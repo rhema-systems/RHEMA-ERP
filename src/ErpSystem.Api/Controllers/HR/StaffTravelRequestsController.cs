@@ -23,18 +23,12 @@ public class StaffTravelRequestsController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
     private readonly IHrControlledDocumentService _hrDocuments;
-    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
-    private readonly IFileStorageService _fileStorage;
-    private readonly ApplicationDbContext _db;
     private readonly IAuthorizationService _authorization;
     private readonly ILogger<StaffTravelRequestsController> _logger;
 
     public StaffTravelRequestsController(
         IStaffTravelRequestService service,
         IHrControlledDocumentService hrDocuments,
-        ICentralDocumentRepositoryFileService centralDocuments,
-        IFileStorageService fileStorage,
-        ApplicationDbContext db,
         IAuthorizationService authorization,
         ILogger<StaffTravelRequestsController> logger,
         ICurrentUserService currentUser)
@@ -42,9 +36,6 @@ public class StaffTravelRequestsController : HrControllerBase
     {
         _service = service;
         _hrDocuments = hrDocuments;
-        _centralDocuments = centralDocuments;
-        _fileStorage = fileStorage;
-        _db = db;
         _authorization = authorization;
         _logger = logger;
     }
@@ -69,9 +60,9 @@ public class StaffTravelRequestsController : HrControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<StaffTravelRequestDto>> GetById(Guid id)
-        => Ok(await _service.GetByIdAsync(id));
+    // GET {id}, its comments, its attachments and their download are the approver's door since lane 2
+    // (D-7): StaffTravelApprovalsController, same route, behind InternalOnly — this class's Read policy
+    // would have kept a line manager out.
 
     [HttpGet("number/{requestNumber}")]
     public async Task<ActionResult<StaffTravelRequestDto?>> GetByRequestNumber(string requestNumber)
@@ -149,7 +140,9 @@ public class StaffTravelRequestsController : HrControllerBase
         dto.InitiatedById = CurrentUser.EmployeeId ?? dto.EmployeeId;
 
         var created = await _service.CreateAsync(dto, tenantId, userId);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        // The read lives on the approver's door since lane 2 — same route, the other controller.
+        return CreatedAtAction(nameof(StaffTravelApprovalsController.GetById), "StaffTravelApprovals",
+            new { id = created.Id }, created);
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
@@ -201,30 +194,9 @@ public class StaffTravelRequestsController : HrControllerBase
         }));
     }
 
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("{id:guid}/approve")]
-    public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveStaffTravelRequestDto dto)
-    {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
-
-        dto.RequestId = id;
-        // ApprovedById is deliberately NOT set. Slice 2 moved approval onto the workflow engine,
-        // which resolves the approver from the authenticated user against the published definition;
-        // the service no longer reads this field. It stays on the DTO for wire compatibility and is
-        // vestigial — a later cleanup should drop it rather than let it look meaningful.
-        await _service.ApproveAsync(dto);
-        return Ok(new { message = "Travel request approved." });
-    }
-
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("{id:guid}/reject")]
-    public async Task<IActionResult> Reject(Guid id, [FromQuery] string? reason = null)
-    {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
-
-        await _service.RejectAsync(id, userId, reason);
-        return Ok(new { message = "Travel request rejected." });
-    }
+    // Approve, reject and return for revision are the approver's since lane 2 (D-7) — the traveller's
+    // line authority, then HR — and live on StaffTravelApprovalsController, not behind this class's
+    // Read policy and the Write policy they used to carry.
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/cancel")]
@@ -251,23 +223,6 @@ public class StaffTravelRequestsController : HrControllerBase
 
         await _service.MarkCompletedAsync(id, userId);
         return Ok(new { message = "Travel request marked as completed." });
-    }
-
-    /// <summary>Send a submitted request back to its requester, saying what to change (D-6, lane 1).</summary>
-    /// <remarks>
-    /// The approve gate: the engine's assignee when a definition is published, the travel approve tier
-    /// when none is, and never the traveller. Lane 2 moves this, with approve and reject, off the Write
-    /// policy and onto the traveller's line authority.
-    /// </remarks>
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("{id:guid}/return")]
-    public async Task<IActionResult> ReturnForRevision(Guid id, [FromBody] ReturnStaffTravelRequestDto dto)
-    {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
-
-        await _service.ReturnForRevisionAsync(id, dto.Reason);
-        return Ok(new { message = "Travel request returned for revision." });
     }
 
     /// <summary>Ask for a change to an approved trip — it goes back for re-approval (D-9, lane 1).</summary>
@@ -314,9 +269,7 @@ public class StaffTravelRequestsController : HrControllerBase
     // COMMENTS
     // =========================================================================
 
-    [HttpGet("{requestId:guid}/comments")]
-    public async Task<ActionResult<IEnumerable<StaffTravelRequestCommentDto>>> GetComments(Guid requestId)
-        => Ok(await _service.GetCommentsAsync(requestId));
+    // Reading the comments is the approver's door's (StaffTravelApprovalsController, lane 2).
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/comments")]
@@ -363,9 +316,8 @@ public class StaffTravelRequestsController : HrControllerBase
     // ATTACHMENTS
     // =========================================================================
 
-    [HttpGet("{requestId:guid}/attachments")]
-    public async Task<ActionResult<IEnumerable<StaffTravelRequestAttachmentDto>>> GetAttachments(Guid requestId)
-        => Ok(await _service.GetAttachmentsAsync(requestId));
+    // Listing and downloading the attachments are the approver's door's (StaffTravelApprovalsController,
+    // lane 2).
 
     /// <summary>
     /// Attaches a document to a travel request through the controlled-upload gate.
@@ -420,27 +372,6 @@ public class StaffTravelRequestsController : HrControllerBase
                 tenantId, userId, uploadedById, ct),
             cancellationToken: ct,
             category: ControlledFileUploadCategories.HrStaffTravelAttachments);
-    }
-
-    /// <summary>Streams a travel attachment back, byte-for-byte.</summary>
-    [HttpGet("attachments/{attachmentId:guid}/download")]
-    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
-    {
-        if (CurrentUser.TenantId is not Guid tenantId)
-            return BadRequest("Tenant context could not be resolved.");
-
-        var attachment = await _db.Set<Core.Entities.HR.StaffTravel.StaffTravelRequestAttachment>()
-            .AsNoTracking()
-            .SingleOrDefaultAsync(
-                a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, ct);
-        if (attachment is null) return NotFound();
-
-        return await HrDocumentDownload.ServeAsync(
-            this, _centralDocuments, _fileStorage, _db, tenantId,
-            attachment.DocumentRecordId, attachment.DocumentVersionId,
-            attachment.FileUploadRecordId, attachment.FileUrl,
-            attachment.FileName, fallbackContentType: attachment.MimeType,
-            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]

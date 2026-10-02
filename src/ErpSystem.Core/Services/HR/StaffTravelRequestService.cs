@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using ErpSystem.Application.HR.Extensions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -38,6 +39,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly HrCurrencyBridge _currency;
     private readonly StaffTravelPolicyGuard _policyGuard;
+    // Lane 2 (D-7): the step a request is on — the line rule applies at the line-manager stage alone —
+    // and the logins of the traveller's line authorities, whom that stage is addressed to.
+    private readonly IWorkflowService _workflowService;
+    private readonly UserManager<ApplicationUser> _userManager;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -53,6 +58,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         HrCurrencyBridge currency,
         StaffTravelPolicyGuard policyGuard,
+        IWorkflowService workflowService,
+        UserManager<ApplicationUser> userManager,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -67,6 +74,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currency = currency;
         _policyGuard = policyGuard;
+        _workflowService = workflowService;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -277,11 +286,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     /// <summary>
-    /// The policy's single-trip limit, checked at submission (decision D-1, finding T-17) — the 422
-    /// names the limit. A trip costed in another currency is compared at Finance's rate.
+    /// The policy's single-trip limit, checked at submission against the estimate (decision D-1, finding
+    /// T-17) and at HR's approval against the approved budget (lane 2, O-9) — the 422 names the limit. An
+    /// amount in another currency is compared at Finance's rate.
     /// </summary>
+    /// <param name="amount">The figure checked, in the request's currency.</param>
+    /// <param name="what">What the figure is, for the refusal: "estimated cost", "approved budget".</param>
+    /// <param name="remedy">What to do about it, for the refusal.</param>
     private async Task RequireWithinSingleTripLimitAsync(
-        StaffTravelRequest entity, TravelPolicyCaps caps, DateOnly asOf, CancellationToken cancellationToken)
+        StaffTravelRequest entity, TravelPolicyCaps caps, DateOnly asOf, decimal amount, string what,
+        string remedy, CancellationToken cancellationToken)
     {
         if (caps.MaxSingleTripBudget is not decimal limit) return;
 
@@ -290,17 +304,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var limitCurrency = caps.CurrencyCode
             ?? await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
             ?? entity.CurrencyCode;
-        var estimate = await _currency.ConvertBetweenAsync(
-            entity.EstimatedTotalCost, entity.CurrencyCode, limitCurrency, asOf, cancellationToken);
-        if (estimate <= limit) return;
+        var compared = await _currency.ConvertBetweenAsync(
+            amount, entity.CurrencyCode, limitCurrency, asOf, cancellationToken);
+        if (compared <= limit) return;
 
         var converted = string.Equals(entity.CurrencyCode, limitCurrency, StringComparison.OrdinalIgnoreCase)
             ? string.Empty
-            : $" (about {limitCurrency} {estimate:N2} at Finance's rate)";
+            : $" (about {limitCurrency} {compared:N2} at Finance's rate)";
         throw new InvalidOperationException(
-            $"The estimated cost of {entity.CurrencyCode} {entity.EstimatedTotalCost:N2}{converted} is above the " +
-            $"{caps.PolicyName} limit of {limitCurrency} {limit:N2} for a single trip. Reduce the estimate, or " +
-            "ask a travel administrator about the policy.");
+            $"The {what} of {entity.CurrencyCode} {amount:N2}{converted} is above the " +
+            $"{caps.PolicyName} limit of {limitCurrency} {limit:N2} for a single trip. {remedy}");
     }
 
     /// <summary>
@@ -856,6 +869,328 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         throw new UnauthorizedAccessException($"You cannot {verb} your own travel request.");
     }
 
+    // ---- The approval ladder (lane 2, decision D-7) ---------------------------
+    //
+    // Approval runs in two stages: the traveller's line authority, then HR. The engine addresses the
+    // first stage BY NAME to the traveller's two nearest line authorities who can sign in (see
+    // StaffTravelApprovalLadder), falling back to the HR role when none can — and this service checks
+    // the decider again, on the rule itself: at the line-manager stage only a line authority decides,
+    // and the travel desk only when no line authority can, with the reason kept on the request. A Manager
+    // who is not the traveller's never decides it. Finding O-1: before this, a line manager could neither
+    // open nor approve a travel request at all.
+
+    private const string DecidesAsLineAuthority = "LineAuthority";
+    private const string DecidesAsTravelDesk = "TravelDesk";
+    private const string DecidesAsApprover = "Approver";
+
+    /// <summary>How the caller stands to a submitted request at the step it is on.</summary>
+    /// <param name="StageName">The engine's current step; null when no approval is in progress.</param>
+    /// <param name="Refusal">Why the caller may not decide; null when they may (the engine has agreed).</param>
+    /// <param name="DecidesAs">How the caller decides when they may.</param>
+    /// <param name="Line">At the line-manager stage: the traveller's line authorities.</param>
+    /// <param name="WaitingFor">At the line-manager stage: the line authorities the engine will accept.</param>
+    private sealed record DecisionStanding(
+        string? StageName,
+        bool IsLineStage,
+        string? Refusal,
+        string? DecidesAs,
+        string? Relation,
+        IReadOnlyList<HrLinePerson> Line,
+        IReadOnlyList<HrLineApprover> WaitingFor)
+    {
+        public bool MayDecide => Refusal is null && DecidesAs is not null;
+    }
+
+    private static bool IsLineStageName(string? stepName)
+        => string.Equals(stepName?.Trim(), StaffTravelApprovalLadder.LineStageName, StringComparison.OrdinalIgnoreCase);
+
+    private static string NameList(IEnumerable<string> names)
+    {
+        var list = names.ToList();
+        return list.Count switch
+        {
+            0 => string.Empty,
+            1 => list[0],
+            _ => string.Join(", ", list.Take(list.Count - 1)) + " or " + list[^1],
+        };
+    }
+
+    /// <summary>
+    /// Who may decide this request now, and as whom — the rule the approve, reject and return verbs run,
+    /// and the one the approver's door, the queue and the screen read, so the button and the verb agree.
+    /// </summary>
+    /// <remarks>
+    /// <para>Never throws for a refusal: <see cref="RequireStandingAsync"/> is the throwing form.</para>
+    ///
+    /// <para><b>With a published definition</b> the engine must accept the caller first. At the
+    /// line-manager stage the caller must then be one of the traveller's line authorities — or, when none
+    /// of those the stage was sent to can decide it, hold the travel desk's permission. Any other stage is
+    /// the engine's alone (and never the traveller's, which the verbs check separately). A request decided
+    /// on the one-step route that lane 2 retired has no line-manager stage, so it is decided as that route
+    /// said.</para>
+    ///
+    /// <para><b>With none published</b> there are no stages: the travel approve tier decides, as before.</para>
+    /// </remarks>
+    /// <param name="explain">False for the queue, which needs the answer and not the reason: a caller the
+    /// engine does not accept is refused without reading the traveller's line.</param>
+    private async Task<DecisionStanding> GetStandingAsync(
+        StaffTravelRequest entity, bool callerIsTravelDesk, CancellationToken cancellationToken, bool explain = true)
+    {
+        var none = (IReadOnlyList<HrLinePerson>)Array.Empty<HrLinePerson>();
+        var nobody = (IReadOnlyList<HrLineApprover>)Array.Empty<HrLineApprover>();
+        var userId = _currentUserProvider.UserId;
+
+        if (entity.Status != StaffTravelRequestStatus.Submitted)
+            return new DecisionStanding(null, false, "Only a request out for approval can be decided.", null, null, none, nobody);
+
+        if (!await _workflowIntegrationService.HasActiveApprovalInstanceAsync(EntityType, entity.Id))
+        {
+            // No instance: either no definition was published when it was submitted, or none is now.
+            if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+                return new DecisionStanding(null, false,
+                    "This request is not waiting on an approval route. Ask the traveller to recall it and submit it again.",
+                    null, null, none, nobody);
+            return HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(_currentUserProvider.Roles, HrPermissions.ApproveTravel)
+                ? new DecisionStanding(null, false, null, DecidesAsApprover, null, none, nobody)
+                : new DecisionStanding(null, false,
+                    "No approval workflow is published for travel, so whoever holds the travel approve permission decides.",
+                    null, null, none, nobody);
+        }
+
+        var callerMayApprove = userId != Guid.Empty
+            && await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, userId);
+        if (!callerMayApprove && !explain)
+            return new DecisionStanding(null, false, "Not waiting for you.", null, null, none, nobody);
+
+        var step = await _workflowService.GetCurrentWorkflowStepAsync(EntityType, entity.Id);
+        var stageName = step?.StepName;
+
+        if (!IsLineStageName(stageName))
+            return callerMayApprove
+                ? new DecisionStanding(stageName, false, null, DecidesAsApprover, null, none, nobody)
+                : new DecisionStanding(stageName, false,
+                    $"This request is at the {stageName ?? "approval"} stage, and you are not one of its approvers.",
+                    null, null, none, nobody);
+
+        // ── The line-manager stage ────────────────────────────────────────────────────────────────
+        var line = await HrLineAuthority.GetLineAsync(_unitOfWork, entity.TenantId, entity.EmployeeId, cancellationToken);
+        var lineApprovers = await HrLineAuthority.GetLineApproversAsync(
+            line, _userManager.Users, entity.TenantId, StaffTravelApprovalLadder.LineApproverCount, cancellationToken);
+
+        // Who the engine will accept among them: the stage was addressed to them when it began.
+        var waitingFor = new List<HrLineApprover>();
+        foreach (var approver in lineApprovers)
+        {
+            if (approver.UserId == userId
+                    ? callerMayApprove
+                    : await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, approver.UserId))
+                waitingFor.Add(approver);
+        }
+
+        var traveller = await TravellerNameAsync(entity, cancellationToken);
+        var me = _currentUserService.EmployeeId;
+        var mine = me is Guid self ? line.FirstOrDefault(p => p.EmployeeId == self) : null;
+
+        if (mine is not null)
+        {
+            if (callerMayApprove)
+                return new DecisionStanding(stageName, true, null, DecidesAsLineAuthority, mine.Relation, line, waitingFor);
+            var sentTo = waitingFor.Count > 0
+                ? $"It was sent to {NameList(waitingFor.Select(a => a.Name))} when it was submitted."
+                : "It was sent elsewhere when it was submitted — your login may not have been active then.";
+            return new DecisionStanding(stageName, true,
+                $"You are {traveller}'s {mine.Relation}, but this stage is not waiting for you. {sentTo}",
+                null, mine.Relation, line, waitingFor);
+        }
+
+        if (waitingFor.Count > 0)
+            return new DecisionStanding(stageName, true,
+                $"This stage is for {traveller}'s line manager — {NameList(waitingFor.Select(a => a.Name))}. " +
+                "HR decides after them.",
+                null, null, line, waitingFor);
+
+        // Nobody in the line can decide: the travel desk does (D-7).
+        if (!callerIsTravelDesk || !callerMayApprove)
+            return new DecisionStanding(stageName, true,
+                $"{traveller} has no line manager who can approve in the system, so the travel desk decides this stage.",
+                null, null, line, waitingFor);
+
+        return new DecisionStanding(stageName, true, null, DecidesAsTravelDesk, null, line, waitingFor);
+    }
+
+    /// <summary>The throwing form of <see cref="GetStandingAsync"/>, for the decision verbs.</summary>
+    private async Task<DecisionStanding> RequireStandingAsync(
+        StaffTravelRequest entity, bool callerIsTravelDesk, CancellationToken cancellationToken)
+    {
+        var standing = await GetStandingAsync(entity, callerIsTravelDesk, cancellationToken);
+        if (!standing.MayDecide)
+            throw new UnauthorizedAccessException(standing.Refusal ?? "You cannot decide this request.");
+        return standing;
+    }
+
+    private async Task<string> TravellerNameAsync(StaffTravelRequest entity, CancellationToken cancellationToken)
+        => await _unitOfWork.Repository<Employee>().GetQueryable()
+               .Where(e => e.TenantId == entity.TenantId && e.Id == entity.EmployeeId)
+               .Select(e => (e.FirstName + " " + e.LastName).Trim())
+               .FirstOrDefaultAsync(cancellationToken)
+           ?? "The traveller";
+
+    /// <summary>
+    /// When the travel desk decides the line-manager stage, the request says why (D-7): an internal note
+    /// in the decider's name — the traveller had no line authority who could approve.
+    /// </summary>
+    /// <remarks>Checked before the engine is asked, so a desk officer with no employee link is refused
+    /// rather than leaving a decision with no note.</remarks>
+    private Guid RequireDeskNoteAuthor(DecisionStanding standing)
+    {
+        if (standing.DecidesAs != DecidesAsTravelDesk) return Guid.Empty;
+        return _currentUserService.EmployeeId is Guid author && author != Guid.Empty
+            ? author
+            : throw new InvalidOperationException(
+                "Deciding the line manager's stage for the travel desk records the reason in your name, and this " +
+                "account is not linked to an employee.");
+    }
+
+    private async Task AddDeskDecisionNoteAsync(
+        StaffTravelRequest entity, DecisionStanding standing, Guid authorEmployeeId, string decision,
+        Guid userId, CancellationToken cancellationToken)
+    {
+        if (standing.DecidesAs != DecidesAsTravelDesk) return;
+
+        var traveller = await TravellerNameAsync(entity, cancellationToken);
+        string why;
+        if (standing.Line.Count == 0)
+        {
+            why = $"{traveller} has no supervisor recorded and no head of a unit above them.";
+        }
+        else
+        {
+            var people = standing.Line.Take(3)
+                .Select(p => $"{p.Name} ({p.Relation})")
+                .ToList();
+            why = $"None of {traveller}'s line authorities could approve it in the system — {string.Join(", ", people)}" +
+                  (standing.Line.Count > 3 ? " and others" : string.Empty) +
+                  ": no active login, or the approval was not addressed to them.";
+        }
+
+        await _commentRepository.AddAsync(new StaffTravelRequestComment
+        {
+            TenantId = entity.TenantId,
+            StaffTravelRequestId = entity.Id,
+            AuthorId = authorEmployeeId,
+            CommentType = TravelRequestCommentType.InternalNote,
+            Body = $"{decision} at the line manager's stage by the travel desk. {why}",
+            IsVisibleToTraveller = false,
+            CreatedBy = userId.ToString(),
+        });
+    }
+
+    // ---- The approver's door (lane 2, D-7, finding O-1) ------------------------
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Leave's read door (<c>LeavesController.CanReadRequestAsync</c>) without its first arm, which the API
+    /// applies: the traveller's line authority reads their people's trips, and whoever the request waits
+    /// for reads it while it does. It is narrower than granting the Manager role the travel read
+    /// permission, which would open every trip in the organisation to every manager, permanently.
+    /// </remarks>
+    public async Task<bool> CanOpenAsApproverAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty
+            && await HrLineAuthority.IsLineAuthorityAsync(_unitOfWork, entity.TenantId, entity.EmployeeId, me, cancellationToken))
+            return true;
+
+        return entity.Status == StaffTravelRequestStatus.Submitted
+               && _currentUserService.EmployeeId != entity.EmployeeId
+               && (await GetStandingAsync(entity, callerIsTravelDesk, cancellationToken, explain: false)).MayDecide;
+    }
+
+    public async Task<StaffTravelViewerActionsDto> GetViewerActionsAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedRequestAsync(requestId);
+        var actions = new StaffTravelViewerActionsDto { RequestId = entity.Id };
+        if (entity.Status != StaffTravelRequestStatus.Submitted) return actions;
+
+        var standing = await GetStandingAsync(entity, callerIsTravelDesk, cancellationToken);
+        var isTraveller = _currentUserService.EmployeeId is Guid me && me == entity.EmployeeId;
+
+        actions.StageName = standing.StageName;
+        actions.IsLineStage = standing.IsLineStage;
+        actions.IsFinalStage = !standing.IsLineStage;
+        actions.CanDecide = standing.MayDecide && !isTraveller;
+        actions.DecidesAs = actions.CanDecide ? standing.DecidesAs : null;
+        actions.Relation = standing.Relation;
+        actions.WaitingFor = standing.WaitingFor.Select(a => $"{a.Name} ({a.Relation})").ToList();
+        actions.Reason = actions.CanDecide
+            ? null
+            : isTraveller ? "You cannot decide your own travel request." : standing.Refusal;
+        return actions;
+    }
+
+    /// <summary>
+    /// How many submitted requests the queue asks about. The engine answers one request at a time, so the
+    /// candidates are bounded — leave's figure, several times any real travel backlog.
+    /// </summary>
+    private const int ApprovalQueueScanCap = 300;
+
+    /// <remarks>
+    /// Leave's <c>GetMyPendingApprovalsAsync</c> (closure plan L-10): the candidates are every submitted
+    /// request in the tenant but the caller's own, and each is asked of the same rule the verbs run — the
+    /// engine first, then the line rule — so the queue lists exactly what the caller can decide, and never
+    /// a row that refuses on click.
+    /// </remarks>
+    public async Task<PagedResult<StaffTravelApprovalQueueItemDto>> GetMyPendingApprovalsAsync(
+        int pageNumber, int pageSize, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        RequireUserId();
+        var me = _currentUserService.EmployeeId;
+
+        var candidates = await _requestRepository.GetQueryable()
+            .Include(r => r.Employee)
+            .Include(r => r.DestinationCountry)
+            .Where(r => r.TenantId == tenantId
+                     && !r.IsDeleted
+                     && r.Status == StaffTravelRequestStatus.Submitted
+                     && (me == null || r.EmployeeId != me))
+            .OrderBy(r => r.SubmittedAt ?? r.CreatedAt)
+            .Take(ApprovalQueueScanCap)
+            .ToListAsync(cancellationToken);
+
+        var now = DateTime.UtcNow;
+        var mine = new List<StaffTravelApprovalQueueItemDto>();
+        foreach (var request in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var standing = await GetStandingAsync(request, callerIsTravelDesk, cancellationToken, explain: false);
+            if (!standing.MayDecide) continue;
+
+            mine.Add(new StaffTravelApprovalQueueItemDto
+            {
+                Request = request.ToSummaryDto(),
+                OriginCity = request.OriginCity,
+                StageName = standing.StageName,
+                IsLineStage = standing.IsLineStage,
+                IsFinalStage = !standing.IsLineStage,
+                DecidesAs = standing.DecidesAs!,
+                Relation = standing.Relation,
+                DaysWaiting = request.SubmittedAt is DateTime submitted ? Math.Max(0, (int)(now - submitted).TotalDays) : 0,
+            });
+        }
+
+        var size = Math.Clamp(pageSize, 1, 100);
+        var page = Math.Max(pageNumber, 1);
+        return new PagedResult<StaffTravelApprovalQueueItemDto>
+        {
+            Items = mine.Skip((page - 1) * size).Take(size).ToList(),
+            TotalCount = mine.Count,
+            Page = page,
+            PageSize = size,
+        };
+    }
+
     /// <remarks>
     /// <para><b>Everything that must hold is checked before the engine is asked</b> (lane 1, finding
     /// A4), so a refused submission leaves no approval task behind: a traveller still employed, a
@@ -904,7 +1239,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await RequireNoOverlappingTripAsync(entity, traveller, cancellationToken);
 
         var caps = await _policyGuard.ResolveAsync(entity, cancellationToken);
-        await RequireWithinSingleTripLimitAsync(entity, caps, today, cancellationToken);
+        await RequireWithinSingleTripLimitAsync(entity, caps, today, entity.EstimatedTotalCost, "estimated cost",
+            "Reduce the estimate, or ask a travel administrator about the policy.", cancellationToken);
         entity.PolicyId = caps.PolicyId;
 
         var warnings = await ApprovedLeaveWarningsAsync(entity, traveller, cancellationToken);
@@ -967,7 +1303,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         };
     }
 
-    public async Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(approveDto.RequestId);
 
@@ -977,6 +1313,26 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var userId = RequireUserId();
 
         RequireNotTheTraveller(entity, "approve");
+
+        // Lane 2 (D-7): the stage decides who may — the traveller's line authority at the line manager's
+        // stage, the travel desk there only when no line authority can, the engine's approvers after.
+        var standing = await RequireStandingAsync(entity, callerIsTravelDesk, cancellationToken);
+        var deskNoteAuthor = RequireDeskNoteAuthor(standing);
+
+        // Lane 2 (O-9, T-10): the approved budget is HR's decision, at the last stage. It used to be the
+        // estimate copied — no screen ever sent one — so the field recorded no decision.
+        if (approveDto.ApprovedBudget is decimal budget)
+        {
+            if (standing.IsLineStage)
+                throw new InvalidOperationException(
+                    "The approved budget is set at HR's approval, after the line manager's — approve without it.");
+            if (budget <= 0m)
+                throw new InvalidOperationException("The approved budget must be more than zero.");
+            var caps = await _policyGuard.ResolveAsync(entity, cancellationToken);
+            await RequireWithinSingleTripLimitAsync(entity, caps, DateOnly.FromDateTime(DateTime.UtcNow), budget,
+                "approved budget", "Approve a lower budget, or ask a travel administrator about the policy.",
+                cancellationToken);
+        }
 
         // The engine decides who may approve, against the published definition. The bespoke chain
         // this replaces took the approver from the request body, so a caller could record a
@@ -995,14 +1351,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (entity.Status == StaffTravelRequestStatus.Approved)
         {
             entity.ApprovedBudget = approveDto.ApprovedBudget ?? entity.EstimatedTotalCost;
-            // Lane 1: the approver as a person. The engine records a platform user; nothing on the
-            // trip said who approved it (finding A10). Null for an approver with no employee link.
+            // Lane 1: the approver as a person — under the two-stage ladder, the one who gave the final
+            // approval. The engine records a platform user; nothing on the trip said who approved it
+            // (finding A10). Null for an approver with no employee link.
             entity.ApprovedById = _currentUserService.EmployeeId;
         }
 
         entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
+        await AddDeskDecisionNoteAsync(entity, standing, deskNoteAuthor, "Approved", userId, cancellationToken);
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1016,7 +1374,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return true;
     }
 
-    public async Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default)
+    public async Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(requestId);
 
@@ -1026,6 +1384,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var userId = RequireUserId();
 
         RequireNotTheTraveller(entity, "reject");
+        var standing = await RequireStandingAsync(entity, callerIsTravelDesk, cancellationToken);
+        var deskNoteAuthor = RequireDeskNoteAuthor(standing);
 
         var decisionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, userId,
@@ -1037,6 +1397,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         entity.UpdatedBy = userId.ToString();
         entity.UpdatedAt = DateTime.UtcNow;
 
+        await AddDeskDecisionNoteAsync(entity, standing, deskNoteAuthor, "Rejected", userId, cancellationToken);
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1127,25 +1488,6 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     // had no recall of its own — "use all four or none" (HrWorkflowFallbackAuthority) had three. Who
     // hears about each is lane 8's (D-4); none of these publishes yet.
 
-    /// <summary>
-    /// Refuses a caller who cannot decide this request at its current step: the engine's assignee when
-    /// a definition is published, the travel approve tier when none is — the two arms approve and
-    /// reject already run. Leave's <c>EnsureMayDecideAsync</c>, for the third decision verb.
-    /// </summary>
-    private async Task EnsureMayDecideAsync(Guid requestId, Guid userId, string actionDescription)
-    {
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, requestId, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, actionDescription, HrPermissions.ApproveTravel);
-        }
-    }
-
     /// <summary>Cancels the request's live approval instance, if it has one; a refusal stops the caller.</summary>
     /// <remarks>
     /// Asked of the record, not of the definition: a request submitted while no definition was published
@@ -1187,9 +1529,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     /// Leave's suggest-changes shape (<c>LeaveService.SuggestChangesAsync</c>): the decider is checked
     /// first, then the live approval is cancelled — a fresh one starts when the request is submitted
     /// again — and the status is set here, because the engine has no "returned" outcome for the adapter
-    /// to apply. Lane 2 adds the traveller's line authority to who may do it.
+    /// to apply. Since lane 2 the decider is whoever may approve at the stage it is on (D-7).
     /// </remarks>
-    public async Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, CancellationToken cancellationToken = default)
+    public async Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(requestId);
 
@@ -1200,10 +1542,12 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         var userId = RequireUserId();
         RequireNotTheTraveller(entity, "return");
-        await EnsureMayDecideAsync(entity.Id, userId, "return a travel request for revision");
+        var standing = await RequireStandingAsync(entity, callerIsTravelDesk, cancellationToken);
+        var deskNoteAuthor = RequireDeskNoteAuthor(standing);
 
         var trimmed = reason.Trim();
         await CancelLiveApprovalAsync(entity, $"Returned for revision: {trimmed}");
+        await AddDeskDecisionNoteAsync(entity, standing, deskNoteAuthor, "Returned for revision", userId, cancellationToken);
 
         entity.Status = StaffTravelRequestStatus.ReturnedForRevision;
         entity.ReturnedAt = DateTime.UtcNow;

@@ -45,8 +45,16 @@ public interface IStaffTravelRequestService
     /// returns where it now is, the policy it was checked against and any warnings.
     /// </summary>
     Task<StaffTravelSubmitResultDto> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
-    Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default);
-    Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the stage the request is on (lane 2, D-7): the line-manager stage is the traveller's line
+    /// authority's — the travel desk's only when no line authority can sign in — and HR's stage sets the
+    /// approved budget.
+    /// </summary>
+    /// <param name="callerIsTravelDesk">Whether the caller holds <c>HR.Travel.Write</c> — evaluated by the
+    /// API's policy pipeline, never taken from the request body.</param>
+    Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
     /// <summary>
     /// Cancels a request. <c>CancelledById</c> on the DTO is the <b>employee</b> who cancelled (an
     /// Employee FK on the entity); <paramref name="cancelledByUserId"/> is the platform user, for
@@ -56,7 +64,20 @@ public interface IStaffTravelRequestService
     Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
     /// <summary>An approver sends a submitted request back to its requester, with what to change (D-6).</summary>
-    Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, CancellationToken cancellationToken = default);
+    Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    // The approver's door (lane 2, D-7, finding O-1)
+    /// <summary>
+    /// Whether the caller may open the request without the travel read permission: they are the
+    /// traveller's line authority, or it is waiting for their decision now.
+    /// </summary>
+    Task<bool> CanOpenAsApproverAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    /// <summary>What the caller may decide on the request, at which stage, and as whom.</summary>
+    Task<StaffTravelViewerActionsDto> GetViewerActionsAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    /// <summary>The submitted requests waiting for the caller's decision — asked of the engine, then of the line rule.</summary>
+    Task<PagedResult<StaffTravelApprovalQueueItemDto>> GetMyPendingApprovalsAsync(int pageNumber, int pageSize, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
 
     /// <summary>A change to an approved trip: back to the requester, then approved again (D-9).</summary>
     Task<bool> RequestChangeAsync(Guid requestId, string reason, CancellationToken cancellationToken = default);

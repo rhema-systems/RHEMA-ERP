@@ -373,21 +373,76 @@ public class StaffTravelPolicyPreviewDto
     public decimal? MaxHotelRatePerNight { get; set; }
 }
 
+/// <remarks>
+/// Lane 2 dropped <c>ApprovedById</c> and <c>ApprovedAt</c>: the approver is the token's and the time the
+/// server's clock, and neither field had been read since approval moved onto the workflow engine. The
+/// approved budget is HR's to set, at the last stage — sent at the line manager's stage it is refused,
+/// not ignored — and it must be more than zero and within the policy's single-trip limit.
+/// </remarks>
 public class ApproveStaffTravelRequestDto
 {
     [Required]
     public Guid RequestId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovedAt { get; set; } = DateTime.UtcNow;
 
     [Range(0, double.MaxValue)]
     public decimal? ApprovedBudget { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+}
+
+/// <summary>
+/// What the caller may decide on a travel request, and as whom (lane 2, decision D-7) — the screen's
+/// answer for whether to offer Approve, Reject and Return, and whether the approve dialog asks for the
+/// budget.
+/// </summary>
+public class StaffTravelViewerActionsDto
+{
+    public Guid RequestId { get; set; }
+
+    /// <summary>True when the caller may approve, reject or return the request now.</summary>
+    public bool CanDecide { get; set; }
+
+    /// <summary>The stage the request is on, as its approval route names it; null when it is not out for approval.</summary>
+    public string? StageName { get; set; }
+
+    /// <summary>True at the line-manager stage.</summary>
+    public bool IsLineStage { get; set; }
+
+    /// <summary>
+    /// True when the next approval completes the request — HR's stage, or a route with one stage. The
+    /// approved budget is asked for then, and only then.
+    /// </summary>
+    public bool IsFinalStage { get; set; }
+
+    /// <summary><c>LineAuthority</c>, <c>TravelDesk</c> or <c>Approver</c>; null when the caller cannot decide.</summary>
+    public string? DecidesAs { get; set; }
+
+    /// <summary>How the caller stands to the traveller as a line authority: "supervisor", "head of …".</summary>
+    public string? Relation { get; set; }
+
+    /// <summary>At the line-manager stage: the line authorities it waits for, named.</summary>
+    public List<string> WaitingFor { get; set; } = new();
+
+    /// <summary>Why the caller cannot decide, when the request is out for approval and they cannot.</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>One row of an approver's travel queue: the request, and the caller's part in it.</summary>
+public class StaffTravelApprovalQueueItemDto
+{
+    public StaffTravelRequestSummaryDto Request { get; set; } = new();
+    public string? OriginCity { get; set; }
+    public string? StageName { get; set; }
+    public bool IsLineStage { get; set; }
+    public bool IsFinalStage { get; set; }
+
+    /// <summary><c>LineAuthority</c>, <c>TravelDesk</c> or <c>Approver</c>.</summary>
+    public string DecidesAs { get; set; } = string.Empty;
+    public string? Relation { get; set; }
+
+    /// <summary>Whole days since the request was submitted.</summary>
+    public int DaysWaiting { get; set; }
 }
 
 /// <remarks>

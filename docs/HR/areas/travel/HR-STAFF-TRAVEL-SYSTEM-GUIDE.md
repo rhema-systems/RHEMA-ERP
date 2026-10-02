@@ -474,12 +474,17 @@ Two footnotes that matter to an auditor:
 **On the workflow engine**, unlike the company schedule and like leave, attendance and recruitment.
 Travel's own bespoke approval chain was retired.
 
+> **Closure lane 2 (2026-10-02) made this two stages** — read this table, not the one-step story the
+> rest of this guide was walked against. A request submitted before the change stays on the one-step
+> route it was submitted on (UAT's demo *TR-2026-00002* and *-00003*) and is decided as before.
+
 | | |
 |---|---|
 | Entity type | `StaffTravelRequest` |
-| Definition seeded? | ✅ *Staff Travel Approval* — `Draft → PendingApproval → Approved` |
-| Approvers | roles: **Manager**, **HR**, **TenantAdmin** |
-| Prevents self-approval? | **No** — `hr.head` can approve what `hr.head` raised |
+| Definition seeded? | ✅ *Staff Travel Approval*, version 2 — `Draft → Line manager approval → HR approval → Approved` |
+| Stage 1 — *Line manager approval* | **addressed by name** to the traveller's two nearest line authorities who can sign in: their supervisor, then the head of their unit and of each unit above. Only they are told, see it in their inbox and may decide it — no Manager role or travel permission needed. With nobody in the line able to sign in, it falls to **HR**, and the request gains an internal note saying why |
+| Stage 2 — *HR approval* | roles **HR** and **TenantAdmin**; HR sets the **approved budget** here (more than zero, within the policy's single-trip limit) |
+| Prevents self-approval? | **Yes, in the service** — nobody decides their own trip on either stage; the engine's initiator bar stays off so the desk can decide trips it raised for others |
 
 Five things follow:
 
@@ -497,7 +502,9 @@ Five things follow:
 
 ⚠ **`approvedBudget` is not sent by the page either** — it is left to the workflow's own budget
 prompt. So a request approved from this screen keeps `ApprovedBudget` null unless the definition
-asks for it, and the Overview's *Approved budget* line reads an em dash. **T-10.**
+asks for it, and the Overview's *Approved budget* line reads an em dash. **T-10.** *Since closure
+lane 2 the API takes the budget at HR's stage and refuses it at the line manager's; the approve
+dialog that asks for it arrives with lane 2's screens (slice 2b).*
 
 ---
 
@@ -2494,7 +2501,15 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 1, slice 1c (2026-10-02, staged) — lane 1 complete.** Groups now move by their own
+> **Closure lane 2, slice 2a (2026-10-02, staged)** put travel approval in **two stages** — the
+> traveller's line manager, then HR (§ 1.6) — and gave the line manager a way in: the traveller's
+> supervisor or head of unit can now open the request, its comments and attachments, find it in a queue
+> of what waits for them, and approve, reject or return it, with no travel permission and no Manager
+> role; a Manager outside the traveller's line can do none of it and is no longer told about it. HR sets
+> the **approved budget** at its stage (**T-10** is fixed at the API; the dialog that asks for it is the
+> next slice). The screens — the approvals queue, the approver's view of the request — are slice 2b.
+>
+> **Closure lane 1, slice 1c (2026-10-02, committed `895996b6f`) — lane 1 complete.** Groups now move by their own
 > buttons (**Open to travellers, Close, Reopen, Cancel group**) instead of an edit's status dropdown; the
 > **traveller limit binds** (**T-31 fixed**; a cancelled or rejected trip no longer holds a place); an
 > **existing draft request can be linked** to a group (**T-30 fixed**) and takes the group's destination

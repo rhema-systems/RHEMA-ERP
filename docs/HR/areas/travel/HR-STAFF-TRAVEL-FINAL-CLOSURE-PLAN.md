@@ -38,11 +38,16 @@ baseline (D-13); lane 0 was built the same day.**
    UAT; truth suite 112/112 twice after). Lanes 1–9 build on it.
 4. **Lane 1** (§ 4) — **COMPLETE 2026-10-02**, in three slices: **1a** the request's write rules
    (committed `e1d050da2`), **1b** the lifecycle verbs (committed `8fadfd31e`), **1c** comments, the
-   traveller's privacy and groups — built and proven (`run-final-lifecycle.mjs` 255/255 twice; the truth
-   suite 117/117 twice) and staged for the user's commit.
-5. **Next: lane 2** (the approval ladder and the approver's door, D-7), then lanes **3 → 4 → 5 → 6 → 7 →
-   8 → 9 → 10** in that order (§ 2). Source-check each lane against this document before building it —
-   line numbers are as of HEAD `bad482a8d`.
+   traveller's privacy and groups (committed `895996b6f`).
+5. **Lane 2** (the approval ladder and the approver's door, D-7) — in two slices. **2a** the ladder, the
+   door, the queue and the retrofit migration — **built and proven 2026-10-02**: the retrofit
+   (`20261002042909_TravelClosureApprovalLadder`, data only) is **applied to UAT** (restore point
+   `ErpSystemDB_UAT_before_travell2.bak`); `run-final-approvals.mjs` 118/118 twice, the lifecycle suite
+   255/255 twice, the truth suite 117/117 twice; staged for the user's commit. ⚠ Stage 1 is addressed
+   **by name**, not by role — read lane 2's *As built* before touching the route. **Next: slice 2b**,
+   the screens (the approvals queue, the approver's view of the request, the budget in the approve
+   dialog); then lanes **3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
+   against this document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -88,8 +93,8 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 |---|---|---|---|---|
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
-| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c 255/255 twice and truth 117/117 twice, staged |
-| **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
+| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
+| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ◐ **2a** built and proven 2026-10-02 — retrofit applied to UAT, approvals 118/118 twice, lifecycle 255/255 twice, truth 117/117 twice; staged. **2b** (the screens) next |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
@@ -744,25 +749,117 @@ platform owner.
 
 ### Lane 2 — The approval ladder and the approver's door (D-7, O-1, O-9, T-10)
 
-- [ ] **Seeder:** STAFF_TRAVEL_REQUEST leaves the one-step list and is seeded through
-  `EnsureSequentialWorkflowDefinitionSeededAsync` as leave is — stage 1 Manager + TenantAdmin, stage 2
-  HR + TenantAdmin — deactivating the superseded one-step row so no tenant holds two active
-  definitions. `PreventInitiatorApproval` stays false; the traveller check is the control.
-- [ ] **Service:** before the engine, approve, reject and return refuse a stage-1 decision by anyone
+- [x] **Seeder:** STAFF_TRAVEL_REQUEST leaves the one-step list and is seeded through
+  `EnsureSequentialWorkflowDefinitionSeededAsync` as leave is — ~~stage 1 Manager + TenantAdmin~~
+  **stage 1 addressed by name, falling back to HR** (see *As built*), stage 2 HR + TenantAdmin —
+  deactivating the superseded one-step row so no tenant holds two active definitions.
+  `PreventInitiatorApproval` stays false; the traveller check is the control. *(2a)*
+- [x] **Service:** before the engine, approve, reject and return refuse a stage-1 decision by anyone
   who is not the traveller's line authority — leave's `IsLineAuthorityAsync` extracted into a shared HR
-  helper, not the leave service injected — unless the traveller has no line authority with a login,
-  when HR decides stage 1 and the record says why.
-- [ ] **Controller:** approve, reject and return move from `TravelWritePolicy` to `InternalOnly` with
+  helper (`HrLineAuthority`), not the leave service injected — unless the traveller has no line
+  authority with a login, when HR decides stage 1 and the record says why. *(2a)*
+- [x] **Controller:** approve, reject and return move from `TravelWritePolicy` to `InternalOnly` with
   the service's checks (leave's shape, `LeavesController.cs:847-858`); a read door — Read OR line
-  authority OR engine assignee (`LeavesController.cs:138-154`) — on the request, its comments and its
-  attachments; `GET requests/my-approvals` asks the engine (`LeavesController.cs:759`).
+  authority OR the person it waits for (`LeavesController.cs:138-154`) — on the request, its comments
+  and its attachments; `GET requests/my-approvals` asks the engine (`LeavesController.cs:759`). *(2a)*
 - [ ] **Frontend:** a `/hr/travel/approvals` queue, added to `sidebar-hr-gates.test.ts`'s KEEP_OPEN list
   with its reason; the detail page renders for an approver with no travel permission (desk-only tabs
   hidden), so `/me/inbox`'s link opens; the approve dialog takes an approved budget, prefilled with
-  the estimate.
+  the estimate. *(slice 2b)*
 
 Suite `run-final-approvals.mjs`: the traveller's manager approves stage 1; an unrelated manager is
 refused; HR approves stage 2; a traveller with no manager goes to HR; the inbox link opens.
+
+**As built — slice 2a (2026-10-02).**
+
+- *Stage 1 is addressed BY NAME — a deviation from this plan's "Manager + TenantAdmin", taken while
+  building.* A role-based stage 1 sends the task, the *Approval Required* notification (in-app and
+  email) and the inbox row to **every** holder of the Manager role — leave's stage does exactly that
+  today — so every manager in the organisation would be asked about every trip and refused on click;
+  and it shuts out a supervisor without the Manager role (on UAT, `she.manager`, `records.officer`,
+  `auditor` and three others have reports and no Manager role), while the HR fallback D-7 asks for
+  needs HR on the stage. So the stage carries two **Dynamic** approver rules reading
+  `lineApproverUserId` and `lineApproverUserId2` — the logins of the traveller's two nearest line
+  authorities who can sign in (supervisor first, then the head of their unit and of each unit above,
+  never the traveller) — which `SimpleWorkflowService` now puts in a travel request's engine context;
+  and its **required role is HR**, which the engine falls back to when no rule resolves (no line
+  authority with a login). This is per-record assignment, not conditional routing: cross-module defect
+  #3 is about transitions and is untouched. TenantAdmin is off stage 1 (the service would refuse them
+  there anyway) and stays on stage 2 as the backstop. The rule is shared, static, over the unit of
+  work (`HrLineAuthority`, Core) so the engine's context and the service name the same people; leave's
+  own `IsLineAuthorityAsync` is unchanged — its owner may point it at the helper.
+- *The service* (`StaffTravelRequestService`, the "approval ladder" block) works out the caller's
+  standing from the engine's current step: at **Line manager approval** the engine must accept the
+  caller and the caller must be one of the traveller's line authorities; when none of the two the stage
+  was sent to can decide it, the travel desk (`HR.Travel.Write`, evaluated by the API's policy pipeline
+  and passed in — never read from a body) decides, and the request gains an **internal note** in the
+  decider's name saying why ("… at the line manager's stage by the travel desk. {who the line was}");
+  a desk officer with no employee link is refused before the engine is asked. At any other step the
+  engine decides alone. Nobody decides their own trip, on either stage. A request out for approval on
+  the retired one-step route has no line-manager stage and is decided as that route said (UAT's demo
+  TR-2026-00002 and -00003). Renaming the stage in the designer turns the service's check off; the
+  engine's routing still applies (`StaffTravelApprovalLadder` documents the contract).
+- *The approved budget (O-9, T-10)* is HR's, at the last stage: sent at the line manager's stage it is
+  refused (422), not ignored; it must be more than zero and within the policy's single-trip limit
+  (the 422 names the policy and the limit, in the policy's currency at Finance's rate); with none sent
+  the estimate is approved as before. `ApprovedById` is the final approver. The approve DTO lost its
+  vestigial `ApprovedById` and `ApprovedAt`.
+- *The door.* `GET {id}`, its comments, attachments and attachment download, approve, reject and
+  return moved to **`StaffTravelApprovalsController`** — same route, `InternalOnly` — because the desk
+  controller's class-level `HR.Travel.Read` is ANDed with any action policy. The door is Read, OR the
+  traveller's line authority (at any status — a manager reads their people's trips), OR the person the
+  request waits for now. Approvers see internal notes: they are staff deciding the trip. The traveller
+  gets no door to their own trip — the desk view carries internal notes and the portal is theirs (A6).
+  New: `GET my-approvals` (the engine, then the line rule, request by request — exactly what the verbs
+  accept) and `GET {id}/viewer-actions` (may I decide, at which stage, as whom, who it waits for, why
+  not) for the screens. The approve answer now says whether the trip is approved or gone on to the next
+  approver.
+- *Seeder and existing databases.* A new tenant gets the two-stage route from
+  `EnsureStaffTravelWorkflowSeededAsync` (also run by `SeedHrWorkflowDefinitionsAsync`); the shared
+  stage seed record gained optional Dynamic keys and a fallback role. A database seeded before lane 2 is
+  moved by the data-only migration **`20261002042909_TravelClosureApprovalLadder`**: per tenant, the
+  seeded one-step route gets version 2 (same key and name, superseding it, as the designer's own
+  new-version-and-publish leaves it), both stages keep the old step's approval settings, the one-step
+  version is retired, requests already out for approval keep their route; two active seeded routes
+  in one tenant refuse the whole migration; a tenant-authored route is left alone; Down changes
+  nothing. Proven on a COPY_ONLY restore of UAT first — **27/27** (shape, rules, transitions, settings
+  kept, Up twice with no change, the refusal with nothing changed, a tenant's own route untouched) —
+  then **applied to UAT 2026-10-02** on the user's go, after a restore point
+  (`ErpSystemDB_UAT_before_travell2.bak`), and re-verified there.
+- *The demo pack* (`080-travel.mjs`) approves stage by stage: the line manager's stage by whichever of
+  `gm.ops`, `head.dev`, `md.tdc` the route named (head.dev's Kumasi trip goes to gm.ops and md.tdc,
+  staff's Sebrepor trip to head.dev and gm.ops), then `hr.head` with the budget. Not run on UAT —
+  UAT's four demo requests are past that step; a rebuilt database exercises it.
+- *Known limits, recorded.* The engine's own delegation re-addresses a by-name approval to the
+  delegate, whom the line rule then refuses: a line manager away is covered by the second line
+  authority the stage was also sent to (the head above), not by delegation. The two line authorities
+  are fixed when the request is submitted: a supervisor changed afterwards does not receive it — the
+  traveller recalls and resubmits. The generic workflow inbox still decides through the engine alone
+  (cross-module defect #15).
+
+**Suite** `run-final-approvals.mjs` (118 assertions; fixture `buildApprovalsFixture` — its own
+directorate and unit with heads and a lone unit with none, under a root with no head, so no real person
+is anyone's line authority; a supervisor holding only the Employee role; a supervisor with no login; an
+unrelated Manager; two HR officers; a TenantAdmin for the run's policy): §1 the route's shape on UAT;
+§2 the supervisor — no Manager role, no travel permission — opens, queues and decides stage 1, is told,
+and so is the head of unit, by name; the unrelated Manager can open nothing, decide nothing, is not told
+and has no inbox row; the head above reads but is not asked; HR waits and the supervisor cannot set the
+budget; §3 HR's stage, the zero and over-limit budgets refused, the budget and the approver recorded;
+§4 no line authority → the desk decides with its note, unseen by the traveller, then a second HR
+officer; §5 a supervisor without a login is passed over and the head of unit rejects; §6 the head of
+unit returns for revision; §7 a head's own trip goes to the head above; §8 the line authority keeps
+reading. **118/118 twice on UAT, 2026-10-02** (stamps 155645, 234900). The first run (087448) failed two
+assertions that expected the approver's door to answer a traveller about their own trip — the door
+refuses them by design (A6), and the suite now asserts that; one run (180324) was cut short by a
+transient failure of the suite's own SQL read of `Notifications` while the platform's notification
+clean-up job rewrote the table, and the harness's SQL now retries a deadlock or timeout and reports
+SQL Server's own message. Both runs tore down cleanly (checked with `teardown-run.mjs`).
+Regression: `run-final-lifecycle.mjs` **255/255 twice** (stamps 266125, 342391 — its approvals now
+take both stages, the desk deciding the first, and its clean-up tries the second HR officer before the
+TenantAdmin); `run-final-truth.mjs` **117/117 twice** (411394, 422420). The API log's only errors were
+the known ones: payroll's profile FK on every employee create (defect #23), the truth suite's
+deliberate duplicate policy version, one demo user's identity reconciliation, and the notification
+clean-up job.
 
 ### Lane 3 — The money chain (B1–B12, B14, D-2, D-10, O-2, O-6, O-8, O-9, T-21, T-22, T-35–T-39, T-57)
 
@@ -1170,3 +1267,13 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   and propagation): the build succeeded; no migration pending on UAT; one stale 1a assertion and the
   untracked request it left were fixed; `run-final-lifecycle.mjs` 255/255 twice, the truth suite 117/117
   twice. Staged. Next: lane 2.
+- **2026-10-02, later** — The user committed slice 1c (`895996b6f`). **Lane 2, slice 2a built**: the
+  two-stage ladder with stage 1 addressed by name (a deviation from the plan's role-based stage 1,
+  recorded in lane 2's *As built*), the line rule in the service with the desk's fallback note, the
+  approved budget at HR's stage, the approver's door, queue and viewer actions on a new controller, the
+  seeder and the data-only retrofit. One build error (the create's `CreatedAtAction` named the moved
+  read) fixed; the user scaffolded `20261002042909_TravelClosureApprovalLadder` (empty, model
+  unchanged), the SQL proven 27/27 on a scratch copy of UAT went in byte for byte, the build succeeded,
+  and on the user's go the API was started on UAT after a restore point — the retrofit applied and
+  re-verified. `run-final-approvals.mjs` 118/118 twice, lifecycle 255/255 twice, truth 117/117 twice.
+  Staged. Next: slice 2b, the screens.
