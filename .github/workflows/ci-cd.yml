@@ -97,12 +97,39 @@ jobs:
             throw 'Test-VPS deployment is allowed only from the master branch.'
           }
 
+      - name: Check whether the build candidate is still current master
+        id: build-freshness
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not refresh origin/master before release construction.' }
+          $candidateCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $masterCommit = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          $isCurrent = $candidateCommit -ceq $masterCommit
+          "is_current=$($isCurrent.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "candidate_commit=$candidateCommit" >> $env:GITHUB_OUTPUT
+          "master_commit=$masterCommit" >> $env:GITHUB_OUTPUT
+
+      - name: Report superseded build candidate
+        if: steps.build-freshness.outputs.is_current != 'true'
+        shell: powershell
+        run: |
+          @"
+          ## Release construction skipped
+
+          `SUPERSEDED_DEPLOYMENT`: candidate `${{ steps.build-freshness.outputs.candidate_commit }}` is no longer current master `${{ steps.build-freshness.outputs.master_commit }}`.
+          Start a new deployment from the current master commit. No release was built and the VPS was not changed.
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
       - name: Set up .NET SDK
+        if: steps.build-freshness.outputs.is_current == 'true'
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Set up Node.js and locked npm cache
+        if: steps.build-freshness.outputs.is_current == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -110,6 +137,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
 
       - name: Restore persistent Next.js compilation cache
+        if: steps.build-freshness.outputs.is_current == 'true'
         uses: actions/cache@v4
         with:
           path: frontend/.next-production/cache
@@ -118,6 +146,7 @@ jobs:
             next-vps-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}-
 
       - name: Validate protected build configuration
+        if: steps.build-freshness.outputs.is_current == 'true'
         shell: powershell
         env:
           SYNCFUSION_LICENSE: ${{ secrets.SYNCFUSION_LICENSE }}
@@ -130,6 +159,7 @@ jobs:
           }
 
       - name: Build, package, and hash immutable release
+        if: steps.build-freshness.outputs.is_current == 'true'
         id: release
         shell: powershell
         env:
@@ -171,6 +201,7 @@ jobs:
           "release_id=$($manifest.releaseId)" >> $env:GITHUB_OUTPUT
 
       - name: Upload verified release without recompressing nested ZIPs
+        if: steps.build-freshness.outputs.is_current == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.release.outputs.artifact_name }}
@@ -207,13 +238,39 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
+      - name: Check whether the deployment candidate is still current master
+        id: deploy-freshness
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git fetch --no-tags origin '+refs/heads/master:refs/remotes/origin/master'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not refresh origin/master before VPS activation.' }
+          $candidateCommit = (git rev-parse HEAD).Trim().ToLowerInvariant()
+          $masterCommit = (git rev-parse refs/remotes/origin/master).Trim().ToLowerInvariant()
+          $isCurrent = $candidateCommit -ceq $masterCommit
+          "is_current=$($isCurrent.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "candidate_commit=$candidateCommit" >> $env:GITHUB_OUTPUT
+          "master_commit=$masterCommit" >> $env:GITHUB_OUTPUT
+
+      - name: Report superseded deployment candidate
+        if: steps.deploy-freshness.outputs.is_current != 'true'
+        shell: powershell
+        run: |
+          @"
+          ## VPS activation skipped
+
+          `SUPERSEDED_DEPLOYMENT`: candidate `${{ steps.deploy-freshness.outputs.candidate_commit }}` is no longer current master `${{ steps.deploy-freshness.outputs.master_commit }}`.
+          Start a new deployment from the current master commit. The stale artifact was not activated and the VPS was not changed.
+          "@ >> $env:GITHUB_STEP_SUMMARY
+
       - name: Set up Node.js for browser smoke tests
+        if: steps.deploy-freshness.outputs.is_current == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
 
       - name: Validate reused immutable release coordinates
-        if: inputs.reuse_release_run_id != ''
+        if: steps.deploy-freshness.outputs.is_current == 'true' && inputs.reuse_release_run_id != ''
         shell: powershell
         run: |
           if ('${{ inputs.reuse_release_run_id }}' -notmatch '^\d+$') {
@@ -227,14 +284,14 @@ jobs:
           }
 
       - name: Download the exact release built by this run
-        if: inputs.reuse_release_run_id == ''
+        if: steps.deploy-freshness.outputs.is_current == 'true' && inputs.reuse_release_run_id == ''
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build-release.outputs.artifact_name }}
           path: ${{ runner.temp }}/rhema-vps-release
 
       - name: Download a verified release built by the prior run
-        if: inputs.reuse_release_run_id != ''
+        if: steps.deploy-freshness.outputs.is_current == 'true' && inputs.reuse_release_run_id != ''
         uses: actions/download-artifact@v4
         with:
           name: ${{ inputs.reuse_release_artifact_name }}
@@ -243,6 +300,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Configure pinned SSH identity
+        if: steps.deploy-freshness.outputs.is_current == 'true'
         id: ssh
         shell: powershell
         env:
@@ -303,6 +361,7 @@ jobs:
           "key_path=$keyPath" >> $env:GITHUB_OUTPUT
 
       - name: Preflight SSH connection without changing the VPS
+        if: steps.deploy-freshness.outputs.is_current == 'true'
         shell: powershell
         run: |
           $arguments = @(
@@ -319,6 +378,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned SSH connection to the test VPS failed.' }
 
       - name: Deploy immutable release with backups, migrations, rollback, and smoke tests
+        if: steps.deploy-freshness.outputs.is_current == 'true'
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
@@ -335,7 +395,7 @@ jobs:
             -PublicBaseUrl $env:VPS_PUBLIC_BASE_URL
 
       - name: Retain sanitized deployment evidence
-        if: always()
+        if: always() && steps.deploy-freshness.outputs.is_current == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: vps-deployment-evidence-${{ github.run_id }}-${{ github.run_attempt }}
