@@ -51,6 +51,13 @@ export interface SalesLinkedSourceContext {
   availableQuantity?: number | null;
   allocatedQuantity?: number | null;
   shouldCreateSalesAllocation?: boolean;
+  activeAllocationId?: string;
+  activeAllocationStatus?: string;
+  activeAllocationReservedUntil?: string;
+  activeAllocationBusinessPartnerId?: string;
+  activeAllocationOpportunityId?: string;
+  activeAllocationSalesOrderId?: string;
+  activeAllocationCustomerName?: string;
 }
 
 export type SaleableQuickStartMode = 'order' | 'agreement';
@@ -85,6 +92,13 @@ const contextParamKeys: (keyof SalesLinkedSourceContext)[] = [
   'locationId',
   'locationName',
   'unitOfMeasure',
+  'activeAllocationId',
+  'activeAllocationStatus',
+  'activeAllocationReservedUntil',
+  'activeAllocationBusinessPartnerId',
+  'activeAllocationOpportunityId',
+  'activeAllocationSalesOrderId',
+  'activeAllocationCustomerName',
 ];
 
 const parseNumberParam = (params: URLSearchParams, key: string) => {
@@ -144,6 +158,13 @@ export const saleableItemToContext = (
     availableQuantity: item.availableQuantity,
     allocatedQuantity: item.allocatedQuantity,
     shouldCreateSalesAllocation: item.shouldCreateSalesAllocation,
+    activeAllocationId: item.activeAllocationId,
+    activeAllocationStatus: item.activeAllocationStatus,
+    activeAllocationReservedUntil: item.activeAllocationReservedUntil,
+    activeAllocationBusinessPartnerId: item.activeAllocationBusinessPartnerId,
+    activeAllocationOpportunityId: item.activeAllocationOpportunityId,
+    activeAllocationSalesOrderId: item.activeAllocationSalesOrderId,
+    activeAllocationCustomerName: item.activeAllocationCustomerName,
   });
 
 export const buildSaleableSourceParams = (
@@ -219,6 +240,8 @@ const formatAmount = (amount?: number | null, currency?: string) => {
 interface SaleableSourceQuickStartProps {
   mode: SaleableQuickStartMode;
   linkedContext: SalesLinkedSourceContext | null;
+  currentOpportunityId?: string;
+  currentCustomerId?: string;
   onSourceSelected?: (source: SalesSaleableSourceDto | null) => void;
   onUseOrder?: (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => void;
   onUseAgreement?: (item: SalesSaleableItemDto, source: SalesSaleableSourceDto, intent: SaleableAgreementIntent) => void;
@@ -227,6 +250,8 @@ interface SaleableSourceQuickStartProps {
 export function SaleableSourceQuickStart({
   mode,
   linkedContext,
+  currentOpportunityId,
+  currentCustomerId,
   onSourceSelected,
   onUseOrder,
   onUseAgreement,
@@ -252,6 +277,20 @@ export function SaleableSourceQuickStart({
 
   const selectedSource = availableSources.find((source) => source.id === selectedSourceId) || availableSources[0];
   const selectedItem = items.find((item) => item.sourceItemId === selectedItemId) || items[0];
+  const selectedItemReservationCanBeUsedForOrder = Boolean(
+    mode === 'order'
+      && selectedItem?.hasActiveAllocation
+      && selectedItem.activeAllocationStatus === 'Reserved'
+      && !selectedItem.activeAllocationSalesOrderId
+      && (!currentOpportunityId
+        || selectedItem.activeAllocationOpportunityId === currentOpportunityId)
+      && (!currentCustomerId
+        || !selectedItem.activeAllocationBusinessPartnerId
+        || selectedItem.activeAllocationBusinessPartnerId === currentCustomerId),
+  );
+  const canUseSelectedItemForOrder = Boolean(
+    selectedItem?.canCreateSalesOrder || selectedItemReservationCanBeUsedForOrder,
+  );
   const title = mode === 'order' ? 'Start From Saleable Source' : 'Start From Saleable Source';
   const description =
     mode === 'order'
@@ -505,7 +544,12 @@ export function SaleableSourceQuickStart({
                       <div className="font-medium">{selectedItem.locationName || '-'}</div>
                     </div>
                   </div>
-                  {selectedItem.hasActiveAllocation ? (
+                  {selectedItemReservationCanBeUsedForOrder ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      This property has a reservation that can be linked to this Sales Order.
+                      {selectedItem.activeAllocationReservedUntil ? ` Reserved until ${new Date(selectedItem.activeAllocationReservedUntil).toLocaleDateString()}.` : ''}
+                    </div>
+                  ) : selectedItem.hasActiveAllocation ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       This item already has an active {selectedItem.activeAllocationStatus || 'reservation'}.
                       {selectedItem.activeAllocationReservedUntil ? ` Reserved until ${new Date(selectedItem.activeAllocationReservedUntil).toLocaleDateString()}.` : ''}
@@ -520,7 +564,7 @@ export function SaleableSourceQuickStart({
                   {mode === 'order' ? (
                     <Button
                       className="w-full justify-start"
-                      disabled={!selectedItem.canCreateSalesOrder || !selectedSource}
+                      disabled={!canUseSelectedItemForOrder || !selectedSource}
                       onClick={() => selectedSource && onUseOrder?.(selectedItem, selectedSource)}
                     >
                       <ShoppingCart className="mr-2 h-4 w-4" />

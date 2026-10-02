@@ -69,6 +69,10 @@ export default function CreateSalesOrderPage() {
   const [linkedSourceContext, setLinkedSourceContext] = useState<SalesLinkedSourceContext | null>(null);
   const [lineSearchSource, setLineSearchSource] = useState<SalesSaleableSourceDto | null>(null);
   const [crmHandoffContext, setCrmHandoffContext] = useState<CrmHandoffContext | null>(null);
+  const [propertyEnquirySourceLock, setPropertyEnquirySourceLock] = useState<{
+    enquiryId: string;
+    assetType?: string;
+  } | null>(null);
 
   // Form state
   const [businessPartnerId, setBusinessPartnerId] = useState('');
@@ -121,6 +125,8 @@ export default function CreateSalesOrderPage() {
     const propertyReferenceParam = params.get('propertyReference');
     const orderTypeParam = params.get('orderType');
     const sourceContext = parseSaleableSourceContextFromParams(params);
+    const propertyEnquiryId = params.get('propertyEnquiryId');
+    const sourceIsLocked = params.get('saleableSourceLocked') === 'true';
     const crmContext: CrmHandoffContext = {
       contextLabel: params.get('crmContext') || undefined,
       quoteId: params.get('quoteId') || undefined,
@@ -159,6 +165,13 @@ export default function CreateSalesOrderPage() {
           return current.map((line, index) => index === 0 ? { ...updatedFirst, key: line.key } : line);
         });
       }
+    }
+
+    if (sourceContext && sourceIsLocked && propertyEnquiryId) {
+      setPropertyEnquirySourceLock({
+        enquiryId: propertyEnquiryId,
+        assetType: params.get('propertyEnquiryAssetType') || undefined,
+      });
     }
 
     if (customerId) {
@@ -210,13 +223,15 @@ export default function CreateSalesOrderPage() {
 
   const applySaleableItem = (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => {
     const context = saleableItemToContext(item, source);
+    const resolvedCustomerId = item.customerId || item.activeAllocationBusinessPartnerId || businessPartnerId;
+    const resolvedCustomerName = item.customerName || item.activeAllocationCustomerName || customerSearch;
     setLinkedSourceContext(context);
     setLineSearchSource(source);
     setCurrency(item.currency || source.defaultCurrency || 'GHS');
-    setBusinessPartnerId(item.customerId || '');
-    setCustomerSearch(item.customerName || '');
-    setSelectedCustomer(item.customerId && item.customerName
-      ? { id: item.customerId, companyName: item.customerName, name: item.customerName }
+    setBusinessPartnerId(resolvedCustomerId);
+    setCustomerSearch(resolvedCustomerName);
+    setSelectedCustomer(resolvedCustomerId && resolvedCustomerName
+      ? { id: resolvedCustomerId, companyName: resolvedCustomerName, name: resolvedCustomerName }
       : null);
     setPropertyReference(item.propertyReference || '');
     setPropertyType(item.itemType || '');
@@ -417,6 +432,16 @@ export default function CreateSalesOrderPage() {
     if (lines.some(l => !l.itemName)) { toast.error('All lines must have an item name'); return; }
     if (lines.some(l => l.quantity <= 0)) { toast.error('Quantities must be greater than 0'); return; }
 
+    const reusingOpportunityReservation = Boolean(
+      linkedSourceContext?.activeAllocationId
+        && linkedSourceContext.activeAllocationStatus === 'Reserved'
+        && !linkedSourceContext.activeAllocationSalesOrderId
+        && (!crmHandoffContext?.opportunityId
+          || linkedSourceContext.activeAllocationOpportunityId === crmHandoffContext.opportunityId)
+        && (!linkedSourceContext.activeAllocationBusinessPartnerId
+          || linkedSourceContext.activeAllocationBusinessPartnerId === businessPartnerId),
+    );
+
     const dto: CreateSalesOrderDto = {
       businessPartnerId,
       orderType,
@@ -433,7 +458,10 @@ export default function CreateSalesOrderPage() {
       notes: notes || undefined,
       internalNotes: internalNotes || undefined,
       quoteId: crmHandoffContext?.quoteId,
-      opportunityId: crmHandoffContext?.opportunityId,
+      opportunityId: crmHandoffContext?.opportunityId || linkedSourceContext?.activeAllocationOpportunityId,
+      salesAllocationId: reusingOpportunityReservation
+        ? linkedSourceContext?.activeAllocationId
+        : undefined,
       taxGroupId: taxGroupId || undefined,
       lines: lines.map(l => ({
         itemName: l.itemName,
@@ -461,7 +489,7 @@ export default function CreateSalesOrderPage() {
           linkedSourceContext.sourceId,
           linkedSourceContext.sourceItemId,
         );
-        if (activeCheck.hasActiveAllocation) {
+        if (activeCheck.hasActiveAllocation && !reusingOpportunityReservation) {
           toast.error('This saleable item already has an active reservation or allocation.');
           return;
         }
@@ -477,22 +505,24 @@ export default function CreateSalesOrderPage() {
       }
       if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId && linkedSourceContext.shouldCreateSalesAllocation !== false) {
         try {
-          await salesAllocationService.createAllocation({
-            saleableSourceId: linkedSourceContext.sourceId,
-            sourceItemId: linkedSourceContext.sourceItemId,
-            sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
-            sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || propertyReference || 'Saleable item',
-            sourceItemType: linkedSourceContext.itemType || propertyType || undefined,
-            businessPartnerId,
-            customerName: selectedCustomer?.companyName || selectedCustomer?.name || customerSearch || linkedSourceContext.customerName,
-            salesOrderId: result.id,
-            allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
-            status: 'Reserved',
-            estimatedValue: linkedSourceContext.estimatedValue ?? undefined,
-            agreedValue: result.totalAmount || grandTotal,
-            currency,
-            notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
-          });
+          if (!reusingOpportunityReservation) {
+            await salesAllocationService.createAllocation({
+              saleableSourceId: linkedSourceContext.sourceId,
+              sourceItemId: linkedSourceContext.sourceItemId,
+              sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
+              sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || propertyReference || 'Saleable item',
+              sourceItemType: linkedSourceContext.itemType || propertyType || undefined,
+              businessPartnerId,
+              customerName: selectedCustomer?.companyName || selectedCustomer?.name || customerSearch || linkedSourceContext.customerName,
+              salesOrderId: result.id,
+              allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
+              status: 'Reserved',
+              estimatedValue: linkedSourceContext.estimatedValue ?? undefined,
+              agreedValue: result.totalAmount || grandTotal,
+              currency,
+              notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
+            });
+          }
         } catch (allocationError: any) {
           toast.warning(allocationError?.message || 'Sales order created, but the saleable item reservation could not be recorded.');
         }
@@ -530,9 +560,21 @@ export default function CreateSalesOrderPage() {
       <SaleableSourceQuickStart
         mode="order"
         linkedContext={linkedSourceContext}
+        currentOpportunityId={crmHandoffContext?.opportunityId}
+        currentCustomerId={businessPartnerId || undefined}
         onSourceSelected={setLineSearchSource}
         onUseOrder={applySaleableItem}
       />
+
+      {propertyEnquirySourceLock ? (
+        <Card className="border-amber-200 bg-amber-50/60">
+          <CardContent className="py-3 text-sm text-amber-900">
+            This order was started from a property enquiry. The exact{' '}
+            {propertyEnquirySourceLock.assetType || 'Estate'} listing is locked to this order
+            to preserve the enquiry, opportunity, reservation, and Sales Order lineage.
+          </CardContent>
+        </Card>
+      ) : null}
 
       {crmHandoffContext ? (
         <Card className="border-blue-200 bg-blue-50/60">
@@ -685,7 +727,9 @@ export default function CreateSalesOrderPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Order Lines</CardTitle>
-                <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
+                {!propertyEnquirySourceLock ? (
+                  <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent className="overflow-visible pb-10">
@@ -707,7 +751,7 @@ export default function CreateSalesOrderPage() {
                 <TableRow key={line.key}>
                   <TableCell>
                     <Popover
-                      open={Boolean(activeLineSearchSourceId && activeLinePicker === line.key)}
+                      open={Boolean(!propertyEnquirySourceLock && activeLineSearchSourceId && activeLinePicker === line.key)}
                       onOpenChange={(open) => {
                         if (!open && activeLinePicker === line.key) {
                           setActiveLinePicker(null);
@@ -721,7 +765,9 @@ export default function CreateSalesOrderPage() {
                             ? `Search ${activeLineSearchSourceName || 'source'} items`
                             : 'Item name'}
                           value={activeLinePicker === line.key ? (lineItemSearch[line.key] ?? line.itemName) : line.itemName}
+                          disabled={Boolean(propertyEnquirySourceLock)}
                           onFocus={() => {
+                            if (propertyEnquirySourceLock) return;
                             setActiveLinePicker(line.key);
                             setLineItemSearch((current) => ({ ...current, [line.key]: current[line.key] ?? line.itemName }));
                             if (activeLineSearchSourceId) {
@@ -729,6 +775,7 @@ export default function CreateSalesOrderPage() {
                             }
                           }}
                           onChange={(e) => {
+                            if (propertyEnquirySourceLock) return;
                             if (activeLineSearchSourceId) {
                               handleLineItemSearchChange(line, e.target.value);
                             } else {
@@ -737,7 +784,7 @@ export default function CreateSalesOrderPage() {
                           }}
                         />
                       </PopoverAnchor>
-                      {activeLineSearchSourceId ? (
+                      {activeLineSearchSourceId && !propertyEnquirySourceLock ? (
                         <PopoverContent
                           align="start"
                           side="bottom"
@@ -791,7 +838,12 @@ export default function CreateSalesOrderPage() {
                     </Popover>
                   </TableCell>
                   <TableCell>
-                    <Input placeholder="Code" value={line.itemCode || ''} onChange={(e) => updateLine(line.key, 'itemCode', e.target.value)} />
+                    <Input
+                      placeholder="Code"
+                      value={line.itemCode || ''}
+                      disabled={Boolean(propertyEnquirySourceLock)}
+                      onChange={(e) => updateLine(line.key, 'itemCode', e.target.value)}
+                    />
                   </TableCell>
                   <TableCell>
                     <Input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', parseFloat(e.target.value) || 0)} />
@@ -809,9 +861,11 @@ export default function CreateSalesOrderPage() {
                     GHS {calcLineTotal(line).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => removeLine(line.key)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                    {!propertyEnquirySourceLock ? (
+                      <Button variant="ghost" size="icon" onClick={() => removeLine(line.key)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}

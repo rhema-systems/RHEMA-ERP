@@ -1,5 +1,9 @@
 import { apiService } from './api.service';
 import type { EhcTicketDetail } from './ehcTicketService';
+import type {
+  SalesSaleableItemDto,
+  SalesSaleableSourceDto,
+} from './salesSetupService';
 
 export type ProspectActivityType = 'Contact' | 'Note' | 'FollowUp';
 
@@ -18,6 +22,8 @@ export interface PropertyEnquiryProspect {
   leadId: string;
   opportunityId?: string | null;
   salesAllocationId?: string | null;
+  salesAllocationStatus?: string | null;
+  salesAllocationReservedUntil?: string | null;
   businessPartnerId?: string | null;
   businessPartnerCode?: string | null;
   businessPartnerName?: string | null;
@@ -62,6 +68,13 @@ export interface BusinessPartnerMatch {
 
 export interface PropertyEnquiryDetail extends EhcTicketDetail {
   prospect?: PropertyEnquiryProspect | null;
+}
+
+export interface PropertyEnquirySalesOrderSource {
+  propertyEnquiryId: string;
+  assetType: 'Land' | 'Property' | 'Facility' | string;
+  source: SalesSaleableSourceDto;
+  item: SalesSaleableItemDto;
 }
 
 export interface CreateProspectBusinessPartnerRequest {
@@ -172,6 +185,15 @@ export const propertyEnquiryService = {
       ),
     ]);
     return { ...ticketResponse.data, prospect: prospectResponse.data };
+  },
+
+  async getSalesOrderSource(
+    id: string
+  ): Promise<PropertyEnquirySalesOrderSource> {
+    const response = await apiService.request<
+      Envelope<PropertyEnquirySalesOrderSource>
+    >(`${baseUrl}/${id}/sales-order-source`, { method: 'GET' });
+    return response.data;
   },
 
   async qualify(

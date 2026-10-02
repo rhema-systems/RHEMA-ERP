@@ -192,6 +192,18 @@ function PropertyEnquiries() {
       return result.data;
     },
   });
+  const salesOrderSource = useQuery({
+    queryKey: ['property-enquiry-sales-order-source', selectedId],
+    enabled: Boolean(
+      selectedId &&
+        detail.data?.prospect?.status === 'Converted' &&
+        detail.data.prospect.opportunityId &&
+        detail.data.prospect.businessPartnerId &&
+        !handoff.data?.salesOrder
+    ),
+    queryFn: () => propertyEnquiryService.getSalesOrderSource(selectedId),
+    retry: false,
+  });
   const sendEmail = useMutation({
     mutationFn: () =>
       propertyEnquiryService.sendEmail(selectedId, emailBody.trim()),
@@ -1105,9 +1117,27 @@ function PropertyEnquiries() {
                 )}
                 {prospect?.salesAllocationId ? (
                   <div className="rounded border border-emerald-200 bg-white p-3 text-sm">
-                    <p>
-                      <span className="font-medium">Reservation:</span> Created
-                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p>
+                        <span className="font-medium">Reservation status:</span>{' '}
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 font-medium text-amber-800">
+                          {prospect.salesAllocationStatus || 'Reserved'}
+                        </span>
+                      </p>
+                      <Button asChild size="sm" variant="outline">
+                        <a href={`/sales/allocations/${prospect.salesAllocationId}`}>
+                          Open reservation
+                        </a>
+                      </Button>
+                    </div>
+                    {prospect.salesAllocationReservedUntil ? (
+                      <p className="mt-2">
+                        <span className="font-medium">Reserved until:</span>{' '}
+                        {new Date(
+                          prospect.salesAllocationReservedUntil
+                        ).toLocaleString()}
+                      </p>
+                    ) : null}
                     <p>
                       <span className="font-medium">Allocation ID:</span>{' '}
                       {prospect.salesAllocationId}
@@ -1369,30 +1399,54 @@ function PropertyEnquiries() {
                           Order for this opportunity before applying it to an
                           invoice.
                         </p>
-                        <SalesHandoffActions
-                          context={{
-                            businessPartnerId: prospect.businessPartnerId,
-                            businessPartnerName:
-                              prospect.businessPartnerName || undefined,
-                            leadId: prospect.leadId,
-                            leadName:
-                              ticket.propertyListing?.contactName ||
-                              ticket.subject,
-                            opportunityId: prospect.opportunityId,
-                            opportunityName:
-                              opportunity?.referenceNumber || ticket.subject,
-                            currency: prospect.currency,
-                            estimatedValue: prospect.agreedAmount,
-                            propertyReference:
-                              ticket.propertyListing?.listingReference,
-                            propertyType:
-                              ticket.propertyListing?.listingType,
-                            contextLabel: `Public property enquiry ${ticket.ticketNumber}`,
-                          }}
-                          size="sm"
-                          showUnavailableHint={false}
-                          showSalesAgreement={false}
-                        />
+                        {salesOrderSource.isLoading ? (
+                          <p className="text-xs text-slate-600">
+                            Resolving the exact Estate listing for this Sales Order...
+                          </p>
+                        ) : salesOrderSource.isError ? (
+                          <Alert variant="destructive">
+                            <AlertDescription>
+                              {salesOrderSource.error instanceof Error
+                                ? salesOrderSource.error.message
+                                : 'The property listing could not be resolved for a Sales Order.'}
+                              <Button
+                                className="ml-2"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => salesOrderSource.refetch()}
+                              >
+                                Try again
+                              </Button>
+                            </AlertDescription>
+                          </Alert>
+                        ) : salesOrderSource.data ? (
+                          <SalesHandoffActions
+                            context={{
+                              businessPartnerId: prospect.businessPartnerId,
+                              businessPartnerName:
+                                prospect.businessPartnerName || undefined,
+                              leadId: prospect.leadId,
+                              leadName:
+                                ticket.propertyListing?.contactName ||
+                                ticket.subject,
+                              opportunityId: prospect.opportunityId,
+                              opportunityName:
+                                opportunity?.referenceNumber || ticket.subject,
+                              currency: prospect.currency,
+                              estimatedValue: prospect.agreedAmount,
+                              propertyReference:
+                                ticket.propertyListing?.listingReference,
+                              propertyType:
+                                ticket.propertyListing?.listingType,
+                              contextLabel: `Public property enquiry ${ticket.ticketNumber}`,
+                              lockedPropertyEnquirySalesOrderSource:
+                                salesOrderSource.data,
+                            }}
+                            size="sm"
+                            showUnavailableHint={false}
+                            showSalesAgreement={false}
+                          />
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

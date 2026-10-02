@@ -69,6 +69,9 @@ export interface SalesSaleableItemDto {
   activeAllocationId?: string;
   activeAllocationStatus?: string;
   activeAllocationReservedUntil?: string;
+  activeAllocationBusinessPartnerId?: string;
+  activeAllocationOpportunityId?: string;
+  activeAllocationSalesOrderId?: string;
   activeAllocationCustomerName?: string;
   hasActiveAllocation: boolean;
 }

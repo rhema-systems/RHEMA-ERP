@@ -176,6 +176,7 @@ public class CreateSalesOrderDto
     // Traceability
     public Guid? QuoteId { get; set; }
     public Guid? OpportunityId { get; set; }
+    public Guid? SalesAllocationId { get; set; }
 
     // TDC Property
     public string? PropertyReference { get; set; }

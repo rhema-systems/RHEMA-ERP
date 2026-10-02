@@ -194,6 +194,7 @@
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
+    <Compile Include="Services\Estate\EstateSalesListingApplicationHandoffTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\Estate\GroundRentAssessmentTests.cs" />
     <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
