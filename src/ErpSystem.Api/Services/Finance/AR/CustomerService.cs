@@ -41,7 +41,7 @@ public class CustomerService : ICustomerService
         var partner = await CustomerPartners()
             .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
-        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken)).Single();
+        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken: cancellationToken)).Single();
     }
 
     public async Task<CustomerDto?> GetByCodeAsync(string customerCode, CancellationToken cancellationToken = default)
@@ -54,7 +54,7 @@ public class CustomerService : ICustomerService
                 p.CustomerAccountNumber == normalizedCode,
                 cancellationToken);
 
-        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken)).Single();
+        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken: cancellationToken)).Single();
     }
 
     public async Task<PagedResult<CustomerDto>> GetAllAsync(CustomerQueryDto query, CancellationToken cancellationToken = default)
@@ -100,6 +100,26 @@ public class CustomerService : ICustomerService
             _ => query.SortDescending ? customers.OrderByDescending(p => p.PartnerName) : customers.OrderBy(p => p.PartnerName)
         };
 
+        if (!string.IsNullOrWhiteSpace(query.TransactionReadiness))
+        {
+            var allPartners = await customers.ToListAsync(cancellationToken);
+            var allDtos = await MapCustomersAsync(allPartners, query.IncludeBalances, cancellationToken);
+            var ready = query.TransactionReadiness.Equals("Ready", StringComparison.OrdinalIgnoreCase);
+            if (!ready && !query.TransactionReadiness.Equals("NotReady", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new ArgumentException("TransactionReadiness must be Ready or NotReady.");
+            }
+
+            var filtered = allDtos.Where(item => item.IsTransactionReady == ready).ToList();
+            return new PagedResult<CustomerDto>
+            {
+                Items = filtered.Skip((query.PageNumber - 1) * query.PageSize).Take(query.PageSize).ToList(),
+                TotalCount = filtered.Count,
+                PageNumber = query.PageNumber,
+                PageSize = query.PageSize
+            };
+        }
+
         var totalCount = await customers.CountAsync(cancellationToken);
         var items = await customers
             .Skip((query.PageNumber - 1) * query.PageSize)
@@ -108,7 +128,7 @@ public class CustomerService : ICustomerService
 
         return new PagedResult<CustomerDto>
         {
-            Items = await MapCustomersAsync(items, cancellationToken),
+            Items = await MapCustomersAsync(items, query.IncludeBalances, cancellationToken),
             TotalCount = totalCount,
             PageNumber = query.PageNumber,
             PageSize = query.PageSize
@@ -287,7 +307,9 @@ public class CustomerService : ICustomerService
     }
 
     private async Task<List<CustomerDto>> MapCustomersAsync(
-        IReadOnlyCollection<BusinessPartner> partners, CancellationToken cancellationToken)
+        IReadOnlyCollection<BusinessPartner> partners,
+        bool includeBalances = false,
+        CancellationToken cancellationToken = default)
     {
         if (partners.Count == 0) return new List<CustomerDto>();
         var readiness = await ResolveCustomerProfilesAsync(partners, DateTime.UtcNow, cancellationToken);
@@ -300,6 +322,14 @@ public class CustomerService : ICustomerService
             .AsNoTracking().ToListAsync(cancellationToken);
         var defaultTerm = terms.Where(term => term.IsDefault)
             .OrderBy(term => term.ApplicableTo == "Customer" ? 0 : 1).ThenBy(term => term.DisplayOrder).FirstOrDefault();
+        var settlementBalances = includeBalances
+            ? (await _settlementReadModelService.GetBalancesAsync(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    DateTime.UtcNow,
+                    cancellationToken: cancellationToken))
+                .GroupBy(item => item.CounterpartyId)
+                .ToDictionary(group => group.Key, group => group.Sum(item => item.OutstandingAmount))
+            : new Dictionary<Guid, decimal>();
         return partners.Select(partner =>
         {
             var state = readiness[partner.Id];
@@ -308,11 +338,21 @@ public class CustomerService : ICustomerService
                     ? terms.SingleOrDefault(value => value.Id == state.ArProfile.PaymentTermId.Value)
                     : defaultTerm
                 : null;
-            return MapToDto(partner, state, term);
+            return MapToDto(
+                partner,
+                state,
+                term,
+                settlementBalances.TryGetValue(partner.Id, out var authoritativeBalance)
+                    ? authoritativeBalance
+                    : includeBalances ? 0m : null);
         }).ToList();
     }
 
-    private static CustomerDto MapToDto(BusinessPartner partner, BusinessPartnerFinanceProfileReadiness readiness, PaymentTerm? paymentTerm)
+    private static CustomerDto MapToDto(
+        BusinessPartner partner,
+        BusinessPartnerFinanceProfileReadiness readiness,
+        PaymentTerm? paymentTerm,
+        decimal? outstandingBalance = null)
     {
 
         return new CustomerDto
@@ -331,12 +371,16 @@ public class CustomerService : ICustomerService
             Country = partner.PhysicalCountry ?? partner.MailingCountry,
             TaxId = partner.TaxIdentificationNumber,
             CreditLimit = readiness.ArProfile?.CreditLimit ?? 0m,
-            OutstandingBalance = partner.OutstandingBalance ?? 0m,
+            OutstandingBalance = outstandingBalance ?? partner.OutstandingBalance ?? 0m,
             PaymentTermsDays = paymentTerm?.DueDays ?? 30,
             PaymentTermId = paymentTerm?.Id,
             PriceGroup = partner.PriceList,
             CurrencyCode = string.IsNullOrWhiteSpace(partner.Currency) ? "GHS" : partner.Currency,
-            IsActive = readiness.IsReady,
+            IsActive = partner.IsActive,
+            IsBlacklisted = partner.IsBlacklisted,
+            IsTransactionReady = readiness.IsReady,
+            ReadinessCode = readiness.Code,
+            ReadinessMessage = readiness.Message,
             Notes = partner.Notes,
             CreatedAt = partner.CreatedAt
         };

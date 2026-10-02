@@ -29,6 +29,35 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 /// </summary>
 public sealed class BankingSettlementReleaseGateTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank")]
+    public async Task Liquidity_register_ShouldExposePrimaryBookGlBalanceAndSubledgerVariance()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        SeedPostedJournal(
+            db,
+            setup,
+            "CashReceipt",
+            Guid.NewGuid(),
+            debitAccountId: setup.HoldingGlAccount.Id,
+            creditAccountId: setup.ExpenseAccount.Id,
+            amount: 150m);
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+
+        var accounts = await service.GetLiquidityAccountsAsync();
+        var holding = accounts.Single(item => item.Id == setup.HoldingAccount.Id);
+
+        holding.CurrentBalance.Should().Be(150m);
+        holding.SettlementBalance.Should().Be(0m);
+        holding.BalanceDifference.Should().Be(150m);
+        holding.IsReconciled.Should().BeFalse();
+        holding.BalanceAuthority.Should().Be("PrimaryBookGL");
+    }
+
     [Theory]
     [InlineData(LiquidityEntryType.CashExpense)]
     [InlineData(LiquidityEntryType.PettyCashReplenishment)]

@@ -33,7 +33,8 @@ export interface CustomerQuery {
     page?: number;
     pageSize?: number;
     searchTerm?: string;
-    status?: string;
+    isActive?: boolean;
+    transactionReadiness?: 'Ready' | 'NotReady';
     includeBalances?: boolean;
 }
 
@@ -86,7 +87,8 @@ class ArService {
         if (query.page) params.append('PageNumber', query.page.toString());
         if (query.pageSize) params.append('PageSize', query.pageSize.toString());
         if (query.searchTerm) params.append('SearchTerm', query.searchTerm);
-        if (query.status) params.append('Status', query.status);
+        if (query.isActive !== undefined) params.append('IsActive', query.isActive.toString());
+        if (query.transactionReadiness) params.append('TransactionReadiness', query.transactionReadiness);
         if (query.includeBalances !== undefined) params.append('IncludeBalances', query.includeBalances.toString());
 
         return apiService.get<PagedResult<Customer>>(`${this.baseUrl}/customers?${params.toString()}`);

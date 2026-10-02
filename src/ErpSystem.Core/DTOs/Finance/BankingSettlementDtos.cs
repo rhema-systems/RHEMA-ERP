@@ -22,6 +22,10 @@ public class LiquidityAccountDto
     public bool IsSystemAccount { get; set; }
     public string? Notes { get; set; }
     public decimal CurrentBalance { get; set; }
+    public decimal SettlementBalance { get; set; }
+    public decimal BalanceDifference { get; set; }
+    public bool IsReconciled { get; set; }
+    public string BalanceAuthority { get; set; } = "LiquiditySubledgerFallback";
     public decimal AvailableToSettle { get; set; }
     public int OpenEntryCount { get; set; }
     public DateTime CreatedAt { get; set; }

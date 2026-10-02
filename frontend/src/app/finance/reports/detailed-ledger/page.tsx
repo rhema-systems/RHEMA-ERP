@@ -359,7 +359,7 @@ export default function DetailedLedgerPage() {
                                 </div>
                                 <div>
                                     <div className="text-muted-foreground">Currency</div>
-                                    <div className="font-medium">{settings?.baseCurrency || report?.currencyCode || 'GHS'}</div>
+                                    <div className="font-medium">{report?.currencyCode || settings?.baseCurrency || 'GHS'}</div>
                                 </div>
                             </div>
                             {error && <div className="mt-4 text-sm text-red-600">{error}</div>}
