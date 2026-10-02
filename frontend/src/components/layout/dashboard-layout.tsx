@@ -24,8 +24,8 @@ export function DashboardLayout({ children, defaultSidebarCollapsed = false }: D
       className={cn(
         'min-h-screen transition-colors',
         interfaceStyle === 'immersive'
-          ? 'bg-gradient-to-br from-slate-50 via-blue-50/30 to-indigo-50/30 dark:from-[#101010] dark:via-[#151515] dark:to-[#181818]'
-          : 'bg-slate-50 dark:bg-[#101010]',
+          ? 'bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.12),transparent_34%),linear-gradient(145deg,#f4f8ff,#f8fafc_45%,#effaf7)] dark:bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.14),transparent_34%),linear-gradient(145deg,#101010,#151515_48%,#111b18)]'
+          : 'bg-[#f5f8fc] dark:bg-[#101010]',
       )}
     >
       <div className="flex h-screen">
@@ -42,7 +42,7 @@ export function DashboardLayout({ children, defaultSidebarCollapsed = false }: D
           {/* Page Content */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
             <main className="min-h-0 min-w-0 flex-1 overflow-auto">
-              <div className={cn('w-full max-w-none', interfaceStyle === 'immersive' ? 'space-y-6 p-6' : 'space-y-5 p-4 lg:p-5')}>
+              <div className={cn('w-full max-w-none', interfaceStyle === 'immersive' ? 'p-3 sm:p-4 lg:p-[18px]' : 'p-3 sm:p-4')}>
                 {children}
               </div>
             </main>

@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using ErpSystem.Api.Controllers.Estate;
+using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services;
 using ErpSystem.Api.Services.Otp;
 using ErpSystem.Api.Services.Sms;
@@ -50,6 +51,13 @@ public sealed class PublicPropertyEnquiryContactControllerTests
 
         var unavailable = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
+        var problem = Assert.IsType<ProblemDetails>(unavailable.Value);
+        Assert.Equal("Verification code could not be sent", problem.Title);
+        Assert.Equal("PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED", problem.Extensions["code"]);
+        Assert.Contains("tenant SMS settings", problem.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.IsType<InvalidOperationException>(
+            fixture.Controller.HttpContext.Items[
+                SystemExceptionResultLoggingFilter.HandledExceptionItemKey]);
         var json = JsonSerializer.Serialize(unavailable.Value);
         Assert.Contains("PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED", json, StringComparison.Ordinal);
         Assert.Contains("tenant SMS settings", json, StringComparison.OrdinalIgnoreCase);

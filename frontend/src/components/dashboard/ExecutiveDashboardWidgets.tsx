@@ -1,0 +1,452 @@
+'use client';
+
+import Link from 'next/link';
+import React, { type CSSProperties, type ReactNode } from 'react';
+import {
+  ArrowRight,
+  BarChart3,
+  CircleDot,
+  TrendingUp,
+} from 'lucide-react';
+import {
+  Area,
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+
+import { cn } from '@/lib/utils';
+
+const DASHBOARD_COLORS = ['#2474ff', '#21bd87', '#8b5cf6', '#ff9f2e', '#ef4444', '#06b6d4'];
+
+const compactNumber = (value: number) => new Intl.NumberFormat('en', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+}).format(value);
+
+export function ExecutiveWidget({
+  title,
+  description,
+  href,
+  actionLabel = 'View details',
+  icon,
+  children,
+  className,
+}: {
+  title: string;
+  description?: string;
+  href?: string;
+  actionLabel?: string;
+  icon?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section
+      className={cn(
+        'overflow-hidden rounded-2xl border border-slate-200/75 bg-white shadow-[0_10px_32px_-24px_rgba(15,23,42,0.42)] dark:border-neutral-700/80 dark:bg-[#1d1d1d]',
+        className,
+      )}
+    >
+      <div className="flex items-start justify-between gap-3 px-4 pb-2 pt-4 sm:px-5">
+        <div className="flex min-w-0 items-start gap-2.5">
+          {icon ? (
+            <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-300">
+              {icon}
+            </span>
+          ) : null}
+          <div className="min-w-0">
+            <h2 className="text-[0.95rem] font-bold tracking-tight text-slate-950 dark:text-white">{title}</h2>
+            {description ? <p className="mt-0.5 truncate text-[0.7rem] text-slate-500 dark:text-slate-400">{description}</p> : null}
+          </div>
+        </div>
+        {href ? (
+          <Link
+            href={href}
+            className="group inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[0.7rem] font-semibold text-blue-600 transition-colors hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:text-blue-300 dark:hover:bg-blue-950/40"
+          >
+            {actionLabel}
+            <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
+          </Link>
+        ) : null}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+export function DashboardEmptyState({
+  title,
+  description,
+  href,
+  actionLabel,
+}: {
+  title: string;
+  description: string;
+  href?: string;
+  actionLabel?: string;
+}) {
+  return (
+    <div className="mx-4 mb-4 flex min-h-24 items-center gap-3 rounded-xl border border-dashed border-slate-200 bg-slate-50/80 p-4 dark:border-neutral-700 dark:bg-neutral-900/50 sm:mx-5">
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-400 shadow-sm dark:bg-neutral-800">
+        <CircleDot className="h-4 w-4" aria-hidden="true" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">{title}</p>
+        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">{description}</p>
+      </div>
+      {href && actionLabel ? (
+        <Link href={href} className="shrink-0 text-xs font-semibold text-blue-600 hover:underline dark:text-blue-300">
+          {actionLabel} →
+        </Link>
+      ) : null}
+    </div>
+  );
+}
+
+function ChartTooltip({ active, payload, label, formatValue }: {
+  active?: boolean;
+  payload?: Array<{ color?: string; name?: string; value?: number }>;
+  label?: string;
+  formatValue: (value: number) => string;
+}) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95">
+      <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{label}</p>
+      {payload.map((entry) => (
+        <p key={entry.name} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
+          <span>{entry.name}</span>
+          <strong className="ml-auto pl-3 text-slate-900 dark:text-white">{formatValue(Number(entry.value ?? 0))}</strong>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+export function FinancialPerformanceWidget({
+  data,
+  formatValue,
+  href,
+}: {
+  data: Array<{ name: string; revenue: number; expenses: number }>;
+  formatValue: (value: number) => string;
+  href: string;
+}) {
+  const chartData = data.map((point) => ({ ...point, net: point.revenue - point.expenses }));
+  return (
+    <ExecutiveWidget
+      title="Revenue vs Expenses"
+      description="Posted general-ledger movement for the selected period"
+      href={href}
+      actionLabel="Open ledger"
+      icon={<BarChart3 className="h-4 w-4" />}
+      className="min-h-[285px]"
+    >
+      {chartData.length === 0 ? (
+        <DashboardEmptyState title="No financial movement yet" description="Posted revenue and expense activity will appear here." href={href} actionLabel="Open ledger" />
+      ) : (
+        <div className="h-[225px] px-2 pb-3 pr-4 sm:px-3">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={chartData} margin={{ top: 8, right: 4, left: -18, bottom: 0 }}>
+              <defs>
+                <linearGradient id="executiveNetFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#21bd87" stopOpacity={0.26} />
+                  <stop offset="100%" stopColor="#21bd87" stopOpacity={0.02} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="#94a3b8" strokeOpacity={0.18} />
+              <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={compactNumber} />
+              <Tooltip content={<ChartTooltip formatValue={formatValue} />} cursor={{ fill: '#eff6ff', opacity: 0.45 }} />
+              <Area type="monotone" dataKey="net" name="Net position" stroke="#21bd87" strokeWidth={2.5} fill="url(#executiveNetFill)" />
+              <Bar dataKey="revenue" name="Revenue" fill="#2474ff" fillOpacity={0.78} radius={[5, 5, 0, 0]} barSize={14} />
+              <Bar dataKey="expenses" name="Expenses" fill="#ff6574" fillOpacity={0.72} radius={[5, 5, 0, 0]} barSize={14} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function ExpenseAccountsWidget({
+  data,
+  formatValue,
+  href,
+}: {
+  data: Array<{ name: string; value: number }>;
+  formatValue: (value: number) => string;
+  href: string;
+}) {
+  const visible = data.slice(0, 5);
+  const maximum = Math.max(1, ...visible.map((item) => item.value));
+  return (
+    <ExecutiveWidget title="Top Expense Accounts" description="Largest posted balances" href={href} actionLabel="View all" icon={<TrendingUp className="h-4 w-4" />}>
+      {visible.length === 0 ? (
+        <DashboardEmptyState title="No expense balances yet" description="Posted expense accounts will appear here." href={href} actionLabel="Open ledger" />
+      ) : (
+        <div className="space-y-3 px-4 pb-4 pt-2 sm:px-5">
+          {visible.map((item, index) => (
+            <Link key={item.name} href={href} className="group grid grid-cols-[minmax(6.5rem,0.8fr)_minmax(5rem,1fr)_auto] items-center gap-3 text-xs">
+              <span className="truncate font-medium text-slate-700 group-hover:text-blue-700 dark:text-slate-200 dark:group-hover:text-blue-300">{item.name}</span>
+              <span className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-neutral-800">
+                <span
+                  className="block h-full rounded-full transition-[width] duration-500"
+                  style={{ width: `${Math.max(6, (item.value / maximum) * 100)}%`, backgroundColor: DASHBOARD_COLORS[(index + 4) % DASHBOARD_COLORS.length] }}
+                />
+              </span>
+              <strong className="whitespace-nowrap text-[0.7rem] text-slate-900 dark:text-white">{formatValue(item.value)}</strong>
+            </Link>
+          ))}
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function PipelineWidget({
+  data,
+  href,
+  getHref,
+}: {
+  data: Array<{ stage: string; opportunities: number; quotes: number }>;
+  href: string;
+  getHref: (stage: string) => string;
+}) {
+  const total = data.reduce((sum, item) => sum + item.opportunities, 0);
+  const maximum = Math.max(1, ...data.map((item) => item.opportunities));
+  return (
+    <ExecutiveWidget title="CRM Pipeline" description={`${total} active opportunities`} href={href} actionLabel="View opportunities">
+      {data.length === 0 ? (
+        <DashboardEmptyState title="No CRM data yet" description="Opportunities will appear here once created." href={href} actionLabel="Open CRM" />
+      ) : (
+        <div className="space-y-2.5 px-4 pb-4 pt-1 sm:px-5">
+          {data.slice(0, 5).map((item, index) => (
+            <Link key={item.stage} href={getHref(item.stage)} className="group grid grid-cols-[5rem_1fr_auto] items-center gap-2.5 text-[0.7rem]">
+              <span className="truncate font-medium text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">{item.stage}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-neutral-800">
+                <span className="block h-full rounded-full" style={{ width: `${Math.max(5, (item.opportunities / maximum) * 100)}%`, backgroundColor: DASHBOARD_COLORS[index % DASHBOARD_COLORS.length] }} />
+              </span>
+              <strong className="w-8 text-right text-slate-900 dark:text-white">{item.opportunities}</strong>
+            </Link>
+          ))}
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function ConversionFunnelWidget({
+  data,
+  href,
+  getHref,
+}: {
+  data: Array<{ stage: string; count: number; conversionRate: number | null }>;
+  href: string;
+  getHref: (stage: string) => string;
+}) {
+  const maximum = Math.max(1, ...data.map((item) => item.count));
+  return (
+    <ExecutiveWidget title="Sales Conversion Funnel" description="Lead-to-delivery conversion" href={href} actionLabel="View details">
+      {data.length === 0 ? (
+        <DashboardEmptyState title="No funnel data yet" description="Conversion stages will appear as leads progress." href={href} actionLabel="Open leads" />
+      ) : (
+        <div className="grid grid-cols-[minmax(7rem,1fr)_minmax(7.5rem,0.85fr)] items-center gap-4 px-4 pb-4 pt-1 sm:px-5">
+          <div className="space-y-1.5">
+            {data.slice(0, 5).map((item, index) => {
+              const width = Math.max(32, (item.count / maximum) * 100);
+              return (
+                <Link key={item.stage} href={getHref(item.stage)} className="mx-auto block h-7 transition-transform hover:scale-[1.02]" style={{ width: `${width}%` }} aria-label={`${item.stage}: ${item.count}`}>
+                  <span
+                    className="flex h-full items-center justify-center rounded-md text-[0.65rem] font-bold text-white shadow-sm"
+                    style={{ background: `linear-gradient(90deg, ${DASHBOARD_COLORS[index % DASHBOARD_COLORS.length]}, ${DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length]})`, clipPath: 'polygon(4% 0, 96% 0, 88% 100%, 12% 100%)' }}
+                  >
+                    {item.count}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+          <div className="space-y-2.5">
+            {data.slice(0, 5).map((item) => (
+              <Link key={item.stage} href={getHref(item.stage)} className="grid grid-cols-[1fr_auto] gap-2 text-[0.68rem] hover:text-blue-700 dark:hover:text-blue-300">
+                <span className="truncate text-slate-600 dark:text-slate-300">{item.stage}</span>
+                <strong>{item.conversionRate === null ? '—' : `${item.conversionRate.toFixed(0)}%`}</strong>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function RiskMixWidget({
+  data,
+  href,
+}: {
+  data: Array<{ name: string; value: number }>;
+  href: string;
+}) {
+  const total = data.reduce((sum, item) => sum + item.value, 0);
+  let cursor = 0;
+  const segments = data.map((item, index) => {
+    const start = cursor;
+    cursor += total ? (item.value / total) * 100 : 0;
+    return `${DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length]} ${start}% ${cursor}%`;
+  });
+  const donutStyle: CSSProperties = { background: total ? `conic-gradient(${segments.join(',')})` : '#e2e8f0' };
+  return (
+    <ExecutiveWidget title="Account Risk Mix" description="Active business-partner health" href={href} actionLabel="View accounts">
+      {data.length === 0 ? (
+        <DashboardEmptyState title="No account risk data yet" description="Risk bands will appear after account assessments." href={href} actionLabel="Open accounts" />
+      ) : (
+        <div className="grid grid-cols-[7.5rem_1fr] items-center gap-5 px-4 pb-4 pt-1 sm:px-5">
+          <div className="relative mx-auto h-28 w-28 rounded-full shadow-inner" style={donutStyle}>
+            <div className="absolute inset-[18px] flex flex-col items-center justify-center rounded-full bg-white shadow-sm dark:bg-[#1d1d1d]">
+              <strong className="text-xl text-slate-950 dark:text-white">{total}</strong>
+              <span className="text-[0.6rem] text-slate-500">Accounts</span>
+            </div>
+          </div>
+          <div className="space-y-2.5">
+            {data.slice(0, 5).map((item, index) => (
+              <Link key={item.name} href={`${href}?healthCategory=${encodeURIComponent(item.name)}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-[0.68rem] hover:text-blue-700 dark:hover:text-blue-300">
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length] }} />
+                <span className="truncate text-slate-600 dark:text-slate-300">{item.name}</span>
+                <strong>{item.value} <span className="font-normal text-slate-400">({total ? Math.round((item.value / total) * 100) : 0}%)</span></strong>
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function CompactProgressWidget({
+  title,
+  description,
+  data,
+  href,
+  actionLabel,
+  emptyTitle,
+  emptyDescription,
+}: {
+  title: string;
+  description: string;
+  data: Array<{ name: string; value: number }>;
+  href: string;
+  actionLabel: string;
+  emptyTitle: string;
+  emptyDescription: string;
+}) {
+  const maximum = Math.max(1, ...data.map((item) => item.value));
+  return (
+    <ExecutiveWidget title={title} description={description} href={href} actionLabel={actionLabel}>
+      {data.length === 0 ? (
+        <DashboardEmptyState title={emptyTitle} description={emptyDescription} href={href} actionLabel={actionLabel} />
+      ) : (
+        <div className="space-y-3 px-4 pb-4 pt-1 sm:px-5">
+          {data.slice(0, 5).map((item, index) => (
+            <Link href={href} key={item.name} className="group grid grid-cols-[minmax(6.5rem,0.9fr)_1fr_auto] items-center gap-3 text-[0.7rem]">
+              <span className="truncate text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">{item.name}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-neutral-800">
+                <span className="block h-full rounded-full" style={{ width: `${Math.max(5, (item.value / maximum) * 100)}%`, backgroundColor: DASHBOARD_COLORS[(index + 4) % DASHBOARD_COLORS.length] }} />
+              </span>
+              <strong>{item.value}</strong>
+            </Link>
+          ))}
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function MaintenanceTrendWidget({
+  data,
+  href,
+}: {
+  data: Array<{ period: string; created: number; completed: number }>;
+  href: string;
+}) {
+  return (
+    <ExecutiveWidget title="Maintenance Trend" description="Created versus completed work orders" href={href} actionLabel="View work orders">
+      {data.length === 0 ? (
+        <DashboardEmptyState title="No maintenance trend yet" description="Work-order movement will appear here as activity is recorded." href={href} actionLabel="Open work orders" />
+      ) : (
+        <div className="h-[155px] px-2 pb-3 pr-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <ComposedChart data={data} margin={{ top: 6, right: 0, left: -24, bottom: 0 }}>
+              <CartesianGrid vertical={false} stroke="#94a3b8" strokeOpacity={0.16} />
+              <XAxis dataKey="period" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 9 }} />
+              <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 9 }} allowDecimals={false} />
+              <Tooltip content={<ChartTooltip formatValue={(value) => String(value)} />} cursor={{ fill: '#eff6ff', opacity: 0.4 }} />
+              <Bar dataKey="created" name="Created" fill="#2474ff" radius={[4, 4, 0, 0]} barSize={10} />
+              <Bar dataKey="completed" name="Completed" fill="#46cc9a" radius={[4, 4, 0, 0]} barSize={10} />
+              <Line type="monotone" dataKey="completed" name="Completed" stroke="#14a973" strokeWidth={2} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </ExecutiveWidget>
+  );
+}
+
+export function MiniTrend({ values, color = '#2474ff' }: { values: number[]; color?: string }) {
+  const cleaned = values.filter(Number.isFinite);
+  if (cleaned.length < 2) return <span className="block h-8 w-20 rounded-lg bg-slate-100 dark:bg-neutral-800" aria-hidden="true" />;
+  const minimum = Math.min(...cleaned);
+  const maximum = Math.max(...cleaned);
+  const span = Math.max(1, maximum - minimum);
+  const points = cleaned.map((value, index) => `${(index / (cleaned.length - 1)) * 78 + 1},${29 - ((value - minimum) / span) * 25}`).join(' ');
+  return (
+    <svg viewBox="0 0 80 32" className="h-8 w-20 overflow-visible" aria-hidden="true">
+      <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export function DashboardHeroArtwork() {
+  return (
+    <svg viewBox="0 0 560 170" className="h-full w-full" role="img" aria-label="Abstract city skyline">
+      <defs>
+        <linearGradient id="heroSky" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0" stopColor="#dbeafe" />
+          <stop offset="0.55" stopColor="#f0f9ff" />
+          <stop offset="1" stopColor="#dcfce7" />
+        </linearGradient>
+        <linearGradient id="heroGlass" x1="0" x2="1" y1="0" y2="1">
+          <stop offset="0" stopColor="#60a5fa" stopOpacity="0.75" />
+          <stop offset="1" stopColor="#1d4ed8" stopOpacity="0.32" />
+        </linearGradient>
+      </defs>
+      <rect width="560" height="170" rx="28" fill="url(#heroSky)" />
+      <circle cx="468" cy="38" r="20" fill="#fff" fillOpacity="0.8" />
+      <path d="M0 136C76 112 114 145 184 126c63-18 84 4 141-7 68-13 118-4 235 6v45H0z" fill="#a7f3d0" fillOpacity="0.48" />
+      <g fill="url(#heroGlass)" stroke="#fff" strokeOpacity="0.58">
+        <path d="M250 59h54v87h-54z" />
+        <path d="M310 35h67v111h-67z" />
+        <path d="M384 70h50v76h-50z" />
+        <path d="M438 52h65v94h-65z" />
+        <path d="M202 83h43v63h-43z" />
+      </g>
+      <g stroke="#eff6ff" strokeOpacity="0.72">
+        {[326, 343, 360].map((x) => <path key={x} d={`M${x} 40v103`} />)}
+        {[83, 100, 117, 134].map((y) => <path key={y} d={`M205 ${y}h294`} />)}
+      </g>
+      <g fill="#1e3a8a" fillOpacity="0.55">
+        <circle cx="115" cy="121" r="19" />
+        <rect x="111" y="120" width="8" height="28" rx="3" />
+        <circle cx="160" cy="116" r="25" />
+        <rect x="156" y="116" width="9" height="32" rx="3" />
+      </g>
+    </svg>
+  );
+}

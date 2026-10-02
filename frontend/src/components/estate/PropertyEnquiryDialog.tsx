@@ -292,7 +292,7 @@ export function PropertyEnquiryDialog({
         }}
       >
         <DialogContent
-          className="max-h-[90vh] overflow-y-auto text-foreground sm:max-w-xl"
+          className="max-h-[90vh] overflow-y-auto text-foreground sm:max-w-2xl"
           onInteractOutside={(e) => {
             if (busy) e.preventDefault();
           }}
@@ -430,23 +430,31 @@ export function PropertyEnquiryDialog({
                     </p>
                   )}
               </div>
-              <div className="space-y-3 rounded-md border bg-muted/30 p-3 sm:col-span-2">
+              <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-4 sm:col-span-2">
                 {!contactChallenge ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => void requestContactOtp()}
-                    disabled={
-                      busy ||
-                      contactBusy ||
-                      !selectedContactIsValid ||
-                      securityLoading ||
-                      securityError ||
-                      Boolean(security?.captchaEnabled && !captchaToken)
-                    }
-                  >
-                    {contactBusy ? 'Sending code…' : 'Send verification code'}
-                  </Button>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold">Verify your contact</p>
+                      <p className="text-xs text-muted-foreground">
+                        We will send a six-digit code to the selected contact.
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      className="min-h-11 w-full px-5 shadow-sm sm:w-auto"
+                      onClick={() => void requestContactOtp()}
+                      disabled={
+                        busy ||
+                        contactBusy ||
+                        !selectedContactIsValid ||
+                        securityLoading ||
+                        securityError ||
+                        Boolean(security?.captchaEnabled && !captchaToken)
+                      }
+                    >
+                      {contactBusy ? 'Sending code…' : 'Send verification code'}
+                    </Button>
+                  </div>
                 ) : !contactVerification ? (
                   <>
                     <p className="text-sm text-muted-foreground">

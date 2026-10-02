@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
+  Building2,
   Settings, 
   ChevronDown,
 } from 'lucide-react';
@@ -70,13 +71,13 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   return (
     <>
     <header className={cn(
-      'sticky top-0 z-50 w-full border-b transition-colors',
+      'sticky top-0 z-50 w-full border-b transition-all',
       interfaceStyle === 'immersive'
-        ? 'border-slate-200/50 bg-white/80 shadow-sm backdrop-blur-xl supports-[backdrop-filter]:bg-white/65 dark:border-neutral-700/70 dark:bg-neutral-900/85'
-        : 'border-slate-200 bg-white dark:border-neutral-800 dark:bg-neutral-950',
+        ? 'border-blue-100/80 bg-white/82 shadow-[0_8px_30px_-24px_rgba(37,99,235,0.5)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/72 dark:border-neutral-700/70 dark:bg-neutral-900/88'
+        : 'border-slate-200/80 bg-white/95 shadow-[0_6px_22px_-22px_rgba(15,23,42,0.5)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95',
       className
     )}>
-      <div className={cn('flex w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-6', interfaceStyle === 'immersive' ? 'min-h-16' : 'min-h-14')}>
+      <div className="flex min-h-16 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-5">
         {/* Enhanced Search */}
         <div className="order-last flex min-w-0 basis-full items-center space-x-4 sm:order-none sm:basis-auto sm:flex-1">
           <GlobalSearch />
@@ -86,20 +87,24 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
           {/* Current Tenant */}
           <ClientOnly>
             {currentTenant && (
-              <div className="hidden items-center rounded-xl border border-slate-200/50 bg-slate-50/80 px-3 py-1.5 dark:border-neutral-700 dark:bg-neutral-800/80 lg:flex">
-                <div className="flex items-center space-x-2">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                  <div className="text-sm">
-                    <span className="font-medium text-slate-700 dark:text-slate-300">{currentTenant.name}</span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400 ml-1">({currentTenant.code})</span>
+              <div className="hidden h-10 items-center rounded-xl border border-slate-200/80 bg-white px-3 shadow-sm dark:border-neutral-700 dark:bg-neutral-800/90 lg:flex">
+                <div className="flex items-center gap-2.5">
+                  <span className="relative flex h-7 w-7 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300">
+                    <Building2 className="h-3.5 w-3.5" />
+                    <i className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full border-2 border-white bg-emerald-500 dark:border-neutral-800" />
+                  </span>
+                  <div className="max-w-40 text-sm leading-tight">
+                    <span className="block truncate text-[0.72rem] font-semibold text-slate-800 dark:text-slate-200">{currentTenant.name}</span>
+                    <span className="block text-[0.58rem] uppercase tracking-wider text-slate-400">{currentTenant.code}</span>
                   </div>
+                  <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
                 </div>
               </div>
             )}
           </ClientOnly>
 
           {/* Actions */}
-          <div className="flex items-center space-x-1 sm:space-x-3">
+          <div className="flex items-center gap-1.5">
           {/* Quick Reports Access - HIDDEN */}
           {/* <div className="hidden lg:flex items-center space-x-2">
             <Button
@@ -140,7 +145,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
                 asChild
                 variant="ghost"
                 size="sm"
-                className="h-9 w-9 rounded-xl p-0 hover:bg-slate-100 dark:hover:bg-neutral-800"
+                className="h-9 w-9 rounded-full border border-transparent p-0 hover:border-slate-200 hover:bg-slate-50 dark:hover:border-neutral-700 dark:hover:bg-neutral-800"
               >
                 <Link href="/settings" aria-label="Open settings" title="Settings">
                   <Settings className="h-4 w-4 text-slate-600 dark:text-slate-300" />
@@ -159,20 +164,21 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
               aria-label="Open account sidebar"
               aria-expanded={isUserMenuOpen}
               aria-controls={isUserMenuOpen ? 'account-sidebar' : undefined}
-              className="flex h-9 items-center space-x-0 rounded-xl bg-slate-50 px-1.5 hover:bg-slate-100 dark:bg-neutral-800 dark:hover:bg-neutral-700 sm:space-x-2 sm:px-3"
+              className="flex h-10 items-center space-x-0 rounded-xl border border-slate-200/80 bg-white px-1.5 shadow-sm hover:bg-slate-50 dark:border-neutral-700 dark:bg-neutral-800 dark:hover:bg-neutral-700 sm:space-x-2 sm:px-2.5"
             >
               {/* Avatar */}
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs font-semibold text-white">
+              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-xs font-semibold text-white shadow-sm ring-2 ring-blue-100 dark:ring-blue-950">
                 {getInitials(userDisplayName) || visibleUser?.username?.[0]?.toUpperCase() || 'U'}
               </div>
               
               {/* User Info */}
-              <div className="hidden sm:block text-left">
-                <div className="text-sm font-medium text-slate-900 dark:text-white">
+              <div className="hidden max-w-36 text-left sm:block">
+                <div className="truncate text-[0.72rem] font-semibold leading-tight text-slate-900 dark:text-white">
                   {visibleUser?.firstName && visibleUser?.lastName
                     ? `${visibleUser.firstName} ${visibleUser.lastName}`
                     : visibleUser?.username || 'User'}
                 </div>
+                <div className="mt-0.5 truncate text-[0.58rem] leading-tight text-slate-400">{visibleUser?.roles?.[0] || 'Team member'}</div>
               </div>
 
               <ChevronDown className={cn(

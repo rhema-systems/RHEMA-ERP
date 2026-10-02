@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { differenceInCalendarDays, format, subMonths } from 'date-fns';
 import type { DateRange } from 'react-day-picker';
 import {
+  Activity,
   AlertTriangle,
   ArrowRight,
   Banknote,
@@ -23,6 +24,7 @@ import {
   type LucideIcon,
   RefreshCw,
   ShoppingCart,
+  Sparkles,
   TrendingUp,
   WalletCards,
   Wrench,
@@ -30,8 +32,6 @@ import {
 import { DashboardLayout } from '../../components/layout/dashboard-layout';
 import {
   BaseBarChart,
-  BaseFunnelChart,
-  BaseLineChart,
   BasePieChart,
   CHART_COLORS,
 } from '../../components/analytics/charts/BaseCharts';
@@ -51,6 +51,19 @@ import { dashboardService, getUnavailableDashboardModules, resolveDashboardRepor
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
 import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import { systemHealthService } from '../../services/systemHealthService';
+import {
+  CompactProgressWidget,
+  ConversionFunnelWidget,
+  DashboardEmptyState,
+  DashboardHeroArtwork,
+  ExecutiveWidget,
+  ExpenseAccountsWidget,
+  FinancialPerformanceWidget,
+  MaintenanceTrendWidget,
+  MiniTrend,
+  PipelineWidget,
+  RiskMixWidget,
+} from '../../components/dashboard/ExecutiveDashboardWidgets';
 
 interface SummaryCardDefinition {
   title: string;
@@ -80,15 +93,6 @@ const getCrmFunnelHref = (stage: string) => {
     return '/crm/leads?status=Qualified';
   }
   return buildQueryHref('/crm/opportunities', { stage });
-};
-
-const operationalModuleHref: Record<string, string> = {
-  CRM: '/crm/leads?followUpOnly=true',
-  Projects: '/development/projects',
-  Procurement: '/procurement/purchase-orders',
-  Inventory: '/inventory/requisitions',
-  Maintenance: '/maintenance/work-orders',
-  Tenders: '/procurement/tenders',
 };
 
 const formatNumber = (value: number) =>
@@ -425,21 +429,13 @@ export default function Dashboard() {
   const inventoryQueueData = [
     { label: 'Approvals', count: queues.pendingInventoryApprovalCount },
     { label: 'Issues', count: queues.pendingInventoryIssueCount },
-  ];
+  ].filter((item) => item.count > 0);
 
   const maintenanceTrendData = (data.maintenanceTrends?.creationTrend ?? []).map((point, index) => ({
     period: new Date(point.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
     created: point.value,
     completed: data.maintenanceTrends?.completionTrend[index]?.value ?? 0,
   }));
-
-  const maintenanceStatusData = [
-    { name: 'Active', value: maintenanceActiveWorkOrders },
-    { name: 'Overdue', value: maintenanceOverdueWorkOrders },
-    { name: 'Completed', value: maintenanceCompletedWorkOrders },
-  ].filter((item) => item.value > 0);
-
-  const tenderStatusData = queues.openTendersByStatus.map((status) => ({ name: status.label, value: status.count }));
 
   const procurementQueuesAvailable = data.moduleStatus.some(
     (status) => status.module === 'Procurement Queues' && status.available,
@@ -524,84 +520,126 @@ export default function Dashboard() {
     endDate: rangeQuery?.endDate,
   });
 
+  const financialOverviewCards = data.financeOverview ? [
+    {
+      title: 'Total Revenue',
+      value: formatReportingMoney(data.financeOverview.kpis.revenue),
+      meta: formatComparison(data.financeOverview.kpis.revenueChangePercent, 'previous period'),
+      href: detailedLedgerHref,
+      icon: TrendingUp,
+      iconClassName: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/70 dark:text-emerald-300',
+      surfaceClassName: 'from-emerald-50/95 via-white to-white dark:from-emerald-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
+      trendColor: '#18b77d',
+      trendValues: data.financeOverview.monthly.map((point) => point.revenue),
+    },
+    {
+      title: 'Total Expenses',
+      value: formatReportingMoney(data.financeOverview.kpis.expenses),
+      meta: formatComparison(data.financeOverview.kpis.expensesChangePercent, 'previous period'),
+      href: detailedLedgerHref,
+      icon: Banknote,
+      iconClassName: 'bg-rose-100 text-rose-600 dark:bg-rose-950/70 dark:text-rose-300',
+      surfaceClassName: 'from-rose-50/95 via-white to-white dark:from-rose-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
+      trendColor: '#ef476f',
+      trendValues: data.financeOverview.monthly.map((point) => point.expenses),
+    },
+    {
+      title: 'Net Position',
+      value: formatReportingMoney(data.financeOverview.kpis.netProfit),
+      meta: formatComparison(data.financeOverview.kpis.netProfitChangePercent, 'previous period'),
+      href: detailedLedgerHref,
+      icon: Gauge,
+      iconClassName: 'bg-blue-100 text-blue-600 dark:bg-blue-950/70 dark:text-blue-300',
+      surfaceClassName: 'from-blue-50/95 via-white to-white dark:from-blue-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
+      trendColor: '#2474ff',
+      trendValues: data.financeOverview.monthly.map((point) => point.revenue - point.expenses),
+    },
+    {
+      title: 'Cash on Hand',
+      value: formatReportingMoney(data.financeOverview.kpis.cashOnHand),
+      meta: 'As at the selected period end',
+      href: detailedLedgerHref,
+      icon: WalletCards,
+      iconClassName: 'bg-amber-100 text-amber-600 dark:bg-amber-950/70 dark:text-amber-300',
+      surfaceClassName: 'from-amber-50/95 via-white to-white dark:from-amber-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
+      trendColor: '#f59e0b',
+      trendValues: [] as number[],
+    },
+  ] : summaryCards.slice(0, 4).map((card) => ({
+    ...card,
+    surfaceClassName: 'from-slate-50 via-white to-white dark:from-neutral-800 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
+    trendColor: '#2474ff',
+    trendValues: [] as number[],
+  }));
+
+  const moduleOverviewCards = summaryCards.filter((card) => card.title !== 'Revenue');
+
   return (
     <DashboardLayout>
-      <div className={cn('space-y-5', interfaceStyle === 'immersive' && 'dashboard-immersive')} data-dashboard-style={interfaceStyle}>
-        <section className={cn(
-          'border border-slate-200/80 p-5 dark:border-slate-800/80',
-          interfaceStyle === 'immersive'
-            ? 'rounded-[28px] bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.16),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.14),_transparent_26%),linear-gradient(135deg,rgba(255,255,255,0.97),rgba(239,246,255,0.96))] shadow-[0_24px_60px_-24px_rgba(15,23,42,0.25)] dark:bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.2),_transparent_30%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.16),_transparent_26%),linear-gradient(135deg,rgba(2,6,23,0.96),rgba(15,23,42,0.98))]'
-            : 'rounded-xl bg-white shadow-sm dark:bg-[#181818]',
-        )}>
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div className="space-y-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="border-slate-300 bg-white/70 text-slate-700 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-300">
-                  {criticalAlertCount} active alerts
-                </Badge>
-                <Badge variant="outline" className="border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-                  {queues.tendersClosingWithin14DaysCount} tenders closing soon
-                </Badge>
-                <Badge variant="outline" className="border-rose-200 bg-rose-50/80 text-rose-700 dark:border-rose-800 dark:bg-rose-950/30 dark:text-rose-300">
-                  {Math.round(maintenanceCompletionRate)}% maintenance completion
-                </Badge>
-              </div>
-              <div>
-                <p className="text-sm font-medium text-slate-500 dark:text-slate-400">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'},</p>
-                <h1 className={cn('font-bold tracking-tight text-slate-950 dark:text-slate-50', interfaceStyle === 'immersive' ? 'text-[2rem]' : 'text-[1.75rem]')}>Welcome back, {displayName}!</h1>
-                <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-600 dark:text-slate-300">
-                  Here&apos;s what&apos;s happening across your organization for the selected reporting period.
+      <div className="space-y-3.5" data-dashboard-style={interfaceStyle}>
+        <section
+          className={cn(
+            'relative isolate overflow-hidden',
+            interfaceStyle === 'immersive'
+              ? 'min-h-[128px] rounded-[24px] border border-blue-200/60 bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 px-5 py-3.5 shadow-[0_24px_55px_-32px_rgba(37,99,235,0.48)] dark:border-blue-900/60 dark:from-blue-950/50 dark:via-neutral-900 dark:to-emerald-950/30 lg:px-6'
+              : 'px-1 pb-1 pt-2',
+          )}
+          aria-labelledby="dashboard-welcome-title"
+        >
+          {interfaceStyle === 'immersive' ? (
+            <div className="pointer-events-none absolute inset-y-0 right-0 -z-10 hidden w-[58%] opacity-90 lg:block">
+              <DashboardHeroArtwork />
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-50 via-blue-50/70 to-transparent dark:from-blue-950 dark:via-blue-950/55" />
+            </div>
+          ) : null}
+
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="relative max-w-xl">
+              <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'},
+              </p>
+              <h1 id="dashboard-welcome-title" className={cn('font-extrabold tracking-[-0.035em] text-slate-950 dark:text-white', interfaceStyle === 'immersive' ? 'mt-0.5 text-3xl sm:text-4xl' : 'text-[1.85rem]')}>
+                Welcome back, {displayName}!
+              </h1>
+              <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                Here&apos;s what&apos;s happening across your organization today.
+              </p>
+              {interfaceStyle === 'immersive' ? (
+                <p className="mt-3 hidden items-center gap-2 text-xs font-semibold italic text-slate-700 dark:text-slate-200 2xl:flex">
+                  <Sparkles className="h-4 w-4 text-blue-600" aria-hidden="true" />
+                  People. Process. Progress. A stronger tomorrow, together.
                 </p>
-              </div>
+              ) : null}
             </div>
 
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <DatePickerWithRange
-                value={selectedRange}
-                onChange={handleRangeChange}
-                className="w-full sm:w-[290px]"
-                placeholder="Select dashboard period"
-              />
-              <Select
-                value={warehouseId}
-                onValueChange={(value) => {
-                  setWarehouseId(value);
-                  setLocationId('all');
-                }}
-              >
-                <SelectTrigger className="w-full bg-white/80 sm:w-[210px] dark:bg-slate-950/40" aria-label="Dashboard warehouse">
-                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-slate-500" />
+            <div className={cn('relative flex flex-wrap items-center gap-2', interfaceStyle === 'immersive' && 'mt-auto lg:justify-end')}>
+              <DatePickerWithRange value={selectedRange} onChange={handleRangeChange} className="w-full sm:w-[252px]" placeholder="Select dashboard period" />
+              <Select value={warehouseId} onValueChange={(value) => { setWarehouseId(value); setLocationId('all'); }}>
+                <SelectTrigger className="h-10 w-full border-white/80 bg-white/90 shadow-sm sm:w-[185px] dark:border-neutral-700 dark:bg-neutral-900/85" aria-label="Dashboard warehouse">
+                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-blue-600" />
                   <SelectValue placeholder="All permitted warehouses" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All permitted warehouses</SelectItem>
-                  {warehouseOptions.map((warehouse) => (
-                    <SelectItem key={warehouse.id} value={warehouse.id}>
-                      {warehouse.code} · {warehouse.name}
-                    </SelectItem>
-                  ))}
+                  {warehouseOptions.map((warehouse) => <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.code} · {warehouse.name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Select value={locationId} onValueChange={setLocationId} disabled={warehouseId === 'all'}>
-                <SelectTrigger className="w-full bg-white/80 sm:w-[210px] dark:bg-slate-950/40" aria-label="Dashboard warehouse location">
+                <SelectTrigger className="h-10 w-full border-white/80 bg-white/90 shadow-sm sm:w-[185px] dark:border-neutral-700 dark:bg-neutral-900/85" aria-label="Dashboard warehouse location">
                   <SelectValue placeholder={warehouseId === 'all' ? 'Select warehouse first' : 'All permitted locations'} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All permitted locations</SelectItem>
-                  {locationOptions.map((location) => (
-                    <SelectItem key={location.id} value={location.id}>
-                      {location.locationCode} · {location.name || location.locationCode}
-                    </SelectItem>
-                  ))}
+                  {locationOptions.map((location) => <SelectItem key={location.id} value={location.id}>{location.locationCode} · {location.name || location.locationCode}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Badge variant="secondary" className="rounded-full px-3 py-1">
-                Updated {formatRelativeTime(data.lastUpdated)}
-              </Badge>
-              <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} className="rounded-full bg-white/80 dark:bg-slate-950/40">
-                <RefreshCw className={`mr-2 h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+              <Button size="sm" onClick={() => refetch()} disabled={isFetching} className="h-10 rounded-xl bg-blue-600 px-4 text-white shadow-sm hover:bg-blue-700">
+                <RefreshCw className={cn('mr-2 h-4 w-4', isFetching && 'animate-spin')} />
                 Refresh
               </Button>
+              <span className="w-full text-right text-[0.65rem] font-medium text-slate-500 dark:text-slate-400">
+                Last updated {formatRelativeTime(data.lastUpdated)}
+              </span>
             </div>
           </div>
         </section>
@@ -625,248 +663,144 @@ export default function Dashboard() {
           </Alert>
         )}
 
-        <div className={cn('grid gap-3 md:grid-cols-2', interfaceStyle === 'immersive' ? 'xl:grid-cols-4 2xl:grid-cols-6' : 'xl:grid-cols-4')}>
-          {summaryCards.map((card) => {
+        <section className={cn('grid gap-3 sm:grid-cols-2 xl:grid-cols-4', interfaceStyle === 'executive' && '2xl:grid-cols-5')} aria-label="Executive financial indicators">
+          {financialOverviewCards.map((card) => {
             const Icon = card.icon;
-
             return (
               <Link
                 key={card.title}
                 href={card.href}
                 aria-label={`Open ${card.title} details`}
-                className="group block rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
               >
-              <Card className={cn('h-full overflow-hidden border shadow-[0_16px_40px_-28px_rgba(15,23,42,0.4)] transition-transform group-hover:-translate-y-0.5 group-hover:shadow-lg dark:shadow-none', card.accentClassName)}>
-                <CardContent className="px-4 py-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">{card.title}</p>
-                      <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">{card.value}</p>
-                      <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{card.meta}</p>
-                    </div>
-                    <div className={cn('flex h-10 w-10 items-center justify-center rounded-2xl', card.iconClassName)}>
-                      <Icon className="h-4.5 w-4.5" />
+                <article className={cn('h-full min-h-[124px] overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.55)] transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg dark:border-neutral-700/80', card.surfaceClassName)}>
+                  <div className="flex items-start gap-3">
+                    <span className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm', card.iconClassName)}>
+                      <Icon className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[0.7rem] font-semibold text-slate-600 dark:text-slate-300">{card.title}</p>
+                      <p className="mt-1 truncate text-[1.35rem] font-extrabold tracking-tight text-slate-950 dark:text-white">{card.value}</p>
                     </div>
                   </div>
-                  <div className="mt-3 inline-flex items-center text-xs font-medium text-primary">
-                    View details
-                    <ArrowRight className="ml-1.5 h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <p className="truncate text-[0.68rem] font-medium text-slate-500 dark:text-slate-400">{card.meta}</p>
+                    <MiniTrend values={card.trendValues} color={card.trendColor} />
                   </div>
-                </CardContent>
-              </Card>
+                </article>
               </Link>
             );
           })}
-        </div>
-
-        <section className="grid gap-4 lg:grid-cols-3" aria-label="Dashboard attention and system status">
-          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
-            <CardHeader className="px-4 pb-2 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-sm">System health</CardTitle>
-                  <CardDescription className="text-xs">Live API readiness checks</CardDescription>
-                </div>
-                <Server className="h-4 w-4 text-blue-600 dark:text-blue-300" />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 px-4 pb-4">
-              {systemHealth?.checks.map((check) => {
-                const healthy = check.status.toLowerCase() === 'healthy';
-                return (
-                  <div key={check.name} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs">
-                    <span className="truncate font-medium capitalize">{check.name.replaceAll('-', ' ')}</span>
-                    <Badge variant="outline" className={cn('shrink-0', healthy ? 'border-emerald-200 text-emerald-700 dark:border-emerald-800 dark:text-emerald-300' : 'border-rose-200 text-rose-700 dark:border-rose-800 dark:text-rose-300')}>
-                      {check.status}
-                    </Badge>
-                  </div>
-                );
-              })}
-              {!systemHealth && !systemHealthError && <p className="py-3 text-center text-xs text-slate-500">Checking service readiness…</p>}
-              {systemHealthError && <p className="py-3 text-center text-xs text-rose-600">Readiness checks are currently unavailable.</p>}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
-            <CardHeader className="px-4 pb-2 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-sm">Alerts and attention</CardTitle>
-                  <CardDescription className="text-xs">Operational records requiring review</CardDescription>
-                </div>
-                <AlertTriangle className="h-4 w-4 text-amber-600" />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 px-4 pb-4">
-              {operationalAlerts.length === 0 ? (
-                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50/60 px-3 py-3 text-xs text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300">
-                  <CircleCheckBig className="h-4 w-4" />
-                  No active operational alerts
-                </div>
-              ) : operationalAlerts.map((alert) => (
-                <Link key={alert.label} href={alert.href} className="group flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-slate-900">
-                  <span className="font-medium">{alert.label}</span>
-                  <span className="flex items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
-                    {formatNumber(alert.count)}
-                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                  </span>
-                </Link>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="border-slate-200/80 shadow-sm dark:border-slate-800/80">
-            <CardHeader className="px-4 pb-2 pt-4">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <CardTitle className="text-sm">Operational work queues</CardTitle>
-                  <CardDescription className="text-xs">Live workload across permitted modules</CardDescription>
-                </div>
-                <ListTodo className="h-4 w-4 text-violet-600 dark:text-violet-300" />
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2 px-4 pb-4">
-              {operationalWorkQueues.length === 0 ? (
-                <p className="rounded-lg border px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
-                  No permitted operational queues
-                </p>
-              ) : operationalWorkQueues.map((queue) => (
-                <Link key={queue.label} href={queue.href} className="group flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-slate-900">
-                  <span className="font-medium">{queue.label}</span>
-                  <span className="flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300">
-                    {formatNumber(queue.count)}
-                    <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-                  </span>
-                </Link>
-              ))}
-            </CardContent>
-          </Card>
+          {interfaceStyle === 'executive' ? (
+            <article className="relative hidden min-h-[124px] overflow-hidden rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 via-sky-50 to-emerald-50 p-4 shadow-[0_10px_30px_-24px_rgba(37,99,235,0.5)] 2xl:block dark:border-blue-900/60 dark:from-blue-950/50 dark:via-neutral-900 dark:to-emerald-950/30">
+              <div className="absolute -bottom-9 -right-7 h-28 w-28 rounded-full bg-blue-300/30 blur-2xl" />
+              <p className="relative text-base font-extrabold leading-tight text-slate-900 dark:text-white">Empowering<br />smarter operations</p>
+              <p className="relative mt-2 text-[0.68rem] text-slate-600 dark:text-slate-300">Integrated. Efficient. Sustainable.</p>
+              <Activity className="absolute bottom-3 right-4 h-8 w-8 text-blue-600/70" aria-hidden="true" />
+            </article>
+          ) : null}
         </section>
 
-        {data.financeOverview && (
-          <section className="space-y-3" aria-labelledby="finance-performance-title">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h2 id="finance-performance-title" className="text-lg font-semibold text-slate-950 dark:text-slate-50">
-                  Financial performance
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Posted general-ledger activity from {format(new Date(data.financeOverview.rangeStartDate), 'dd MMM yyyy')} to{' '}
-                  {format(new Date(data.financeOverview.rangeEndDate), 'dd MMM yyyy')} in {reportingCurrency || 'the configured reporting currency'}.
-                </p>
+        <section className="grid gap-3 xl:grid-cols-12" aria-label="Executive performance overview">
+          <div className="space-y-3 xl:col-span-9">
+            {data.financeOverview ? (
+              <div className="grid gap-3 lg:grid-cols-5">
+                <div className="lg:col-span-3">
+                  <FinancialPerformanceWidget data={data.financeOverview.monthly} formatValue={formatReportingMoney} href={detailedLedgerHref} />
+                </div>
+                <div className="lg:col-span-2">
+                  <ExpenseAccountsWidget data={data.financeOverview.expenseChart} formatValue={formatReportingMoney} href={detailedLedgerHref} />
+                </div>
               </div>
-              <Link href="/finance/reports/income-statement">
-                <Button variant="outline" size="sm">
-                  Open income statement
-                  <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-                </Button>
-              </Link>
-            </div>
+            ) : (
+              <ExecutiveWidget title="Financial performance" description="Posted general-ledger movement" href="/finance" actionLabel="Open finance">
+                <DashboardEmptyState title="Financial data is not available" description="This panel appears when the finance dashboard is permitted and available." href="/finance" actionLabel="Open finance" />
+              </ExecutiveWidget>
+            )}
 
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <Link href={detailedLedgerHref} aria-label="Drill down to revenue ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Card className="h-full border-emerald-200/80 transition-colors hover:bg-emerald-50/60 dark:border-emerald-900/70 dark:hover:bg-emerald-950/20">
-                <CardContent className="flex items-start justify-between gap-3 p-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Revenue</p>
-                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.revenue)}</p>
-                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.revenueChangePercent, 'previous period')}</p>
-                  </div>
-                  <TrendingUp className="h-5 w-5 text-emerald-600" />
-                </CardContent>
-              </Card>
-              </Link>
+            {moduleOverviewCards.length > 0 ? (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Module performance snapshot">
+                {moduleOverviewCards.slice(0, 3).map((card) => {
+                  const Icon = card.icon;
+                  return (
+                    <Link key={card.title} href={card.href} className="group flex items-center gap-3 rounded-2xl border border-slate-200/75 bg-white px-4 py-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.5)] transition-colors hover:border-blue-200 hover:bg-blue-50/40 dark:border-neutral-700/80 dark:bg-[#1d1d1d] dark:hover:border-blue-900/70 dark:hover:bg-blue-950/20">
+                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', card.iconClassName)}><Icon className="h-4 w-4" /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[0.68rem] font-semibold text-slate-500 dark:text-slate-400">{card.title}</span>
+                        <strong className="block truncate text-base text-slate-950 dark:text-white">{card.value}</strong>
+                      </span>
+                      <span className="max-w-24 truncate text-right text-[0.62rem] text-slate-500 dark:text-slate-400">{card.meta}</span>
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-blue-600 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
 
-              <Link href={detailedLedgerHref} aria-label="Drill down to expense ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Card className="h-full border-amber-200/80 transition-colors hover:bg-amber-50/60 dark:border-amber-900/70 dark:hover:bg-amber-950/20">
-                <CardContent className="flex items-start justify-between gap-3 p-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Expenses</p>
-                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.expenses)}</p>
-                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.expensesChangePercent, 'previous period')}</p>
-                  </div>
-                  <Banknote className="h-5 w-5 text-amber-600" />
-                </CardContent>
-              </Card>
-              </Link>
+          <aside className="grid gap-3 sm:grid-cols-2 xl:col-span-3 xl:grid-cols-1" aria-label="System status and attention">
+            <ExecutiveWidget title="Systems Health" description={systemHealthError ? 'Readiness checks unavailable' : 'Live service readiness'} icon={<Server className="h-4 w-4" />} className="sm:col-span-2 xl:col-span-1">
+              <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
+                {systemHealth?.checks.slice(0, 4).map((check) => {
+                  const healthy = check.status.toLowerCase() === 'healthy';
+                  return (
+                    <div key={check.name} className="flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-neutral-800">
+                      <span className={cn('h-2 w-2 rounded-full', healthy ? 'bg-emerald-500' : 'bg-rose-500')} />
+                      <span className="min-w-0 flex-1 truncate text-[0.7rem] font-medium capitalize text-slate-700 dark:text-slate-200">{check.name.replaceAll('-', ' ')}</span>
+                      <span className={cn('rounded-full px-2 py-0.5 text-[0.6rem] font-semibold', healthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300')}>{check.status}</span>
+                    </div>
+                  );
+                })}
+                {!systemHealth && !systemHealthError ? <p className="py-3 text-center text-xs text-slate-500">Checking service readiness…</p> : null}
+                {systemHealthError ? <p className="py-3 text-center text-xs text-rose-600">Readiness checks are currently unavailable.</p> : null}
+              </div>
+            </ExecutiveWidget>
 
-              <Link href={detailedLedgerHref} aria-label="Drill down to net-position ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Card className="h-full border-blue-200/80 transition-colors hover:bg-blue-50/60 dark:border-blue-900/70 dark:hover:bg-blue-950/20">
-                <CardContent className="flex items-start justify-between gap-3 p-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Net position</p>
-                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.netProfit)}</p>
-                    <p className="mt-1 text-xs text-slate-500">{formatComparison(data.financeOverview.kpis.netProfitChangePercent, 'previous period')}</p>
-                  </div>
-                  <Gauge className="h-5 w-5 text-blue-600" />
-                </CardContent>
-              </Card>
-              </Link>
+            <ExecutiveWidget title="Alerts & Attention" description={`${criticalAlertCount} records require review`} icon={<AlertTriangle className="h-4 w-4 text-rose-500" />}>
+              <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
+                {operationalAlerts.length === 0 ? (
+                  <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-3 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"><CircleCheckBig className="h-4 w-4" />No active operational alerts</div>
+                ) : operationalAlerts.slice(0, 4).map((alert, index) => (
+                  <Link key={alert.label} href={alert.href} className="group flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-neutral-800">
+                    <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[0.65rem] font-bold', index === 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300')}>{formatNumber(alert.count)}</span>
+                    <span className="min-w-0 flex-1 truncate text-[0.7rem] font-medium text-slate-700 dark:text-slate-200">{alert.label}</span>
+                    <ArrowRight className="h-3.5 w-3.5 text-blue-600 transition-transform group-hover:translate-x-0.5" />
+                  </Link>
+                ))}
+              </div>
+            </ExecutiveWidget>
 
-              <Link href={detailedLedgerHref} aria-label="Drill down to cash ledger detail" className="rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <Card className="h-full border-violet-200/80 transition-colors hover:bg-violet-50/60 dark:border-violet-900/70 dark:hover:bg-violet-950/20">
-                <CardContent className="flex items-start justify-between gap-3 p-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Cash on hand</p>
-                    <p className="mt-2 text-xl font-semibold">{formatReportingMoney(data.financeOverview.kpis.cashOnHand)}</p>
-                    <p className="mt-1 text-xs text-slate-500">As at the selected period end</p>
-                  </div>
-                  <WalletCards className="h-5 w-5 text-violet-600" />
-                </CardContent>
-              </Card>
-              </Link>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <BaseLineChart
-                data={data.financeOverview.monthly}
-                xAxisKey="name"
-                lines={[
-                  { dataKey: 'revenue', name: 'Revenue', color: CHART_COLORS.success[0] },
-                  { dataKey: 'expenses', name: 'Expenses', color: CHART_COLORS.warning[0] },
-                ]}
-                title="Revenue and Expenses"
-                description="Posted general-ledger movement for the selected period."
-                height={300}
-                compact
-                formatValue={(value) => formatReportingMoney(Number(value))}
-                detailsHref={detailedLedgerHref}
-                detailsLabel="Open ledger"
-                className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-              />
-              <BaseBarChart
-                data={data.financeOverview.expenseChart}
-                xAxisKey="name"
-                bars={[{ dataKey: 'value', name: 'Expense', color: CHART_COLORS.danger[0] }]}
-                title="Top Expense Accounts"
-                description="Largest posted expense balances in the selected period."
-                height={300}
-                compact
-                orientation="horizontal"
-                formatValue={(value) => formatReportingMoney(Number(value))}
-                detailsHref={detailedLedgerHref}
-                detailsLabel="Open ledger"
-                className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-              />
-            </div>
-          </section>
-        )}
+            <ExecutiveWidget title="My Tasks & Queues" description="Live workload across permitted modules" href="/workflow/inbox" actionLabel="View all" icon={<ListTodo className="h-4 w-4 text-violet-600" />}>
+              {operationalWorkQueues.length === 0 ? (
+                <DashboardEmptyState title="No permitted queues" description="Available operational work will appear here." href="/workflow/inbox" actionLabel="Open inbox" />
+              ) : (
+                <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
+                  {operationalWorkQueues.slice(0, 4).map((queue, index) => (
+                    <Link key={queue.label} href={queue.href} className="group flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-neutral-800">
+                      <span className={cn('flex h-6 w-6 items-center justify-center rounded-lg text-[0.65rem] font-bold', index % 2 === 0 ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'bg-violet-50 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300')}>{queue.count}</span>
+                      <span className="min-w-0 flex-1 truncate text-[0.7rem] font-medium text-slate-700 dark:text-slate-200">{queue.label}</span>
+                      <ArrowRight className="h-3.5 w-3.5 text-blue-600 transition-transform group-hover:translate-x-0.5" />
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </ExecutiveWidget>
+          </aside>
+        </section>
 
         {management && (
-          <section className="space-y-3" aria-labelledby="procurement-inventory-management-title">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h2 id="procurement-inventory-management-title" className="text-lg font-semibold text-slate-950 dark:text-slate-50">
-                  Procurement and inventory management
-                </h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  {format(new Date(management.rangeStartDate), 'dd MMM yyyy')} – {format(new Date(management.rangeEndDate), 'dd MMM yyyy')}
-                </p>
-              </div>
-              <Badge variant="outline" className="font-normal">
-                Stock as at {formatRelativeTime(management.inventoryAsOfUtc)}
-              </Badge>
-            </div>
+          <details className="group rounded-2xl border border-slate-200/75 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.5)] dark:border-neutral-700/80 dark:bg-[#1d1d1d]">
+            <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 sm:px-5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/50 dark:text-amber-300"><ShoppingCart className="h-4 w-4" /></span>
+              <span className="min-w-0 flex-1">
+                <strong id="procurement-inventory-management-title" className="block text-sm text-slate-950 dark:text-white">Procurement and inventory management</strong>
+                <span className="block truncate text-[0.68rem] text-slate-500 dark:text-slate-400">
+                  {format(new Date(management.rangeStartDate), 'dd MMM yyyy')} – {format(new Date(management.rangeEndDate), 'dd MMM yyyy')} · Stock updated {formatRelativeTime(management.inventoryAsOfUtc)}
+                </span>
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[0.65rem] font-semibold text-slate-600 group-open:bg-blue-50 group-open:text-blue-700 dark:bg-neutral-800 dark:text-slate-300 dark:group-open:bg-blue-950/50 dark:group-open:text-blue-300">View management detail</span>
+            </summary>
+            <section className="space-y-3 border-t border-slate-100 p-4 dark:border-neutral-800" aria-labelledby="procurement-inventory-management-title">
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <Card className="border-amber-200/80 dark:border-amber-900/70">
@@ -1039,172 +973,54 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
             )}
-          </section>
+            </section>
+          </details>
         )}
 
-        <div className={cn('grid gap-4 lg:grid-cols-2', interfaceStyle === 'immersive' && '2xl:grid-cols-3')}>
-          <BaseBarChart
+        <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" aria-label="Customer relationship performance">
+          <PipelineWidget
             data={pipelineStageData}
-            xAxisKey="stage"
-            bars={[
-              { dataKey: 'opportunities', name: 'Opportunities', color: CHART_COLORS.success[0] },
-              { dataKey: 'quotes', name: 'Quotes', color: CHART_COLORS.primary[0] },
-            ]}
-            title="CRM Pipeline Activity"
-            description="Open opportunities and related quotes by configured CRM stage."
-            height={300}
-            compact
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/crm/opportunities"
-            detailsLabel="View pipeline"
-            getDatumHref={(datum) => buildQueryHref('/crm/opportunities', {
-              stage: String(datum.stage ?? ''),
-            })}
-            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
+            href="/crm/opportunities"
+            getHref={(stage) => buildQueryHref('/crm/opportunities', { stage })}
           />
+          <ConversionFunnelWidget data={crmFunnelData} href="/crm/leads" getHref={getCrmFunnelHref} />
+          <RiskMixWidget data={crmHealthData} href="/crm/accounts" />
+        </section>
 
-          <BaseFunnelChart
-            data={crmFunnelData}
-            dataKey="count"
-            nameKey="stage"
-            title="CRM Conversion Funnel"
-            description="Lead-to-delivery conversion volume."
-            height={300}
-            compact
-            showLabels={false}
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/crm/leads"
-            detailsLabel="View funnel"
-            getDatumHref={(datum) => getCrmFunnelHref(String(datum.stage ?? ''))}
-            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BasePieChart
-            data={crmHealthData}
-            dataKey="value"
-            nameKey="name"
-            title="Account Risk Mix"
-            description="Live active-account risk bands from the business-partner register."
-            height={300}
-            compact
-            innerRadius={68}
-            showLabels={false}
-            detailsHref="/crm/accounts"
-            detailsLabel="View accounts"
-            getDatumHref={(datum) => buildQueryHref('/crm/accounts', {
-              healthCategory: String(datum.name ?? ''),
-            })}
-            colors={[CHART_COLORS.success[0], CHART_COLORS.warning[0], CHART_COLORS.danger[0], CHART_COLORS.info[0]]}
-            error={unavailableModules.find((module) => module.module === 'CRM')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BaseBarChart
-            data={projectPressureData}
-            xAxisKey="name"
-            bars={[{ dataKey: 'value', name: 'Open Items', color: CHART_COLORS.danger[0] }]}
+        <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" aria-label="Operational delivery overview">
+          <CompactProgressWidget
             title="Project Delivery Pressure"
-            description="Tasks, milestones, risks, and issues."
-            height={300}
-            compact
-            orientation="horizontal"
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/development/projects"
-            detailsLabel="View projects"
-            getDatumHref={() => '/development/projects'}
-            error={unavailableModules.find((module) => module.module === 'Projects')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
+            description="Tasks, milestones, risks and issues"
+            data={projectPressureData}
+            href="/development/projects"
+            actionLabel="View projects"
+            emptyTitle="No project pressure"
+            emptyDescription="No overdue tasks, milestones, risks or issues are currently visible."
           />
-
-          <BaseBarChart
-            data={inventoryQueueData}
-            xAxisKey="label"
-            bars={[{ dataKey: 'count', name: 'Queue Count', color: CHART_COLORS.info[0] }]}
-            title="Inventory Queue Profile"
-            description="Approvals versus issue workload."
-            height={300}
-            compact
-            orientation="horizontal"
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/inventory/requisitions"
-            detailsLabel="View queue"
-            getDatumHref={() => '/inventory/requisitions'}
-            error={unavailableModules.find((module) => module.module === 'Inventory Queues')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
+          <CompactProgressWidget
+            title="Inventory Queue"
+            description="Approvals and issue workload"
+            data={inventoryQueueData.map((item) => ({ name: item.label, value: item.count }))}
+            href="/inventory/requisitions"
+            actionLabel="View queue"
+            emptyTitle="Inventory queue is clear"
+            emptyDescription="No permitted approvals or issue requests are waiting."
           />
-
-          <BaseLineChart
-            data={maintenanceTrendData}
-            xAxisKey="period"
-            lines={[
-              { dataKey: 'created', name: 'Created', color: CHART_COLORS.danger[0] },
-              { dataKey: 'completed', name: 'Completed', color: CHART_COLORS.success[0] },
-            ]}
-            title="Maintenance Trend"
-            description="Created versus completed work orders."
-            height={300}
-            compact
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/maintenance/work-orders"
-            detailsLabel="View work orders"
-            error={unavailableModules.find((module) => module.module === 'Maintenance Trends')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BasePieChart
-            data={maintenanceStatusData}
-            dataKey="value"
-            nameKey="name"
-            title="Maintenance Workload Mix"
-            description="Current backlog composition."
-            height={300}
-            compact
-            innerRadius={68}
-            showLabels={false}
-            detailsHref="/maintenance/work-orders"
-            detailsLabel="View work orders"
-            getDatumHref={() => '/maintenance/work-orders'}
-            colors={[CHART_COLORS.danger[0], CHART_COLORS.warning[0], CHART_COLORS.success[0]]}
-            error={unavailableModules.find((module) => ['Maintenance Overview', 'Maintenance Metrics'].includes(module.module))?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BasePieChart
-            data={tenderStatusData}
-            dataKey="value"
-            nameKey="name"
-            title="Tender Status Mix"
-            description="Live tenders by workflow status."
-            height={300}
-            compact
-            innerRadius={68}
-            showLabels={false}
-            detailsHref="/procurement/tenders"
-            detailsLabel="View tenders"
-            getDatumHref={() => '/procurement/tenders'}
-            colors={[CHART_COLORS.info[0], CHART_COLORS.warning[0], CHART_COLORS.success[0], CHART_COLORS.primary[0], CHART_COLORS.danger[0]]}
-            error={unavailableModules.find((module) => module.module === 'Procurement Queues')?.error}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-
-          <BaseBarChart
-            data={queueLoadData}
-            xAxisKey="module"
-            bars={[{ dataKey: 'items', name: 'Open Items', color: CHART_COLORS.neutral[1] }]}
-            title="Operational Queue Load"
-            description="Where work is building across modules."
-            height={300}
-            compact
-            orientation="horizontal"
-            formatValue={(value) => formatNumber(Number(value))}
-            detailsHref="/workflow/inbox"
-            detailsLabel="View work"
-            getDatumHref={(datum) => operationalModuleHref[String(datum.module ?? '')]}
-            className="border-slate-200/80 shadow-lg shadow-slate-200/50 dark:border-slate-800/80 dark:shadow-none"
-          />
-        </div>
+          <MaintenanceTrendWidget data={maintenanceTrendData} href="/maintenance/work-orders" />
+          {queueLoadData.length > 0 ? (
+            <div className="lg:col-span-2 2xl:col-span-3">
+              <CompactProgressWidget
+                title="Operational Queue Load"
+                description="Where work is building across permitted modules"
+                data={queueLoadData.map((item) => ({ name: item.module, value: item.items }))}
+                href="/workflow/inbox"
+                actionLabel="View work"
+                emptyTitle="Operational queues are clear"
+                emptyDescription="No open work is currently visible across permitted modules."
+              />
+            </div>
+          ) : null}
+        </section>
       </div>
     </DashboardLayout>
   );
