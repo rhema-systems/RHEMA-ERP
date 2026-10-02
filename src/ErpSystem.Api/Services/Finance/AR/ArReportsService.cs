@@ -727,6 +727,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     {
                         SourceDocumentId = transaction.SourceDocumentId,
                         TransactionDate = transaction.TransactionDate,
+                        PostedAt = transaction.PostedAt,
                         TransactionType = transaction.TransactionType,
                         DocumentNumber = transaction.DocumentNumber,
                         Reference = transaction.Reference,
@@ -1485,7 +1486,34 @@ namespace ErpSystem.Api.Services.Finance.AR
                     signedAmount < 0m ? adjustmentAmount : 0m));
             }
 
-            return transactions;
+            var sourceDocumentIds = transactions
+                .Select(transaction => transaction.SourceDocumentId)
+                .Distinct()
+                .ToList();
+            if (sourceDocumentIds.Count == 0)
+                return transactions;
+
+            var postedEvents = await _unitOfWork.Repository<FinancePostingEvent>()
+                .GetQueryable(postingEvent =>
+                    postingEvent.TenantId == TenantId &&
+                    sourceDocumentIds.Contains(postingEvent.SourceDocumentId) &&
+                    postingEvent.PostingAction == "Post" &&
+                    postingEvent.PostingStatus == "Posted" &&
+                    postingEvent.PostedAt.HasValue)
+                .Select(postingEvent => new { postingEvent.SourceDocumentId, postingEvent.PostedAt })
+                .ToListAsync(cancellationToken);
+            var postedAtBySourceDocument = postedEvents
+                .GroupBy(postingEvent => postingEvent.SourceDocumentId)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Max(postingEvent => postingEvent.PostedAt));
+
+            return transactions
+                .Select(transaction => transaction with
+                {
+                    PostedAt = postedAtBySourceDocument.GetValueOrDefault(transaction.SourceDocumentId)
+                })
+                .ToList();
         }
 
         private static decimal AmountForLedgerCurrency(
@@ -1557,7 +1585,10 @@ namespace ErpSystem.Api.Services.Finance.AR
             string TransactionCurrencyCode,
             decimal ExchangeRate,
             decimal Debit,
-            decimal Credit);
+            decimal Credit)
+        {
+            public DateTime? PostedAt { get; init; }
+        }
 
         private async Task RecordReportAuditAsync(string eventType, object report, CancellationToken cancellationToken)
         {

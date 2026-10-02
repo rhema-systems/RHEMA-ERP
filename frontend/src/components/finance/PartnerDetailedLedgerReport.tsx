@@ -27,6 +27,10 @@ export function formatLedgerDateTime(value: string): string {
     });
 }
 
+export function resolveLedgerDisplayDateTime(line: Pick<DetailedLedgerLine, 'transactionDate' | 'postedAt'>): string {
+    return formatLedgerDateTime(line.postedAt || line.transactionDate);
+}
+
 export interface LedgerPartnerOption {
     id: string;
     code: string;
@@ -37,6 +41,7 @@ export interface LedgerPartnerOption {
 export interface DetailedLedgerLine {
     sourceDocumentId: string;
     transactionDate: string;
+    postedAt?: string | null;
     transactionType: string;
     documentNumber: string;
     reference?: string;
@@ -460,7 +465,7 @@ export function PartnerDetailedLedgerReport({
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
-                                                    <TableHead className="min-w-[155px]">Date / time</TableHead>
+                                                    <TableHead className="min-w-[155px]">Posted date / time</TableHead>
                                                     <TableHead className="min-w-[150px]">Type</TableHead>
                                                     <TableHead className="min-w-[140px]">Document</TableHead>
                                                     <TableHead className="min-w-[140px]">Reference</TableHead>
@@ -487,7 +492,9 @@ export function PartnerDetailedLedgerReport({
                                                 </TableRow>
                                                 {account.lines.map((line, index) => (
                                                     <TableRow key={`${line.sourceDocumentId}-${line.transactionType}-${index}`}>
-                                                        <TableCell className="whitespace-nowrap">{formatLedgerDateTime(line.transactionDate)}</TableCell>
+                                                        <TableCell className="whitespace-nowrap" title={`Business date: ${line.transactionDate.slice(0, 10)}`}>
+                                                            {resolveLedgerDisplayDateTime(line)}
+                                                        </TableCell>
                                                         <TableCell>{line.transactionType}</TableCell>
                                                         <TableCell className="font-medium">{line.documentNumber}</TableCell>
                                                         <TableCell>{line.reference || '-'}</TableCell>
