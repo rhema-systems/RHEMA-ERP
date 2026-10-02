@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   prospectStatus: 'Opportunity',
   businessPartnerId: null as string | null,
   depositThresholdMet: false,
+  depositError: null as string | null,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -64,8 +65,9 @@ describe('property enquiry deposit controls', () => {
     mocks.prospectStatus = 'Opportunity';
     mocks.businessPartnerId = null;
     mocks.depositThresholdMet = false;
+    mocks.depositError = null;
     mocks.request.mockReset();
-    mocks.request.mockImplementation(async (endpoint: string) => {
+    mocks.request.mockImplementation(async (endpoint: string, options?: RequestInit) => {
       if (endpoint.endsWith('/prospect/qualify')) {
         throw new Error('Record Sales contact before qualifying this prospect');
       }
@@ -84,6 +86,21 @@ describe('property enquiry deposit controls', () => {
               amount: 10000,
               currency: 'GHS',
             },
+          },
+        };
+      }
+      if (endpoint.endsWith('/prospect/deposits') && options?.method === 'POST') {
+        if (mocks.depositError) throw new Error(mocks.depositError);
+        return {
+          success: true,
+          data: {
+            id: 'new-deposit-1',
+            receiptNumber: 'PDR-003',
+            amount: 500,
+            currency: 'GHS',
+            paymentMethod: 'BankTransfer',
+            status: 'Pending',
+            receivedAt: '2026-10-01T10:00:00.000Z',
           },
         };
       }
@@ -165,6 +182,33 @@ describe('property enquiry deposit controls', () => {
     await waitFor(() => expect(screen.getByText(/PDR-001/)).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reverse' })).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  it('uses the linked prospect currency and prevents deposit currency editing', async () => {
+    const client = renderPage();
+
+    const currency = await screen.findByLabelText('Deposit currency');
+    expect(currency).toHaveValue('GHS');
+    expect(currency).toBeDisabled();
+    client.clear();
+  });
+
+  it('shows deposit recording failures in a toast instead of the page alert', async () => {
+    mocks.depositError = 'An active deposit policy is required.';
+    const client = renderPage();
+
+    fireEvent.change(await screen.findByLabelText('Deposit amount'), {
+      target: { value: '500' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Record deposit' }));
+
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith({
+      title: 'Deposit could not be recorded',
+      description: 'An active deposit policy is required.',
+      variant: 'destructive',
+    }));
+    expect(screen.queryByText('An active deposit policy is required.')).not.toBeInTheDocument();
     client.clear();
   });
 
