@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountBookAssignments } from './account-book-assignments';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { AccountBookAssignmentInput, AccountClassification, AccountingBook } from '@/types/finance';
+import type { AccountAccountingBook } from '@/types/finance';
 
 vi.mock('@/services/finance/finance-data.service', () => ({
     financeDataService: {
@@ -33,6 +34,26 @@ function Harness() {
     </>;
 }
 
+function HistoricalHarness() {
+    const [value, setValue] = useState<AccountBookAssignmentInput[]>([{
+        accountingBookId: 'book-1', accountClassificationId: 'class-1',
+        isEnabled: true, rowVersion: 'row-version-1',
+    }]);
+    const historicalMappings = [{
+        accountingBookId: 'book-1', accountClassificationId: 'class-1',
+        isEnabled: true, rowVersion: 'row-version-1',
+    }] as AccountAccountingBook[];
+    return <>
+        <AccountBookAssignments
+            accountType="Expense"
+            value={value}
+            onChange={setValue}
+            historicalMappings={historicalMappings}
+        />
+        <output data-testid="value">{JSON.stringify(value)}</output>
+    </>;
+}
+
 describe('AccountBookAssignments', () => {
     beforeEach(() => {
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([book]);
@@ -48,5 +69,20 @@ describe('AccountBookAssignments', () => {
         await waitFor(() => expect(screen.getByTestId('value').textContent).toContain('"isEnabled":false'));
         expect(screen.getByTestId('value').textContent).toContain('"rowVersion":"row-version-1"');
         expect(screen.getByTestId('value').textContent).toContain('"accountClassificationId":"class-1"');
+    });
+
+    it('allows an enabled inactive-book assignment to be switched off but not re-enabled', async () => {
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...book, isActive: false, allowsPosting: false, lifecycleStatus: 'Retired',
+        } as AccountingBook]);
+        render(<HistoricalHarness />);
+        const checkbox = await screen.findByRole('checkbox', { name: /IFRS/ });
+
+        expect(checkbox).toBeEnabled();
+        fireEvent.click(checkbox);
+
+        await waitFor(() => expect(screen.getByTestId('value').textContent).toContain('"isEnabled":false'));
+        expect(checkbox).toBeDisabled();
+        expect(screen.getByTestId('value').textContent).toContain('"rowVersion":"row-version-1"');
     });
 });
