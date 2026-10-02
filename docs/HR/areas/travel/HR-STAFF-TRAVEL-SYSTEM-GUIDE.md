@@ -994,6 +994,17 @@ the approver sets when they sign it off"* rather than pointing at a number.
 
 ### 5.2 👁 Itinerary tab
 
+> ⚠ **Changed by closure lane 5, slice 5b (2026-10-02) — the walk below predates it; lane 10 rewrites it.**
+> - **The status is the server's.** A version starts a **Draft**; **Finalise** (the version in force, once it has a
+>   leg) marks it **Finalised** and stamps it — then it, its legs and its activities are the record, not changed;
+>   making another version current marks the old one **Superseded**; cancelling the trip marks the plan
+>   **Cancelled**. The version in force is never deleted.
+> - **The days are the trip's** — travel, working and weekend days are worked out from its dates, read-only.
+> - **Each leg can link a booking of this trip** (*Linked booking*), shows it with its dates, and is **flagged when
+>   the leg's date disagrees with the booking's** — a flight flying another day, a night outside the hotel stay.
+> - Legs and activities have **Edit** and **Remove**; a plan is made while the trip is open, from its draft until it
+>   is under way. On the demo, Lagos's programme is a Draft: **Finalise** is a live, safe write to show.
+
 **What it is:** the programme — where they are, day by day, and what happens.
 
 **Versioned.** An itinerary carries a version number and one is current. **New version** creates the
@@ -1192,7 +1203,7 @@ load-bearing and must not be renumbered**.
 | **T-8 · There is no vendor field on any booking form.** `VendorId` exists on the entities and Procurement's `SuppliersController` answers 400, so there are no selectable vendors. *Preferred vendor mandatory* on the policy therefore has nothing to check | |
 | **T-9 · The hotel cap has no currency** — see § 1.5 | |
 | **T-18 · Only flights and hotels are capped.** Ground transport and car rentals have no policy check at all, though a GHS 620-a-day car hire for five days is real money | |
-| **T-19 · Nothing reconciles a booking against the itinerary.** A flight arriving the day after the itinerary says the traveller is in a meeting is accepted | |
+| **T-19 · Nothing reconciles a booking against the itinerary.** A flight arriving the day after the itinerary says the traveller is in a meeting is accepted | *Fixed in closure lane 5: a leg links only this trip's bookings and is flagged when its date is not the booking's (a warning, not a refusal)* |
 
 ---
 
@@ -2046,7 +2057,7 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 | Gap | |
 |---|---|
 | **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | |
-| **T-45 · An alert does not block or flag a booking** to the destination it warns about, at any severity — including `Emergency` | |
+| **T-45 · An alert does not block or flag a booking** to the destination it warns about, at any severity — including `Emergency` | *Flagged since closure lane 5: a Critical or Emergency alert in force over the trip shows as a warning on the request page — for the approver and the desk. Blocking is TDC's question* |
 | **T-46 · `TravelRiskLevel.Prohibited` exists and prohibits nothing** | |
 
 ---
@@ -2546,8 +2557,12 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 5, bookings and itinerary (2026-10-02) — slice 5a staged** (5b, the itinerary and destination
-> alerts, to come). **Bookings live on an approved trip** (D-23): made, changed, held, confirmed and ticketed while
+> **Closure lane 5, bookings and itinerary (2026-10-02) — lane 5 complete** (5a committed `4b7d12302`, 5b staged).
+> **The itinerary (5b):** planned while the trip is open; its status the server's — Draft, **Finalised**, Superseded,
+> Cancelled with the trip (D-25); a finalised or superseded version not changed; the days the trip's; the version in
+> force not deleted (O-15); a leg links only this trip's bookings and is **flagged when its date disagrees with the
+> booking's (T-19)**; legs and activities edited and removed. **A Critical or Emergency destination alert in force over
+> the trip shows as a warning on the request page (T-45).** **Bookings (5a):** **Bookings live on an approved trip** (D-23): made, changed, held, confirmed and ticketed while
 > the trip is Approved or under way, cancelled on any trip not closed, completed or a no-show once it has started.
 > Every booking falls inside the trip's dates, a day either side. **The status moves only by the row's verbs** —
 > an edit never changes it, a new booking is Pending, and the stamps, the fee, nights and totals are the server's

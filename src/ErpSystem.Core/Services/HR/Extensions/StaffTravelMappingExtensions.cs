@@ -449,28 +449,19 @@ public static class StaffTravelMappingExtensions
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            VersionNumber = dto.VersionNumber,
-            IsCurrentVersion = dto.IsCurrentVersion,
+            // Lane 5 (5b): the version, the current flag and the days are the service's; a version starts a Draft.
             Status = TravelItineraryStatus.Draft,
             Title = dto.Title,
-            TotalTravelDays = dto.TotalTravelDays,
-            TotalWorkingDays = dto.TotalWorkingDays,
-            TotalWeekendDays = dto.TotalWeekendDays,
             SummaryNotes = dto.SummaryNotes,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>A version's words — never its status, current flag, days or finalisation (lane 5, D-25).</summary>
     public static void UpdateEntity(this StaffTravelItinerary entity, UpdateStaffTravelItineraryDto dto, Guid userId)
     {
-        entity.Status = dto.Status;
         entity.Title = dto.Title;
-        entity.IsCurrentVersion = dto.IsCurrentVersion;
-        entity.TotalTravelDays = dto.TotalTravelDays;
-        entity.TotalWorkingDays = dto.TotalWorkingDays;
-        entity.TotalWeekendDays = dto.TotalWeekendDays;
         entity.SummaryNotes = dto.SummaryNotes;
-        entity.FinalizedAt = dto.FinalizedAt;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

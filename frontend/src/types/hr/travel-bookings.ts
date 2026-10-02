@@ -99,6 +99,12 @@ export interface StaffTravelItineraryLeg extends AuditFields {
   groundTransportId?: string | null;
   notes?: string | null;
   activities: StaffTravelItineraryActivity[];
+  /** The linked booking as the desk names it — "Flight H4RB9L (confirmed)" (lane 5, T-19). */
+  linkedBooking?: string | null;
+  /** The booking's own dates — its segment days, its stay, its pick-up. */
+  linkedBookingDates?: string | null;
+  /** The leg's date is not one of its booking's: flagged, not refused. */
+  linkedBookingDateMismatch?: boolean;
 }
 
 export interface StaffTravelItinerarySummary {
@@ -129,27 +135,22 @@ export interface StaffTravelItinerary extends AuditFields {
   legs: StaffTravelItineraryLeg[];
 }
 
+/**
+ * A new version (lane 5, slice 5b): numbered by the server, a Draft, its days worked out from the trip's dates.
+ * A trip's first version is current whatever `isCurrentVersion` says; a later one only when asked.
+ */
 export interface CreateStaffTravelItinerary {
   staffTravelRequestId: string;
-  versionNumber?: number;
   isCurrentVersion?: boolean;
   title: string;
-  totalTravelDays: number;
-  totalWorkingDays: number;
-  totalWeekendDays: number;
   summaryNotes?: string | null;
 }
 
+/** A draft version's words. Status, the current flag, the days and finalisation are the server's (D-25). */
 export interface UpdateStaffTravelItinerary {
   id: string;
-  status: TravelItineraryStatus;
   title: string;
-  isCurrentVersion: boolean;
-  totalTravelDays: number;
-  totalWorkingDays: number;
-  totalWeekendDays: number;
   summaryNotes?: string | null;
-  finalizedAt?: string | null;
 }
 
 export interface CreateStaffTravelItineraryLeg {

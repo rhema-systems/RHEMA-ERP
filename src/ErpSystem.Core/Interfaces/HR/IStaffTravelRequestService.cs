@@ -75,6 +75,12 @@ public interface IStaffTravelRequestService
 
     /// <summary>What the caller may decide on the request, at which stage, and as whom.</summary>
     Task<StaffTravelViewerActionsDto> GetViewerActionsAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The active destination alerts over the trip's dates — its country, and its city or country-wide — most severe
+    /// first (lane 5, T-45). Shown as a warning to whoever approves or books the trip; whether one should block is TDC's
+    /// question.
+    /// </summary>
+    Task<IEnumerable<StaffTravelAlertSummaryDto>> GetDestinationAlertsAsync(Guid requestId, CancellationToken cancellationToken = default);
 
     /// <summary>The submitted requests waiting for the caller's decision — asked of the engine, then of the line rule.</summary>
     Task<PagedResult<StaffTravelApprovalQueueItemDto>> GetMyPendingApprovalsAsync(int pageNumber, int pageSize, bool callerIsTravelDesk, CancellationToken cancellationToken = default);

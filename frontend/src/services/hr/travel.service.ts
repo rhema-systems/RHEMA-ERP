@@ -1,7 +1,7 @@
 import { apiService } from '../api.service';
 import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
-import type { StaffTravelAlertNotification } from '@/types/hr/travel-compliance';
+import type { StaffTravelAlertNotification, StaffTravelAlertSummary } from '@/types/hr/travel-compliance';
 import type {
   StaffTravelRequest,
   StaffTravelRequestSummary,
@@ -41,7 +41,7 @@ import type {
  *
  * <b>The approver's door</b> (travel final closure, lane 2): `getById`, `getComments`,
  * `getAttachments` and the download, `approve`, `reject`, `returnForRevision`, `getMyApprovals` and
- * `getViewerActions` also answer the traveller's line manager and whoever the request waits for — no
+ * `getViewerActions` (and, since lane 5, `getDestinationAlerts`) also answer the traveller's line manager and whoever the request waits for — no
  * travel permission needed. Everything else here stays the desk's.
  */
 class TravelService {
@@ -70,6 +70,14 @@ class TravelService {
   /** What the caller may decide on this request, at which stage, and as whom (lane 2). */
   getViewerActions(id: string) {
     return apiService.get<StaffTravelViewerActions>(`${this.baseUrl}/${id}/viewer-actions`);
+  }
+
+  /**
+   * The destination alerts in force over the trip, most severe first (lane 5, T-45) — on the approver's door, so
+   * whoever decides or books the trip sees a Critical or Emergency alert. A warning; a block is TDC's question.
+   */
+  getDestinationAlerts(id: string) {
+    return apiService.get<StaffTravelAlertSummary[]>(`${this.baseUrl}/${id}/destination-alerts`);
   }
 
   getByNumber(requestNumber: string) {

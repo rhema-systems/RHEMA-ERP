@@ -72,6 +72,15 @@ public class StaffTravelItinerariesController : HrControllerBase
         return Ok(new { message = "Itinerary set as current version." });
     }
 
+    /// <summary>Finalise the version in force — Approved and stamped; it is then the record of the plan (lane 5, D-25).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/finalise")]
+    public async Task<ActionResult<StaffTravelItineraryDto>> Finalise(Guid id)
+    {
+        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        return Ok(await _service.FinaliseAsync(id, userId));
+    }
+
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id)

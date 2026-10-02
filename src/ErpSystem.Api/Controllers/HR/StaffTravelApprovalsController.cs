@@ -103,6 +103,17 @@ public class StaffTravelApprovalsController : HrControllerBase
         return Ok(await _service.GetByIdAsync(id, ct));
     }
 
+    /// <summary>
+    /// The destination alerts in force over the trip (lane 5, T-45) — on this door because the approver deciding the trip
+    /// needs them and may hold no travel permission; the alerts register itself stays the desk's.
+    /// </summary>
+    [HttpGet("{id:guid}/destination-alerts")]
+    public async Task<ActionResult<IEnumerable<StaffTravelAlertSummaryDto>>> GetDestinationAlerts(Guid id, CancellationToken ct = default)
+    {
+        if (!await CanOpenAsync(id, ct)) return Forbid();
+        return Ok(await _service.GetDestinationAlertsAsync(id, ct));
+    }
+
     /// <summary>The request's comments — internal notes included: the reader is staff deciding or managing it.</summary>
     [HttpGet("{requestId:guid}/comments")]
     public async Task<ActionResult<IEnumerable<StaffTravelRequestCommentDto>>> GetComments(Guid requestId, CancellationToken ct = default)

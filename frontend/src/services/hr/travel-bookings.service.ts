@@ -86,6 +86,11 @@ class TravelBookingsService {
     return apiService.post<void>(`${this.itineraries}/${id}/set-current`, {});
   }
 
+  /** Finalises the version in force (it needs a leg): Approved and stamped — after that a change is a new version. */
+  finaliseItinerary(id: string) {
+    return apiService.post<StaffTravelItinerary>(`${this.itineraries}/${id}/finalise`, {});
+  }
+
   deleteItinerary(id: string) {
     return apiService.delete<void>(`${this.itineraries}/${id}`);
   }

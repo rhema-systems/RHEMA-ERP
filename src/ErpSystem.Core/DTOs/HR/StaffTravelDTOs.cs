@@ -758,57 +758,39 @@ public class StaffTravelItinerarySummaryDto
     public DateTime? FinalizedAt { get; set; }
 }
 
+/// <summary>
+/// A new itinerary version (lane 5, slice 5b): the server numbers it, makes it a Draft and works its days out from the
+/// trip's dates — the payload's <c>VersionNumber</c> and day totals left the contract.
+/// </summary>
 public class CreateStaffTravelItineraryDto : CreateDtoBase
 {
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Range(1, int.MaxValue)]
-    public int VersionNumber { get; set; } = 1;
-
-    public bool IsCurrentVersion { get; set; } = true;
+    /// <summary>Asks for the new version to become the current one, replacing (superseding) the one in force. A trip's
+    /// first version is current whatever this says.</summary>
+    public bool IsCurrentVersion { get; set; }
 
     [Required]
     [MaxLength(300)]
     public string Title { get; set; } = string.Empty;
-
-    [Range(0, 365)]
-    public int TotalTravelDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWorkingDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWeekendDays { get; set; }
 
     [MaxLength(2000)]
     public string? SummaryNotes { get; set; }
 }
 
+/// <summary>
+/// The words of a version still being written (lane 5, slice 5b, D-25): its title and summary. The status moves by
+/// Finalise and by a newer version becoming current; the current flag by set-current; the days follow the trip.
+/// </summary>
 public class UpdateStaffTravelItineraryDto : UpdateDtoBase
 {
-    [Required]
-    public TravelItineraryStatus Status { get; set; }
-
     [Required]
     [MaxLength(300)]
     public string Title { get; set; } = string.Empty;
 
-    public bool IsCurrentVersion { get; set; }
-
-    [Range(0, 365)]
-    public int TotalTravelDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWorkingDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWeekendDays { get; set; }
-
     [MaxLength(2000)]
     public string? SummaryNotes { get; set; }
-
-    public DateTime? FinalizedAt { get; set; }
 }
 
 #endregion
@@ -837,6 +819,18 @@ public class StaffTravelItineraryLegDto : BaseDto
     public Guid? GroundTransportId { get; set; }
     public string? Notes { get; set; }
     public List<StaffTravelItineraryActivityDto> Activities { get; set; } = new();
+
+    /// <summary>The booking the leg is linked to, as the desk would name it — "Flight H4RB9L (Confirmed)" (lane 5, T-19).</summary>
+    public string? LinkedBooking { get; set; }
+
+    /// <summary>The booking's own dates — a flight's segment days, a hotel's stay, a pick-up.</summary>
+    public string? LinkedBookingDates { get; set; }
+
+    /// <summary>
+    /// T-19: the leg's date is not one of its booking's — a flight segment's day, inside a hotel stay, a pick-up's day.
+    /// Flagged, not refused: the plan or the booking may be the one that moved.
+    /// </summary>
+    public bool LinkedBookingDateMismatch { get; set; }
 }
 
 public class CreateStaffTravelItineraryLegDto : CreateDtoBase

@@ -24,6 +24,7 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { TravelApproveDialog, decidesAsSentence } from '@/components/hr/travel/TravelApproveDialog';
 import { TravelAttachmentsPanel } from '@/components/hr/travel/TravelAttachmentsPanel';
 import { TravelBookingsPanel } from '@/components/hr/travel/TravelBookingsPanel';
+import { TravelDestinationAlerts } from '@/components/hr/travel/TravelDestinationAlerts';
 import { TravelCompliancePanel } from '@/components/hr/travel/TravelCompliancePanel';
 import { TravelFinancePanel } from '@/components/hr/travel/TravelFinancePanel';
 import { TravelItineraryPanel } from '@/components/hr/travel/TravelItineraryPanel';
@@ -374,6 +375,11 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Lane 5, T-45: an alert in force at the destination during the trip — a warning, for the approver and the desk. */}
+      {(r.status === 'Submitted' || r.status === 'Approved' || r.status === 'InProgress') && (
+        <TravelDestinationAlerts requestId={r.id} context={r.status === 'Submitted' ? 'approve' : 'book'} />
       )}
 
       <Tabs defaultValue="overview">

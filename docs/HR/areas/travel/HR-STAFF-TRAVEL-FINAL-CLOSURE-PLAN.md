@@ -59,10 +59,10 @@ baseline (D-13); lane 0 was built the same day.**
    ⚠ **The HR role's `HR.Travel.Admin` row reaches an existing database through `seed-db`'s add-only grant, not
    at API startup** (D-22): UAT was granted it by hand on 2026-10-02; the API lets HR through meanwhile (the
    role-fallback handler), but the screens draw from the row.
-8. **Lane 5** (bookings and itinerary) — **IN PROGRESS.** Source-checked against `ef113ea0a` on 2026-10-02
-   (lane 5's *Source check*): every finding holds, seven more (Q1–Q7); D-23…D-26 taken. Two slices: **5a**
-   bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's cascade, the booking doors, the demo
-   pack — built and proven, bookings 90/90 three times, and staged), **5b** itinerary and alerts. No migration.
+8. **Lane 5** (bookings and itinerary) — **COMPLETE 2026-10-02.** Source-checked against `ef113ea0a` (lane 5's
+   *Source check*: Q1–Q7; D-23…D-26). **5a** bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's
+   cascade, the booking doors, the demo pack) committed `4b7d12302`; **5b** itinerary and destination alerts (D-25,
+   O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — staged. No migration.
 9. **Then** lanes **6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -127,7 +127,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
 | **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
-| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ◐ source-checked 2026-10-02; D-23…D-26; **5a built and staged** (bookings 90/90 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); next 5b itinerary and alerts |
+| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b staged (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 | `run-final-fleet.mjs` | ☐ |
 | **7** | Compliance and the portal | batch 1 | `run-final-compliance.mjs`, `run-final-portal.mjs` | ☐ |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
@@ -1541,10 +1541,10 @@ clean-up hitting its 5 s command timeout twice during a lifecycle run.
   confirmation — a booking is created Pending)*
 - [x] A flight cannot be Ticketed while the request requires a visa and no visa application is
   Approved or NotRequired. *(5a)*
-- [ ] An active Critical or Emergency alert for the destination shows on the approval and booking
-  screens (a warning; a block is a TDC question).
-- [ ] Itinerary: delete only a non-current version; `Superseded` set when a version is replaced.
-- [ ] **Doors (D-5):** edit, cancel and status on every booking row; flight segments; itinerary, leg and
+- [x] An active Critical or Emergency alert for the destination shows on the approval and booking
+  screens (a warning; a block is a TDC question). *(5b)*
+- [x] Itinerary: delete only a non-current version; `Superseded` set when a version is replaced. *(5b)*
+- [x] **Doors (D-5):** edit, cancel and status on every booking row; flight segments; itinerary, leg and
   activity edit and delete; the leg ↔ booking link; the vendor picker, star rating, actual cost. *(The booking
   half — rows, segments, star rating, actual cost — 5a; the vendor picker was 4b's; the itinerary half 5b's.)*
 
@@ -1654,6 +1654,58 @@ is pending, §10 the authorised flight confirmed by verb and the refused one's c
 085224); approvals **123/123 twice** (180444, 252011). No request over 2 s (the slowest booking call 96 ms). The API log
 held only the known noise (defect #23, an identity reconciliation, the notification clean-up's 5 s timeout, and the
 email queue failing at once — UAT has no `EmailSettings` row).
+
+**As built — slice 5b (2026-10-02).** No migration.
+
+- *The rules in one place.* `StaffTravelItineraryRules` (Core): the plannable trip states, the editable versions, the
+  trip's days, D-24's itinerary half. `StaffTravelItineraryService` was rewritten on it.
+- *When (Q5).* An itinerary, its legs and activities are written while the trip is Draft, Submitted, returned for
+  revision, Approved or under way — planning starts with the request — and not on a rejected, cancelled, completed or
+  closed one (a Closed trip took one before).
+- *Status (D-25).* A new version is a Draft; `POST itineraries/{id}/finalise` (Write) marks the version in force, with at
+  least one leg, Approved and stamps `FinalizedAt`; set-current (and a new version asked to be current) marks the
+  version it replaces Superseded and not current; the trip's cancel marks the current one Cancelled. A finalised,
+  superseded or cancelled version — and its legs and activities — is not changed: a change is a new version. A
+  superseded or cancelled version is not put back in force. PendingReview, Active and Completed keep no writer.
+- *Server-owned (D5).* The create DTO lost `VersionNumber` and the day totals (it keeps `IsCurrentVersion`, as an ask —
+  a trip's first version is current whatever it says); the update DTO keeps only the title and summary. The days are
+  the trip's: every day from departure to return, its Saturdays and Sundays, the rest working days (public holidays not
+  subtracted), refreshed on each edit and on finalising.
+- *Delete (O-15).* The version in force is refused; another is deleted.
+- *Legs (Q3, T-19).* A leg's date falls inside the trip, a day either side; a linked flight, hotel or ground booking is
+  the same trip's (404 otherwise). Every leg read carries `LinkedBooking`, `LinkedBookingDates` and
+  `LinkedBookingDateMismatch` — the leg's date not a segment day of its flight, outside its hotel stay, or not its
+  pick-up's day — flagged, not refused (the plan or the booking may be the one that moved). Read as narrow projections.
+  Activities fall inside the trip too.
+- *Destination alerts (T-45).* `GET requests/{id}/destination-alerts` on the approver's door (Read, the line
+  authority, or whoever the request waits for): the active alerts for the destination country — its city or the whole
+  country — in force at any point of the trip, most severe first. `TravelDestinationAlerts` draws a Critical or
+  Emergency one as a warning, lesser ones as a quiet line, on the request page of a Submitted, Approved or
+  InProgress trip — above the tabs, so the approver and the Bookings tab both see it (one banner, not a second inside the
+  panel). A warning only; whether it blocks is TDC's question (§ 7's list, lane 10).
+- *Screens.* The itinerary panel: per version Edit (a draft), Finalise (the draft in force, once it has a leg), Make
+  current, Delete (not in force, administrators), New version (with "make it current now"); the days read-only, "from
+  the trip's dates"; a finalised version says it is the record; per leg Edit and Remove and a **Linked booking** picker
+  (the trip's flights, hotels and ground bookings), the link and its dates shown, a mismatch flagged; per activity Edit
+  and Remove. Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: `081`'s Lagos itinerary (Lagos is Submitted — plannable) sends a version and day totals the
+  server now ignores; it stays a Draft for the guide to finalise.
+
+**Suite** `run-final-bookings.mjs` 90 → **148**: §9 the trip's cancel marks its itinerary Cancelled and a cancelled trip
+takes no new one; §11 a first version is 1, current and a Draft though the payload said 7, not current and Approved,
+its days 4 with the weekend counted from the trip's dates (not the payload's 99); a second is 2, beside it; the one in
+force not deleted; an edit leaves the status (payload Completed) and the current flag; set-current supersedes version 1,
+which is then not put back, edited or given a leg, but deleted; §12 a leg after the trip refused, another trip's flight
+404, a stay linked to the trip's hotel named with no flag, a leg the day after its flight's segment flagged and the flag
+cleared when moved; §13 a version not in force not finalised; the one in force finalised (Approved, stamped); then no
+leg, edit or leg removal; a new version supersedes it; a draft trip planned too, its legless plan not finalised; §14 an
+activity after the trip refused, one on the day added, moved and removed; §15 alerts raised for the run — Critical for
+Kumasi, Warning country-wide, one for Tamale, one ending before the trip: the trip sees Kumasi's and the country's, the
+Critical first; the traveller is refused (403); the run's alerts deleted at the end. **148/148 three times** (579523,
+629716, 661095; every section ran; no test alert left). Regression: policy **131/131 twice** (676658, 688290), money
+**288/288 twice** (698899, 729479), lifecycle **256/256 twice** (777449, 814081), truth **118/118 twice** (851164,
+856092), approvals **123/123 twice** (861253, 881417). No request over 2 s (the slowest travel call 130 ms). The API log
+held only the known noise.
 
 ### Lane 6 — Fleet (D-11, D-12, D2, D4, FX-1…FX-9)
 
@@ -1887,7 +1939,7 @@ fleet trip.
 | Paying claims through payroll (O-6) | Payroll is another developer's module — D-10 hides the option until it can receive them |
 | Column encryption of passport and visa numbers (O-7) | No encryption mechanism exists in the model; masking ships in lane 7 |
 | Concurrency tokens on travel entities | A platform item |
-| **TDC questions:** reminder windows (90/14/90 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
+| **TDC questions:** reminder windows (90/14/90 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a pending or on-hold booking counts as committed spend (lane 5, Q6); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
 
 ---
 
@@ -2029,3 +2081,10 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   segments, star rating, actual cost) and the demo pack. The build succeeded; no migration. `run-final-bookings.mjs`
   90/90 three times; policy 131/131, money 288/288, lifecycle 256/256, truth 118/118, approvals 123/123, each twice.
   Staged. Next: slice 5b, itinerary and alerts.
+- **2026-10-02, later** — The user committed slice 5a (`4b7d12302`). **Slice 5b built — LANE 5 COMPLETE**: the
+  itinerary planned while the trip is open, its status the server's with a Finalise step (D-25), Superseded written,
+  cancelled with the trip (D-24), its days the trip's, the version in force not deleted (O-15), a leg's booking the
+  trip's own (Q3) and its date checked against the booking's (T-19), the itinerary, leg and activity doors and the
+  booking-link picker; destination alerts in force over the trip shown as a warning on the request page (T-45). The
+  build succeeded; no migration. `run-final-bookings.mjs` 148/148 three times; policy 131/131, money 288/288,
+  lifecycle 256/256, truth 118/118, approvals 123/123, each twice. Staged. Next: lane 6, Fleet.

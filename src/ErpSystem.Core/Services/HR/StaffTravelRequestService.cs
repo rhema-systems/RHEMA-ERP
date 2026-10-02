@@ -1168,6 +1168,34 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                && (await GetStandingAsync(entity, callerIsTravelDesk, cancellationToken, explain: false)).MayDecide;
     }
 
+    /// <summary>
+    /// T-45: an alert never reached the trip it warns about — nothing read its severity. The alerts in force at any point
+    /// of the trip, for its destination country and its city (or the whole country), most severe first. Read narrowly.
+    /// </summary>
+    public async Task<IEnumerable<StaffTravelAlertSummaryDto>> GetDestinationAlertsAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var request = await GetOwnedRequestAsync(requestId);
+        var from = request.TravelStartDate.ToDateTime(TimeOnly.MinValue);
+        var to = request.TravelEndDate.ToDateTime(TimeOnly.MaxValue);
+        var city = request.DestinationCity?.Trim();
+        var rows = await _unitOfWork.Repository<StaffTravelAlert>()
+            .GetQueryable(a => a.TenantId == request.TenantId && !a.IsDeleted && a.IsActive
+                            && a.CountryId == request.DestinationCountryId
+                            && a.EffectiveFrom <= to && (a.EffectiveTo == null || a.EffectiveTo >= from))
+            .Select(a => new { a.Id, a.AlertType, a.Severity, CountryName = a.Country.Name, a.City, a.Title, a.EffectiveFrom, a.IsActive })
+            .ToListAsync(cancellationToken);
+        return rows
+            .Where(a => string.IsNullOrWhiteSpace(a.City)
+                        || string.Equals(a.City.Trim(), city, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(a => a.Severity).ThenBy(a => a.EffectiveFrom)
+            .Select(a => new StaffTravelAlertSummaryDto
+            {
+                Id = a.Id, AlertType = a.AlertType, Severity = a.Severity, CountryName = a.CountryName, City = a.City,
+                Title = a.Title, EffectiveFrom = a.EffectiveFrom, IsActive = a.IsActive,
+            })
+            .ToList();
+    }
+
     public async Task<StaffTravelViewerActionsDto> GetViewerActionsAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRequestAsync(requestId);
@@ -1537,6 +1565,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // Lane 5, D-24: the holds — pending or on hold, which no supplier committed to — go with the trip. They stayed
         // live, and the budget's Committed kept counting them (Q2).
         var heldCancelled = await StaffTravelBookingRules.CancelHoldsAsync(
+            _unitOfWork, entity.TenantId, entity.Id, cancelledByUserId.ToString(), cancellationToken);
+        // ...and the plan of a trip that will not happen is marked so (D-24's itinerary half, D-25).
+        await StaffTravelItineraryRules.CancelWithTripAsync(
             _unitOfWork, entity.TenantId, entity.Id, cancelledByUserId.ToString(), cancellationToken);
 
         await _requestRepository.UpdateAsync(entity);
