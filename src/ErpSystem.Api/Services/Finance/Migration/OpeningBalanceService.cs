@@ -2723,7 +2723,11 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         => string.Equals(line.CounterpartyType, BankAccountOpening, StringComparison.Ordinal);
 
     private static bool IsGovernedProtectedAccountLine(OpeningBalanceLine line)
-        => line.CounterpartyType is BankAccountOpening or ResidualRetainedEarnings;
+        // WHT opening lines are server-derived from the tax master's exact payable/receivable
+        // mapping and retain canonical payment/certificate evidence. They may therefore reach a
+        // statutory control account without making that account available to manual GL posting.
+        => line.CounterpartyType is BankAccountOpening or ResidualRetainedEarnings or
+            ApWithholdingOpening or ArWithholdingOpening;
 
     private static bool IsGovernedFinanceOpeningBatch(OpeningBalanceBatch batch)
         => HasBankAccountOpeningEvidence(batch) || HasResidualGlEquityOpeningEvidence(batch);

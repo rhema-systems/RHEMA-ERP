@@ -92,7 +92,9 @@ export function AccountBookAssignments({ accountType, value, onChange, historica
                     <Checkbox
                         id={`book-${book.id}`}
                         checked={enabled}
-                        disabled={!book.isActive || !book.allowsPosting}
+                        // Historical assignments on inactive books must remain removable. Once
+                        // disabled, the inactive book cannot be selected again.
+                        disabled={(!book.isActive || !book.allowsPosting) && !enabled}
                         onCheckedChange={checked => setEnabled(book, checked === true)}
                     />
                     <Label htmlFor={`book-${book.id}`}>{book.name} <span className="text-muted-foreground">({book.code})</span></Label>
