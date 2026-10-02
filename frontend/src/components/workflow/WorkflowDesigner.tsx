@@ -54,6 +54,15 @@ import type {
   WorkflowEntityTypeInfo
 } from '@/types/workflow';
 import { buildFallbackEntityTypes, filterEntityTypesByModule, isEntityTypeInList, moduleEntityTypeMap } from './entityTypeMapping';
+// An approval stage's approvers are read and saved through WorkflowDesigner.approvers.ts — part of this
+// designer, kept in its own file so the mapping is unit-tested (WorkflowDesigner.approvers.test.ts; defect #34).
+import {
+  approverSlotCount,
+  buildApprovalStageRules,
+  describePreservedApprover,
+  readApprovalStageApprovers,
+  stageRequiredRole,
+} from './WorkflowDesigner.approvers';
 import {
   WorkflowStepType,
   WorkflowDefinitionLifecycleStatus,
@@ -234,6 +243,13 @@ const normalizeAssignmentType = (assignmentType: unknown): WorkflowAssignmentTyp
 
   return undefined;
 };
+
+/**
+ * An approval node's approver rules of the kinds this designer does not edit — a person named by the
+ * record, the requester's manager — kept as loaded and written back unchanged (cross-module defect #34).
+ */
+const preservedApproverRulesOf = (data: Record<string, any> | undefined): WorkflowAssignmentRuleDto[] =>
+  Array.isArray(data?.preservedApproverRules) ? (data?.preservedApproverRules as WorkflowAssignmentRuleDto[]) : [];
 
 // Same issue as normalizeAssignmentType above, for WorkflowApprovalType values.
 const normalizeApprovalType = (approvalType: unknown): WorkflowApprovalType | undefined => {
@@ -1247,9 +1263,18 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
         ? estimatedHoursValue
         : undefined;
       const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
+      // Defect #34: a stage with approvers named by the record keeps the required role it was stored with —
+      // the engine's fallback when none of them resolves. Any other stage takes its first role, as before.
+      const approvalRequiredRole = node.type === 'approval'
+        ? stageRequiredRole({
+            approverRoles,
+            preservedApproverRules: preservedApproverRulesOf(node.data),
+            fallbackRequiredRole: node.data?.fallbackRequiredRole,
+          })
+        : undefined;
       const requiredRole =
-        node.type === 'approval' && approverRoles.length > 0
-          ? approverRoles[0]
+        node.type === 'approval' && approvalRequiredRole
+          ? approvalRequiredRole
           : node.type === 'task' && node.data?.taskAssigneeType === 'role' && node.data?.taskAssigneeRole
             ? node.data.taskAssigneeRole
             : undefined;
@@ -1430,24 +1455,18 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     if (normalizeStepType(step.stepType) === WorkflowStepType.Approval) {
       const approvalConfig = step.configuration?.approvalConfig;
       // Preserve role/user rules plus governance settings so Finance workflows round-trip through the designer.
-      const configuredApproverRoles = approvalConfig?.approverRules
-        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.Role && rule.role)
-        .map(rule => rule.role ?? '')
-        .filter(Boolean) ?? [];
-      const approverRoles = configuredApproverRoles.length > 0
-        ? configuredApproverRoles
-        : step.requiredRole
-          ? [step.requiredRole]
-          : [];
-      const approverUsers = approvalConfig?.approverRules
-        ?.filter(rule => normalizeAssignmentType(rule.assignmentType) === WorkflowAssignmentType.User && rule.userId)
-        .map(rule => rule.userId ?? '')
-        .filter(Boolean) ?? [];
+      // Approver rules of other kinds (a person named by the record, the requester's manager…) are kept as
+      // stored and written back unchanged, and the step's required role stays their fallback rather than
+      // turning into an approver — cross-module defect #34. The mapping and its tests: WorkflowDesigner.approvers.ts.
+      const { approverRoles, approverUsers, preservedApproverRules, fallbackRequiredRole } =
+        readApprovalStageApprovers(approvalConfig?.approverRules, step.requiredRole);
       return {
         ...baseData,
         approvers: approverRoles,
         approverRoles,
         approverUsers,
+        preservedApproverRules,
+        fallbackRequiredRole,
         approvalType: approvalConfig
           ? normalizeApprovalType(approvalConfig.approvalType) === WorkflowApprovalType.Single && approvalConfig.minApprovalsRequired > 1
             ? 'minimum'
@@ -1623,25 +1642,14 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     if (node.type === 'approval') {
       const approverRoles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
       const approverUsers = normalizeStringList(node.data?.approverUsers);
-      const approverRules: WorkflowAssignmentRuleDto[] = [];
       const sequentialApprovals = node.data?.approvalActivationMode === 'sequential';
-
-      approverRoles.forEach((role: string, index: number) => {
-        approverRules.push({
-          assignmentType: WorkflowAssignmentType.Role,
-          role,
-          approvalGroup: sequentialApprovals ? index + 1 : 1,
-          priority: approverRoles.length - index,
-        });
-      });
-
-      approverUsers.forEach((userId: string, index: number) => {
-        approverRules.push({
-          assignmentType: WorkflowAssignmentType.User,
-          userId,
-          approvalGroup: sequentialApprovals ? approverRoles.length + index + 1 : 1,
-          priority: approverUsers.length - index,
-        });
+      // Roles and users as the designer has always built them, then the rules it does not edit — kept as
+      // stored (defect #34). The mapping and its tests: WorkflowDesigner.approvers.ts.
+      const approverRules = buildApprovalStageRules({
+        approverRoles,
+        approverUsers,
+        preservedApproverRules: preservedApproverRulesOf(node.data),
+        sequential: sequentialApprovals,
       });
 
       return {
@@ -1877,13 +1885,19 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     approvalNodes.forEach(node => {
       const roles = normalizeStringList(node.data?.approverRoles || node.data?.approvers);
       const users = normalizeStringList(node.data?.approverUsers);
-      if (roles.length === 0 && users.length === 0) {
+      // Approvers named by the record count (defect #34): travel's line-manager stage has no role or user.
+      const approverSlots = approverSlotCount({
+        approverRoles: roles,
+        approverUsers: users,
+        preservedApproverRules: preservedApproverRulesOf(node.data),
+      });
+      if (approverSlots === 0) {
         errors.push(`Approval step "${node.data?.label || 'Approval'}" must have at least one approver role or user`);
       }
 
       const minimumApprovals = Math.max(Number(node.data?.minApprovalsRequired) || 1, 1);
-      if (minimumApprovals > roles.length + users.length) {
-        errors.push(`Approval step "${node.data?.label || 'Approval'}" requires ${minimumApprovals} approvals but only ${roles.length + users.length} approval slots are configured`);
+      if (minimumApprovals > approverSlots) {
+        errors.push(`Approval step "${node.data?.label || 'Approval'}" requires ${minimumApprovals} approvals but only ${approverSlots} approval slots are configured`);
       }
 
       const conflictRules = (node.data?.approvalConflictRules || []) as WorkflowApprovalConflictRuleDto[];
@@ -2275,6 +2289,13 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
     selectedNode?.type === 'approval'
       ? normalizeApproverValues(selectedNode.data?.approverUsers || selectedNode.data?.approvalConfig?.approverUsers)
       : [];
+  // Approvers this designer does not edit, shown read-only (defect #34).
+  const selectedPreservedApprovers =
+    selectedNode?.type === 'approval' ? preservedApproverRulesOf(selectedNode.data) : [];
+  const selectedFallbackRequiredRole =
+    selectedNode?.type === 'approval' && selectedPreservedApprovers.length > 0
+      ? String(selectedNode.data?.fallbackRequiredRole || '')
+      : '';
   const selectedApproverRoleKeys = new Set(selectedApproverRoles.map((role) => normalizeApproverKey(role)));
   const selectedApproverUserKeys = new Set(selectedApproverUsers.map((userId) => normalizeApproverKey(userId)));
   const isRoleSelected = (role: Role) =>
@@ -3272,6 +3293,9 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                             <div className="flex flex-wrap gap-2">
                               <Badge variant="secondary">{selectedApproverRoles.length} roles</Badge>
                               <Badge variant="secondary">{selectedApproverUsers.length} users</Badge>
+                              {selectedPreservedApprovers.length > 0 && (
+                                <Badge variant="secondary">{selectedPreservedApprovers.length} named by the record</Badge>
+                              )}
                             </div>
                             {(selectedApproverRoles.length > 0 || selectedApproverUsers.length > 0) && (
                               <p className="text-xs text-muted-foreground line-clamp-2">
@@ -3283,6 +3307,24 @@ export function WorkflowDesigner({ workflowId, isOpen, onClose, onSave }: Workfl
                                     .map(formatUserLabel),
                                 ].slice(0, 6).join(', ')}
                               </p>
+                            )}
+                            {selectedPreservedApprovers.length > 0 && (
+                              <div className="space-y-1 rounded-md border border-dashed bg-muted/40 p-2">
+                                <p className="text-xs font-medium">Named by the record</p>
+                                <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                                  {selectedPreservedApprovers.map((rule, index) => (
+                                    <li key={`${rule.dynamicExpression ?? rule.assignmentType}-${index}`}>
+                                      {describePreservedApprover(rule)}
+                                    </li>
+                                  ))}
+                                </ul>
+                                <p className="text-xs text-muted-foreground">
+                                  Set by the module that owns this workflow and kept as they are when you save.
+                                  {selectedFallbackRequiredRole
+                                    ? ` When none of them can be found, the ${selectedFallbackRequiredRole} role is asked instead.`
+                                    : ''}
+                                </p>
+                              </div>
                             )}
                           </div>
 

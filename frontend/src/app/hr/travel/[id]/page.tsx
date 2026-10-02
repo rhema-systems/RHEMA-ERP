@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send, RotateCcw, FilePenLine, Lock } from 'lucide-react';
+import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send, RotateCcw, FilePenLine, Lock, ThumbsUp, ThumbsDown, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -21,6 +21,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelApproveDialog, decidesAsSentence } from '@/components/hr/travel/TravelApproveDialog';
 import { TravelAttachmentsPanel } from '@/components/hr/travel/TravelAttachmentsPanel';
 import { TravelBookingsPanel } from '@/components/hr/travel/TravelBookingsPanel';
 import { TravelCompliancePanel } from '@/components/hr/travel/TravelCompliancePanel';
@@ -64,12 +65,21 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 /**
- * A travel request, from the travel desk's side.
+ * A travel request, from the travel desk's side — and the approver's (travel final closure, lane 2).
  *
- * ⚠ **Approval is the workflow engine's, not this page's.** Slice 2 retired travel's bespoke
- * approval chain, so `status` says only which phase the request is in — `Submitted` means "out for
- * approval" and which step it sits on is the workflow instance's business. Submit/approve/reject
- * therefore all go through `useWorkflowRecord`, and nothing here ever writes a status.
+ * ⚠ **Approval is the workflow engine's, not this page's.** `status` says only which phase the request
+ * is in — `Submitted` means "out for approval" and which stage it sits on is the workflow instance's
+ * business — and nothing here ever writes a status.
+ *
+ * **Who decides is the server's answer** (`viewer-actions`, lane 2): the traveller's line manager at the
+ * first stage (the travel desk there only when no line manager can), the route's approvers after, never
+ * the traveller. Approve, Reject and Return are travel's own buttons, drawn from that answer — the shared
+ * workflow actions keep submit and recall only — so the budget is asked for at the last stage, and a
+ * Manager outside the traveller's line is never offered a button the server would refuse.
+ *
+ * **An approver without travel permission** reaches this page through the approvals queue or their
+ * inbox: they see the trip, its comments and attachments and their decision; the desk's tabs and
+ * controls are not drawn for them.
  */
 export default function TravelRequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -81,8 +91,9 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   const [internalNote, setInternalNote] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  /** Which reason-asking action is open: submit after departure, return for revision, request change. */
-  const [reasonFor, setReasonFor] = useState<null | 'late' | 'return' | 'change'>(null);
+  /** Which reason-asking action is open: submit after departure, return, reject, request change. */
+  const [reasonFor, setReasonFor] = useState<null | 'late' | 'return' | 'reject' | 'change'>(null);
+  const [approveOpen, setApproveOpen] = useState(false);
 
   const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['travel-request', id],
@@ -98,6 +109,14 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   // A departure date already past: the server refuses the submission without the desk's reason.
   const departed = !!r && r.travelStartDate.slice(0, 10) < todayUtc();
 
+  // Lane 2: what the caller may decide on it, at which stage and as whom — asked only while it is out
+  // for approval.
+  const { data: viewer } = useQuery({
+    queryKey: ['travel-request-viewer', id],
+    queryFn: () => travelService.getViewerActions(id),
+    enabled: r?.status === 'Submitted',
+  });
+
   const {
     data: comments,
     isError: commentsFailed,
@@ -110,6 +129,8 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
 
   const refresh = async () => {
     await queryClient.invalidateQueries({ queryKey: ['travel-request', id] });
+    await queryClient.invalidateQueries({ queryKey: ['travel-request-viewer', id] });
+    await queryClient.invalidateQueries({ queryKey: ['travel-request-comments', id] });
     await queryClient.invalidateQueries({ queryKey: ['travel-requests'] });
   };
 
@@ -122,18 +143,14 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
     status: r?.status ?? 'Draft',
     // Draft and ReturnedForRevision are the two states the request can be sent from. A trip whose
     // departure has passed is submitted through its own button instead, because the server needs the
-    // reason it is late (lane 1).
-    canSubmit: (r?.status === 'Draft' || r?.status === 'ReturnedForRevision') && !departed,
-    canApproveReject: r?.status === 'Submitted',
+    // reason it is late (lane 1). The desk submits; a line manager reading their report's draft does not.
+    canSubmit: (r?.status === 'Draft' || r?.status === 'ReturnedForRevision') && !departed && access.canWrite,
+    // Lane 2: approve and reject are travel's own buttons below, drawn from the server's viewer actions —
+    // the shared actions asked only the engine, which would offer them to anyone it lists.
+    canApproveReject: false,
     enabled: !!r,
     commands: {
       submit: async () => announceWarnings(await travelService.submit(id)),
-      // No approver id is sent — the server resolves the approver from the token against the
-      // published definition. ⚠ No amount is sent either, and the server then copies the ESTIMATE
-      // into the approved budget, so that field records no decision. There is no budget prompt
-      // anywhere in the workflow; lane 2 gives the approve dialog one (findings O-9, T-10).
-      approve: (ctx) => travelService.approve(id, undefined, ctx.comments || undefined),
-      reject: (ctx) => travelService.reject(id, ctx.comments || 'Rejected'),
       // Travel's own recall (lane 1): the generic recall the actions fell back to never told the
       // request, which stayed Submitted with no workflow behind it (cross-module defect #15's shape).
       recall: (reason) => travelService.recall(id, reason || undefined),
@@ -157,6 +174,23 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
       announceWarnings(result);
     },
     onError: failed('Could not submit'),
+  });
+
+  // Lane 2 (D-7, O-9, T-10): the approver's decisions, at the stage the request is on.
+  const approve = useMutation({
+    mutationFn: (d: { approvedBudget?: number; notes?: string }) => travelService.approve(id, d.approvedBudget, d.notes),
+    onSuccess: (result) =>
+      afterLifecycle(
+        result.status === 'Approved' ? 'Trip approved' : 'Approved at this stage',
+        result.status === 'Approved' ? undefined : result.message,
+      ),
+    onError: failed('Could not approve'),
+  });
+
+  const reject = useMutation({
+    mutationFn: (reason: string) => travelService.reject(id, reason),
+    onSuccess: () => afterLifecycle('Travel request rejected', 'The traveller sees the reason.'),
+    onError: failed('Could not reject'),
   });
 
   // Lane 1 (D-6): the approver's third answer beside approve and reject.
@@ -248,32 +282,42 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   const notStarted = r.travelStartDate.slice(0, 10) > todayUtc();
   // Lane 1 (O-11): a trip under way is completed, not cancelled.
   const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed', 'InProgress'].includes(r.status);
-  // Returning is the approver's — whoever the workflow names, or the approve tier when none is published.
-  const mayDecide = workflow.summary?.hasActiveInstance
-    ? !!workflow.summary.canCurrentUserApprove
-    : access.canApprove;
+  // Lane 2: deciding is the server's answer for this caller at this stage — the line rule included.
+  const mayDecide = r.status === 'Submitted' && viewer?.canDecide === true;
+  // An approver with no travel permission sees the trip and their decision, not the desk's tabs.
+  const deskView = access.canRead;
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title={r.requestNumber}
         description={`${r.employeeName} · ${r.originCity} → ${r.destinationCity}, ${fmtDate(r.travelStartDate)}`}
-        backHref="/hr/travel"
+        backHref={deskView ? '/hr/travel' : '/hr/travel/approvals'}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status)} />
-            {isEditable && (
+            {isEditable && access.canWrite && (
               <Button variant="outline" onClick={() => router.push(`/hr/travel/${id}/edit`)}>
                 <Pencil className="mr-2 h-4 w-4" /> Edit
               </Button>
             )}
             <WorkflowApprovalActions {...workflow.actionProps} />
-            {isEditable && departed && (
+            {isEditable && departed && access.canWrite && (
               <Button onClick={() => setReasonFor('late')}>
                 <Send className="mr-2 h-4 w-4" /> Submit after departure
               </Button>
             )}
-            {r.status === 'Submitted' && mayDecide && (
+            {mayDecide && (
+              <Button onClick={() => setApproveOpen(true)} disabled={approve.isPending}>
+                <ThumbsUp className="mr-2 h-4 w-4" /> Approve
+              </Button>
+            )}
+            {mayDecide && (
+              <Button variant="outline" onClick={() => setReasonFor('reject')}>
+                <ThumbsDown className="mr-2 h-4 w-4" /> Reject
+              </Button>
+            )}
+            {mayDecide && (
               <Button variant="outline" onClick={() => setReasonFor('return')}>
                 <RotateCcw className="mr-2 h-4 w-4" /> Return for revision
               </Button>
@@ -283,7 +327,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
                 <FilePenLine className="mr-2 h-4 w-4" /> Request change
               </Button>
             )}
-            {canComplete && (
+            {canComplete && access.canWrite && (
               <Button
                 variant="outline"
                 onClick={() => complete.mutate()}
@@ -298,7 +342,8 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
                 <Lock className="mr-2 h-4 w-4" /> Close trip
               </Button>
             )}
-            {isLive && (
+            {/* Cancel is the desk's (HR.Travel.Write); it was drawn for anyone who could open the page. */}
+            {isLive && access.canWrite && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
                 <Ban className="mr-2 h-4 w-4" /> Cancel
               </Button>
@@ -307,13 +352,37 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         }
       />
 
+      {r.status === 'Submitted' && viewer && (
+        <Card className={mayDecide ? 'border-primary/40' : undefined}>
+          <CardContent className="flex items-start gap-3 p-4 text-sm">
+            <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="space-y-1">
+              <p className="font-medium">
+                {viewer.stageName ? `${viewer.stageName} stage` : 'Out for approval'}
+                {viewer.nextStageName ? ` — then ${viewer.nextStageName}` : ''}
+              </p>
+              {mayDecide ? (
+                <p className="text-muted-foreground">
+                  {decidesAsSentence(viewer, r.employeeName)}{' '}
+                  {viewer.isFinalStage ? 'You set the approved budget.' : ''}
+                </p>
+              ) : viewer.waitingFor.length > 0 ? (
+                <p className="text-muted-foreground">Waiting for {viewer.waitingFor.join(' or ')}.</p>
+              ) : viewer.reason ? (
+                <p className="text-muted-foreground">{viewer.reason}</p>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="itinerary">Itinerary</TabsTrigger>
-          <TabsTrigger value="bookings">Bookings</TabsTrigger>
-          <TabsTrigger value="finance">Finance</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance</TabsTrigger>
+          {deskView && <TabsTrigger value="itinerary">Itinerary</TabsTrigger>}
+          {deskView && <TabsTrigger value="bookings">Bookings</TabsTrigger>}
+          {deskView && <TabsTrigger value="finance">Finance</TabsTrigger>}
+          {deskView && <TabsTrigger value="compliance">Compliance</TabsTrigger>}
           <TabsTrigger value="comments">Comments</TabsTrigger>
           <TabsTrigger value="attachments">Attachments</TabsTrigger>
           <WorkflowTabTrigger value="workflow" />
@@ -421,23 +490,30 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
           )}
         </TabsContent>
 
-        <TabsContent value="itinerary" className="pt-4">
-          <TravelItineraryPanel request={r} />
-        </TabsContent>
+        {deskView && (
+          <>
+            <TabsContent value="itinerary" className="pt-4">
+              <TravelItineraryPanel request={r} />
+            </TabsContent>
 
-        <TabsContent value="bookings" className="pt-4">
-          <TravelBookingsPanel request={r} />
-        </TabsContent>
+            <TabsContent value="bookings" className="pt-4">
+              <TravelBookingsPanel request={r} />
+            </TabsContent>
 
-        <TabsContent value="finance" className="pt-4">
-          <TravelFinancePanel request={r} />
-        </TabsContent>
+            <TabsContent value="finance" className="pt-4">
+              <TravelFinancePanel request={r} />
+            </TabsContent>
 
-        <TabsContent value="compliance" className="pt-4">
-          <TravelCompliancePanel request={r} />
-        </TabsContent>
+            <TabsContent value="compliance" className="pt-4">
+              <TravelCompliancePanel request={r} />
+            </TabsContent>
+          </>
+        )}
 
         <TabsContent value="comments" className="space-y-4 pt-4">
+          {/* Posting is the desk's (HR.Travel.Write); an approver reads the thread and gives their
+              reasons with their decision. */}
+          {access.canWrite && (
           <Card>
             <CardContent className="space-y-3 p-4">
               <Textarea
@@ -477,6 +553,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               </div>
             </CardContent>
           </Card>
+          )}
 
           {commentsFailed && !comments ? (
             <TravelQueryError error={commentsError} what="the comments" />
@@ -513,7 +590,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
 
         <TabsContent value="attachments" className="pt-4">
           {/* Delete is `HR.Travel.Admin` server-side, so the button shows only to those who hold it. */}
-          <TravelAttachmentsPanel requestId={id} canDelete={access.canAdmin} />
+          <TravelAttachmentsPanel requestId={id} canUpload={access.canWrite} canDelete={access.canAdmin} />
         </TabsContent>
 
         <WorkflowTabContent
@@ -539,6 +616,33 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         confirmLabel="Submit for approval"
         pending={submitLate.isPending}
         onConfirm={(reason) => submitLate.mutateAsync(reason)}
+      />
+
+      {viewer && (
+        <TravelApproveDialog
+          open={approveOpen}
+          onOpenChange={setApproveOpen}
+          requestNumber={r.requestNumber}
+          traveller={r.employeeName}
+          estimate={r.estimatedTotalCost}
+          currencyCode={r.currencyCode}
+          viewer={viewer}
+          pending={approve.isPending}
+          onConfirm={(decision) => approve.mutateAsync(decision)}
+        />
+      )}
+
+      <TravelReasonDialog
+        open={reasonFor === 'reject'}
+        onOpenChange={(open) => setReasonFor(open ? 'reject' : null)}
+        title="Reject this travel request"
+        description="The trip will not go ahead. A rejected request cannot be sent again — the traveller raises a new one. They see your reason."
+        label="Why it is rejected"
+        placeholder="Not this quarter's priority, cover cannot be found, the cost is not justified…"
+        confirmLabel="Reject"
+        destructive
+        pending={reject.isPending}
+        onConfirm={(reason) => reject.mutateAsync(reason)}
       />
 
       <TravelReasonDialog

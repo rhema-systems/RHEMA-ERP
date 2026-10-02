@@ -1956,6 +1956,127 @@ loop; and index `Notifications (IsDeleted, CreatedAt)` so the `WHERE CreatedAt <
 rows without a scan. The claim query should not hold range locks over the table the rest of the
 application inserts into (read committed with a claim `UPDATE … OUTPUT`, or `READPAST`).
 
+## 34. Workflow designer — an approval stage's "person named by the record" approvers are invisible, and saving the route deletes them (2026-10-02)
+
+**Owner:** Platform (workflow — `frontend/src/components/workflow/WorkflowDesigner.tsx`).
+**Severity:** high for any route that relies on them: the route works until someone edits it in the
+designer, and is then silently rewired. Today that is one route, **Staff Travel Approval**, since HR's
+travel closure lane 2 (2026-10-02). **Found:** HR, checking whether the travel route would survive an
+administrator's edit. **Evidence:** read in source on 2026-10-02; not yet reproduced in the browser
+(steps below).
+
+> **Status: the minimum fix is in — made by HR on 2026-10-02 (travel closure slice 2b), after the issue was
+> raised with the workflow developer.** The designer now keeps, shows and saves back the approver rules it does not edit,
+> and keeps the step's required role as their fallback. See *What HR changed* below. The fuller fix — an
+> approval stage *assigned* to a person from the record in the designer — stays with the workflow owner.
+
+### What the engine supports
+
+An approval stage's approver rules (`approvalConfig.approverRules`) can be `Role`, `User`, `Dynamic`,
+`RequestorManager` or `PreviousStepUser` (`WorkflowAssignmentType`). `WorkflowEngine.ResolveApproversAsync`
+(`WorkflowEngine.cs:1561`) resolves each; a `Dynamic` rule reads a user id from the record's workflow
+context under its `dynamicExpression` (l.1593), and when no rule resolves the engine falls back to the
+step's `RequiredRole` (l.1455). The context is what the entity's block in
+`SimpleWorkflowService.BuildEntityContextAsync` puts there.
+
+Staff travel uses this: the *Line manager approval* stage carries two `Dynamic` rules
+(`lineApproverUserId`, `lineApproverUserId2`), which the travel context fills with the logins of the
+traveller's two nearest line authorities (`SimpleWorkflowService.cs:1932-1938`), and `RequiredRole = HR`
+as the fallback. So the task, the *Approval Required* notification and the inbox row go to the
+traveller's own supervisor or head of unit — not to every holder of the Manager role — and to HR only
+when nobody in the traveller's line can sign in.
+
+### What is broken
+
+The designer understands only `Role` and `User` approver rules on an approval stage:
+
+- **Loading** (`WorkflowDesigner.tsx:1433-1446`) keeps the `Role` and `User` rules and drops every other
+  kind; when no `Role` rule is left, it shows the step's `RequiredRole` as the stage's approver role. The
+  travel stage therefore shows **"HR"** as its approver — the fallback, not who is actually asked.
+- **Saving** (from l.1623; `requiredRole` at l.1250) rebuilds `approverRules` from the roles and users it
+  showed. The `Dynamic` rules are gone, and "HR" is written back as an explicit `Role` rule.
+- Nothing warns, on load or on save.
+
+Task steps are not affected — they already offer *Dynamic User From Context* (l.2866). The gap is approval
+stages only.
+
+### What happens when someone edits the travel route (steps to reproduce)
+
+1. Workflow designer → *Staff Travel Approval* → new version → change nothing, or add a stage → publish.
+2. Read the new version's *Line manager approval* step: `approverRules` is `[Role: HR]`; the two `Dynamic`
+   rules are gone.
+3. Submit a travel request: every HR officer gets the first-stage task and notification; the traveller's
+   line manager gets nothing and can no longer decide it. HR's travel service then lets the travel desk
+   decide the stage (its rule for "no line manager can"), so nothing errors — the route has quietly become
+   HR-only.
+
+### What a fix needs
+
+**Minimum (enough for travel):** on load, keep every approver rule the designer does not edit, unchanged,
+in the node's data; on save, write those rules back after the role and user rules; show them read-only on
+the stage (for example *Named by the record: lineApproverUserId*); and do not present `RequiredRole` as an
+approver role when the stage's rules are of another kind. A round-trip test — load a stage with a `Dynamic`
+rule, save it, get the same rules back — and a check that `Role`/`User`-only routes save exactly as before.
+
+**Fuller:** let an approval stage be assigned *Person from the record (context field)*, as a task step
+already can, listing the context fields the entity's `BuildEntityContextAsync` block provides.
+
+**HR's proposal** (as first recorded): HR makes the minimum change in its next travel slice (2b), with the
+round-trip test, unless the workflow owner prefers to make it. Until then, do not publish a new version of
+*Staff Travel Approval* from the designer. — *Done by HR; see below.*
+
+### What HR changed (2026-10-02, travel closure slice 2b)
+
+The minimum fix, and nothing else in the designer or the engine:
+
+- **New `frontend/src/components/workflow/WorkflowDesigner.approvers.ts`** — the approval stage's approver
+  mapping, moved out of the component into pure functions so it can be tested. It is part of the
+  designer — named for it, and the designer's import and its load and save points say where it is:
+  - `readApprovalStageApprovers(rules, requiredRole)` — **load.** Roles and users go to the designer's
+    editors as before. Every other kind of rule is kept **exactly as stored** (`preservedApproverRules`).
+    When there are such rules, the step's required role is kept as their fallback
+    (`fallbackRequiredRole`) and is **no longer shown as an approver role**. A stage of roles and users
+    loads exactly as before — including the old behaviour of showing the required role when no role
+    rule is left.
+  - `buildApprovalStageRules(...)` — **save.** Roles and users are built exactly as the designer always
+    built them (same groups and priorities); the preserved rules follow, unchanged (their kind written
+    as the enum number, as the designer writes its own).
+  - `stageRequiredRole(...)` — a stage with preserved rules keeps the required role it was stored with;
+    any other stage takes its first role, as before.
+  - `approverSlotCount(...)` — the designer's "at least one approver" and minimum-approvals checks count
+    preserved approvers (travel's line-manager stage has no role or user, and would otherwise fail
+    validation and could not be saved at all).
+  - `describePreservedApprover(rule)` — the words the designer shows for one.
+- **`WorkflowDesigner.tsx`** — `buildNodeDataFromStep` reads the stage through the helper and keeps
+  `preservedApproverRules` and `fallbackRequiredRole` on the node; `buildStepConfiguration` saves through
+  `buildApprovalStageRules`; the step's `requiredRole` comes from `stageRequiredRole`; validation counts
+  preserved approvers. The stage's properties panel shows them read-only under **Named by the record**
+  ("Person named by the record (lineApproverUserId)"), with "When none of them can be found, the HR role
+  is asked instead". **`nodes/ApprovalNode.tsx`** counts them on the canvas card.
+- **Proof:** `WorkflowDesigner.approvers.test.ts`, 8 tests — the travel stage **exactly as
+  `GET api/Workflow/definitions/{id}` returned it on UAT** round-trips unchanged, twice, with HR kept as
+  its fallback; a stage of roles and users saves **exactly as the code before the fix did** (that code is
+  copied into the test as the reference, for parallel and sequential stages); the old seed shape (no
+  rules, a required role only) is unchanged; a mixed stage keeps both kinds; the kind is read whether the
+  API sends its name or its number. All 47 workflow component tests pass; type-check and lint clean.
+  Not yet walked in the browser.
+
+**What it means now:** the *Staff Travel Approval* route can be opened, edited (a stage added, for
+instance) and republished in the designer; its *Line manager approval* stage keeps its two named-approver
+rules and its HR fallback.
+
+**Still the workflow owner's:** letting an author *assign* an approval stage to a person from the record
+in the designer (task steps already offer *Dynamic User From Context*), and #3 below.
+
+### Related
+
+- **#3 — conditional routing does not route** (still open): a stage cannot yet depend on the record, e.g.
+  "the Managing Director only above GHS 50,000".
+- **`RequestorManager` never resolves.** The engine reads `requestorManagerId` from the context
+  (`WorkflowEngine.cs:1600`, `ProcedureCaseService.cs:6848`), and no entity's context supplies it, so a
+  stage assigned to "the requestor's manager" has no approver. HR built its own line-manager lookup for
+  travel for this reason (`HrLineAuthority`).
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

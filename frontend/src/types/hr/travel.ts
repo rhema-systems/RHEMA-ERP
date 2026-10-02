@@ -128,6 +128,7 @@ export interface StaffTravelRequestSummary extends AuditFields {
   currencyCode: string;
   isInternational: boolean;
   riskLevel: TravelRiskLevel;
+  submittedAt?: string | null;
 }
 
 export interface StaffTravelRequestComment extends AuditFields {
@@ -344,6 +345,51 @@ export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
   'employeeId' | 'initiatedByRole'
 > & { id: string };
+
+/** How the caller decides a request at the stage it is on (travel final closure, lane 2 — D-7). */
+export type TravelDecidesAs = 'LineAuthority' | 'TravelDesk' | 'Approver';
+
+/**
+ * What the caller may decide on a request, at which stage and as whom — the screen's answer for whether
+ * to offer Approve, Reject and Return, and whether the approve dialog asks for the budget (lane 2).
+ */
+export interface StaffTravelViewerActions {
+  requestId: string;
+  canDecide: boolean;
+  /** The stage the request is on, as its route names it; null when it is not out for approval. */
+  stageName?: string | null;
+  isLineStage: boolean;
+  /** The last approval stage of the route — its approval approves the trip and sets the budget. */
+  isFinalStage: boolean;
+  /** The stage the request goes to after this one; null at the last. */
+  nextStageName?: string | null;
+  decidesAs?: TravelDecidesAs | null;
+  /** As a line authority: "supervisor", or "head of …". */
+  relation?: string | null;
+  /** At the line manager's stage: the line authorities it waits for, named. */
+  waitingFor: string[];
+  /** Why the caller cannot decide, when the request is out for approval and they cannot. */
+  reason?: string | null;
+}
+
+/** One row of an approver's travel queue: the request, and the caller's part in it (lane 2). */
+export interface StaffTravelApprovalQueueItem {
+  request: StaffTravelRequestSummary;
+  originCity?: string | null;
+  stageName?: string | null;
+  isLineStage: boolean;
+  isFinalStage: boolean;
+  decidesAs: TravelDecidesAs;
+  relation?: string | null;
+  /** Whole days since it was submitted. */
+  daysWaiting: number;
+}
+
+/** What an approval did: approved the trip, or sent it on to the next stage (lane 2). */
+export interface StaffTravelApproveResult {
+  message: string;
+  status: StaffTravelRequestStatus;
+}
 
 /** What a submission did (lane 1). */
 export interface StaffTravelSubmitResult {

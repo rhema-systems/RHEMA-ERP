@@ -483,28 +483,32 @@ Travel's own bespoke approval chain was retired.
 | Entity type | `StaffTravelRequest` |
 | Definition seeded? | ✅ *Staff Travel Approval*, version 2 — `Draft → Line manager approval → HR approval → Approved` |
 | Stage 1 — *Line manager approval* | **addressed by name** to the traveller's two nearest line authorities who can sign in: their supervisor, then the head of their unit and of each unit above. Only they are told, see it in their inbox and may decide it — no Manager role or travel permission needed. With nobody in the line able to sign in, it falls to **HR**, and the request gains an internal note saying why |
-| Stage 2 — *HR approval* | roles **HR** and **TenantAdmin**; HR sets the **approved budget** here (more than zero, within the policy's single-trip limit) |
+| Stage 2 — *HR approval* | roles **HR** and **TenantAdmin**; the **last** stage, so HR sets the **approved budget** here (more than zero, within the policy's single-trip limit) |
 | Prevents self-approval? | **Yes, in the service** — nobody decides their own trip on either stage; the engine's initiator bar stays off so the desk can decide trips it raised for others |
+| Editing the route | Allowed in the workflow designer (`/administration/workflow`): it keeps stage 1's named approvers and its HR fallback (cross-module defect #34, fixed by HR in lane 2). A stage added in between — Finance, say — is a middle stage: the budget stays with whoever approves **last** |
 
-Five things follow:
+Six things follow (since closure lane 2):
 
 1. **`status` says only which phase the request is in.** *Submitted* means "out for approval";
-   **which step it sits on is the workflow instance's business**, and the **Workflow** tab is
-   authoritative.
-2. **Nothing on the page ever writes a status.** Submit, approve and reject all go through
-   `useWorkflowRecord`, and the screen refetches rather than assuming an outcome.
-3. **No approver id is sent.** The server resolves the approver from the token against the
-   published definition.
-4. **Approve and Reject are not permission-gated.** They are the assignee's act. If you are not the
-   assignee the buttons render **disabled**, with the step and the pending approver named beside
-   them.
-5. **Two states can be submitted from:** `Draft` and `ReturnedForRevision`.
+   **which stage it sits on is the workflow instance's business** — the page's banner names it, and
+   the **Workflow** tab is authoritative.
+2. **Nothing on the page ever writes a status.** It sends the decision and refetches rather than
+   assuming an outcome.
+3. **No approver id is sent.** The server resolves the approver from the token.
+4. **Approve, Reject and Return for revision are the server's answer, not a permission.** The page
+   asks *viewer actions* who may decide at this stage and draws the three buttons only for them — the
+   traveller's line manager at stage 1 (the travel desk there only when nobody in the line can sign
+   in), HR at stage 2. Everyone else sees whose decision it is: *"Waiting for Kojo Fiadzo (supervisor)
+   or …"*.
+5. **The approve dialog asks for the approved budget at the last stage only**, prefilled with the
+   estimate (**T-10 fixed**). An earlier stage approves without one and is told who sets it.
+6. **Two states can be submitted from:** `Draft` and `ReturnedForRevision`.
 
-⚠ **`approvedBudget` is not sent by the page either** — it is left to the workflow's own budget
-prompt. So a request approved from this screen keeps `ApprovedBudget` null unless the definition
-asks for it, and the Overview's *Approved budget* line reads an em dash. **T-10.** *Since closure
-lane 2 the API takes the budget at HR's stage and refuses it at the line manager's; the approve
-dialog that asks for it arrives with lane 2's screens (slice 2b).*
+**The line manager's way in.** *Human Resources → Time & Leave → Staff Travel → Approvals* lists what waits for the
+signed-in person — every employee sees the entry, and it lists only their own work. A line manager
+with no travel permission opens the request from there or from their inbox and sees the trip, its
+comments and attachments and their decision; the desk's tabs (itinerary, bookings, finance,
+compliance) and its Edit, Cancel and Complete buttons are not drawn for them.
 
 ---
 
@@ -2501,7 +2505,15 @@ the module's argument.
 > they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
 > below warns about one of these, the warning describes the code before lane 0.
 >
-> **Closure lane 2, slice 2a (2026-10-02, staged)** put travel approval in **two stages** — the
+> **Closure lane 2, slice 2b (2026-10-02, staged) — lane 2 complete.** The screens: a **Travel
+> Approvals** queue under Staff Travel; the request page's own **Approve, Reject and Return** buttons,
+> drawn only for whoever may decide at the stage, with a banner saying whose decision it is; the approve
+> dialog asks for the **approved budget** at the last stage, prefilled with the estimate (**T-10
+> fixed**); an approver without travel permission sees the trip, not the desk's tabs. The workflow
+> designer now keeps the travel route's named approvers when the route is edited (cross-module defect
+> #34).
+>
+> **Closure lane 2, slice 2a (2026-10-02, committed `4e4d85b2f`)** put travel approval in **two stages** — the
 > traveller's line manager, then HR (§ 1.6) — and gave the line manager a way in: the traveller's
 > supervisor or head of unit can now open the request, its comments and attachments, find it in a queue
 > of what waits for them, and approve, reject or return it, with no travel permission and no Manager

@@ -18,6 +18,9 @@ import { useAuth } from '@/hooks/use-auth';
 export function useTravelAccess() {
   const { hasAnyPermission, hasAnyRole } = useAuth();
   return {
+    // The desk's view: the register, the tabs, the money. A line manager or another approver who holds
+    // none of these still opens a request waiting for them — through the approver's door (lane 2).
+    canRead: hasAnyPermission(['HR.Travel.Read', 'HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES),
     canWrite: hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES),
     canAdmin: hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES),
     canApprove: hasAnyPermission(['HR.Travel.Approve', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES),

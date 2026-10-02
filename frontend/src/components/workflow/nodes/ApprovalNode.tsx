@@ -6,11 +6,14 @@ import { Badge } from '@/components/ui/badge';
 interface ApprovalNodeData {
   label: string;
   approvers?: string[];
+  /** Approvers named by the record, which the designer keeps but does not edit (defect #34). */
+  preservedApproverRules?: unknown[];
   approvalType?: 'any' | 'all' | 'sequence';
   escalationTimeout?: number;
 }
 
 export const ApprovalNode = memo<NodeProps<ApprovalNodeData>>(({ data }) => {
+  const approverCount = (data.approvers?.length ?? 0) + (data.preservedApproverRules?.length ?? 0);
   const getApprovalTypeColor = (type: string) => {
     switch (type) {
       case 'any': return 'bg-blue-100 text-blue-800';
@@ -52,10 +55,10 @@ export const ApprovalNode = memo<NodeProps<ApprovalNodeData>>(({ data }) => {
         </div>
       )}
       
-      {data.approvers && data.approvers.length > 0 && (
+      {approverCount > 0 && (
         <div className="flex items-center justify-center text-xs text-gray-600 mb-1">
           <Users className="h-3 w-3 mr-1" />
-          <span>{data.approvers.length} approver{data.approvers.length > 1 ? 's' : ''}</span>
+          <span>{approverCount} approver{approverCount > 1 ? 's' : ''}</span>
         </div>
       )}
       

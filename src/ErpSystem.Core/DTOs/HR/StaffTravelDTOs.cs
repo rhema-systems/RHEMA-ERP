@@ -410,10 +410,13 @@ public class StaffTravelViewerActionsDto
     public bool IsLineStage { get; set; }
 
     /// <summary>
-    /// True when the next approval completes the request — HR's stage, or a route with one stage. The
-    /// approved budget is asked for then, and only then.
+    /// True when the next approval completes the request — the last approval stage of its route, read from
+    /// the route itself (HR's on the seeded one). The approved budget is asked for then, and only then.
     /// </summary>
     public bool IsFinalStage { get; set; }
+
+    /// <summary>The stage the request goes to after this one; null at the last.</summary>
+    public string? NextStageName { get; set; }
 
     /// <summary><c>LineAuthority</c>, <c>TravelDesk</c> or <c>Approver</c>; null when the caller cannot decide.</summary>
     public string? DecidesAs { get; set; }

@@ -13,6 +13,9 @@ import type {
   StaffTravelDashboard,
   StaffTravelPolicyPreview,
   StaffTravelSubmitResult,
+  StaffTravelApprovalQueueItem,
+  StaffTravelApproveResult,
+  StaffTravelViewerActions,
   CreateStaffTravelRequest,
   UpdateStaffTravelRequest,
   CreateStaffTravelRequestComment,
@@ -35,6 +38,11 @@ import type {
  *
  * ⚠ Someone else's request on the self-service surface is a 404, not a 403, so the surface cannot
  * be used to enumerate travel-request ids. Treat 404 there as "not yours", not as "deleted".
+ *
+ * <b>The approver's door</b> (travel final closure, lane 2): `getById`, `getComments`,
+ * `getAttachments` and the download, `approve`, `reject`, `returnForRevision`, `getMyApprovals` and
+ * `getViewerActions` also answer the traveller's line manager and whoever the request waits for — no
+ * travel permission needed. Everything else here stays the desk's.
  */
 class TravelService {
   private readonly baseUrl = '/staff-travel/requests';
@@ -52,6 +60,16 @@ class TravelService {
 
   getById(id: string) {
     return apiService.get<StaffTravelRequest>(`${this.baseUrl}/${id}`);
+  }
+
+  /** Travel requests waiting for the caller's decision — the engine's, then the line rule's (lane 2). */
+  getMyApprovals(params: { pageNumber?: number; pageSize?: number } = {}) {
+    return apiService.get<PagedResult<StaffTravelApprovalQueueItem>>(`${this.baseUrl}/my-approvals`, params);
+  }
+
+  /** What the caller may decide on this request, at which stage, and as whom (lane 2). */
+  getViewerActions(id: string) {
+    return apiService.get<StaffTravelViewerActions>(`${this.baseUrl}/${id}/viewer-actions`);
   }
 
   getByNumber(requestNumber: string) {
@@ -130,9 +148,13 @@ class TravelService {
       `${this.baseUrl}/${id}/submit`, lateSubmissionReason ? { lateSubmissionReason } : {});
   }
 
-  /** The approver is resolved from the token against the published definition, never sent. */
+  /**
+   * Approves the stage the request is on; the approver is the token, never sent. The budget is the last
+   * stage's to set (lane 2) — sent at an earlier stage it is refused; left out at the last, the estimate
+   * is approved. The answer says whether the trip is approved or gone on to the next stage.
+   */
   approve(id: string, approvedBudget?: number, notes?: string) {
-    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/approve`, {
+    return apiService.post<StaffTravelApproveResult>(`${this.baseUrl}/${id}/approve`, {
       requestId: id, approvedBudget, notes,
     });
   }

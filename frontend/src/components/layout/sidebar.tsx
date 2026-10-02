@@ -1347,6 +1347,9 @@ export const navigationItems: NavItem[] = [
             icon: Plane,
             children: [
               { title: 'Register', href: '/hr/travel', icon: Plane, permissions: ['HR.Travel.Read'] },
+              // ⚠ NO permission (travel final closure, lane 2): the traveller's line manager approves the first
+              // stage and holds no travel permission. The server lists only what waits for the caller.
+              { title: 'Approvals', href: '/hr/travel/approvals', icon: CheckSquare },
               // My Travel re-homed to the portal (/me/travel).
               // Claims get their own entry because the finance desk works a queue ACROSS trips —
               // "approved and unpaid" — which no single travel request can show.

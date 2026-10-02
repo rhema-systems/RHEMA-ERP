@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
@@ -889,6 +890,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     /// <param name="DecidesAs">How the caller decides when they may.</param>
     /// <param name="Line">At the line-manager stage: the traveller's line authorities.</param>
     /// <param name="WaitingFor">At the line-manager stage: the line authorities the engine will accept.</param>
+    /// <param name="NextStageName">The approval stage the route goes to after this one; null when this is the
+    /// last — the one whose approval approves the trip, and so the one that sets the budget.</param>
     private sealed record DecisionStanding(
         string? StageName,
         bool IsLineStage,
@@ -896,9 +899,40 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         string? DecidesAs,
         string? Relation,
         IReadOnlyList<HrLinePerson> Line,
-        IReadOnlyList<HrLineApprover> WaitingFor)
+        IReadOnlyList<HrLineApprover> WaitingFor,
+        string? NextStageName = null)
     {
         public bool MayDecide => Refusal is null && DecidesAs is not null;
+        public bool IsFinalStage => NextStageName is null;
+    }
+
+    /// <summary>
+    /// The approval stage the request's route goes to after the one it is on, or null when that is the last.
+    /// </summary>
+    /// <remarks>
+    /// Read from the route itself — the engine's current step, its definition, the next approval step by order
+    /// — so a stage an administrator adds in the workflow designer (Finance between the line manager and HR,
+    /// say) is a middle stage here too. Lane 2a assumed every stage after the line manager's was the last:
+    /// with a stage added, its approver would have been offered the budget and the figure discarded.
+    /// </remarks>
+    private async Task<string?> NextApprovalStageAsync(WorkflowStepInfo? step, CancellationToken cancellationToken)
+    {
+        if (step is null || step.Id == Guid.Empty) return null;
+
+        var current = await _unitOfWork.Repository<WorkflowStepInstance>().GetQueryable()
+            .Where(si => si.Id == step.Id)
+            .Select(si => new { si.WorkflowStep.WorkflowDefinitionId, si.WorkflowStep.Order })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (current is null) return null;
+
+        return await _unitOfWork.Repository<WorkflowStep>().GetQueryable()
+            .Where(s => s.WorkflowDefinitionId == current.WorkflowDefinitionId
+                     && !s.IsDeleted
+                     && s.StepType == WorkflowStepType.Approval
+                     && s.Order > current.Order)
+            .OrderBy(s => s.Order)
+            .Select(s => s.Name)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private static bool IsLineStageName(string? stepName)
@@ -964,13 +998,14 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         var step = await _workflowService.GetCurrentWorkflowStepAsync(EntityType, entity.Id);
         var stageName = step?.StepName;
+        var nextStage = await NextApprovalStageAsync(step, cancellationToken);
 
         if (!IsLineStageName(stageName))
             return callerMayApprove
-                ? new DecisionStanding(stageName, false, null, DecidesAsApprover, null, none, nobody)
+                ? new DecisionStanding(stageName, false, null, DecidesAsApprover, null, none, nobody, nextStage)
                 : new DecisionStanding(stageName, false,
                     $"This request is at the {stageName ?? "approval"} stage, and you are not one of its approvers.",
-                    null, null, none, nobody);
+                    null, null, none, nobody, nextStage);
 
         // ── The line-manager stage ────────────────────────────────────────────────────────────────
         var line = await HrLineAuthority.GetLineAsync(_unitOfWork, entity.TenantId, entity.EmployeeId, cancellationToken);
@@ -994,28 +1029,28 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         if (mine is not null)
         {
             if (callerMayApprove)
-                return new DecisionStanding(stageName, true, null, DecidesAsLineAuthority, mine.Relation, line, waitingFor);
+                return new DecisionStanding(stageName, true, null, DecidesAsLineAuthority, mine.Relation, line, waitingFor, nextStage);
             var sentTo = waitingFor.Count > 0
                 ? $"It was sent to {NameList(waitingFor.Select(a => a.Name))} when it was submitted."
                 : "It was sent elsewhere when it was submitted — your login may not have been active then.";
             return new DecisionStanding(stageName, true,
                 $"You are {traveller}'s {mine.Relation}, but this stage is not waiting for you. {sentTo}",
-                null, mine.Relation, line, waitingFor);
+                null, mine.Relation, line, waitingFor, nextStage);
         }
 
+        var then = nextStage is null ? string.Empty : $" Then it goes to {nextStage}.";
         if (waitingFor.Count > 0)
             return new DecisionStanding(stageName, true,
-                $"This stage is for {traveller}'s line manager — {NameList(waitingFor.Select(a => a.Name))}. " +
-                "HR decides after them.",
-                null, null, line, waitingFor);
+                $"This stage is for {traveller}'s line manager — {NameList(waitingFor.Select(a => a.Name))}.{then}",
+                null, null, line, waitingFor, nextStage);
 
         // Nobody in the line can decide: the travel desk does (D-7).
         if (!callerIsTravelDesk || !callerMayApprove)
             return new DecisionStanding(stageName, true,
                 $"{traveller} has no line manager who can approve in the system, so the travel desk decides this stage.",
-                null, null, line, waitingFor);
+                null, null, line, waitingFor, nextStage);
 
-        return new DecisionStanding(stageName, true, null, DecidesAsTravelDesk, null, line, waitingFor);
+        return new DecisionStanding(stageName, true, null, DecidesAsTravelDesk, null, line, waitingFor, nextStage);
     }
 
     /// <summary>The throwing form of <see cref="GetStandingAsync"/>, for the decision verbs.</summary>
@@ -1118,7 +1153,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         actions.StageName = standing.StageName;
         actions.IsLineStage = standing.IsLineStage;
-        actions.IsFinalStage = !standing.IsLineStage;
+        actions.IsFinalStage = standing.IsFinalStage;
+        actions.NextStageName = standing.NextStageName;
         actions.CanDecide = standing.MayDecide && !isTraveller;
         actions.DecidesAs = actions.CanDecide ? standing.DecidesAs : null;
         actions.Relation = standing.Relation;
@@ -1173,7 +1209,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 OriginCity = request.OriginCity,
                 StageName = standing.StageName,
                 IsLineStage = standing.IsLineStage,
-                IsFinalStage = !standing.IsLineStage,
+                IsFinalStage = standing.IsFinalStage,
                 DecidesAs = standing.DecidesAs!,
                 Relation = standing.Relation,
                 DaysWaiting = request.SubmittedAt is DateTime submitted ? Math.Max(0, (int)(now - submitted).TotalDays) : 0,
@@ -1319,13 +1355,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var standing = await RequireStandingAsync(entity, callerIsTravelDesk, cancellationToken);
         var deskNoteAuthor = RequireDeskNoteAuthor(standing);
 
-        // Lane 2 (O-9, T-10): the approved budget is HR's decision, at the last stage. It used to be the
-        // estimate copied — no screen ever sent one — so the field recorded no decision.
+        // Lane 2 (O-9, T-10): the approved budget is the last approver's decision — HR's on the seeded route. It
+        // used to be the estimate copied — no screen ever sent one — so the field recorded no decision. Sent at an
+        // earlier stage it is refused, not kept: only the approval that approves the trip records it.
         if (approveDto.ApprovedBudget is decimal budget)
         {
-            if (standing.IsLineStage)
+            if (!standing.IsFinalStage)
                 throw new InvalidOperationException(
-                    "The approved budget is set at HR's approval, after the line manager's — approve without it.");
+                    $"The approved budget is set by the last approver. After this stage the request goes to " +
+                    $"{standing.NextStageName} — approve without a budget.");
             if (budget <= 0m)
                 throw new InvalidOperationException("The approved budget must be more than zero.");
             var caps = await _policyGuard.ResolveAsync(entity, cancellationToken);

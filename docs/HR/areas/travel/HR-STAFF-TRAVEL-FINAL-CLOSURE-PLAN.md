@@ -39,15 +39,16 @@ baseline (D-13); lane 0 was built the same day.**
 4. **Lane 1** (§ 4) — **COMPLETE 2026-10-02**, in three slices: **1a** the request's write rules
    (committed `e1d050da2`), **1b** the lifecycle verbs (committed `8fadfd31e`), **1c** comments, the
    traveller's privacy and groups (committed `895996b6f`).
-5. **Lane 2** (the approval ladder and the approver's door, D-7) — in two slices. **2a** the ladder, the
-   door, the queue and the retrofit migration — **built and proven 2026-10-02**: the retrofit
-   (`20261002042909_TravelClosureApprovalLadder`, data only) is **applied to UAT** (restore point
-   `ErpSystemDB_UAT_before_travell2.bak`); `run-final-approvals.mjs` 118/118 twice, the lifecycle suite
-   255/255 twice, the truth suite 117/117 twice; staged for the user's commit. ⚠ Stage 1 is addressed
-   **by name**, not by role — read lane 2's *As built* before touching the route. **Next: slice 2b**,
-   the screens (the approvals queue, the approver's view of the request, the budget in the approve
-   dialog); then lanes **3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
-   against this document before building it — line numbers are as of HEAD `bad482a8d`.
+5. **Lane 2** (the approval ladder and the approver's door, D-7) — **COMPLETE 2026-10-02**, in two
+   slices: **2a** the ladder, the door, the queue and the retrofit migration (committed `4e4d85b2f`; the
+   retrofit `20261002042909_TravelClosureApprovalLadder` is applied to UAT, restore point
+   `ErpSystemDB_UAT_before_travell2.bak`); **2b** the screens, the last stage read from the route, and
+   the workflow designer fix (cross-module defect #34) — built and proven (`run-final-approvals.mjs`
+   123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) and staged for the user's commit.
+   ⚠ Stage 1 is addressed **by name**, not by role — read lane 2's *As built* before touching the route.
+6. **Next: lane 3** (the money chain, B9 included), then lanes **4 → 5 → 6 → 7 → 8 → 9 → 10** in that
+   order (§ 2). Source-check each lane against this document before building it — line numbers are as
+   of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -94,7 +95,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
 | **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
 | **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
-| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ◐ **2a** built and proven 2026-10-02 — retrofit applied to UAT, approvals 118/118 twice, lifecycle 255/255 twice, truth 117/117 twice; staged. **2b** (the screens) next |
+| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice, staged |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
 | **5** | Bookings and itinerary | batch 1 | `run-final-bookings.mjs` | ☐ |
@@ -762,7 +763,7 @@ platform owner.
   the service's checks (leave's shape, `LeavesController.cs:847-858`); a read door — Read OR line
   authority OR the person it waits for (`LeavesController.cs:138-154`) — on the request, its comments
   and its attachments; `GET requests/my-approvals` asks the engine (`LeavesController.cs:759`). *(2a)*
-- [ ] **Frontend:** a `/hr/travel/approvals` queue, added to `sidebar-hr-gates.test.ts`'s KEEP_OPEN list
+- [x] **Frontend:** a `/hr/travel/approvals` queue, added to `sidebar-hr-gates.test.ts`'s KEEP_OPEN list
   with its reason; the detail page renders for an approver with no travel permission (desk-only tabs
   hidden), so `/me/inbox`'s link opens; the approve dialog takes an approved budget, prefilled with
   the estimate. *(slice 2b)*
@@ -860,6 +861,57 @@ TenantAdmin); `run-final-truth.mjs` **117/117 twice** (411394, 422420). The API 
 the known ones: payroll's profile FK on every employee create (defect #23), the truth suite's
 deliberate duplicate policy version, one demo user's identity reconciliation, and the notification
 clean-up job.
+
+**As built — slice 2b (2026-10-02).**
+
+- *The screens.* **Travel Approvals** (`/hr/travel/approvals`, *Human Resources → Time & Leave → Staff
+  Travel → Approvals*), open to every user and on the sidebar test's keep-open list with its reason —
+  the server lists only what waits for the caller; each row says the stage, whether it sets the
+  budget, how the caller decides (line manager and their relation, the travel desk, an approver) and
+  how long it has waited. The request page draws **Approve, Reject and Return for revision** from the
+  server's *viewer actions*, not from the engine's flag (the shared workflow actions keep submit and
+  recall; their approve and reject are off, since they offered the buttons to anyone the engine
+  listed); a banner says the stage, what follows, and whose decision it is ("Waiting for … or …").
+  **`TravelApproveDialog`** asks for the approved budget at the last stage only, prefilled with the
+  estimate (T-10). An approver without travel permission sees the overview, comments, attachments and
+  the workflow tab — not the itinerary, bookings, finance or compliance tabs, the comment composer, the
+  upload, or Edit, Cancel, Complete and Submit; **Cancel had been drawn for anyone who could open the
+  page**, and is now the desk's. The back link goes to the queue for them. `useTravelAccess` gained
+  `canRead`.
+- *The last stage is read from the route.* 2a treated every stage after the line manager's as the last,
+  so a stage an administrator adds in the middle (Finance between the line manager and HR) would have
+  been offered the budget and the figure discarded. The service now reads the route — the engine's
+  current step, its definition, the next approval step by order — and only the stage with none after
+  it takes the budget; an earlier stage's budget is refused naming the stage that follows. *Viewer
+  actions* gained `nextStageName`, and the stage-1 refusal says what follows instead of "HR decides
+  after them". With Finance added, HR — last — would still set the budget; whether TDC wants Finance
+  to own that figure is recorded as a question, not decided.
+- *The workflow designer keeps what it does not edit* — **cross-module defect #34, found and fixed in
+  this lane** (the entry records both, for the workflow owner). The designer understood only role and
+  user approvers: it showed the travel stage's approver as HR (its fallback) and, on any save, deleted
+  the two named-approver rules and wrote HR as a role — every HR officer would have been asked about
+  every trip at stage 1, silently. The approval-stage mapping moved into
+  `frontend/src/components/workflow/WorkflowDesigner.approvers.ts` (part of the designer, in its own file so
+  it is tested — `WorkflowDesigner.approvers.test.ts`): other kinds of rule are
+  kept as stored, shown read-only (*Named by the record*), saved back unchanged, counted by validation;
+  the required role stays their fallback. Role-and-user stages load and save exactly as before (the
+  test holds a verbatim copy of the old code as the reference); the travel stage exactly as UAT's API
+  returns it round-trips unchanged, twice. 8 new tests; all 47 workflow component tests pass. Not
+  walked in the browser. Assigning an approval stage to a person from the record in the designer stays
+  the workflow owner's.
+
+**Suite** `run-final-approvals.mjs` gains five checks (123 in all): the stage that follows is named, read
+from the route; the desk's refusal at stage 1 names it rather than assuming HR; the supervisor's budget
+is refused naming the stage that sets it; HR's stage has none after it; HR's queue row is marked as the
+stage that sets the budget. **123/123 twice on UAT, 2026-10-02** (stamps 157115, 210672). Regression:
+lifecycle **255/255 twice** (248517, 317816), truth **117/117 twice** (387218, 396916). Frontend: the
+scoped travel type-check and the designer files' type-check clean, lint clean, the travel and workflow
+unit tests green. ⚠ `sidebar-hr-gates.test.ts` fails on two leaves that are not travel's —
+`/hr/leave/calendar` and `/hr/company-schedule/my-schedule` — exactly as it does on the committed code
+before this slice; the new entry passes. Recorded, not changed here. The API log held only the known
+noise (no SMTP on UAT: 1,600 notification e-mails failed; payroll's profile FK; the truth suite's
+deliberate duplicate; one demo user's identity reconciliation). The screens were not walked in a
+browser.
 
 ### Lane 3 — The money chain (B1–B12, B14, D-2, D-10, O-2, O-6, O-8, O-9, T-21, T-22, T-35–T-39, T-57)
 
@@ -1199,7 +1251,7 @@ fleet trip.
 | Paying claims through payroll (O-6) | Payroll is another developer's module — D-10 hides the option until it can receive them |
 | Column encryption of passport and visa numbers (O-7) | No encryption mechanism exists in the model; masking ships in lane 7 |
 | Concurrency tokens on travel entities | A platform item |
-| **TDC questions:** reminder windows (90/14/90 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a Critical or Emergency alert blocks booking (T-45) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
+| **TDC questions:** reminder windows (90/14/90 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
 
 ---
 
@@ -1277,3 +1329,11 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   and on the user's go the API was started on UAT after a restore point — the retrofit applied and
   re-verified. `run-final-approvals.mjs` 118/118 twice, lifecycle 255/255 twice, truth 117/117 twice.
   Staged. Next: slice 2b, the screens.
+- **2026-10-02, later** — The user committed slice 2a (`4e4d85b2f`). Checking how the travel route would
+  survive an administrator's edit found **cross-module defect #34** — the workflow designer deletes an
+  approval stage's named-approver rules on save; recorded for the workflow developer, raised with them,
+  and the user chose to fix the designer's side in this lane. **Slice 2b built — LANE 2 COMPLETE**: the
+  approvals queue and the approver's view, travel's own decision buttons and the budget dialog, the last
+  stage read from the route, and the designer fix with its round-trip tests. The build succeeded; no
+  migration pending on UAT; approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice.
+  Staged. Next: lane 3.
