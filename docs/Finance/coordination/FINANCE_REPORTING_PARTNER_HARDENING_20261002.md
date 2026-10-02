@@ -3,7 +3,8 @@
 ## Authority and exact base
 
 - Objective: investigate and remediate liquidity-card totals, detailed-ledger presentation, and AR/AP Business Partner eligibility/display gaps as a separate follow-up to PR #323.
-- Exact base: `4ad3a54f4a03f2fd56da733c6a63081a947c4505` (`origin/master`).
+- Original investigation base: `4ad3a54f4a03f2fd56da733c6a63081a947c4505`.
+- Final integration base after synchronization: `a8a17615113de45e80b5e4bafe09ef1f437d5349` (`origin/master`, including Finance precision PR #323).
 - Branch: `codex/finance-reporting-partner-hardening`.
 - Worktree: `C:/Users/Akwas/Documents/DEV WORK/RHEMA ERP/RHEMA-ERP/.codex-worktrees/finance-reporting-partner-hardening`.
 - The primary dirty UAT checkout is untouched.
@@ -48,4 +49,5 @@
   - settlement entries remain the authority for availability and open-item workflow;
   - historical partner visibility is retained, while readiness is explicit and new-transaction actions remain fail-closed;
   - no schema, migration, posted evidence, or Business Partner master data is mutated.
-- Phase: final diff review and local commit; no remote integration has been performed.
+- Phase: verified and ready for remote integration.
+- Rebase: clean onto `a8a17615113de45e80b5e4bafe09ef1f437d5349`; post-rebase focused verification passed (`7/7`).
