@@ -170,6 +170,11 @@ public class EhcWorkflowRoutingRule : TenantEntity
 [Table("EhcTickets")]
 public class EhcTicket : TenantEntity
 {
+    public Guid? PublicPropertyEnquiryContactId { get; set; }
+
+    [ForeignKey(nameof(PublicPropertyEnquiryContactId))]
+    public virtual EhcPublicPropertyEnquiryContact? PublicPropertyEnquiryContact { get; set; }
+
     [Column(TypeName = "nvarchar(max)")]
     public string? PropertyListingContextJson { get; set; }
 

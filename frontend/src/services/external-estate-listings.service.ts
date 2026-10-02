@@ -79,12 +79,34 @@ export interface CreatePropertyListingEnquiry {
 export interface CreatePublicPropertyListingEnquiry {
   submissionId: string;
   contactName: string;
-  contactPhone: string;
-  alternativePhoneNumber?: string;
-  contactEmail: string;
-  preferredContactMethod: 'Email' | 'Phone' | 'Either';
+  contactPhone?: string;
+  contactEmail?: string;
+  preferredContactMethod: 'Email' | 'Phone';
+  contactVerificationToken: string;
   message: string;
   captchaToken?: string;
+}
+
+export type PublicEnquiryContactChannel = 'Email' | 'Phone';
+
+export interface PublicEnquiryContactChallenge {
+  channel: PublicEnquiryContactChannel;
+  maskedContact: string;
+  expiresInSeconds: number;
+}
+
+export interface PublicEnquiryContactProfile {
+  contactName: string;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  requiresPortalLogin: boolean;
+  externalPortalPath?: string | null;
+}
+
+export interface PublicEnquiryContactVerification {
+  verificationToken: string;
+  expiresAtUtc: string;
+  profile: PublicEnquiryContactProfile;
 }
 
 export interface ExternalListingRequestDocument {
@@ -276,6 +298,36 @@ class ExternalEstateListingsService {
     const response = await rawApiService.publicRequest<
       ApiResponse<ExternalListingEnquiry>
     >(`/estate/public/listings/${listingId}/enquiries`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return response.data;
+  }
+
+  async requestPublicEnquiryContactChallenge(payload: {
+    listingId: string;
+    channel: PublicEnquiryContactChannel;
+    contact: string;
+    captchaToken?: string;
+  }): Promise<PublicEnquiryContactChallenge> {
+    const response = await rawApiService.publicRequest<
+      ApiResponse<PublicEnquiryContactChallenge>
+    >('/estate/public/property-enquiry-contacts/challenges', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return response.data;
+  }
+
+  async verifyPublicEnquiryContact(payload: {
+    listingId: string;
+    channel: PublicEnquiryContactChannel;
+    contact: string;
+    otpCode: string;
+  }): Promise<PublicEnquiryContactVerification> {
+    const response = await rawApiService.publicRequest<
+      ApiResponse<PublicEnquiryContactVerification>
+    >('/estate/public/property-enquiry-contacts/verifications', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

@@ -114,7 +114,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             }
             else
             {
-                await _sms.SendAsync(
+                await _sms.SendOtpAsync(
                     tenant.Id,
                     contact,
                     $"Your supplier application verification code is {code}. It expires in 10 minutes.",
@@ -787,7 +787,7 @@ public sealed class SupplierApplicantAccessController : ControllerBase
             }
             else
             {
-                await _sms.SendAsync(
+                await _sms.SendOtpAsync(
                     prepared.TenantId,
                     prepared.NormalizedContact,
                     $"Your supplier contact correction verification code is {code}. " +

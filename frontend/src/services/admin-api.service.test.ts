@@ -52,3 +52,26 @@ describe('admin temporary-password API', () => {
     ).toBe('The password was used recently. (USER_PASSWORD_REUSED)');
   });
 });
+
+describe('admin SMS settings API', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('checks mNotify balance without sending configuration or credentials', async () => {
+    api.request.mockResolvedValue({ balance: 1483, bonus: 20 });
+
+    await adminApiService.getSmsBalance();
+
+    expect(api.request).toHaveBeenCalledWith('/settings/sms/balance');
+  });
+
+  it('sends an ordinary test SMS through the server-side tenant configuration', async () => {
+    api.request.mockResolvedValue({ success: true, message: 'Test SMS sent successfully.' });
+
+    await adminApiService.sendTestSms('+233241234567');
+
+    expect(api.request).toHaveBeenCalledWith('/settings/sms/test', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber: '+233241234567' }),
+    });
+  });
+});

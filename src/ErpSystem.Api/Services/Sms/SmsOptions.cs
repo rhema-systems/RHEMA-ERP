@@ -29,12 +29,9 @@ public sealed class GhanaGatewaySmsOptions
     public bool Enabled { get; set; } = false;
 
     /// <summary>
-    /// GET URL template with placeholders:
-    /// {to}, {message}, {senderId}, {apiKey}
-    /// Example:
-    /// https://gateway.example/send?to={to}&from={senderId}&msg={message}&key={apiKey}
+    /// mNotify Quick SMS endpoint. The API key is appended as the key query parameter.
     /// </summary>
-    public string? UrlTemplate { get; set; }
+    public string? UrlTemplate { get; set; } = MNotifySmsGateway.DefaultEndpoint;
 
     public string? ApiKey { get; set; }
     public string? SenderId { get; set; }

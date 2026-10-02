@@ -9270,7 +9270,7 @@ function BudgetAnalysisForm({
       </Card>
 
       <Dialog open={analysisOpen} onOpenChange={setAnalysisOpen}>
-        <DialogContent className="flex h-screen w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0">
+        <DialogContent className="flex h-[100dvh] max-h-[100dvh] w-screen max-w-none flex-col gap-0 overflow-hidden rounded-none p-0">
           <DialogHeader className="border-b px-4 py-2">
             <div className="flex flex-wrap items-center justify-between gap-3 pr-8">
               <div>

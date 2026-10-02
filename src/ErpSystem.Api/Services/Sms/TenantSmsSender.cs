@@ -1,4 +1,3 @@
-using System.Net;
 using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Services;
@@ -39,7 +38,38 @@ public sealed class TenantSmsSender : ITenantSmsSender
         _logger = logger;
     }
 
-    public async Task SendAsync(Guid tenantId, string toPhoneNumber, string message, CancellationToken cancellationToken = default)
+    public Task SendAsync(Guid tenantId, string toPhoneNumber, string message, CancellationToken cancellationToken = default)
+        => SendAsync(tenantId, toPhoneNumber, message, isOtp: false, cancellationToken: cancellationToken);
+
+    public Task SendOtpAsync(Guid tenantId, string toPhoneNumber, string message, CancellationToken cancellationToken = default)
+        => SendAsync(tenantId, toPhoneNumber, message, isOtp: true, cancellationToken: cancellationToken);
+
+    public async Task<MNotifySmsBalance> GetMNotifyBalanceAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await _db.SmsSettings
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (settings?.GhanaGatewayEnabled != true)
+            throw new InvalidOperationException("mNotify SMS is not enabled for this tenant.");
+
+        var apiKey = DecryptSecret(settings.GhanaGatewayApiKey);
+        if (string.IsNullOrWhiteSpace(apiKey))
+            throw new InvalidOperationException("mNotify API key is not configured for this tenant.");
+
+        using var client = _httpClientFactory.CreateClient("mnotify");
+        client.Timeout = TimeSpan.FromSeconds(Math.Clamp(settings.GhanaGatewayTimeoutSeconds, 1, 60));
+        return await MNotifySmsGateway.GetBalanceAsync(client, apiKey, cancellationToken);
+    }
+
+    private async Task SendAsync(
+        Guid tenantId,
+        string toPhoneNumber,
+        string message,
+        bool isOtp,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(toPhoneNumber))
             throw new ArgumentException("Phone number is required.", nameof(toPhoneNumber));
@@ -51,7 +81,7 @@ public sealed class TenantSmsSender : ITenantSmsSender
 
         if (settings == null)
         {
-            await SendWithFallbackOptionsAsync(toPhoneNumber, message, cancellationToken);
+            await SendWithFallbackOptionsAsync(toPhoneNumber, message, isOtp, cancellationToken);
             return;
         }
 
@@ -87,9 +117,9 @@ public sealed class TenantSmsSender : ITenantSmsSender
                     return;
                 }
 
-                if (p is "ghanagateway" or "ghana")
+                if (p is "mnotify" or "ghanagateway" or "ghana")
                 {
-                    await SendViaGhanaGatewayAsync(settings, toPhoneNumber, message, cancellationToken);
+                    await SendViaMNotifyAsync(settings, toPhoneNumber, message, isOtp, cancellationToken);
                     return;
                 }
 
@@ -105,7 +135,11 @@ public sealed class TenantSmsSender : ITenantSmsSender
         throw new InvalidOperationException("All tenant SMS providers failed.", last);
     }
 
-    private async Task SendWithFallbackOptionsAsync(string toPhoneNumber, string message, CancellationToken cancellationToken)
+    private async Task SendWithFallbackOptionsAsync(
+        string toPhoneNumber,
+        string message,
+        bool isOtp,
+        CancellationToken cancellationToken)
     {
         var providers = new List<string>();
         if (!string.IsNullOrWhiteSpace(_fallbackOptions.DefaultProvider))
@@ -128,9 +162,9 @@ public sealed class TenantSmsSender : ITenantSmsSender
                     return;
                 }
 
-                if (p is "ghanagateway" or "ghana")
+                if (p is "mnotify" or "ghanagateway" or "ghana")
                 {
-                    await SendViaGhanaGatewayOptionsAsync(_fallbackOptions.GhanaGateway, toPhoneNumber, message, cancellationToken);
+                    await SendViaMNotifyOptionsAsync(_fallbackOptions.GhanaGateway, toPhoneNumber, message, isOtp, cancellationToken);
                     return;
                 }
 
@@ -194,46 +228,53 @@ public sealed class TenantSmsSender : ITenantSmsSender
         }
     }
 
-    private async Task SendViaGhanaGatewayAsync(SmsSettings settings, string toPhoneNumber, string message, CancellationToken cancellationToken)
+    private async Task SendViaMNotifyAsync(
+        SmsSettings settings,
+        string toPhoneNumber,
+        string message,
+        bool isOtp,
+        CancellationToken cancellationToken)
     {
         if (settings.GhanaGatewayEnabled != true)
-            throw new InvalidOperationException("GhanaGateway SMS is not enabled for this tenant.");
+            throw new InvalidOperationException("mNotify SMS is not enabled for this tenant.");
 
-        await SendViaGhanaGatewayOptionsAsync(new GhanaGatewaySmsOptions
+        await SendViaMNotifyOptionsAsync(new GhanaGatewaySmsOptions
         {
             Enabled = true,
             UrlTemplate = settings.GhanaGatewayUrlTemplate,
-            ApiKey = string.IsNullOrWhiteSpace(settings.GhanaGatewayApiKey) ? null : _crypto.Decrypt(settings.GhanaGatewayApiKey),
+            ApiKey = DecryptSecret(settings.GhanaGatewayApiKey),
             SenderId = settings.GhanaGatewaySenderId,
             TimeoutSeconds = settings.GhanaGatewayTimeoutSeconds <= 0 ? 10 : settings.GhanaGatewayTimeoutSeconds
-        }, toPhoneNumber, message, cancellationToken);
+        }, toPhoneNumber, message, isOtp, cancellationToken);
     }
 
-    private async Task SendViaGhanaGatewayOptionsAsync(GhanaGatewaySmsOptions gw, string toPhoneNumber, string message, CancellationToken cancellationToken)
+    private async Task SendViaMNotifyOptionsAsync(
+        GhanaGatewaySmsOptions options,
+        string toPhoneNumber,
+        string message,
+        bool isOtp,
+        CancellationToken cancellationToken)
     {
-        if (gw.Enabled != true)
-            throw new InvalidOperationException("GhanaGateway SMS is not enabled.");
+        _logger.LogInformation("[SMS:mNotify] Sending to {To}; OTP={IsOtp}", Mask(toPhoneNumber), isOtp);
 
-        if (string.IsNullOrWhiteSpace(gw.UrlTemplate))
-            throw new InvalidOperationException("GhanaGateway SMS is enabled but UrlTemplate is not configured.");
+        using var client = _httpClientFactory.CreateClient("mnotify");
+        client.Timeout = TimeSpan.FromSeconds(Math.Clamp(options.TimeoutSeconds, 1, 60));
+        await MNotifySmsGateway.SendAsync(client, options, toPhoneNumber, message, isOtp, cancellationToken);
+    }
 
-        var url = gw.UrlTemplate
-            .Replace("{to}", WebUtility.UrlEncode(toPhoneNumber))
-            .Replace("{message}", WebUtility.UrlEncode(message))
-            .Replace("{senderId}", WebUtility.UrlEncode(gw.SenderId ?? string.Empty))
-            .Replace("{apiKey}", WebUtility.UrlEncode(gw.ApiKey ?? string.Empty));
+    private string? DecryptSecret(string? encryptedValue)
+    {
+        if (string.IsNullOrWhiteSpace(encryptedValue))
+            return null;
 
-        _logger.LogInformation("[SMS:GhanaGateway] Sending to {To}", Mask(toPhoneNumber));
-
-        using var client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(Math.Clamp(gw.TimeoutSeconds, 1, 60));
-
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await client.SendAsync(req, cancellationToken);
-        if (!resp.IsSuccessStatusCode)
+        try
         {
-            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"GhanaGateway SMS failed: HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}. Body={body}");
+            return _crypto.Decrypt(encryptedValue);
+        }
+        catch
+        {
+            // Preserve compatibility with rows created before SMS secrets were encrypted.
+            return encryptedValue;
         }
     }
 

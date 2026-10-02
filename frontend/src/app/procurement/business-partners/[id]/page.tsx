@@ -40,6 +40,12 @@ import {
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { businessPartnerService, type BusinessPartnerDetailDto } from '@/services/businessPartnerService';
+import {
+  businessPartnerFinanceProfileService,
+  type BusinessPartnerApProfile,
+  type BusinessPartnerArProfile,
+  type BusinessPartnerFinanceProfileSet,
+} from '@/services/businessPartnerFinanceProfileService';
 import { licenseTypeService, type LicenseTypeDto } from '@/services/partnerConfigService';
 import { performanceTrackingService, type SupplierPerformanceMetricDto, type QualityIncidentDto, type PerformanceReviewDto } from '@/services/performanceTrackingService';
 import { purchasingService, type PurchaseOrderSummaryDto } from '@/services/purchasingService';
@@ -53,12 +59,21 @@ import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
+const effectiveProfile = <T extends BusinessPartnerApProfile | BusinessPartnerArProfile>(profiles: T[]): T | null => {
+  const today = new Date().toISOString().slice(0, 10);
+  return [...profiles]
+    .filter((profile) => profile.status === 'Approved' && profile.effectiveFrom.slice(0, 10) <= today &&
+      (!profile.effectiveTo || profile.effectiveTo.slice(0, 10) >= today))
+    .sort((left, right) => right.effectiveFrom.localeCompare(left.effectiveFrom) || right.versionNumber - left.versionNumber)[0] ?? null;
+};
+
 export default function BusinessPartnerDetailPage() {
   const router = useRouter();
   const params = useParams();
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
 
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
+  const [financeProfiles, setFinanceProfiles] = useState<BusinessPartnerFinanceProfileSet | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [licenseTypes, setLicenseTypes] = useState<LicenseTypeDto[]>([]);
@@ -100,10 +115,22 @@ export default function BusinessPartnerDetailPage() {
 
   useEffect(() => {
     loadPartner();
+    loadFinanceProfiles();
     loadLicenseTypes();
     loadPerformanceData();
     loadPurchaseOrders();
   }, [id]);
+
+  const loadFinanceProfiles = async () => {
+    try {
+      setFinanceProfiles(await businessPartnerFinanceProfileService.get(id));
+    } catch (error) {
+      // Finance profile access is permission-controlled independently of the partner identity.
+      // The detail page remains available when the current user cannot view Finance configuration.
+      console.warn('Finance profile summary is unavailable:', error);
+      setFinanceProfiles(null);
+    }
+  };
 
   const loadPartner = async () => {
     try {
@@ -373,6 +400,15 @@ export default function BusinessPartnerDetailPage() {
     partnerWorkflow.summary?.canCurrentUserApprove === true;
   const partnerContacts = contactsFromRegistrationData(partner as unknown as Record<string, unknown>);
   const partnerBankAccounts = bankAccountsFromRegistrationData(partner as unknown as Record<string, unknown>);
+  const currentApProfiles = financeProfiles?.roles
+    .filter((role) => role.status === 'Active' && (role.roleType === 'Supplier' || role.roleType === 'Contractor'))
+    .map((role) => ({ role, profile: effectiveProfile(role.apProfiles) }))
+    .filter((item): item is typeof item & { profile: BusinessPartnerApProfile } => item.profile !== null) ?? [];
+  const currentArProfiles = financeProfiles?.roles
+    .filter((role) => role.status === 'Active' && role.roleType === 'Customer')
+    .map((role) => ({ role, profile: effectiveProfile(role.arProfiles) }))
+    .filter((item): item is typeof item & { profile: BusinessPartnerArProfile } => item.profile !== null) ?? [];
+  const hasFinanceProfileHistory = financeProfiles?.roles.some((role) => role.apProfiles.length > 0 || role.arProfiles.length > 0) === true;
 
   return (
     <div className="space-y-6">
@@ -864,9 +900,59 @@ export default function BusinessPartnerDetailPage() {
                 Financial Information
               </CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-6">
+              {financeProfiles && (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="font-semibold text-lg">Current approved Finance profiles</h3>
+                      <p className="text-sm text-muted-foreground">Effective profile values used by Finance and transaction processing.</p>
+                    </div>
+                    <Button variant="outline" size="sm" onClick={() => router.push(`/procurement/business-partners/${id}/edit?tab=finance-profiles`)}>
+                      View Finance Profiles
+                    </Button>
+                  </div>
+                  {(currentApProfiles.length > 0 || currentArProfiles.length > 0) ? (
+                    <div className="grid gap-4 md:grid-cols-2">
+                      {currentApProfiles.map(({ role, profile }) => (
+                        <div key={profile.id} className="rounded-lg border p-4">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <p className="font-semibold">{role.roleType} / Accounts Payable</p>
+                            <Badge variant="outline">Version {profile.versionNumber}</Badge>
+                          </div>
+                          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                            <div><dt className="text-muted-foreground">AP reference</dt><dd className="font-medium">{profile.apReferenceNumber || 'Not set'}</dd></div>
+                            <div><dt className="text-muted-foreground">Subject to WHT</dt><dd className="font-medium">{profile.subjectToWithholding ? 'Yes' : 'No'}</dd></div>
+                            <div><dt className="text-muted-foreground">Effective from</dt><dd className="font-medium">{format(new Date(profile.effectiveFrom), 'MMM dd, yyyy')}</dd></div>
+                          </dl>
+                        </div>
+                      ))}
+                      {currentArProfiles.map(({ role, profile }) => (
+                        <div key={profile.id} className="rounded-lg border p-4">
+                          <div className="mb-3 flex items-center justify-between gap-2">
+                            <p className="font-semibold">{role.roleType} / Accounts Receivable</p>
+                            <Badge variant="outline">Version {profile.versionNumber}</Badge>
+                          </div>
+                          <dl className="grid gap-3 text-sm sm:grid-cols-2">
+                            <div><dt className="text-muted-foreground">Credit limit</dt><dd className="font-medium">{profile.creditLimit == null ? 'Not set' : `${partner.currency || 'GHS'} ${profile.creditLimit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}</dd></div>
+                            <div><dt className="text-muted-foreground">AR reference</dt><dd className="font-medium">{profile.arReferenceNumber || 'Not set'}</dd></div>
+                            <div><dt className="text-muted-foreground">Withholding agent</dt><dd className="font-medium">{profile.isWithholdingAgent ? 'Yes' : 'No'}</dd></div>
+                            <div><dt className="text-muted-foreground">Effective from</dt><dd className="font-medium">{format(new Date(profile.effectiveFrom), 'MMM dd, yyyy')}</dd></div>
+                          </dl>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      {hasFinanceProfileHistory
+                        ? 'Finance profile changes are saved, but no approved profile is currently effective. Submit the draft and complete independent approval before its values become operational.'
+                        : 'No Finance profile has been prepared for this Business Partner.'}
+                    </p>
+                  )}
+                </div>
+              )}
               {!partner.financialInfo || partner.financialInfo.length === 0 ? (
-                <p className="text-center text-gray-500 py-8">No financial information available</p>
+                <p className="text-center text-gray-500 py-4">No audited financial statements available</p>
               ) : (
                 <div className="space-y-6">
                   {/* Financial Records */}

@@ -78,6 +78,45 @@ public sealed class BusinessPartnerFinanceProfilesControllerTests
     }
 
     [Fact]
+    public async Task Saved_ar_credit_limit_is_persisted_and_survives_reload()
+    {
+        await using var fixture = new Fixture();
+        fixture.Role.RoleType = BusinessPartnerRoleType.Customer;
+        fixture.Term.ApplicableTo = "Customer";
+        await fixture.SeedAsync();
+
+        var created = await fixture.Controller.CreateArDraft(fixture.Partner.Id, new()
+        {
+            BusinessPartnerRoleId = fixture.Role.Id,
+            EffectiveFrom = new DateTime(2026, 10, 1),
+            PaymentTermId = fixture.Term.Id,
+            CreditLimit = 12_500m,
+            IsWithholdingAgent = true
+        }, default);
+
+        var saved = (BusinessPartnerArProfileDto)created.Result.Should().BeOfType<OkObjectResult>().Subject.Value!;
+        saved.CreditLimit.Should().Be(12_500m);
+        (await fixture.Context.BusinessPartnerArProfileVersions.SingleAsync()).CreditLimit.Should().Be(12_500m);
+
+        var reloaded = (BusinessPartnerFinanceProfileSetDto)(await fixture.Controller.Get(fixture.Partner.Id, default))
+            .Result.Should().BeOfType<OkObjectResult>().Subject.Value!;
+        reloaded.Roles.Single().ArProfiles.Single().CreditLimit.Should().Be(12_500m);
+
+        var updated = await fixture.Controller.UpdateArDraft(fixture.Partner.Id, saved.Id, new()
+        {
+            BusinessPartnerRoleId = fixture.Role.Id,
+            EffectiveFrom = new DateTime(2026, 10, 1),
+            PaymentTermId = fixture.Term.Id,
+            CreditLimit = 15_000m,
+            IsWithholdingAgent = false
+        }, default);
+
+        ((BusinessPartnerArProfileDto)updated.Result.Should().BeOfType<OkObjectResult>().Subject.Value!)
+            .CreditLimit.Should().Be(15_000m);
+        (await fixture.Context.BusinessPartnerArProfileVersions.SingleAsync()).CreditLimit.Should().Be(15_000m);
+    }
+
+    [Fact]
     public async Task Pending_approval_queue_is_shared_with_checkers_but_excludes_the_maker()
     {
         await using var fixture = new Fixture();

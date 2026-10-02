@@ -1,4 +1,3 @@
-using System.Net;
 using Microsoft.Extensions.Options;
 
 namespace ErpSystem.Api.Services.Sms;
@@ -21,30 +20,17 @@ public sealed class GhanaGatewaySmsSender : ISmsSender
         var gw = _options.GhanaGateway;
         if (gw.Enabled != true)
         {
-            throw new InvalidOperationException("GhanaGateway SMS is not enabled.");
+            throw new InvalidOperationException("mNotify SMS is not enabled.");
         }
 
-        if (string.IsNullOrWhiteSpace(gw.UrlTemplate))
-        {
-            throw new InvalidOperationException("GhanaGateway SMS is enabled but UrlTemplate is not configured.");
-        }
-
-        var url = gw.UrlTemplate
-            .Replace("{to}", WebUtility.UrlEncode(toPhoneNumber))
-            .Replace("{message}", WebUtility.UrlEncode(message))
-            .Replace("{senderId}", WebUtility.UrlEncode(gw.SenderId ?? string.Empty))
-            .Replace("{apiKey}", WebUtility.UrlEncode(gw.ApiKey ?? string.Empty));
-
-        _logger.LogInformation("[SMS:GhanaGateway] Sending to {To}", Mask(toPhoneNumber));
-
-        using var req = new HttpRequestMessage(HttpMethod.Get, url);
-        using var resp = await _httpClient.SendAsync(req, cancellationToken);
-
-        if (!resp.IsSuccessStatusCode)
-        {
-            var body = await resp.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"GhanaGateway SMS failed: HTTP {(int)resp.StatusCode} {resp.ReasonPhrase}. Body={body}");
-        }
+        _logger.LogInformation("[SMS:mNotify] Sending to {To}", Mask(toPhoneNumber));
+        await MNotifySmsGateway.SendAsync(
+            _httpClient,
+            gw,
+            toPhoneNumber,
+            message,
+            isOtp: false,
+            cancellationToken: cancellationToken);
     }
 
     private static string Mask(string phone)
