@@ -1277,6 +1277,10 @@ public sealed class ControlledOpeningBalancePostingTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        fixture.WhtPayable.AllowDirectPosting = false;
+        fixture.WhtPayable.IsControlAccount = true;
+        fixture.WhtReceivable.AllowDirectPosting = false;
+        fixture.WhtReceivable.IsControlAccount = true;
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
 
