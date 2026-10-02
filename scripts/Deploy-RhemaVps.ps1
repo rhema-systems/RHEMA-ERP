@@ -1246,6 +1246,16 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         if ($LASTEXITCODE -ne 0) { throw 'Remote helper verification failed.' }
     } | Out-Host
 
+    if (-not $DryRun -and -not $PreflightOnly) {
+        $pruneOutput = @(Invoke-Step 'Prune obsolete VPS deployment artifacts' {
+            Invoke-RemoteHelper $remoteHelperPath 'Prune'
+        })
+        $pruneOutput | Out-Host
+        Import-RemoteTimings $pruneOutput
+        Assert-True ($pruneOutput -contains 'PRUNE|PASS') `
+            'The VPS retention prune did not report success.'
+    }
+
     $preflight = @(Invoke-Step 'Fail-fast VPS and migration preflight' {
         Invoke-RemoteHelper $remoteHelperPath 'Preflight' @{ FreshDatabaseName = $FreshDatabaseName }
     })
