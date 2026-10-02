@@ -270,10 +270,10 @@ export function TravelPolicyForm({
           <p className="text-sm text-muted-foreground">
             Once the policy is approved: a trip estimated above the per-trip limit is refused at
             submission; an expense above the receipt threshold needs a receipt, and a claim is
-            submitted within the days allowed after the trip ends.
-          </p>
-          <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
-            Not yet enforced: the days ahead a flight or hotel must be booked, and preferred vendors.
+            submitted within the days allowed after the trip ends; a flight or hotel booked with less
+            notice than below is a breach, as a class or rate above the caps is — saved awaiting a
+            second travel administrator&apos;s authorisation; and with preferred vendors on, every
+            booking names its supplier.
           </p>
           <NumberField form={form} name="maxSingleTripBudget" label="Max per trip (0 = no limit)" />
           <FieldRow>
@@ -304,7 +304,7 @@ export function TravelPolicyForm({
             form={form}
             name="preferredVendorMandatory"
             label="Preferred vendors only"
-            description="Records that bookings should go through an approved vendor. Not checked on any booking yet."
+            description="Every flight, hotel, car rental and ground-transport booking under this policy names the supplier it is booked with (a company vehicle excepted)."
           />
         </CardContent>
       </Card>

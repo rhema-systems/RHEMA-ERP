@@ -16,16 +16,13 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelBookingsController : HrControllerBase
 {
     private readonly IStaffTravelBookingService _service;
-    private readonly IAuthorizationService _authorization;
 
     public StaffTravelBookingsController(
         IStaffTravelBookingService service,
-        IAuthorizationService authorization,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
-        _authorization = authorization;
     }
 
     /// <summary>
@@ -35,22 +32,60 @@ public class StaffTravelBookingsController : HrControllerBase
     private (Guid tenantId, Guid userId)? ResolveContext()
         => TryGetWriteContext(out var tenantId, out var userId) is null ? (tenantId, userId) : null;
 
-    /// <summary>
-    /// Whether this caller may authorise a booking above the travel policy's cap.
-    /// </summary>
-    /// <remarks>
-    /// <para>Booking is <c>HR.Travel.Write</c>; approving a breach of the policy is
-    /// <c>HR.Travel.Admin</c>, which HR deliberately does not hold. Without this split the
-    /// exception flag was a plain boolean on the payload — the caller booked over the cap and
-    /// ticked their own approval in the same request.</para>
-    ///
-    /// <para>Evaluated through <see cref="IAuthorizationService"/> against the same policy object
-    /// the <c>[Authorize]</c> attributes use, so a change to how the permission is granted (seeded
-    /// permission today, role fallback for HR actors) is honoured here automatically rather than
-    /// re-derived from claims.</para>
-    /// </remarks>
-    private async Task<bool> CallerMayApproveExceptionsAsync()
-        => (await _authorization.AuthorizeAsync(User, HrPermissions.TravelAdminPolicy)).Succeeded;
+    // ⚠ Lane 4, D-8: there was a `CallerMayApproveExceptionsAsync` here — a booker holding HR.Travel.Admin authorised
+    // their own breach in the same request. A breaching booking is now saved awaiting authorisation (the caller's
+    // employee record is passed as who asked), and a different administrator decides it on the routes below.
+
+    // =========================================================================
+    // POLICY EXCEPTIONS ON BOOKINGS (lane 4, D-8)
+    // =========================================================================
+
+    /// <summary>The policy-breach register: flight and hotel bookings with an exception, pending first.</summary>
+    [HttpGet("exceptions")]
+    public async Task<ActionResult<IEnumerable<StaffTravelBookingExceptionDto>>> GetBookingExceptions(
+        [FromQuery] TravelBookingExceptionState? state = null)
+        => Ok(await _service.GetBookingExceptionsAsync(state));
+
+    /// <summary>A travel administrator who neither booked it nor asked for the exception, and is not the traveller.</summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("flights/{id:guid}/exception/authorise")]
+    public async Task<ActionResult<StaffTravelFlightBookingDto>> AuthoriseFlightException(Guid id)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Authorising a travel policy exception") is { } contextError) return contextError;
+        return Ok(await _service.DecideFlightExceptionAsync(id, authorise: true, reason: null, employeeId));
+    }
+
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("flights/{id:guid}/exception/refuse")]
+    public async Task<ActionResult<StaffTravelFlightBookingDto>> RefuseFlightException(
+        Guid id, [FromBody] RefuseStaffTravelBookingExceptionDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Refusing a travel policy exception") is { } contextError) return contextError;
+        return Ok(await _service.DecideFlightExceptionAsync(id, authorise: false, dto.Reason, employeeId));
+    }
+
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("hotels/{id:guid}/exception/authorise")]
+    public async Task<ActionResult<StaffTravelHotelBookingDto>> AuthoriseHotelException(Guid id)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Authorising a travel policy exception") is { } contextError) return contextError;
+        return Ok(await _service.DecideHotelExceptionAsync(id, authorise: true, reason: null, employeeId));
+    }
+
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("hotels/{id:guid}/exception/refuse")]
+    public async Task<ActionResult<StaffTravelHotelBookingDto>> RefuseHotelException(
+        Guid id, [FromBody] RefuseStaffTravelBookingExceptionDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Refusing a travel policy exception") is { } contextError) return contextError;
+        return Ok(await _service.DecideHotelExceptionAsync(id, authorise: false, dto.Reason, employeeId));
+    }
 
     // =========================================================================
     // FLIGHT BOOKINGS
@@ -77,7 +112,7 @@ public class StaffTravelBookingsController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         var created = await _service.CreateFlightAsync(
-            dto, ctx.Value.tenantId, ctx.Value.userId, await CallerMayApproveExceptionsAsync());
+            dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId);
         return CreatedAtAction(nameof(GetFlightById), new { id = created.Id }, created);
     }
 
@@ -91,7 +126,7 @@ public class StaffTravelBookingsController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         return Ok(await _service.UpdateFlightAsync(
-            dto, ctx.Value.userId, await CallerMayApproveExceptionsAsync()));
+            dto, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
@@ -161,7 +196,7 @@ public class StaffTravelBookingsController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         var created = await _service.CreateHotelAsync(
-            dto, ctx.Value.tenantId, ctx.Value.userId, await CallerMayApproveExceptionsAsync());
+            dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId);
         return CreatedAtAction(nameof(GetHotelById), new { id = created.Id }, created);
     }
 
@@ -175,7 +210,7 @@ public class StaffTravelBookingsController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         return Ok(await _service.UpdateHotelAsync(
-            dto, ctx.Value.userId, await CallerMayApproveExceptionsAsync()));
+            dto, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]

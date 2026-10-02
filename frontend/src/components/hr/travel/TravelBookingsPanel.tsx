@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
+import Link from 'next/link';
+import { useForm, type FieldValues, type Path, type PathValue, type UseFormReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -30,12 +31,15 @@ import {
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
 import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { SupplierPicker } from '@/components/hr/common/SupplierPicker';
+import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
 import { travelBookingsService } from '@/services/hr/travel-bookings.service';
 import { TravelQueryError } from './TravelQueryError';
 import { fmtTravelMoney as fmtMoney } from './travel-format';
 import type { StaffTravelRequest } from '@/types/hr/travel';
+import type { TravelBookingExceptionState } from '@/types/hr/travel-bookings';
 
 const CABIN_CLASSES = ['Economy', 'PremiumEconomy', 'Business', 'First'] as const;
 const CHANNELS = [
@@ -68,6 +72,35 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
  */
 const orNull = (v?: string | null) => (v && v.trim() ? v : null);
 
+/**
+ * The supplier a booking is made with (lane 4, D-1) — required when the trip's policy books through preferred
+ * vendors only, which the server says in its refusal. HR's own supplier list (`api/hr/suppliers`).
+ */
+function VendorField<T extends FieldValues>({ form }: { form: UseFormReturn<T> }) {
+  const name = 'vendorId' as Path<T>;
+  const value = form.watch(name) as unknown as string | undefined;
+  return (
+    <SupplierPicker
+      label="Supplier"
+      value={value || null}
+      onChange={(id) => form.setValue(name, (id ?? '') as PathValue<T, Path<T>>, { shouldDirty: true })}
+      noneLabel="No supplier named"
+    />
+  );
+}
+
+/** Where a booking's policy exception stands (lane 4, D-8); nothing for a booking within the policy. */
+function ExceptionBadge({ state }: { state?: TravelBookingExceptionState }) {
+  if (!state || state === 'None') return null;
+  const label = state === 'Pending' ? 'Exception awaiting authorisation'
+    : state === 'Authorised' ? 'Exception authorised' : 'Exception refused';
+  return (
+    <Badge variant={state === 'Refused' ? 'destructive' : state === 'Pending' ? 'outline' : 'secondary'} className="ml-2">
+      {label}
+    </Badge>
+  );
+}
+
 /** A booking refused for breaching the policy explains itself; the cap is not ours to predict. */
 function useBookingToast() {
   const { toast } = useToast();
@@ -97,6 +130,7 @@ const flightSchema = z.object({
   currencyCode: z.string().min(1, 'Select a currency'),
   ticketNumber: z.string().max(50).optional(),
   status: z.enum(BOOKING_STATUSES),
+  vendorId: z.string().optional(),
 });
 
 function FlightDialog({
@@ -115,14 +149,14 @@ function FlightDialog({
     defaultValues: {
       bookingClass: 'Economy', bookedBy: 'TravelDesk', status: 'Pending',
       classExceptionApproved: false, totalFare: 0, taxesAndFees: 0,
-      currencyCode: defaultCurrency,
+      currencyCode: defaultCurrency, vendorId: '',
     },
   });
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof flightSchema>) => {
       const v = flightSchema.parse(values);
-      return travelBookingsService.createFlight({ ...v, staffTravelRequestId: requestId });
+      return travelBookingsService.createFlight({ ...v, vendorId: v.vendorId || null, staffTravelRequestId: requestId });
     },
     onSuccess: async () => {
       notify.saved();
@@ -141,7 +175,8 @@ function FlightDialog({
         <DialogHeader>
           <DialogTitle>Add a flight booking</DialogTitle>
           <DialogDescription>
-            The cabin class is checked against the travel policy for this trip.
+            The cabin class, how far ahead it is booked and the supplier are checked against the trip&apos;s
+            travel policy.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -177,23 +212,25 @@ function FlightDialog({
             />
           </FieldRow>
 
+          <VendorField form={form} />
+
           {/*
-            Shown to everyone, because the screen cannot know the caller's permissions and hiding it
-            would turn "you may not do this" into "this does not exist". A caller without
-            HR.Travel.Admin gets a 403 that says so.
+            Lane 4, D-8: asking for an exception, not granting one. A breaching flight is saved awaiting
+            authorisation; a travel administrator other than the booker authorises it on Staff Travel →
+            Policy breaches before it can be confirmed or ticketed.
           */}
           <SwitchField
             form={form}
             name="classExceptionApproved"
-            label="Authorise a booking above the policy cap"
-            description="Travel administrators only. Without this, a class above the cap is refused."
+            label="Ask for an exception to the policy"
+            description="For a class above the cap, or a flight booked later than the policy asks. Saved awaiting authorisation by another travel administrator; until then it stays Pending."
           />
           {wantsException && (
             <TextareaField
               form={form}
               name="classExceptionReason"
-              label="Why the exception is granted"
-              placeholder="Required — kept on the booking."
+              label="Why the exception is needed"
+              placeholder="Required — kept on the booking and shown to whoever decides it."
             />
           )}
         </form>
@@ -229,6 +266,7 @@ const hotelSchema = z
     status: z.enum(BOOKING_STATUSES),
     bookingReference: z.string().max(100).optional(),
     cancellationPolicy: z.string().max(1000).optional(),
+    vendorId: z.string().optional(),
   })
   .refine((v) => !v.checkOutDate || !v.checkInDate || v.checkOutDate >= v.checkInDate, {
     message: 'Check-out cannot be before check-in',
@@ -253,14 +291,14 @@ function HotelDialog({
     defaultValues: {
       hotelName: '', city: '', countryId: defaultCountryId, checkInDate: '', checkOutDate: '',
       ratePerNight: 0, currencyCode: defaultCurrency, rateExceptionApproved: false,
-      bookedBy: 'TravelDesk', status: 'Pending',
+      bookedBy: 'TravelDesk', status: 'Pending', vendorId: '',
     },
   });
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof hotelSchema>) => {
       const v = hotelSchema.parse(values);
-      return travelBookingsService.createHotel({ ...v, staffTravelRequestId: requestId });
+      return travelBookingsService.createHotel({ ...v, vendorId: v.vendorId || null, staffTravelRequestId: requestId });
     },
     onSuccess: async () => {
       notify.saved();
@@ -288,7 +326,8 @@ function HotelDialog({
         <DialogHeader>
           <DialogTitle>Add a hotel booking</DialogTitle>
           <DialogDescription>
-            The nightly rate is checked against the travel policy for this trip.
+            The nightly rate (converted into the policy&apos;s currency), how far ahead it is booked and the
+            supplier are checked against the trip&apos;s travel policy.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -336,19 +375,21 @@ function HotelDialog({
             />
           </FieldRow>
           <TextareaField form={form} name="cancellationPolicy" label="Cancellation policy" />
+          <VendorField form={form} />
 
+          {/* Lane 4, D-8 — asking, not granting; see the flight dialog. */}
           <SwitchField
             form={form}
             name="rateExceptionApproved"
-            label="Authorise a rate above the policy cap"
-            description="Travel administrators only. Without this, a rate above the cap is refused."
+            label="Ask for an exception to the policy"
+            description="For a rate above the cap, or a stay booked later than the policy asks. Saved awaiting authorisation by another travel administrator; until then it stays Pending."
           />
           {wantsException && (
             <TextareaField
               form={form}
               name="rateExceptionReason"
-              label="Why the exception is granted"
-              placeholder="Required — kept on the booking."
+              label="Why the exception is needed"
+              placeholder="Required — kept on the booking and shown to whoever decides it."
             />
           )}
         </form>
@@ -379,6 +420,7 @@ const groundSchema = z
     currencyCode: z.string().min(1, 'Select a currency'),
     status: z.enum(BOOKING_STATUSES),
     notes: z.string().max(2000).optional(),
+    vendorId: z.string().optional(),
   })
   .refine((v) => v.transportType !== 'CompanyVehicle' || !!v.vehicleAssetId, {
     message: 'A company vehicle must be named — a draft trip is created for it in Fleet',
@@ -399,7 +441,7 @@ function GroundDialog({
   const form = useForm<z.input<typeof groundSchema>>({
     resolver: zodResolver(groundSchema),
     defaultValues: {
-      transportType: 'Taxi', currencyCode: defaultCurrency, status: 'Pending', estimatedCost: 0,
+      transportType: 'Taxi', currencyCode: defaultCurrency, status: 'Pending', estimatedCost: 0, vendorId: '',
     },
   });
 
@@ -409,6 +451,7 @@ function GroundDialog({
       return travelBookingsService.createGroundTransport({
         ...v,
         staffTravelRequestId: requestId,
+        vendorId: v.vendorId || null,
         vehicleAssetId: v.vehicleAssetId || null,
         pickupDatetime: orNull(v.pickupDatetime),
         dropoffDatetime: orNull(v.dropoffDatetime),
@@ -479,6 +522,8 @@ function GroundDialog({
           <SelectField
             form={form} name="status" label="Status" required options={options(BOOKING_STATUSES)}
           />
+          {/* A company vehicle has no supplier; the policy's preferred-vendor rule does not apply to it. */}
+          {!isCompanyVehicle && <VendorField form={form} />}
           <TextareaField form={form} name="notes" label="Notes" />
         </form>
         <DialogFooter>
@@ -510,6 +555,7 @@ const carSchema = z
     fuelPolicy: z.string().max(100).optional(),
     driverLicenseRequired: z.boolean(),
     status: z.enum(BOOKING_STATUSES),
+    vendorId: z.string().optional(),
   })
   .refine((v) => !v.dropoffDatetime || !v.pickupDatetime || v.dropoffDatetime >= v.pickupDatetime, {
     message: 'Drop-off cannot be before pick-up',
@@ -532,14 +578,14 @@ function CarRentalDialog({
     defaultValues: {
       pickupDatetime: '', dropoffDatetime: '', vehicleCategory: 'Economy', dailyRate: 0,
       currencyCode: defaultCurrency, insuranceIncluded: true, driverLicenseRequired: true,
-      status: 'Pending',
+      status: 'Pending', vendorId: '',
     },
   });
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof carSchema>) => {
       const v = carSchema.parse(values);
-      return travelBookingsService.createCarRental({ ...v, staffTravelRequestId: requestId });
+      return travelBookingsService.createCarRental({ ...v, vendorId: v.vendorId || null, staffTravelRequestId: requestId });
     },
     onSuccess: async () => {
       notify.saved();
@@ -600,6 +646,7 @@ function CarRentalDialog({
           <SelectField
             form={form} name="status" label="Status" required options={options(BOOKING_STATUSES)}
           />
+          <VendorField form={form} />
           <SwitchField form={form} name="insuranceIncluded" label="Insurance included" />
           <SwitchField form={form} name="driverLicenseRequired" label="Driving licence required" />
         </form>
@@ -646,12 +693,13 @@ function Section({
 /**
  * What has actually been reserved for a trip: flights, hotels, ground transport and car rentals.
  *
- * ⚠ **A booking above the travel policy's cap is refused by the server, and the refusal names the
- * cap.** The screen cannot pre-empt that — the cap depends on the traveller's staff level, their
- * organisation unit and whether the trip crosses a border — so the refusal is surfaced verbatim
- * rather than guessed at. The two "authorise above the cap" switches are shown to everyone and
- * answer 403 for a caller without `HR.Travel.Admin`: hiding them would turn "you may not do this"
- * into "this does not exist", which is a worse thing to tell someone.
+ * ⚠ **A booking that breaches the travel policy is refused by the server unless it asks for an
+ * exception, and the refusal names the cap.** The screen cannot pre-empt that — the cap depends on the
+ * traveller's staff level, their organisation unit and whether the trip crosses a border — so the
+ * refusal is surfaced verbatim rather than guessed at. Since lane 4 (D-8) the flight and hotel switches
+ * ASK for an exception: the booking is saved awaiting authorisation, stays Pending, and a travel
+ * administrator other than the booker decides it on Staff Travel → Policy breaches. (They used to grant
+ * it in the same request for a caller holding `HR.Travel.Admin`.)
  *
  * Nothing here computes a stored total. Nights, hire days and segment durations are all worked out
  * server-side; where a figure is previewed it is labelled as a preview and uses the same arithmetic,
@@ -729,7 +777,10 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
                     {fmtMoney(f.totalFare, f.currencyCode)}
                   </TableCell>
                   <TableCell>{f.segmentCount}</TableCell>
-                  <TableCell><StatusBadge status={humanize(f.statusName)} /></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <StatusBadge status={humanize(f.statusName)} />
+                    <ExceptionBadge state={f.exceptionState} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -766,7 +817,10 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
                   <TableCell className="text-right whitespace-nowrap">
                     {fmtMoney(h.totalCost, h.currencyCode)}
                   </TableCell>
-                  <TableCell><StatusBadge status={humanize(h.statusName)} /></TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <StatusBadge status={humanize(h.statusName)} />
+                    <ExceptionBadge state={h.exceptionState} />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -852,11 +906,15 @@ export function TravelBookingsPanel({ request }: { request: StaffTravelRequest }
         )}
       </Section>
 
-      {(flights ?? []).some((f) => f.bookingClass !== 'Economy') && (
+      {[...(flights ?? []), ...(hotels ?? [])].some((b) => b.exceptionState && b.exceptionState !== 'None') && (
         <p className="flex items-start gap-2 text-xs text-muted-foreground">
           <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          A booking above the travel policy&apos;s cap is stored with the cap that applied and the
-          reason the exception was granted.
+          <span>
+            A booking that breaches the travel policy is kept with the cap that applied and the reason
+            given. It cannot be confirmed or ticketed until a travel administrator other than the booker
+            authorises the exception on{' '}
+            <Link href="/hr/travel/breaches" className="underline">Policy breaches</Link>.
+          </span>
         </p>
       )}
 

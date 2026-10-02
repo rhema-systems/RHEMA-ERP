@@ -277,9 +277,48 @@ export interface StaffTravelFlightBookingSummary {
   statusName: string;
   ticketNumber?: string | null;
   segmentCount: number;
+  vendorName?: string | null;
+  /** Lane 4, D-8: a breach of the policy waits for a different travel administrator. */
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
 }
 
-export interface StaffTravelFlightBooking extends AuditFields {
+/**
+ * Who asked for a booking's policy exception and who decided it (lane 4, D-8). `exceptionAuthorisedBy*` is the
+ * DECIDER — the state says whether they authorised or refused.
+ */
+export interface TravelBookingExceptionFields {
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
+  exceptionRequestedById?: string | null;
+  exceptionRequestedByName?: string | null;
+  exceptionAuthorisedById?: string | null;
+  exceptionAuthorisedByName?: string | null;
+  exceptionAuthorisedAt?: string | null;
+}
+
+/** One row of the policy-breach register (lane 4, D-8). */
+export interface StaffTravelBookingException {
+  bookingId: string;
+  kind: 'Flight' | 'Hotel';
+  staffTravelRequestId: string;
+  requestNumber: string;
+  travellerName: string;
+  travelStartDate: string;
+  booking: string;
+  policyCap?: string | null;
+  reason?: string | null;
+  bookingStatus: TravelBookingStatus;
+  bookingStatusName: string;
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
+  requestedByName?: string | null;
+  decidedByName?: string | null;
+  decidedAt?: string | null;
+  createdAt: string;
+}
+
+export interface StaffTravelFlightBooking extends AuditFields, TravelBookingExceptionFields {
   staffTravelRequestId: string;
   bookingReference?: string | null;
   airlineCode?: string | null;
@@ -367,9 +406,12 @@ export interface StaffTravelHotelBookingSummary {
   currencyCode: string;
   status: TravelBookingStatus;
   statusName: string;
+  vendorName?: string | null;
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
 }
 
-export interface StaffTravelHotelBooking extends AuditFields {
+export interface StaffTravelHotelBooking extends AuditFields, TravelBookingExceptionFields {
   staffTravelRequestId: string;
   bookingReference?: string | null;
   hotelName: string;

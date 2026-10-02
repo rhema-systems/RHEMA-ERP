@@ -1035,6 +1035,15 @@ public class StaffTravelFlightBookingDto : BaseDto
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
     public decimal? CancellationFee { get; set; }
+    /// <summary>Lane 4, D-8: a booking that breaches the policy waits for a different travel administrator.</summary>
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public Guid? ExceptionRequestedById { get; set; }
+    public string? ExceptionRequestedByName { get; set; }
+    /// <summary>Who decided the exception — authorised it, or refused it (<see cref="ExceptionState"/> says which).</summary>
+    public Guid? ExceptionAuthorisedById { get; set; }
+    public string? ExceptionAuthorisedByName { get; set; }
+    public DateTime? ExceptionAuthorisedAt { get; set; }
     public List<StaffTravelFlightSegmentDto> Segments { get; set; } = new();
 }
 
@@ -1051,6 +1060,9 @@ public class StaffTravelFlightBookingSummaryDto
     public string StatusName => Status.ToString();
     public string? TicketNumber { get; set; }
     public int SegmentCount { get; set; }
+    public string? VendorName { get; set; }
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
 }
 
 public class CreateStaffTravelFlightBookingDto : CreateDtoBase
@@ -1344,6 +1356,14 @@ public class StaffTravelHotelBookingDto : BaseDto
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
     public decimal? CancellationFee { get; set; }
+    /// <summary>Lane 4, D-8 — as on the flight booking.</summary>
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public Guid? ExceptionRequestedById { get; set; }
+    public string? ExceptionRequestedByName { get; set; }
+    public Guid? ExceptionAuthorisedById { get; set; }
+    public string? ExceptionAuthorisedByName { get; set; }
+    public DateTime? ExceptionAuthorisedAt { get; set; }
 }
 
 public class StaffTravelHotelBookingSummaryDto
@@ -1358,6 +1378,46 @@ public class StaffTravelHotelBookingSummaryDto
     public string CurrencyCode { get; set; } = string.Empty;
     public TravelBookingStatus Status { get; set; }
     public string StatusName => Status.ToString();
+    public string? VendorName { get; set; }
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+}
+
+/// <summary>
+/// One row of the policy-breach register (lane 4, D-8): a flight or hotel booking that breaches its trip's policy —
+/// a cabin class or nightly rate above the cap, or booked later than the policy asks — with the exception's state.
+/// </summary>
+public class StaffTravelBookingExceptionDto
+{
+    public Guid BookingId { get; set; }
+    /// <summary><c>Flight</c> or <c>Hotel</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
+    public string RequestNumber { get; set; } = string.Empty;
+    public string TravellerName { get; set; } = string.Empty;
+    public DateOnly TravelStartDate { get; set; }
+    /// <summary>What was booked — "Kenya Airways · Business", "Hotel Ibis · USD 140.00 a night".</summary>
+    public string Booking { get; set; } = string.Empty;
+    /// <summary>The policy's cap for the booked figure — "Economy", "900.00 a night" — when one applied.</summary>
+    public string? PolicyCap { get; set; }
+    public string? Reason { get; set; }
+    public TravelBookingStatus BookingStatus { get; set; }
+    public string BookingStatusName => BookingStatus.ToString();
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public string? RequestedByName { get; set; }
+    public string? DecidedByName { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Refusing a booking's policy exception (lane 4, D-8): the reason is kept on the trip as an internal note.</summary>
+public class RefuseStaffTravelBookingExceptionDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public class CreateStaffTravelHotelBookingDto : CreateDtoBase
@@ -2703,10 +2763,11 @@ public class DecideStaffTravelPolicyExceptionDto
     public Guid ExceptionId { get; set; }
     // ApprovedById removed: stamped from the caller's token.
 
+    /// <summary>Approved or Rejected (lane 4, C4).</summary>
     [Required]
     public TravelPolicyExceptionStatus Status { get; set; }
 
-    public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
+    // DecidedAt removed (lane 4, C4): the clock's, not the caller's.
 
     /// <summary>
     /// Why the exception was granted or refused.

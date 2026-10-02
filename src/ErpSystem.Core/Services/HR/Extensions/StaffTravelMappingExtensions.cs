@@ -663,6 +663,14 @@ public static class StaffTravelMappingExtensions
             BookedAt = entity.BookedAt,
             CancelledAt = entity.CancelledAt,
             CancellationFee = entity.CancellationFee,
+            // Lane 4, D-8. The two names are filled by the service with a narrow read — the reads that feed this do
+            // not include two more whole Employee rows (the memory-grant lesson of slice 4a).
+            ExceptionState = entity.ExceptionState,
+            ExceptionRequestedById = entity.ExceptionRequestedById,
+            ExceptionRequestedByName = entity.ExceptionRequestedBy?.FullName,
+            ExceptionAuthorisedById = entity.ExceptionAuthorisedById,
+            ExceptionAuthorisedByName = entity.ExceptionAuthorisedBy?.FullName,
+            ExceptionAuthorisedAt = entity.ExceptionAuthorisedAt,
             Segments = entity.Segments.OrderBy(s => s.SegmentOrder).Select(s => s.ToDto()).ToList(),
         };
     }
@@ -680,6 +688,8 @@ public static class StaffTravelMappingExtensions
             Status = entity.Status,
             TicketNumber = entity.TicketNumber,
             SegmentCount = entity.Segments.Count,
+            VendorName = entity.Vendor?.Name,
+            ExceptionState = entity.ExceptionState,
         };
     }
 
@@ -851,6 +861,13 @@ public static class StaffTravelMappingExtensions
             BookedAt = entity.BookedAt,
             CancelledAt = entity.CancelledAt,
             CancellationFee = entity.CancellationFee,
+            // Lane 4, D-8 — names filled by the service, as on the flight.
+            ExceptionState = entity.ExceptionState,
+            ExceptionRequestedById = entity.ExceptionRequestedById,
+            ExceptionRequestedByName = entity.ExceptionRequestedBy?.FullName,
+            ExceptionAuthorisedById = entity.ExceptionAuthorisedById,
+            ExceptionAuthorisedByName = entity.ExceptionAuthorisedBy?.FullName,
+            ExceptionAuthorisedAt = entity.ExceptionAuthorisedAt,
         };
     }
 
@@ -867,6 +884,8 @@ public static class StaffTravelMappingExtensions
             TotalCost = entity.TotalCost,
             CurrencyCode = entity.CurrencyCode,
             Status = entity.Status,
+            VendorName = entity.Vendor?.Name,
+            ExceptionState = entity.ExceptionState,
         };
     }
 

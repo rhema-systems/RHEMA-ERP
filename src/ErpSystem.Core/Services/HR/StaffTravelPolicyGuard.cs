@@ -18,6 +18,9 @@ namespace ErpSystem.Core.Services.HR;
 /// batch 1 gave policies a currency; the caller then reads the limits in the base currency, which is
 /// what the batch backfilled.
 /// </param>
+/// <param name="AdvanceBookingDaysFlight">Days before departure a flight is to be booked (lane 4, D-1); 0 sets none.</param>
+/// <param name="AdvanceBookingDaysHotel">Days before check-in a hotel is to be booked; 0 sets none.</param>
+/// <param name="PreferredVendorMandatory">Every booking names its supplier (lane 4, D-1).</param>
 public sealed record TravelPolicyCaps(
     Guid? PolicyId,
     string? PolicyName,
@@ -25,7 +28,10 @@ public sealed record TravelPolicyCaps(
     decimal? MaxHotelRatePerNight,
     decimal? MaxSingleTripBudget = null,
     string? CurrencyCode = null,
-    int? VersionNumber = null)
+    int? VersionNumber = null,
+    int AdvanceBookingDaysFlight = 0,
+    int AdvanceBookingDaysHotel = 0,
+    bool PreferredVendorMandatory = false)
 {
     public static readonly TravelPolicyCaps None = new(null, null, null, null);
 
@@ -54,12 +60,12 @@ public sealed record TravelPolicyCaps(
 /// domestic trip declared international bought the international caps. The request service now sets
 /// it from the countries on every create, edit and submission.)</para>
 ///
-/// <para><b>Who may approve a breach.</b> The exception flag is not a field the booking form fills
-/// in; it is an act of authority. It may only be set by a caller holding
-/// <c>HR.Travel.Admin</c> — which HR deliberately does <i>not</i> hold — so a travel clerk with
-/// Write cannot approve their own breach. The service takes that decision as an explicit
-/// parameter rather than reading claims itself, because a service that quietly inspects the
-/// caller's identity is the thing that made these fields spoofable in the first place.</para>
+/// <para><b>Who may approve a breach (lane 4, D-8).</b> The exception is an act of authority, and not the
+/// booker's: a breaching booking is saved <i>awaiting authorisation</i> and cannot be confirmed or ticketed until
+/// a travel administrator other than the one who asked for it authorises it (<c>StaffTravelBookingService</c>).
+/// Before lane 4 the guard granted the exception in the same request when the caller held
+/// <c>HR.Travel.Admin</c> — safe only while HR did not hold it, which D-3 ends. The guard now only describes the
+/// breach.</para>
 ///
 /// <para><b>No policy means no cap, and that is deliberate.</b> A tenant that has configured no
 /// travel policy is not thereby forbidden from booking travel — it simply has no rule to breach,
@@ -140,41 +146,31 @@ public sealed class StaffTravelPolicyGuard
             isInternational ? policy.MaxHotelRateInternational : policy.MaxHotelRateDomestic,
             policy.MaxSingleTripBudget > 0m ? policy.MaxSingleTripBudget : null,
             string.IsNullOrWhiteSpace(policy.CurrencyCode) ? null : policy.CurrencyCode.Trim(),
-            policy.VersionNumber);
+            policy.VersionNumber,
+            Math.Max(0, policy.AdvanceBookingDaysFlight),
+            Math.Max(0, policy.AdvanceBookingDaysHotel),
+            policy.PreferredVendorMandatory);
     }
 
     /// <summary>
-    /// Refuses a cabin class above the policy cap unless an authorised caller has approved the
-    /// exception. Returns the exception flag to store — never the caller's claim of it.
+    /// What a cabin class above the policy's cap breaches, in words; null within the cap or with no policy.
     /// </summary>
     /// <remarks>
-    /// The enum is ordered Economy(1) → PremiumEconomy(2) → Business(3) → First(4), so "above the
-    /// cap" is a numeric comparison. That ordering is load-bearing; do not renumber it.
+    /// <para>The enum is ordered Economy(1) → PremiumEconomy(2) → Business(3) → First(4), so "above the cap" is a
+    /// numeric comparison. That ordering is load-bearing; do not renumber it.</para>
+    ///
+    /// <para><b>Lane 4, D-8: a breach is described, not decided here.</b> These checks returned "authorised" when
+    /// the caller held <c>HR.Travel.Admin</c> and asked for an exception in the same request — so once HR holds
+    /// Admin (D-3) the clerk booking over the cap would tick their own breach. The booking service now saves a
+    /// breaching booking awaiting authorisation, and a different administrator decides it.</para>
     /// </remarks>
-    public bool RequireFlightClassWithinPolicy(
-        FlightCabinClass bookedClass,
-        TravelPolicyCaps caps,
-        bool exceptionRequested,
-        bool callerMayApproveExceptions)
-    {
-        if (caps.MaxFlightClass is not FlightCabinClass cap) return false;
-        if (bookedClass <= cap) return false;
-
-        if (!exceptionRequested)
-            throw new InvalidOperationException(
-                $"{bookedClass} exceeds the {caps.PolicyName} cap of {cap} for this trip. " +
-                "An approved policy exception is required to book above the cap.");
-
-        if (!callerMayApproveExceptions)
-            throw new UnauthorizedAccessException(
-                $"Approving a booking above the {caps.PolicyName} cap of {cap} requires travel " +
-                "administrator rights. Ask a travel administrator to authorise the exception.");
-
-        return true;
-    }
+    public static string? FlightClassBreach(FlightCabinClass bookedClass, TravelPolicyCaps caps)
+        => caps.MaxFlightClass is FlightCabinClass cap && bookedClass > cap
+            ? $"{Spaced(bookedClass)} is above the {caps.PolicyName} cap of {Spaced(cap)}"
+            : null;
 
     /// <summary>
-    /// Refuses a nightly rate above the policy cap unless an authorised caller has approved it.
+    /// What a nightly rate above the policy's cap breaches; null within the cap or with no cap.
     /// </summary>
     /// <remarks>
     /// The rate is compared <b>in the policy's currency</b> (lane 4, C3/T-9): the caller converts the booked rate
@@ -183,27 +179,31 @@ public sealed class StaffTravelPolicyGuard
     /// </remarks>
     /// <param name="rateInPolicyCurrency">The booked nightly rate, converted into <paramref name="policyCurrency"/>.</param>
     /// <param name="bookedRate">The rate as booked, for the message — "USD 300.00 (GHS 3,750.00)".</param>
-    public bool RequireHotelRateWithinPolicy(
-        decimal rateInPolicyCurrency,
-        string policyCurrency,
-        string bookedRate,
-        TravelPolicyCaps caps,
-        bool exceptionRequested,
-        bool callerMayApproveExceptions)
+    public static string? HotelRateBreach(
+        decimal rateInPolicyCurrency, string policyCurrency, string bookedRate, TravelPolicyCaps caps)
+        => caps.MaxHotelRatePerNight is decimal cap && cap > 0m && rateInPolicyCurrency > cap
+            ? $"a nightly rate of {bookedRate} is above the {caps.PolicyName} cap of {policyCurrency} {cap:N2}"
+            : null;
+
+    /// <summary>
+    /// What booking later than the policy asks breaches (lane 4, D-1: <c>AdvanceBookingDaysFlight/Hotel</c> had no
+    /// reader); null when booked in time or when the policy sets no notice.
+    /// </summary>
+    /// <param name="daysAhead">Days between the day the booking was made and the departure (or check-in).</param>
+    /// <param name="what">"flight" or "hotel".</param>
+    public static string? AdvanceBookingBreach(int daysAhead, int required, string what, TravelPolicyCaps caps)
     {
-        if (caps.MaxHotelRatePerNight is not decimal cap || cap <= 0m) return false;
-        if (rateInPolicyCurrency <= cap) return false;
-
-        if (!exceptionRequested)
-            throw new InvalidOperationException(
-                $"A nightly rate of {bookedRate} exceeds the {caps.PolicyName} cap of " +
-                $"{policyCurrency} {cap:N2} for this trip. An approved policy exception is required.");
-
-        if (!callerMayApproveExceptions)
-            throw new UnauthorizedAccessException(
-                $"Approving a nightly rate above the {caps.PolicyName} cap of {policyCurrency} {cap:N2} requires " +
-                "travel administrator rights. Ask a travel administrator to authorise the exception.");
-
-        return true;
+        if (required <= 0 || daysAhead >= required) return null;
+        var before = what == "hotel" ? "check-in" : "departure";
+        var when = daysAhead switch
+        {
+            < 0 => $"{-daysAhead} day{(daysAhead == -1 ? "" : "s")} after {before}",
+            0 => $"on the day of {before}",
+            _ => $"{daysAhead} day{(daysAhead == 1 ? "" : "s")} before {before}",
+        };
+        return $"the {what} was booked {when}; {caps.PolicyName} asks for {required} days' notice";
     }
+
+    private static string Spaced(FlightCabinClass cabin)
+        => System.Text.RegularExpressions.Regex.Replace(cabin.ToString(), "(?<!^)([A-Z])", " $1");
 }

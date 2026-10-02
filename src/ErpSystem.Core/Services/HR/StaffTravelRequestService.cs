@@ -228,6 +228,32 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 "this organisation holds.");
     }
 
+    /// <summary>
+    /// Lane 4, C5 (T-46): <c>TravelRiskLevel.Prohibited</c> prohibits — at submission and at every approval stage.
+    /// It is the trip's own level (the requester's choice) or, higher, the latest risk assessment the desk recorded
+    /// for the trip that still holds on the departure date (P2: the request's level is the requester's to pick).
+    /// A Critical trip's acknowledged assessment is lane 7's (D-18).
+    /// </summary>
+    private async Task RequireNotProhibitedAsync(StaffTravelRequest entity, string verb, CancellationToken cancellationToken)
+    {
+        if (entity.RiskLevel == TravelRiskLevel.Prohibited)
+            throw new InvalidOperationException(
+                $"Travel request {entity.RequestNumber} is rated Prohibited, so it cannot be {verb}. Travel to a prohibited " +
+                "destination does not go ahead; if the rating is wrong, correct it first.");
+
+        var assessed = await _unitOfWork.Repository<StaffTravelRiskAssessment>()
+            .GetQueryable(a => a.TenantId == entity.TenantId && a.StaffTravelRequestId == entity.Id
+                            && (a.ValidUntil == null || a.ValidUntil >= entity.TravelStartDate))
+            .OrderByDescending(a => a.AssessedAt ?? a.CreatedAt)
+            .Select(a => new { a.RiskLevel, a.AssessmentSource })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (assessed?.RiskLevel == TravelRiskLevel.Prohibited)
+            throw new InvalidOperationException(
+                $"The latest risk assessment of travel request {entity.RequestNumber}" +
+                (string.IsNullOrWhiteSpace(assessed.AssessmentSource) ? string.Empty : $" ({assessed.AssessmentSource})") +
+                $" rates the destination Prohibited, so the trip cannot be {verb}.");
+    }
+
     private static void RequireDatesInOrder(DateOnly start, DateOnly end)
     {
         if (end < start)
@@ -1258,6 +1284,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             throw new InvalidOperationException(
                 "Enter the trip's estimated cost before submitting it — the approver decides the budget against it.");
         RequireDatesInOrder(entity.TravelStartDate, entity.TravelEndDate);
+        await RequireNotProhibitedAsync(entity, "submitted", cancellationToken);
         await _currency.RequireKnownCurrencyAsync(entity.CurrencyCode, cancellationToken);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -1349,6 +1376,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var userId = RequireUserId();
 
         RequireNotTheTraveller(entity, "approve");
+        // Lane 4 (C5): a destination assessed Prohibited after submission stops the approval too.
+        await RequireNotProhibitedAsync(entity, "approved", cancellationToken);
 
         // Lane 2 (D-7): the stage decides who may — the traveller's line authority at the line manager's
         // stage, the travel desk there only when no line authority can, the engine's approvers after.

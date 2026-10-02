@@ -185,7 +185,11 @@ public class StaffTravelPoliciesController : HrControllerBase
         return Ok(await _service.CreateExceptionAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    /// <summary>
+    /// Lane 4, C4: a travel administrator's act, as authorising a booking's breach is — it was Write, so whoever
+    /// could raise an exception could grant it. The decision's time is the server's, and the requester does not decide.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpPost("exceptions/{id:guid}/decide")]
     public async Task<IActionResult> DecideException(Guid id, [FromBody] DecideStaffTravelPolicyExceptionDto dto)
     {

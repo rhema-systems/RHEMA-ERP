@@ -28,6 +28,8 @@ import type {
   CreateStaffTravelCarRentalBooking,
   UpdateStaffTravelCarRentalBooking,
   TravelBookingStatus,
+  TravelBookingExceptionState,
+  StaffTravelBookingException,
 } from '@/types/hr/travel-bookings';
 
 /**
@@ -195,6 +197,24 @@ class TravelBookingsService {
 
   deleteHotel(id: string) {
     return apiService.delete<void>(`${this.bookings}/hotels/${id}`);
+  }
+
+  // ── Policy exceptions on bookings (lane 4, D-8) ────────────────────────────
+
+  /** The policy-breach register: flight and hotel bookings that breach their trip's policy, pending first. */
+  getBookingExceptions(state?: TravelBookingExceptionState) {
+    return apiService.get<StaffTravelBookingException[]>(
+      `${this.bookings}/exceptions${state ? `?state=${state}` : ''}`);
+  }
+
+  /**
+   * A travel administrator who neither booked it nor asked for the exception, and is not the traveller, decides
+   * it. A refusal needs a reason of five characters or more, kept on the trip as an internal note.
+   */
+  decideBookingException(kind: 'Flight' | 'Hotel', id: string, authorise: boolean, reason?: string) {
+    const path = `${this.bookings}/${kind === 'Flight' ? 'flights' : 'hotels'}/${id}/exception/${authorise ? 'authorise' : 'refuse'}`;
+    return apiService.post<StaffTravelFlightBooking | StaffTravelHotelBooking>(
+      path, authorise ? {} : { reason: reason ?? '' });
   }
 
   // ── Ground transport ───────────────────────────────────────────────────────

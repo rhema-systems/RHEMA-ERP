@@ -632,10 +632,17 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
 
         if (entity.Status != TravelPolicyExceptionStatus.Pending)
             throw new InvalidOperationException("Only pending exceptions can be decided.");
+        // Lane 4, C4: approve or reject — "Pending" or "Expired" are not decisions.
+        if (decideDto.Status is not (TravelPolicyExceptionStatus.Approved or TravelPolicyExceptionStatus.Rejected))
+            throw new InvalidOperationException("Approve the exception or reject it.");
+        // ...and not by whoever raised it (its CreatedBy, the platform user) — the two-person rule of D-2 and D-8.
+        if (string.Equals(entity.CreatedBy, _currentUserProvider.UserId.ToString(), StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                "You raised this policy exception, so another travel administrator decides it.");
 
         entity.Status = decideDto.Status;
         entity.ApprovedById = deciderEmployeeId;   // the caller, not a payload value
-        entity.DecidedAt = decideDto.DecidedAt;
+        entity.DecidedAt = DateTime.UtcNow;         // the clock, not the payload (C4)
         entity.DecisionNotes = decideDto.DecisionNotes;
         // Audit field: the USER id, not the Employee FK stamped above.
         entity.UpdatedBy = _currentUserProvider.UserId.ToString();

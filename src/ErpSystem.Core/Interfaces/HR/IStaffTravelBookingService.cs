@@ -15,15 +15,16 @@ public interface IStaffTravelBookingService
     Task<StaffTravelFlightBookingDto> GetFlightByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelFlightBookingSummaryDto>> GetFlightsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelFlightBookingSummaryDto>> GetFlightsByStatusAsync(TravelBookingStatus status, CancellationToken cancellationToken = default);
-    /// <param name="callerMayApproveExceptions">
-    /// Whether this caller holds <c>HR.Travel.Admin</c> and may therefore authorise a booking above
-    /// the travel policy's cap. Passed in rather than read from claims here: a service that
-    /// inspects the caller's identity behind the controller's back is how these fields became
-    /// spoofable. See <see cref="Services.HR.StaffTravelPolicyGuard"/>.
+    /// <param name="actorEmployeeId">
+    /// The caller's employee record, when the login has one — recorded as who asked for a policy exception. Lane 4,
+    /// D-8: a breach is no longer authorised in the booking request (it was, for a caller holding
+    /// <c>HR.Travel.Admin</c>); a different administrator decides it with <see cref="DecideFlightExceptionAsync"/>.
     /// </param>
-    Task<StaffTravelFlightBookingDto> CreateFlightAsync(CreateStaffTravelFlightBookingDto createDto, Guid tenantId, Guid createdByUserId, bool callerMayApproveExceptions = false, CancellationToken cancellationToken = default);
-    Task<StaffTravelFlightBookingDto> UpdateFlightAsync(UpdateStaffTravelFlightBookingDto updateDto, Guid updatedByUserId, bool callerMayApproveExceptions = false, CancellationToken cancellationToken = default);
+    Task<StaffTravelFlightBookingDto> CreateFlightAsync(CreateStaffTravelFlightBookingDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<StaffTravelFlightBookingDto> UpdateFlightAsync(UpdateStaffTravelFlightBookingDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> DeleteFlightAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Authorise (or refuse, with the reason) a flight booking's policy exception — lane 4, D-8.</summary>
+    Task<StaffTravelFlightBookingDto> DecideFlightExceptionAsync(Guid id, bool authorise, string? reason, Guid deciderEmployeeId, CancellationToken cancellationToken = default);
 
     // Flight segments
     Task<StaffTravelFlightSegmentDto> AddSegmentAsync(CreateStaffTravelFlightSegmentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
@@ -34,10 +35,15 @@ public interface IStaffTravelBookingService
     // Hotel bookings
     Task<StaffTravelHotelBookingDto> GetHotelByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelHotelBookingSummaryDto>> GetHotelsByRequestAsync(Guid requestId, CancellationToken cancellationToken = default);
-    /// <param name="callerMayApproveExceptions">See <c>CreateFlightAsync</c> — same contract.</param>
-    Task<StaffTravelHotelBookingDto> CreateHotelAsync(CreateStaffTravelHotelBookingDto createDto, Guid tenantId, Guid createdByUserId, bool callerMayApproveExceptions = false, CancellationToken cancellationToken = default);
-    Task<StaffTravelHotelBookingDto> UpdateHotelAsync(UpdateStaffTravelHotelBookingDto updateDto, Guid updatedByUserId, bool callerMayApproveExceptions = false, CancellationToken cancellationToken = default);
+    /// <param name="actorEmployeeId">See <c>CreateFlightAsync</c> — same contract.</param>
+    Task<StaffTravelHotelBookingDto> CreateHotelAsync(CreateStaffTravelHotelBookingDto createDto, Guid tenantId, Guid createdByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
+    Task<StaffTravelHotelBookingDto> UpdateHotelAsync(UpdateStaffTravelHotelBookingDto updateDto, Guid updatedByUserId, Guid? actorEmployeeId = null, CancellationToken cancellationToken = default);
     Task<bool> DeleteHotelAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>As <see cref="DecideFlightExceptionAsync"/>, for a hotel booking.</summary>
+    Task<StaffTravelHotelBookingDto> DecideHotelExceptionAsync(Guid id, bool authorise, string? reason, Guid deciderEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>The policy-breach register: flight and hotel bookings with an exception, pending first (lane 4, D-8).</summary>
+    Task<IEnumerable<StaffTravelBookingExceptionDto>> GetBookingExceptionsAsync(TravelBookingExceptionState? state = null, CancellationToken cancellationToken = default);
 
     // Ground transport
     Task<StaffTravelGroundTransportDto> GetGroundTransportByIdAsync(Guid id, CancellationToken cancellationToken = default);
