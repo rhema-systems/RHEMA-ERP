@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Services.Projects;
@@ -34,6 +35,7 @@ public class SalesOrderService : ISalesOrderService
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly ISalesOrderInvoiceService? _invoiceGenerator;
     private readonly ITaxCalculationEngine? _taxCalculationEngine;
+    private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
     public SalesOrderService(
         IGenericRepository<SalesOrder> salesOrderRepo,
@@ -49,7 +51,8 @@ public class SalesOrderService : ISalesOrderService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ILogger<SalesOrderService> logger,
         ISalesOrderInvoiceService? invoiceGenerator = null,
-        ITaxCalculationEngine? taxCalculationEngine = null)
+        ITaxCalculationEngine? taxCalculationEngine = null,
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
     {
         _salesOrderRepo = salesOrderRepo;
         _lineRepo = lineRepo;
@@ -66,6 +69,7 @@ public class SalesOrderService : ISalesOrderService
         _documentNumberingService = documentNumberingService;
         _invoiceGenerator = invoiceGenerator;
         _taxCalculationEngine = taxCalculationEngine;
+        _commercialQuantityValidator = commercialQuantityValidator;
     }
 
     #region CRUD
@@ -159,6 +163,7 @@ public class SalesOrderService : ISalesOrderService
                     TaxCode = tax.TaxCode,
                     TaxGroupId = tax.TaxGroupId,
                     Unit = lineDto.Unit,
+                    UnitOfMeasureId = lineDto.UnitOfMeasureId,
                     WarehouseId = lineDto.WarehouseId ?? dto.WarehouseId,
                     LocationId = lineDto.LocationId,
                     GLAccountId = lineDto.GLAccountId,
@@ -168,6 +173,8 @@ public class SalesOrderService : ISalesOrderService
                     Notes = lineDto.Notes,
                     TenantId = bp.TenantId
                 };
+
+                await ValidateLineQuantityAsync(line, "Sales order create");
 
                 subTotal += line.LineTotal - line.DiscountAmount;
                 totalTax += line.TaxAmount;
@@ -290,12 +297,15 @@ public class SalesOrderService : ISalesOrderService
                         TaxCode = tax.TaxCode,
                         TaxGroupId = tax.TaxGroupId,
                         Unit = lineDto.Unit,
+                        UnitOfMeasureId = lineDto.UnitOfMeasureId,
                         WarehouseId = lineDto.WarehouseId ?? so.WarehouseId,
                         LocationId = lineDto.LocationId,
                         GLAccountId = lineDto.GLAccountId,
                         Notes = lineDto.Notes,
                         TenantId = so.TenantId
                     };
+
+                    await ValidateLineQuantityAsync(line, "Sales order update");
 
                     subTotal += line.LineTotal - line.DiscountAmount;
                     totalTax += line.TaxAmount;
@@ -485,12 +495,14 @@ public class SalesOrderService : ISalesOrderService
     {
         try
         {
-            var so = await _salesOrderRepo.GetByIdAsync(id)
+            var so = await _salesOrderRepo.GetByIdAsync(id, s => s.Lines)
                 ?? throw new InvalidOperationException($"Sales Order {id} not found");
             EnsureLifecycleTenant(so);
 
             if (so.OrderStatus != SalesOrderStatus.Draft)
                 throw new InvalidOperationException($"Cannot submit Sales Order in {so.OrderStatus} status");
+
+            await ValidateOrderQuantitiesAsync(so, "Sales order submit");
 
             var userId = _currentUserProvider.UserId;
             if (userId == Guid.Empty)
@@ -532,7 +544,7 @@ public class SalesOrderService : ISalesOrderService
     {
         try
         {
-            var so = await _salesOrderRepo.GetByIdAsync(id)
+            var so = await _salesOrderRepo.GetByIdAsync(id, s => s.Lines)
                 ?? throw new InvalidOperationException($"Sales Order {id} not found");
             EnsureLifecycleTenant(so);
 
@@ -550,6 +562,9 @@ public class SalesOrderService : ISalesOrderService
 
             if (dto.Approved && !await ValidateCreditLimitAsync(so.BusinessPartnerId, so.TotalAmount))
                 throw new InvalidOperationException("Order exceeds customer's available credit limit or the customer is on credit hold");
+
+            if (dto.Approved)
+                await ValidateOrderQuantitiesAsync(so, "Sales order confirm");
 
             var previousStatus = so.OrderStatus;
             var comments = dto.Approved
@@ -863,6 +878,20 @@ public class SalesOrderService : ISalesOrderService
             throw new KeyNotFoundException("The selected sales order was not found in the current tenant.");
     }
 
+    private async Task ValidateOrderQuantitiesAsync(SalesOrder order, string boundary)
+    {
+        foreach (var line in order.Lines.Where(line => !line.IsDeleted))
+            await ValidateLineQuantityAsync(line, boundary);
+    }
+
+    private Task ValidateLineQuantityAsync(SalesOrderLine line, string boundary)
+    {
+        var validator = _commercialQuantityValidator
+            ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales.");
+        return SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, line.Quantity, $"{boundary} line {line.LineNumber}");
+    }
+
     private async Task SyncLinkedProjectUnitsForSalesOrderAsync(SalesOrder salesOrder)
     {
         var projectUnitRepository = _unitOfWork.Repository<ProjectUnit>();
@@ -1145,6 +1174,10 @@ public class SalesOrderService : ISalesOrderService
             TaxCode = l.TaxCode,
             TaxGroupId = l.TaxGroupId,
             Unit = l.Unit,
+            UnitOfMeasureId = l.UnitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = l.UnitOfMeasureCodeSnapshot,
+            UnitOfMeasureDecimalPlacesSnapshot = l.UnitOfMeasureDecimalPlacesSnapshot,
+            UnitOfMeasureRoundingIncrementSnapshot = l.UnitOfMeasureRoundingIncrementSnapshot,
             WarehouseId = l.WarehouseId,
             LocationId = l.LocationId,
             SerialNumber = l.SerialNumber,

@@ -67,7 +67,7 @@ public class RequestForQuotation : TenantEntity
     public virtual ProcurementRfqEvaluation? Evaluation { get; set; }
 }
 
-public class RequestForQuotationItem : TenantEntity
+public class RequestForQuotationItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid RfqId { get; set; }
@@ -93,6 +93,10 @@ public class RequestForQuotationItem : TenantEntity
 
     [MaxLength(50)]
     public string UnitOfMeasure { get; set; } = string.Empty;
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     public string? Specifications { get; set; }
 

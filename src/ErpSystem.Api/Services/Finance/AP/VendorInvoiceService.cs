@@ -3074,9 +3074,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions)
         {
             postingLine.SourceDocumentLineId = sourceLine.Id;
+            ApplyCommercialUomEvidence(postingLine, sourceLine);
             postingLine.Dimensions = sourceDimensions.TryGetValue(sourceLine.Id, out var values)
                 ? values
                 : Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
+        private static void ApplyCommercialUomEvidence(FinancePostingLineDto postingLine, VendorInvoiceLineItem sourceLine)
+        {
+            postingLine.CommercialUnitOfMeasureId = sourceLine.UnitOfMeasureId;
+            postingLine.CommercialUnitOfMeasureCode = sourceLine.UnitOfMeasureCodeSnapshot;
+            postingLine.CommercialQuantityDecimalPlaces = sourceLine.UnitOfMeasureDecimalPlacesSnapshot;
+            postingLine.CommercialQuantityRoundingIncrement = sourceLine.UnitOfMeasureRoundingIncrementSnapshot;
         }
 
         private async Task<VendorInvoice> LoadInvoiceForPostingAsync(Guid id, CancellationToken cancellationToken)
@@ -3481,6 +3490,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     ResolveLineTag(line),
                     functionalDecimalPlaces: functionalDecimalPlaces);
                 expenseLine.SourceDocumentLineId = line.Id;
+                ApplyCommercialUomEvidence(expenseLine, line);
                 ApplySourceDimensions(expenseLine, line, sourceLineDimensions);
                 postingLines.Add(expenseLine);
             }
@@ -4118,6 +4128,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                             $"AP-Tax-{breakdown.TaxCode}",
                             functionalDecimalPlaces: functionalDecimalPlaces);
                         postingLine.SourceDocumentLineId = line.Id;
+                        ApplyCommercialUomEvidence(postingLine, line);
                         postingLine.Notes = IsFixedAssetLine(line)
                             ? $"{BuildFixedAssetLineNotes(line)};TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};Recoverable={breakdown.IsInputTaxDeductible};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}"
                             : $"TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}";

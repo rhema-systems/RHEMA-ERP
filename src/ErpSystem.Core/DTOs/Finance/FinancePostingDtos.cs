@@ -85,6 +85,10 @@ public sealed class FinancePostingLineDto
     /// re-resolving today's account mappings.
     /// </summary>
     public Guid? SourceDocumentLineId { get; set; }
+    public Guid? CommercialUnitOfMeasureId { get; set; }
+    public string? CommercialUnitOfMeasureCode { get; set; }
+    public int? CommercialQuantityDecimalPlaces { get; set; }
+    public decimal? CommercialQuantityRoundingIncrement { get; set; }
     public string? Description { get; set; }
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }

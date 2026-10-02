@@ -209,6 +209,8 @@
     <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
     <Compile Include="Services\Inventory\CommercialQuantityPolicyTests.cs" />
+    <Compile Include="Services\Sales\SalesCommercialQuantityEvidenceTests.cs" />
+    <Compile Include="Services\Inventory\CommercialQuantityEvidencePersistenceTests.cs" />
     <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
     <Compile Include="Finance\PrecisionRoundingPolicyTests.cs" />
   </ItemGroup>

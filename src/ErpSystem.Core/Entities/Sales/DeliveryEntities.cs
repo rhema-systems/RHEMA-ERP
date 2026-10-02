@@ -102,7 +102,7 @@ public class DeliveryNote : DocumentEntity
 /// Individual line item on a Delivery Note.
 /// Links back to the Sales Order Line for quantity tracking.
 /// </summary>
-public class DeliveryNoteLine : BaseEntity
+public class DeliveryNoteLine : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid DeliveryNoteId { get; set; }
@@ -139,6 +139,10 @@ public class DeliveryNoteLine : BaseEntity
 
     [MaxLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // ── Stock Tracking ──────────────────────────────────────────────────
 

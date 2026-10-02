@@ -68,7 +68,7 @@ public sealed class ProcurementReceiptInspectionCase : TenantEntity
 }
 
 [Table("ProcurementReceiptInspectionLines")]
-public sealed class ProcurementReceiptInspectionLine : TenantEntity
+public sealed class ProcurementReceiptInspectionLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid InspectionCaseId { get; set; }
     public Guid PurchaseOrderReceiptItemId { get; set; }
@@ -76,6 +76,10 @@ public sealed class ProcurementReceiptInspectionLine : TenantEntity
     public decimal AcceptedQuantity { get; set; }
     public decimal RejectedQuantity { get; set; }
     public decimal PendingQuantity { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public ProcurementReceiptDisposition Disposition { get; set; }
     [StringLength(1000)] public string? RejectionReason { get; set; }
     [StringLength(1000)] public string? InspectionNotes { get; set; }

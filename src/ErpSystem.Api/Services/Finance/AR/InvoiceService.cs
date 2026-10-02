@@ -1416,9 +1416,18 @@ namespace ErpSystem.Api.Services.Finance.AR
             IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions)
         {
             postingLine.SourceDocumentLineId = sourceLine.Id;
+            ApplyCommercialUomEvidence(postingLine, sourceLine);
             postingLine.Dimensions = sourceDimensions.TryGetValue(sourceLine.Id, out var values)
                 ? values
                 : Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
+        private static void ApplyCommercialUomEvidence(FinancePostingLineDto postingLine, InvoiceLineItem sourceLine)
+        {
+            postingLine.CommercialUnitOfMeasureId = sourceLine.UnitOfMeasureId;
+            postingLine.CommercialUnitOfMeasureCode = sourceLine.UnitOfMeasureCodeSnapshot;
+            postingLine.CommercialQuantityDecimalPlaces = sourceLine.UnitOfMeasureDecimalPlacesSnapshot;
+            postingLine.CommercialQuantityRoundingIncrement = sourceLine.UnitOfMeasureRoundingIncrementSnapshot;
         }
 
         private static IReadOnlyDictionary<Guid, decimal> AllocateDocumentDiscount(
@@ -1714,7 +1723,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         lineNumber++,
                         "AR-Inventory",
                         functionalDecimalPlaces);
-                    if (salesSource) inventoryPostingLine.SourceDocumentLineId = line.Id;
+                    if (salesSource)
+                    {
+                        inventoryPostingLine.SourceDocumentLineId = line.Id;
+                        ApplyCommercialUomEvidence(inventoryPostingLine, line);
+                    }
                     postingLines.Add(inventoryPostingLine);
                 }
             }
@@ -2279,6 +2292,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         $"AR-Tax-{breakdown.TaxCode}",
                         functionalDecimalPlaces);
                     postingLine.SourceDocumentLineId = line.Id;
+                    ApplyCommercialUomEvidence(postingLine, line);
                     postingLine.Notes = $"TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}";
                     calculatedLines.Add(postingLine);
 

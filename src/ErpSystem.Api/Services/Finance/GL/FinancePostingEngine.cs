@@ -367,6 +367,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             Lines = journal.Transactions.OrderBy(item => item.LineNumber).Select(item => new FinancePostingLineDto
             {
                 AccountId = item.AccountId, SourceDocumentLineId = item.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = item.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = item.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = item.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = item.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {item.Description}", DebitAmount = item.CreditAmount,
                 CreditAmount = item.DebitAmount, TransactionCurrency = item.TransactionCurrency,
                 ForeignCurrencyAmount = item.ForeignCurrencyAmount, ExchangeRate = item.ExchangeRate,
@@ -489,6 +493,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 AccountId = t.AccountId,
                 SourceDocumentLineId = t.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = t.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = t.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = t.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = t.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {t.Description}",
                 DebitAmount = t.CreditAmount,
                 CreditAmount = t.DebitAmount,
@@ -801,6 +809,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             transaction.SourceModule = validation.SourceModule;
             transaction.SourceDocumentId = validation.SourceDocumentId;
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
+            transaction.CommercialUnitOfMeasureId = requestLine.CommercialUnitOfMeasureId;
+            transaction.CommercialUnitOfMeasureCode = requestLine.CommercialUnitOfMeasureCode;
+            transaction.CommercialQuantityDecimalPlaces = requestLine.CommercialQuantityDecimalPlaces;
+            transaction.CommercialQuantityRoundingIncrement = requestLine.CommercialQuantityRoundingIncrement;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.Description = requestLine.Description ?? validation.Description;
             transaction.SourceReferenceNumber = requestLine.SourceReferenceNumber ?? validation.SourceDocumentReference;
@@ -883,6 +895,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 TenantId = tenantId,
                 AccountId = line.AccountId,
                 SourceDocumentLineId = line.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = line.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = line.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = line.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = line.CommercialQuantityRoundingIncrement,
                 JournalEntryId = journalEntry.Id,
                 TransactionDate = validation.PostingDate,
                 Description = line.Description ?? validation.Description,
@@ -1001,6 +1017,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 || a.ForeignCurrencyAmount != b.ForeignCurrencyAmount || a.ExchangeRateId != b.ExchangeRateId
                 || a.ExchangeRate != b.ExchangeRate || a.ExchangeRateDate != b.ExchangeRateDate
                 || a.SourceDocumentLineId != b.SourceDocumentLineId
+                || a.CommercialUnitOfMeasureId != b.CommercialUnitOfMeasureId
+                || a.CommercialQuantityDecimalPlaces != b.CommercialQuantityDecimalPlaces
+                || a.CommercialQuantityRoundingIncrement != b.CommercialQuantityRoundingIncrement
+                || !string.Equals(a.CommercialUnitOfMeasureCode, b.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.ExchangeRateSource, b.ExchangeRateSource, StringComparison.Ordinal)
                 || !string.Equals(a.TransactionCurrency, b.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.SourceReferenceNumber, b.SourceReferenceNumber, StringComparison.Ordinal)
@@ -1188,6 +1208,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     FinanceDimensionSnapshotId = replicaSnapshot?.Id,
                     SourceModule = source.SourceModule, SourceDocumentId = source.SourceDocumentId,
                     SourceDocumentLineId = source.SourceDocumentLineId,
+                    CommercialUnitOfMeasureId = source.CommercialUnitOfMeasureId,
+                    CommercialUnitOfMeasureCode = source.CommercialUnitOfMeasureCode,
+                    CommercialQuantityDecimalPlaces = source.CommercialQuantityDecimalPlaces,
+                    CommercialQuantityRoundingIncrement = source.CommercialQuantityRoundingIncrement,
                     SourceDocumentType = source.SourceDocumentType,
                     SourceReferenceNumber = source.SourceReferenceNumber,
                     BookClassification = book.Code, AccountingBookId = book.Id,
@@ -1941,9 +1965,25 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 credit,
                 cancellationToken);
 
+            var carriesCommercialUomEvidence = line.CommercialUnitOfMeasureId.HasValue ||
+                !string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                line.CommercialQuantityDecimalPlaces.HasValue ||
+                line.CommercialQuantityRoundingIncrement.HasValue;
+            if (carriesCommercialUomEvidence && (!line.CommercialUnitOfMeasureId.HasValue ||
+                string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                !line.CommercialQuantityDecimalPlaces.HasValue))
+                throw new InvalidOperationException("Commercial UOM posting evidence must include stable ID, code, and decimal precision together.");
+            if (carriesCommercialUomEvidence)
+                ErpSystem.Core.Inventory.CommercialQuantityPolicy.ValidateConfiguration(
+                    line.CommercialQuantityDecimalPlaces!.Value, line.CommercialQuantityRoundingIncrement);
+
             normalizedLines.Add(new ValidatedPostingLine(
                 line.AccountId,
                 line.SourceDocumentLineId,
+                line.CommercialUnitOfMeasureId,
+                NormalizeOptional(line.CommercialUnitOfMeasureCode, 20, "Commercial UOM code"),
+                line.CommercialQuantityDecimalPlaces,
+                line.CommercialQuantityRoundingIncrement,
                 NormalizeOptional(line.Description, 500, "Line description"),
                 debit,
                 credit,
@@ -2901,6 +2941,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var requested = requestedLines[index];
             if (stored.AccountId != requested.AccountId
                 || stored.SourceDocumentLineId != requested.SourceDocumentLineId
+                || stored.CommercialUnitOfMeasureId != requested.CommercialUnitOfMeasureId
+                || stored.CommercialQuantityDecimalPlaces != requested.CommercialQuantityDecimalPlaces
+                || stored.CommercialQuantityRoundingIncrement != requested.CommercialQuantityRoundingIncrement
+                || !string.Equals(stored.CommercialUnitOfMeasureCode, requested.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || stored.DebitAmount != requested.DebitAmount
                 || stored.CreditAmount != requested.CreditAmount
                 || stored.TransactionDebitAmount != requested.TransactionDebitAmount
@@ -3459,6 +3503,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var prefix = $"line[{lineIndex}]";
             AddGuid($"{prefix}.accountId", line.AccountId);
             AddGuid($"{prefix}.sourceDocumentLineId", line.SourceDocumentLineId);
+            AddGuid($"{prefix}.commercialUnitOfMeasureId", line.CommercialUnitOfMeasureId);
+            Add($"{prefix}.commercialUnitOfMeasureCode", line.CommercialUnitOfMeasureCode);
+            Add($"{prefix}.commercialQuantityDecimalPlaces", line.CommercialQuantityDecimalPlaces?.ToString(CultureInfo.InvariantCulture));
+            AddDecimal($"{prefix}.commercialQuantityRoundingIncrement", line.CommercialQuantityRoundingIncrement);
             Add($"{prefix}.description", line.Description);
             AddDecimal($"{prefix}.debitAmount", line.DebitAmount);
             AddDecimal($"{prefix}.creditAmount", line.CreditAmount);
@@ -4119,6 +4167,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
     private sealed record ValidatedPostingLine(
         Guid AccountId,
         Guid? SourceDocumentLineId,
+        Guid? CommercialUnitOfMeasureId,
+        string? CommercialUnitOfMeasureCode,
+        int? CommercialQuantityDecimalPlaces,
+        decimal? CommercialQuantityRoundingIncrement,
         string? Description,
         decimal DebitAmount,
         decimal CreditAmount,

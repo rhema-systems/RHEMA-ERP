@@ -7,6 +7,15 @@ public sealed record CommercialQuantityEvidence(
     decimal? RoundingIncrement,
     decimal Quantity);
 
+/// <summary>Persisted snapshot carried by commercial transaction lines and copied into posting evidence.</summary>
+public interface ICommercialQuantityEvidenceLine
+{
+    Guid? UnitOfMeasureId { get; set; }
+    string? UnitOfMeasureCodeSnapshot { get; set; }
+    int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
+}
+
 /// <summary>Shared commercial boundary contract. Stable UOM ID is authoritative; code is legacy fallback only.</summary>
 public interface ICommercialQuantityPolicyValidator
 {

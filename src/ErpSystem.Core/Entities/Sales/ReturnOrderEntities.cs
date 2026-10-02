@@ -56,7 +56,7 @@ public class ReturnOrder : DocumentEntity
 /// <summary>
 /// Individual items being returned
 /// </summary>
-public class ReturnOrderLine : BaseEntity
+public class ReturnOrderLine : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid ReturnOrderId { get; set; }
     public virtual ReturnOrder ReturnOrder { get; set; } = null!;
@@ -74,6 +74,11 @@ public class ReturnOrderLine : BaseEntity
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal QuantityReturned { get; set; }
+
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal UnitPrice { get; set; }

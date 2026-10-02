@@ -148,7 +148,7 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }
 
-    public class InvoiceLineItem : BaseEntity
+    public class InvoiceLineItem : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
     {
         [Required]
         public Guid InvoiceId { get; set; }
@@ -219,6 +219,10 @@ namespace ErpSystem.Core.Entities.Finance
 
         [MaxLength(50)]
         public string? Unit { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
+        [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+        public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+        [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
         [Column(TypeName = "decimal(5,2)")]
         public decimal DiscountPercentage { get; set; }

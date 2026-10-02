@@ -18,6 +18,8 @@ using ErpSystem.Core.Entities.Reference;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Inventory;
 using ErpSystem.Data.Configuration;
 using ErpSystem.Data.Configuration.Finance;
 using ErpSystem.Core.Entities.HR.StaffLeave;
@@ -11036,6 +11038,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("LandAcquisitionChecklistResponses");
             entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
         });
+
+        builder.Entity<InventoryItem>()
+            .HasOne<UnitOfMeasure>()
+            .WithMany()
+            .HasForeignKey(item => item.UnitOfMeasureId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        foreach (var entityType in builder.Model.GetEntityTypes()
+                     .Where(entityType => typeof(ICommercialQuantityEvidenceLine).IsAssignableFrom(entityType.ClrType)))
+        {
+            builder.Entity(entityType.ClrType)
+                .HasOne(typeof(UnitOfMeasure), navigationName: null)
+                .WithMany()
+                .HasForeignKey(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureId))
+                .OnDelete(DeleteBehavior.Restrict);
+        }
     }
 
     private static void ConfigureProcedureCaseEntities(ModelBuilder builder)
@@ -11121,6 +11139,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
     {
+        await GovernCommercialQuantityEvidenceAsync(cancellationToken);
         await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
         // HR, round 4 lane O: before the audit pass, so the holders it moves are stamped too.
         await ApplyTechnicianRoleRuleAsync(true, cancellationToken);
@@ -11148,6 +11167,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     private int SaveWithInventoryCostProjection(bool acceptAllChanges)
     {
+        GovernCommercialQuantityEvidenceAsync(CancellationToken.None).GetAwaiter().GetResult();
         SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         // HR, round 4 lane O — see the async path.
         ApplyTechnicianRoleRuleAsync(false, CancellationToken.None).GetAwaiter().GetResult();
@@ -11156,6 +11176,164 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return base.SaveChanges(acceptAllChanges);
     }
+
+    private async Task GovernCommercialQuantityEvidenceAsync(CancellationToken cancellationToken)
+    {
+        var entries = ChangeTracker.Entries()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified &&
+                            entry.Entity is ICommercialQuantityEvidenceLine)
+            .ToList();
+
+        foreach (var entry in entries)
+        {
+            var line = (ICommercialQuantityEvidenceLine)entry.Entity;
+            var quantities = CommercialQuantities(entry.Entity);
+            if (entry.Entity is InvoiceLineItem or VendorInvoiceLineItem &&
+                line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(LegacyUnitCode(entry.Entity)) &&
+                InventoryItemId(entry.Entity) is null)
+                continue;
+            if (entry.Entity is InvoiceLineItem or VendorInvoiceLineItem &&
+                line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(LegacyUnitCode(entry.Entity)) &&
+                InventoryItemId(entry.Entity) is null)
+                continue;
+            var allowsNegative = entry.Entity is StockMovement or PhysicalCountItem;
+            if (!allowsNegative && quantities.Any(value => value.Value < 0m))
+                throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} quantities cannot be negative.");
+
+            if (line.UnitOfMeasureId.HasValue && line.UnitOfMeasureDecimalPlacesSnapshot.HasValue &&
+                !string.IsNullOrWhiteSpace(line.UnitOfMeasureCodeSnapshot))
+            {
+                foreach (var quantity in quantities)
+                    CommercialQuantityPolicy.Validate(quantity.Value, line.UnitOfMeasureDecimalPlacesSnapshot.Value,
+                        line.UnitOfMeasureRoundingIncrementSnapshot);
+                continue;
+            }
+
+            var legacyCode = LegacyUnitCode(entry.Entity);
+            if (line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(legacyCode))
+            {
+                var itemId = InventoryItemId(entry.Entity);
+                if (itemId.HasValue)
+                {
+                    var currentTenantId = (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+                    var item = await Set<InventoryItem>().AsNoTracking()
+                        .Where(value => value.TenantId == currentTenantId && value.Id == itemId.Value)
+                        .Select(value => new { value.UnitOfMeasureId, value.UnitOfMeasure })
+                        .SingleOrDefaultAsync(cancellationToken);
+                    line.UnitOfMeasureId = item?.UnitOfMeasureId;
+                    legacyCode = item?.UnitOfMeasure;
+                }
+            }
+
+            if (entry.Entity is ProcurementReceiptInspectionLine inspection && line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(legacyCode))
+            {
+                var receiptEvidence = await Set<PurchaseOrderReceiptItem>().AsNoTracking()
+                    .Where(value => value.Id == inspection.PurchaseOrderReceiptItemId && value.TenantId == inspection.TenantId)
+                    .Select(value => new { value.UnitOfMeasureId, value.UnitOfMeasure, value.UnitOfMeasureCodeSnapshot })
+                    .SingleOrDefaultAsync(cancellationToken);
+                line.UnitOfMeasureId = receiptEvidence?.UnitOfMeasureId;
+                legacyCode = receiptEvidence?.UnitOfMeasureCodeSnapshot ?? receiptEvidence?.UnitOfMeasure;
+            }
+
+            var tenantId = (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+            var normalizedCode = legacyCode?.Trim().ToUpperInvariant();
+            var candidates = line.UnitOfMeasureId.HasValue
+                ? await Set<UnitOfMeasure>().AsNoTracking().Where(value => value.TenantId == tenantId &&
+                    value.Id == line.UnitOfMeasureId.Value && value.IsActive && !value.IsDeleted).Take(2).ToListAsync(cancellationToken)
+                : await Set<UnitOfMeasure>().AsNoTracking().Where(value => value.TenantId == tenantId &&
+                    value.Code.ToUpper() == normalizedCode && value.IsActive && !value.IsDeleted).Take(2).ToListAsync(cancellationToken);
+            if (candidates.Count != 1)
+                throw new InvalidOperationException(candidates.Count == 0
+                    ? $"{entry.Metadata.ClrType.Name} cannot resolve an active Inventory UOM."
+                    : $"{entry.Metadata.ClrType.Name} legacy UOM code '{normalizedCode}' is ambiguous; a stable UOM ID is required.");
+
+            var unit = candidates[0];
+            if (line.UnitOfMeasureId.HasValue && !string.IsNullOrWhiteSpace(normalizedCode) &&
+                !string.Equals(unit.Code, normalizedCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} UOM ID/code identity does not match.");
+
+            foreach (var quantity in quantities)
+                CommercialQuantityPolicy.Validate(quantity.Value, unit.DecimalPlaces, unit.RoundingIncrement);
+            line.UnitOfMeasureId = unit.Id;
+            line.UnitOfMeasureCodeSnapshot = unit.Code;
+            line.UnitOfMeasureDecimalPlacesSnapshot = unit.DecimalPlaces;
+            line.UnitOfMeasureRoundingIncrementSnapshot = unit.RoundingIncrement;
+        }
+    }
+
+    private static IReadOnlyList<(string Name, decimal Value)> CommercialQuantities(object entity) => entity switch
+    {
+        StockMovement value => [(nameof(value.Quantity), value.Quantity)],
+        GoodsReceiptNoteItem value => [(nameof(value.OrderedQuantity), value.OrderedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity)],
+        InventoryTransferItem value => [(nameof(value.RequestedQuantity), value.RequestedQuantity), (nameof(value.ShippedQuantity), value.ShippedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.DamagedQuantity), value.DamagedQuantity), (nameof(value.ShortageQuantity), value.ShortageQuantity)],
+        PhysicalCountItem value => [(nameof(value.SystemQuantity), value.SystemQuantity), (nameof(value.CountedQuantity), value.CountedQuantity), (nameof(value.DefectiveQuantity), value.DefectiveQuantity), (nameof(value.VarianceQuantity), value.VarianceQuantity)],
+        InventoryRequisitionItem value => [(nameof(value.RequestedQuantity), value.RequestedQuantity), (nameof(value.ApprovedQuantity), value.ApprovedQuantity), (nameof(value.IssuedQuantity), value.IssuedQuantity)],
+        InventoryDisposalLine value => [(nameof(value.Quantity), value.Quantity)],
+        InventoryIssueVoucherLine value => [(nameof(value.Quantity), value.Quantity)],
+        PurchaseOrderItem value => [(nameof(value.OrderedQuantity), value.OrderedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity)],
+        PurchaseOrderReceiptItem value => [(nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity)],
+        ProcurementReceiptInspectionLine value => [(nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity), (nameof(value.PendingQuantity), value.PendingQuantity)],
+        ProcurementPlanItem value => [(nameof(value.EstimatedQuantity), value.EstimatedQuantity)],
+        PurchaseRequisitionItem value => [(nameof(value.Quantity), value.Quantity)],
+        RequestForQuotationItem value => [(nameof(value.Quantity), value.Quantity)],
+        TenderItem value => [(nameof(value.Quantity), value.Quantity)],
+        TenderNegotiationItem value => [(nameof(value.Quantity), value.Quantity)],
+        ProcurementFrameworkPriceListLine value => value.MaximumQuantity.HasValue
+            ? [(nameof(value.MinimumQuantity), value.MinimumQuantity), (nameof(value.MaximumQuantity), value.MaximumQuantity.Value)]
+            : [(nameof(value.MinimumQuantity), value.MinimumQuantity)],
+        ProcurementFrameworkCallOffLine value => [(nameof(value.Quantity), value.Quantity), (nameof(value.SourceDemandQuantity), value.SourceDemandQuantity)],
+        InvoiceLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        VendorInvoiceLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        SalesOrderLine value => [(nameof(value.Quantity), value.Quantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.InvoicedQuantity), value.InvoicedQuantity)],
+        DeliveryNoteLine value => [(nameof(value.DispatchedQuantity), value.DispatchedQuantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.DamagedQuantity), value.DamagedQuantity)],
+        ReturnOrderLine value => [(nameof(value.QuantityReturned), value.QuantityReturned)],
+        _ => []
+    };
+
+    private static string? LegacyUnitCode(object entity) => entity switch
+    {
+        GoodsReceiptNoteItem value => value.UnitOfMeasure,
+        InventoryTransferItem value => value.UnitOfMeasure,
+        PhysicalCountItem value => value.UnitOfMeasure,
+        InventoryRequisitionItem value => value.UnitOfMeasure,
+        PurchaseOrderItem value => value.UnitOfMeasure,
+        PurchaseOrderReceiptItem value => value.UnitOfMeasure,
+        InventoryIssueVoucherLine value => value.UnitOfMeasure,
+        ProcurementPlanItem value => value.UnitOfMeasure,
+        PurchaseRequisitionItem value => value.UnitOfMeasure,
+        RequestForQuotationItem value => value.UnitOfMeasure,
+        TenderItem value => value.UnitOfMeasure,
+        TenderNegotiationItem value => value.UnitOfMeasure,
+        ProcurementFrameworkPriceListLine value => value.UnitOfMeasure,
+        ProcurementFrameworkCallOffLine value => value.UnitOfMeasure,
+        InvoiceLineItem value => value.Unit,
+        VendorInvoiceLineItem value => value.Unit,
+        SalesOrderLine value => value.Unit,
+        DeliveryNoteLine value => value.Unit,
+        _ => null
+    };
+
+    private static Guid? InventoryItemId(object entity) => entity switch
+    {
+        StockMovement value => value.InventoryItemId,
+        GoodsReceiptNoteItem value => value.InventoryItemId,
+        InventoryTransferItem value => value.InventoryItemId,
+        PhysicalCountItem value => value.InventoryItemId,
+        InventoryRequisitionItem value => value.InventoryItemId,
+        InventoryDisposalLine value => value.InventoryItemId,
+        InventoryIssueVoucherLine value => value.InventoryItemId,
+        PurchaseOrderItem value => value.InventoryItemId,
+        ProcurementPlanItem value => value.InventoryItemId,
+        PurchaseRequisitionItem value => value.InventoryItemId,
+        RequestForQuotationItem value => value.InventoryItemId,
+        ProcurementFrameworkPriceListLine value => value.InventoryItemId,
+        ProcurementFrameworkCallOffLine value => value.InventoryItemId,
+        InvoiceLineItem value => value.InventoryItemId,
+        VendorInvoiceLineItem value => value.InventoryItemId,
+        SalesOrderLine value => value.InventoryItemId,
+        DeliveryNoteLine value => value.InventoryItemId,
+        _ => null
+    };
 
     private void NormalizeProcurementAwardReadinessAuditEnvelopes()
     {

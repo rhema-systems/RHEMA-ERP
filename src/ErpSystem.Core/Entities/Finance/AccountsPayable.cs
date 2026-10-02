@@ -400,7 +400,7 @@ public class VendorInvoice : TenantEntity
 /// <summary>
 /// An individual line item on a vendor invoice.
 /// </summary>
-public class VendorInvoiceLineItem : TenantEntity
+public class VendorInvoiceLineItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     /// <summary>Server-owned immutable lease component; null for ordinary AP lines.</summary>
     public LeaseInvoiceComponent? LeaseComponent { get; set; }
@@ -522,6 +522,10 @@ public class VendorInvoiceLineItem : TenantEntity
 
     [MaxLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 

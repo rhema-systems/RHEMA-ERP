@@ -108,6 +108,10 @@ public class SalesOrderLineDto
     public decimal TaxAmount { get; set; }
     public string? TaxCode { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public Guid? WarehouseId { get; set; }
     public string? WarehouseName { get; set; }
     public Guid? LocationId { get; set; }
@@ -216,6 +220,7 @@ public class CreateSalesOrderLineDto
     public decimal? TaxRate { get; set; }
     public string? TaxCode { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
     public Guid? WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
     public Guid? GLAccountId { get; set; }

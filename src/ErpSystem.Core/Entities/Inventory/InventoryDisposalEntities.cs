@@ -101,12 +101,16 @@ public sealed class InventoryDisposalCase : TenantEntity
     public ICollection<InventoryDisposalAction> Actions { get; set; } = new List<InventoryDisposalAction>();
 }
 
-public sealed class InventoryDisposalLine : TenantEntity
+public sealed class InventoryDisposalLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid InventoryDisposalCaseId { get; set; }
     public Guid InventoryItemId { get; set; }
     public Guid LocationId { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal Quantity { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal UnitCost { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal TotalValue { get; set; }
     [MaxLength(100)] public string? LotNumber { get; set; }

@@ -94,13 +94,17 @@ public sealed class ProcurementFrameworkAgreementCategory : TenantEntity
 }
 
 [Table("ProcurementFrameworkPriceListLines")]
-public sealed class ProcurementFrameworkPriceListLine : TenantEntity
+public sealed class ProcurementFrameworkPriceListLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid AgreementId { get; set; }
     public Guid InventoryItemId { get; set; }
     [Required, StringLength(100)] public string ItemCode { get; set; } = string.Empty;
     [Required, StringLength(200)] public string ItemName { get; set; } = string.Empty;
     [Required, StringLength(20)] public string UnitOfMeasure { get; set; } = string.Empty;
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal UnitPrice { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal MinimumQuantity { get; set; } = 1m;
     [Column(TypeName = "decimal(18,4)")] public decimal? MaximumQuantity { get; set; }

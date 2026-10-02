@@ -169,6 +169,10 @@ public class AccountTransaction : BusinessEntity
     /// source records while Finance uses this lineage for exact corrective postings and audit.
     /// </summary>
     public Guid? SourceDocumentLineId { get; set; }
+    public Guid? CommercialUnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? CommercialUnitOfMeasureCode { get; set; }
+    public int? CommercialQuantityDecimalPlaces { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? CommercialQuantityRoundingIncrement { get; set; }
 
     /// <summary>
     /// Source document type for reference and reporting.
