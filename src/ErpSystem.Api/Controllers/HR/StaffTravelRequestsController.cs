@@ -11,6 +11,7 @@ using ErpSystem.Shared;
 using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -99,6 +100,17 @@ public class StaffTravelRequestsController : HrControllerBase
     public async Task<ActionResult<StaffTravelDashboardDto>> GetDashboard([FromQuery] int upcomingDays = 30)
         => Ok(await _service.GetDashboardAsync(upcomingDays));
 
+    /// <summary>
+    /// The approved policy a trip for this traveller would be checked against, and its limits — what
+    /// the request form shows before the desk saves anything (finding T-16).
+    /// </summary>
+    [HttpGet("policy-preview")]
+    public async Task<ActionResult<StaffTravelPolicyPreviewDto>> GetPolicyPreview(
+        [FromQuery] Guid employeeId, [FromQuery] DateOnly departure,
+        [FromQuery] Guid? originCountryId = null, [FromQuery] Guid? destinationCountryId = null,
+        CancellationToken ct = default)
+        => Ok(await _service.GetPolicyPreviewAsync(employeeId, departure, originCountryId, destinationCountryId, ct));
+
     // =========================================================================
     // CRUD
     // =========================================================================
@@ -154,14 +166,29 @@ public class StaffTravelRequestsController : HrControllerBase
     // WORKFLOW
     // =========================================================================
 
+    /// <summary>Send a request for approval.</summary>
+    /// <remarks>
+    /// The body is optional and carries one thing: the desk's reason for submitting a trip whose
+    /// departure date has passed (lane 1). Without it such a trip is refused; with it the reason is
+    /// kept as an internal note in the submitter's name, so the caller must be linked to an employee.
+    /// The answer says where the request now is and lists any warnings — approved leave over the same
+    /// days, for instance.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/submit")]
-    public async Task<IActionResult> Submit(Guid id)
+    public async Task<ActionResult<StaffTravelSubmitResultDto>> Submit(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SubmitStaffTravelRequestBodyDto? body)
     {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
 
-        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId });
-        return Ok(new { message = "Travel request submitted." });
+        return Ok(await _service.SubmitAsync(new SubmitStaffTravelRequestDto
+        {
+            RequestId = id,
+            LateSubmissionReason = body?.LateSubmissionReason,
+            SubmittedByEmployeeId = CurrentUser.EmployeeId,
+        }));
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]

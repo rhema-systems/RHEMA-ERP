@@ -1,6 +1,8 @@
 ﻿using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
@@ -35,6 +37,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly HrCurrencyBridge _currency;
+    private readonly StaffTravelPolicyGuard _policyGuard;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -49,6 +52,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         HrCurrencyBridge currency,
+        StaffTravelPolicyGuard policyGuard,
         ILogger<StaffTravelRequestService> logger)
     {
         _requestRepository = requestRepository;
@@ -62,6 +66,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currency = currency;
+        _policyGuard = policyGuard;
         _logger = logger;
     }
 
@@ -135,6 +140,215 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             throw new ArgumentException($"Group travel with ID '{id}' not found.");
         return entity;
     }
+
+    // ---- The trip's facts: the server's, not the payload's -----------------
+    //
+    // Travel final closure, lane 1 (findings A4, A5, O-5, O-13, O-14, T-17). The request took its
+    // unit, its international flag and its policy from the payload, accepted a traveller who had
+    // left, and went for approval costed at nothing, back to front, in the past, over another trip,
+    // or above the policy's single-trip limit. Each rule below is one of those, refused before the
+    // workflow engine is asked — so a refused submission leaves no approval task behind.
+
+    private sealed record TravellerFacts(Guid Id, string Name, Guid? OrganizationUnitId, string? InactiveState);
+
+    /// <summary>The traveller as their employee record has them, or null when there is no such employee.</summary>
+    /// <remarks>
+    /// <para><b>Their unit is the request's unit</b> (finding O-5). The policy guard resolves on the
+    /// request's unit and the payload used to choose it: a self-raised trip carried none, so no
+    /// unit-scoped policy ever applied to it, and the desk could name a unit with a laxer policy. It is
+    /// the employee's own unit, or their position's when the employee row has none (29 of 4,398 staff
+    /// on UAT, 2026-10-02; none where the two disagree).</para>
+    ///
+    /// <para><b>Who counts as having left</b> (finding O-14): a record switched off, or a status of
+    /// Inactive, Terminated or Retired — what separation, termination and deactivation write.
+    /// Probation, leave and suspension are statuses of someone still employed.</para>
+    /// </remarks>
+    private async Task<TravellerFacts?> FindTravellerAsync(
+        Guid tenantId, Guid employeeId, CancellationToken cancellationToken)
+    {
+        var row = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.Id == employeeId)
+            .Select(e => new
+            {
+                e.FirstName,
+                e.LastName,
+                e.IsActive,
+                e.StaffStatus,
+                e.OrganizationUnitId,
+                PositionUnitId = (Guid?)e.Position.OrganizationUnitId,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (row is null) return null;
+
+        string? inactive = row.StaffStatus is StaffStatus.Inactive or StaffStatus.Terminated or StaffStatus.Retired
+            ? row.StaffStatus.ToString()
+            : row.IsActive ? null : "deactivated";
+
+        return new TravellerFacts(employeeId, $"{row.FirstName} {row.LastName}".Trim(),
+            row.OrganizationUnitId ?? row.PositionUnitId, inactive);
+    }
+
+    /// <param name="requireActive">
+    /// True where the trip moves forward — raising it, submitting it. An edit of a draft re-reads the
+    /// traveller's unit without refusing a leaver; the desk cancels that trip instead.
+    /// </param>
+    private async Task<TravellerFacts> RequireTravellerAsync(
+        Guid tenantId, Guid employeeId, bool requireActive, CancellationToken cancellationToken)
+    {
+        var traveller = await FindTravellerAsync(tenantId, employeeId, cancellationToken)
+            ?? throw new InvalidOperationException("The traveller named is not an employee of this organisation.");
+
+        if (requireActive && traveller.InactiveState is { } state)
+            throw new InvalidOperationException(
+                $"{traveller.Name} is no longer an active employee ({state}), so travel cannot be raised " +
+                "or submitted for them.");
+
+        return traveller;
+    }
+
+    /// <summary>What the server decides about a trip: the traveller's unit, and whether it crosses a border.</summary>
+    private static void ApplyServerFacts(StaffTravelRequest entity, TravellerFacts traveller)
+    {
+        entity.OrganizationUnitId = traveller.OrganizationUnitId;
+        entity.IsInternational = entity.OriginCountryId != entity.DestinationCountryId;
+    }
+
+    /// <summary>Both countries are foreign keys from the payload; they must be this organisation's.</summary>
+    private async Task RequireKnownCountriesAsync(
+        Guid tenantId, Guid originCountryId, Guid destinationCountryId, CancellationToken cancellationToken)
+    {
+        var wanted = new[] { originCountryId, destinationCountryId }.Distinct().ToList();
+        var found = await _unitOfWork.Repository<Country>().GetQueryable()
+            .CountAsync(c => c.TenantId == tenantId && wanted.Contains(c.Id), cancellationToken);
+        if (found != wanted.Count)
+            throw new InvalidOperationException(
+                "Choose the origin and destination countries from the list — one of them is not a country " +
+                "this organisation holds.");
+    }
+
+    private static void RequireDatesInOrder(DateOnly start, DateOnly end)
+    {
+        if (end < start)
+            throw new InvalidOperationException(
+                $"The return date ({end:dd MMM yyyy}) is before the departure date ({start:dd MMM yyyy}).");
+    }
+
+    /// <summary>The group and the earlier request a trip names must exist here — and the earlier one must be the same traveller's.</summary>
+    /// <remarks>Tenant checks only. Slice 1c gives group membership its own rules (capacity, status, dates).</remarks>
+    private async Task RequireLinksAsync(
+        Guid tenantId, Guid travellerId, Guid? groupTravelId, Guid? parentRequestId, Guid? selfId,
+        CancellationToken cancellationToken)
+    {
+        if (groupTravelId is Guid groupId)
+        {
+            var group = await _groupTravelRepository.GetByIdAsync(groupId);
+            if (group is null || group.TenantId != tenantId || group.IsDeleted)
+                throw new InvalidOperationException("The group trip named does not exist.");
+        }
+
+        if (parentRequestId is Guid parentId)
+        {
+            var parentTraveller = parentId == selfId
+                ? (Guid?)null
+                : await _requestRepository.GetQueryable()
+                    .Where(r => r.Id == parentId && r.TenantId == tenantId)
+                    .Select(r => (Guid?)r.EmployeeId)
+                    .FirstOrDefaultAsync(cancellationToken);
+            if (parentTraveller != travellerId)
+                throw new InvalidOperationException("The earlier request named is not one of this traveller's.");
+        }
+    }
+
+    /// <summary>One traveller cannot be on two trips at once (finding O-13).</summary>
+    /// <remarks>
+    /// Trips may MEET on a travel day — back from one and off on the next the same day — but not run
+    /// over each other, and two cannot leave on the same day. Only trips still going ahead count:
+    /// submitted, approved or under way.
+    /// </remarks>
+    private async Task RequireNoOverlappingTripAsync(
+        StaffTravelRequest entity, TravellerFacts traveller, CancellationToken cancellationToken)
+    {
+        var clash = await _requestRepository.GetQueryable()
+            .Where(r => r.TenantId == entity.TenantId
+                     && r.EmployeeId == entity.EmployeeId
+                     && r.Id != entity.Id
+                     && (r.Status == StaffTravelRequestStatus.Submitted
+                         || r.Status == StaffTravelRequestStatus.Approved
+                         || r.Status == StaffTravelRequestStatus.InProgress)
+                     && ((r.TravelStartDate < entity.TravelEndDate && r.TravelEndDate > entity.TravelStartDate)
+                         || r.TravelStartDate == entity.TravelStartDate))
+            .OrderBy(r => r.TravelStartDate)
+            .Select(r => new { r.RequestNumber, r.Status, r.TravelStartDate, r.TravelEndDate })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (clash is not null)
+            throw new InvalidOperationException(
+                $"{traveller.Name} is already on trip {clash.RequestNumber} ({clash.Status}) from " +
+                $"{clash.TravelStartDate:dd MMM yyyy} to {clash.TravelEndDate:dd MMM yyyy}, which overlaps " +
+                "these dates. Change the dates, or cancel the other trip first.");
+    }
+
+    /// <summary>
+    /// The policy's single-trip limit, checked at submission (decision D-1, finding T-17) — the 422
+    /// names the limit. A trip costed in another currency is compared at Finance's rate.
+    /// </summary>
+    private async Task RequireWithinSingleTripLimitAsync(
+        StaffTravelRequest entity, TravelPolicyCaps caps, DateOnly asOf, CancellationToken cancellationToken)
+    {
+        if (caps.MaxSingleTripBudget is not decimal limit) return;
+
+        // A policy written before migration batch 1 has no currency; the batch backfilled the base,
+        // and the base is what its limits were always read in.
+        var limitCurrency = caps.CurrencyCode
+            ?? await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
+            ?? entity.CurrencyCode;
+        var estimate = await _currency.ConvertBetweenAsync(
+            entity.EstimatedTotalCost, entity.CurrencyCode, limitCurrency, asOf, cancellationToken);
+        if (estimate <= limit) return;
+
+        var converted = string.Equals(entity.CurrencyCode, limitCurrency, StringComparison.OrdinalIgnoreCase)
+            ? string.Empty
+            : $" (about {limitCurrency} {estimate:N2} at Finance's rate)";
+        throw new InvalidOperationException(
+            $"The estimated cost of {entity.CurrencyCode} {entity.EstimatedTotalCost:N2}{converted} is above the " +
+            $"{caps.PolicyName} limit of {limitCurrency} {limit:N2} for a single trip. Reduce the estimate, or " +
+            "ask a travel administrator about the policy.");
+    }
+
+    /// <summary>
+    /// Approved leave over the trip's days — told, not refused (finding O-13): the approver weighs it,
+    /// and the leave may be the thing that moves.
+    /// </summary>
+    private async Task<List<string>> ApprovedLeaveWarningsAsync(
+        StaffTravelRequest entity, TravellerFacts traveller, CancellationToken cancellationToken)
+    {
+        var leave = await _unitOfWork.Repository<LeaveRequest>().GetQueryable()
+            .Where(l => l.TenantId == entity.TenantId
+                     && l.EmployeeId == entity.EmployeeId
+                     && (l.Status == LeaveStatus.Approved || l.Status == LeaveStatus.InProgress)
+                     && l.StartDate <= entity.TravelEndDate
+                     && l.EndDate >= entity.TravelStartDate)
+            .OrderBy(l => l.StartDate)
+            .Select(l => new { l.StartDate, l.EndDate, TypeName = l.LeaveType.Name })
+            .ToListAsync(cancellationToken);
+
+        return leave
+            .Select(l => $"{traveller.Name} has approved leave ({l.TypeName}) from {l.StartDate:dd MMM yyyy} " +
+                         $"to {l.EndDate:dd MMM yyyy}, over this trip's dates.")
+            .ToList();
+    }
+
+    /// <summary>Why an edit is refused, and what to do instead.</summary>
+    private static string EditRefusal(StaffTravelRequestStatus status) => status switch
+    {
+        StaffTravelRequestStatus.Submitted =>
+            "A submitted request cannot be edited while it is out for approval. Recall it, or ask the " +
+            "approver to return it for revision.",
+        StaffTravelRequestStatus.Approved =>
+            "An approved trip cannot be edited. Use Request change to send it back for re-approval.",
+        StaffTravelRequestStatus.InProgress => "A trip that is under way cannot be edited.",
+        _ => $"A request that is {status} cannot be edited.",
+    };
 
     // ---- Lifecycle notifications -------------------------------------------
 
@@ -388,6 +602,51 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// The policy a trip would be checked against — for the request form, before anything is saved
+    /// (finding T-16). The same resolution submission uses: the traveller's own unit, the two
+    /// countries, the departure date, approved policies only.
+    /// </summary>
+    public async Task<StaffTravelPolicyPreviewDto> GetPolicyPreviewAsync(
+        Guid employeeId, DateOnly departure, Guid? originCountryId, Guid? destinationCountryId,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var traveller = await FindTravellerAsync(tenantId, employeeId, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        var international = originCountryId is Guid origin && destinationCountryId is Guid destination
+                            && origin != destination;
+        var caps = await _policyGuard.ResolveForAsync(
+            tenantId, employeeId, traveller.OrganizationUnitId, departure, international, cancellationToken);
+
+        var unitName = traveller.OrganizationUnitId is Guid unitId
+            ? await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .Where(u => u.Id == unitId && u.TenantId == tenantId)
+                .Select(u => u.Name)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+
+        return new StaffTravelPolicyPreviewDto
+        {
+            EmployeeId = employeeId,
+            OrganizationUnitId = traveller.OrganizationUnitId,
+            OrganizationUnitName = unitName,
+            IsInternational = international,
+            HasPolicy = caps.HasPolicy,
+            PolicyId = caps.PolicyId,
+            PolicyName = caps.PolicyName,
+            VersionNumber = caps.VersionNumber,
+            CurrencyCode = caps.HasPolicy
+                ? caps.CurrencyCode ?? await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
+                : null,
+            MaxSingleTripBudget = caps.MaxSingleTripBudget,
+            // A class stored as 0 is the omitted-class defect lane 4 fixes (C2); show no cap, not "0".
+            MaxFlightClass = caps.MaxFlightClass is { } cabin && Enum.IsDefined(cabin) ? cabin : null,
+            MaxHotelRatePerNight = caps.MaxHotelRatePerNight is > 0m ? caps.MaxHotelRatePerNight : null,
+        };
+    }
+
     // ---- Dashboard ---------------------------------------------------------
 
     public async Task<StaffTravelDashboardDto> GetDashboardAsync(int upcomingDays = 30, CancellationToken cancellationToken = default)
@@ -517,7 +776,14 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     {
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
+        var traveller = await RequireTravellerAsync(tenantId, createDto.EmployeeId, requireActive: true, cancellationToken);
+        await RequireKnownCountriesAsync(tenantId, createDto.OriginCountryId, createDto.DestinationCountryId, cancellationToken);
+        RequireDatesInOrder(createDto.TravelStartDate, createDto.TravelEndDate);
+        await RequireLinksAsync(tenantId, traveller.Id, createDto.GroupTravelId, createDto.ParentRequestId,
+            selfId: null, cancellationToken);
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        ApplyServerFacts(entity, traveller);
         entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
         entity.Status = StaffTravelRequestStatus.Draft;
 
@@ -537,10 +803,22 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         var tenantId = GetTenantId();
         var entity = await GetOwnedRequestAsync(updateDto.Id);
 
-        if (entity.Status is StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Closed)
-            throw new InvalidOperationException($"A request in status '{entity.Status}' cannot be edited.");
+        // Lane 1, finding A1: only a Draft or a returned request is the requester's to change. This
+        // refused only Approved, Completed, Cancelled and Closed, so a Submitted request could be
+        // rewritten while the approver decided it — on the desk and through /me alike.
+        if (entity.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
+            throw new InvalidOperationException(EditRefusal(entity.Status));
+
+        await _currency.RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken);
+        await RequireKnownCountriesAsync(tenantId, updateDto.OriginCountryId, updateDto.DestinationCountryId, cancellationToken);
+        RequireDatesInOrder(updateDto.TravelStartDate, updateDto.TravelEndDate);
+        if (updateDto.GroupTravelId != entity.GroupTravelId)
+            await RequireLinksAsync(tenantId, entity.EmployeeId, updateDto.GroupTravelId, parentRequestId: null,
+                entity.Id, cancellationToken);
+        var traveller = await RequireTravellerAsync(tenantId, entity.EmployeeId, requireActive: false, cancellationToken);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        ApplyServerFacts(entity, traveller);
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -594,12 +872,58 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         throw new UnauthorizedAccessException($"You cannot {verb} your own travel request.");
     }
 
-    public async Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default)
+    /// <remarks>
+    /// <para><b>Everything that must hold is checked before the engine is asked</b> (lane 1, finding
+    /// A4), so a refused submission leaves no approval task behind: a traveller still employed, a
+    /// cost, dates in order and not in the past, a currency Finance holds, no other trip over the same
+    /// days, and an estimate within the policy's single-trip limit. Submission used to check the status
+    /// and nothing else.</para>
+    ///
+    /// <para><b>A past departure</b> is refused unless the travel desk gives the reason — a trip taken
+    /// at short notice whose paperwork followed. The reason is kept on the request as an internal note
+    /// in the submitter's name; the self-service route never passes one.</para>
+    ///
+    /// <para><b>The policy is recorded</b> — the one the trip was checked against, or none. The column
+    /// had no writer; the payload set it and nothing read it.</para>
+    /// </remarks>
+    public async Task<StaffTravelSubmitResultDto> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await GetOwnedRequestAsync(submitDto.RequestId);
 
         if (entity.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
             throw new InvalidOperationException("Only draft or returned requests can be submitted.");
+
+        var traveller = await RequireTravellerAsync(tenantId, entity.EmployeeId, requireActive: true, cancellationToken);
+        // A draft written before lane 1 may still carry a unit and an international flag the payload
+        // chose; the policy below must be resolved on the facts.
+        ApplyServerFacts(entity, traveller);
+
+        if (entity.EstimatedTotalCost <= 0m)
+            throw new InvalidOperationException(
+                "Enter the trip's estimated cost before submitting it — the approver decides the budget against it.");
+        RequireDatesInOrder(entity.TravelStartDate, entity.TravelEndDate);
+        await _currency.RequireKnownCurrencyAsync(entity.CurrencyCode, cancellationToken);
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var lateReason = submitDto.LateSubmissionReason?.Trim();
+        var departed = entity.TravelStartDate < today;
+        if (departed && string.IsNullOrEmpty(lateReason))
+            throw new InvalidOperationException(
+                $"The departure date ({entity.TravelStartDate:dd MMM yyyy}) has passed. Change the dates, or ask " +
+                "the travel desk to submit it with the reason it is late.");
+        if (departed && submitDto.SubmittedByEmployeeId is null)
+            throw new InvalidOperationException(
+                "Submitting a trip after its departure date records the reason in the submitter's name, and " +
+                "this account is not linked to an employee.");
+
+        await RequireNoOverlappingTripAsync(entity, traveller, cancellationToken);
+
+        var caps = await _policyGuard.ResolveAsync(entity, cancellationToken);
+        await RequireWithinSingleTripLimitAsync(entity, caps, today, cancellationToken);
+        entity.PolicyId = caps.PolicyId;
+
+        var warnings = await ApprovedLeaveWarningsAsync(entity, traveller, cancellationToken);
 
         var (workflowResult, submitOutcome) =
             await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
@@ -614,11 +938,26 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplySubmitOutcome(entity, submitOutcome, RequireUserId());
 
-        entity.SubmittedAt = submitDto.SubmittedAt;
+        entity.SubmittedAt = DateTime.UtcNow;
         entity.UpdatedBy = RequireUserId().ToString();
         entity.UpdatedAt = DateTime.UtcNow;
         if (entity.Status == StaffTravelRequestStatus.Approved)
             entity.ApprovedAt ??= DateTime.UtcNow;
+
+        if (departed)
+        {
+            await _commentRepository.AddAsync(new StaffTravelRequestComment
+            {
+                TenantId = entity.TenantId,
+                StaffTravelRequestId = entity.Id,
+                AuthorId = submitDto.SubmittedByEmployeeId!.Value,
+                CommentType = TravelRequestCommentType.InternalNote,
+                Body = $"Submitted on {today:dd MMM yyyy}, after the departure date of " +
+                       $"{entity.TravelStartDate:dd MMM yyyy}. Reason: {lateReason}",
+                IsVisibleToTraveller = false,
+                CreatedBy = RequireUserId().ToString(),
+            });
+        }
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -632,7 +971,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             entity.Status == StaffTravelRequestStatus.Approved ? "Approved" : "Submitted",
             cancellationToken);
 
-        return true;
+        return new StaffTravelSubmitResultDto
+        {
+            Message = entity.Status == StaffTravelRequestStatus.Approved
+                ? "Travel request submitted and approved."
+                : "Travel request submitted.",
+            Status = entity.Status,
+            PolicyId = caps.PolicyId,
+            PolicyName = caps.PolicyName,
+            Warnings = warnings,
+        };
     }
 
     public async Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default)
@@ -931,17 +1279,26 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .Where(id => !existing.Contains(id))
             .ToList();
 
+        // The single request's rules, for every participant (lane 1). Each is checked BEFORE any is
+        // raised, so a leaver in the list refuses the call instead of leaving half a group behind;
+        // the currency was not checked here at all.
+        await _currency.RequireKnownCurrencyAsync(dto.CurrencyCode, cancellationToken);
+        await RequireKnownCountriesAsync(tenantId, dto.OriginCountryId, group.DestinationCountryId, cancellationToken);
+        RequireDatesInOrder(group.TravelStartDate, group.TravelEndDate);
+        var travellers = new List<TravellerFacts>();
         foreach (var employeeId in toAdd)
+            travellers.Add(await RequireTravellerAsync(tenantId, employeeId, requireActive: true, cancellationToken));
+
+        foreach (var traveller in travellers)
         {
             var createDto = new CreateStaffTravelRequestDto
             {
-                EmployeeId              = employeeId,
+                EmployeeId              = traveller.Id,
                 InitiatedById           = initiatorEmployeeId,   // Employee FK, not the user id
                 InitiatedByRole         = dto.InitiatedByRole,
                 TravelType              = dto.TravelType,
                 TravelPurpose           = dto.TravelPurpose,
                 PurposeDescription      = dto.PurposeDescription,
-                OrganizationUnitId      = dto.OrganizationUnitId,
                 Priority                = dto.Priority,
                 DestinationCountryId    = group.DestinationCountryId,
                 DestinationCity         = group.DestinationCity,
@@ -951,7 +1308,6 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 TravelEndDate           = group.TravelEndDate,
                 EstimatedTotalCost      = dto.EstimatedTotalCost,
                 CurrencyCode            = dto.CurrencyCode,
-                IsInternational         = dto.IsInternational,
                 RequiresVisa            = dto.RequiresVisa,
                 RequiresHealthClearance = dto.RequiresHealthClearance,
                 RiskLevel               = dto.RiskLevel,
@@ -959,6 +1315,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             };
 
             var entity = createDto.ToEntity(tenantId, createdByUserId);
+            // Each participant's own unit — the template's single unit stamped the whole group with one.
+            ApplyServerFacts(entity, traveller);
             // Request numbers are derived from the persisted count, so save each in turn.
             entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
             entity.Status = StaffTravelRequestStatus.Draft;

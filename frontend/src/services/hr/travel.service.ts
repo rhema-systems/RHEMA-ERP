@@ -11,6 +11,8 @@ import type {
   StaffGroupTravel,
   StaffGroupTravelSummary,
   StaffTravelDashboard,
+  StaffTravelPolicyPreview,
+  StaffTravelSubmitResult,
   CreateStaffTravelRequest,
   UpdateStaffTravelRequest,
   CreateStaffTravelRequestComment,
@@ -84,6 +86,19 @@ class TravelService {
     return apiService.get<StaffTravelDashboard>(`${this.baseUrl}/dashboard`, { upcomingDays });
   }
 
+  /**
+   * The approved policy a trip for this traveller would be checked against, and its limits — the
+   * same resolution the server applies at submission (finding T-16).
+   */
+  getPolicyPreview(params: {
+    employeeId: string;
+    departure: string;
+    originCountryId?: string;
+    destinationCountryId?: string;
+  }) {
+    return apiService.get<StaffTravelPolicyPreview>(`${this.baseUrl}/policy-preview`, params);
+  }
+
   // ── Desk writes (HR.Travel.Write; delete is Admin) ─────────────────────────
 
   create(payload: CreateStaffTravelRequest) {
@@ -104,8 +119,15 @@ class TravelService {
   // These start and drive the WORKFLOW. A screen must never set a status itself: submit, refetch,
   // and let the workflow record say where the request now is.
 
-  submit(id: string) {
-    return apiService.post<{ message: string }>(`${this.baseUrl}/${id}/submit`, { requestId: id });
+  /**
+   * Everything that must hold is checked first and refused with a 422 that says what (lane 1). The
+   * one override is the desk's: a trip whose departure has passed goes with the reason it is late,
+   * kept on the request as an internal note in the submitter's name. The answer carries warnings —
+   * approved leave over the same days — that did not stop it.
+   */
+  submit(id: string, lateSubmissionReason?: string) {
+    return apiService.post<StaffTravelSubmitResult>(
+      `${this.baseUrl}/${id}/submit`, lateSubmissionReason ? { lateSubmissionReason } : {});
   }
 
   /** The approver is resolved from the token against the published definition, never sent. */
@@ -251,8 +273,14 @@ class TravelService {
     return apiService.put<StaffTravelRequest>(`${this.meUrl}/requests/${payload.id}`, payload);
   }
 
+  /** A past departure is refused here — that trip is the travel desk's to submit, with a reason. */
   submitMine(id: string) {
-    return apiService.post<void>(`${this.meUrl}/requests/${id}/submit`, {});
+    return apiService.post<StaffTravelSubmitResult>(`${this.meUrl}/requests/${id}/submit`, {});
+  }
+
+  /** The approved policy that covers the caller for a trip on these dates — their own, only. */
+  getMyPolicyPreview(params: { departure: string; originCountryId?: string; destinationCountryId?: string }) {
+    return apiService.get<StaffTravelPolicyPreview>(`${this.meUrl}/policy-preview`, params);
   }
 
   cancelMine(id: string, payload: CancelMyStaffTravelRequest) {

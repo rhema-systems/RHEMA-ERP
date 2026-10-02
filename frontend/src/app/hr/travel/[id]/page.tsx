@@ -3,7 +3,7 @@
 import { use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil } from 'lucide-react';
+import { Loader2, Ban, CheckCheck, Globe, ShieldAlert, Pencil, Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -45,9 +45,12 @@ import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/Wo
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { useToast } from '@/hooks/use-toast';
 import { travelService } from '@/services/hr/travel.service';
+import type { StaffTravelSubmitResult } from '@/types/hr/travel';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
+/** Today on the server's calendar (UTC), as the API compares a departure date. */
+const todayUtc = () => new Date().toISOString().slice(0, 10);
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -76,11 +79,22 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
   const [internalNote, setInternalNote] = useState(false);
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [lateOpen, setLateOpen] = useState(false);
+  const [lateReason, setLateReason] = useState('');
 
   const { data: r, isLoading, isError, error } = useQuery({
     queryKey: ['travel-request', id],
     queryFn: () => travelService.getById(id),
   });
+
+  /** A submission can carry warnings that did not stop it — approved leave over the same days. */
+  const announceWarnings = (result: StaffTravelSubmitResult) => {
+    if (result.warnings?.length)
+      toast({ title: 'Submitted — please note', description: result.warnings.join(' ') });
+  };
+
+  // A departure date already past: the server refuses the submission without the desk's reason.
+  const departed = !!r && r.travelStartDate.slice(0, 10) < todayUtc();
 
   const {
     data: comments,
@@ -104,12 +118,14 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
     entityLabel: 'Travel Request',
     entityNumber: r?.requestNumber,
     status: r?.status ?? 'Draft',
-    // Draft and ReturnedForRevision are the two states the request can be sent from.
-    canSubmit: r?.status === 'Draft' || r?.status === 'ReturnedForRevision',
+    // Draft and ReturnedForRevision are the two states the request can be sent from. A trip whose
+    // departure has passed is submitted through its own button instead, because the server needs the
+    // reason it is late (lane 1).
+    canSubmit: (r?.status === 'Draft' || r?.status === 'ReturnedForRevision') && !departed,
     canApproveReject: r?.status === 'Submitted',
     enabled: !!r,
     commands: {
-      submit: () => travelService.submit(id),
+      submit: async () => announceWarnings(await travelService.submit(id)),
       // No approver id is sent — the server resolves the approver from the token against the
       // published definition. ⚠ No amount is sent either, and the server then copies the ESTIMATE
       // into the approved budget, so that field records no decision. There is no budget prompt
@@ -119,6 +135,20 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
       afterAction: refresh,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
+  });
+
+  const submitLate = useMutation({
+    mutationFn: () => travelService.submit(id, lateReason.trim()),
+    onSuccess: async (result) => {
+      setLateOpen(false);
+      setLateReason('');
+      toast({ title: 'Travel request submitted', description: result.message });
+      announceWarnings(result);
+      await refresh();
+      await workflow.refresh();
+    },
+    onError: (e: Error) =>
+      toast({ variant: 'destructive', title: 'Could not submit', description: e.message }),
   });
 
   const complete = useMutation({
@@ -203,6 +233,11 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               </Button>
             )}
             <WorkflowApprovalActions {...workflow.actionProps} />
+            {isEditable && departed && (
+              <Button onClick={() => setLateOpen(true)}>
+                <Send className="mr-2 h-4 w-4" /> Submit after departure
+              </Button>
+            )}
             {canComplete && (
               <Button variant="outline" onClick={() => complete.mutate()} disabled={complete.isPending}>
                 <CheckCheck className="mr-2 h-4 w-4" /> Mark completed
@@ -256,7 +291,13 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
               <InfoRow label="Departs" value={fmtDate(r.travelStartDate)} />
               <InfoRow label="Returns" value={fmtDate(r.travelEndDate)} />
               <InfoRow label="Duration" value={`${r.estimatedDurationDays} day(s)`} />
+              {/* Both are the server's: the traveller's own unit, and the policy the trip was
+                  checked against when it was submitted (lane 1). */}
               <InfoRow label="Organisation unit" value={r.organizationUnitName || '—'} />
+              <InfoRow
+                label="Travel policy"
+                value={r.policyName || (r.submittedAt ? 'None covered this trip' : 'Checked when submitted')}
+              />
             </CardContent>
           </Card>
 
@@ -425,6 +466,38 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
           }}
         />
       </Tabs>
+
+      <Dialog open={lateOpen} onOpenChange={setLateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Submit a trip after its departure date</DialogTitle>
+            <DialogDescription>
+              This trip was due to leave on {fmtDate(r.travelStartDate)}. Say why it is being submitted
+              late — usually travel at short notice, with the paperwork following. The reason is kept on
+              the request as an internal note in your name, for the approver.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="late-reason">Reason</Label>
+            <Textarea
+              id="late-reason"
+              value={lateReason}
+              onChange={(e) => setLateReason(e.target.value)}
+              rows={3}
+              maxLength={1000}
+              placeholder="Why is this trip being submitted after it began?"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLateOpen(false)}>
+              Not now
+            </Button>
+            <Button disabled={!lateReason.trim() || submitLate.isPending} onClick={() => submitLate.mutate()}>
+              Submit for approval
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>

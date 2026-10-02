@@ -28,15 +28,20 @@ baseline (D-13); lane 0 was built the same day.**
 **START HERE:**
 1. § 1 is settled — thirteen decisions, all taken with the user on 2026-10-01. Decision numbers in
    this document are **travel-closure-local**; they are not the closure ledger's D-01…D-40.
-2. **Lane 0** (§ 4) — **COMPLETE 2026-10-01**: `run-final-truth.mjs` passed 112/112 twice on UAT;
-   staged for the user's commit. The old slice suites are not run on UAT at all (D-13). Starting the
-   API on UAT: auto mode refuses `start-api-uat.ps1` unless this project's local settings allow it
-   (the user added that rule on 2026-10-01); before every start, check UAT for pending migrations
-   and ask the user first if one would be applied.
-3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02** (`20261002000637_TravelClosureBatch1`,
-   guarded SQL; 33/33 on a scratch copy of UAT first; verified on UAT; truth suite 112/112 twice after);
-   staged for the user's commit. **Next: lane 1.** Lanes 1–9 build on it.
-4. Then lanes **1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
+2. **Lane 0** (§ 4) — **COMPLETE 2026-10-01**, committed `0b8cdf124` (`run-final-truth.mjs` 112/112
+   twice on UAT). The old slice suites are not run on UAT at all (D-13). Starting the API on UAT: auto
+   mode refuses `start-api-uat.ps1` unless this project's local settings allow it (the user added that
+   rule on 2026-10-01); before every start, check UAT for pending migrations and ask the user first if
+   one would be applied.
+3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02**, committed `d426f4ed3`
+   (`20261002000637_TravelClosureBatch1`, guarded SQL; 33/33 on a scratch copy of UAT first; verified on
+   UAT; truth suite 112/112 twice after). Lanes 1–9 build on it.
+4. **Lane 1** (§ 4) is built in three slices. **Slice 1a — the request's write rules — built and proven
+   2026-10-02** (`run-final-lifecycle.mjs` 103/103 twice, then a third time after a harness fix; the
+   truth suite 114/114 twice); staged for the user's commit. **Next: slice 1b** (cancel, return for
+   revision, close, request change, recall, the approver's stamp), then **1c** (comments, the
+   traveller's privacy, groups).
+5. Then lanes **2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10** in that order (§ 2). Source-check each lane
    against this document before building it — line numbers are as of HEAD `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
@@ -81,9 +86,9 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 
 | Lane | What | Schema | Suite | Status |
 |---|---|---|---|---|
-| **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; staged |
-| **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; staged |
-| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ☐ |
+| **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
+| **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
+| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ◐ slice 1a (write rules) 2026-10-02 — 103/103 twice, truth 114/114 twice; staged. 1b (verbs) and 1c (comments, privacy, groups) to come |
 | **2** | The approval ladder and the approver's door | batch 1 | `run-final-approvals.mjs` | ☐ |
 | **3** | The money chain | batch 1 | `run-final-money.mjs` | ☐ |
 | **4** | Policy and authority | batch 1 | `run-final-policy.mjs` | ☐ |
@@ -109,7 +114,7 @@ Each finding names the lane that owns it.
 **A. Request lifecycle** (`StaffTravelRequestService.cs`, the workflow adapter, the mapper, `/me`)
 - **A1 H** `UpdateAsync` (l.539) refuses only Approved/Completed/Cancelled/Closed, so a **Submitted**
   request can be rewritten while the approver decides — on the desk and through `/me`; Rejected and
-  InProgress too. → lane 1
+  InProgress too. → lane 1 — **fixed in slice 1a, 2026-10-02**
 - **A2 H** `CancelAsync` (l.713) never cancels the engine instance (leave and movements call
   `CancelWorkflowAsync`), so a cancelled Submitted trip leaves a live approval task; cancelling an
   Approved trip leaves confirmed bookings counted as committed, a disbursed advance outstanding and a
@@ -117,12 +122,14 @@ Each finding names the lane that owns it.
 - **A3 M** `ReturnedForRevision`, `InProgress` and `Closed` have no writer (D-6). → lanes 1, 8
 - **A4 M** `SubmitAsync` checks nothing but status: cost 0, return before departure (the mapper
   clamps the duration to 0), past dates, no itinerary, the policy; `SubmittedAt` comes from the DTO's
-  default. → lane 1
+  default. → lane 1 — **fixed in slice 1a, 2026-10-02** (an itinerary is not required: a trip is often
+  approved before its itinerary is drawn up)
 - **A5 M** The mapper (`StaffTravelMappingExtensions.cs` l.111–172) takes `IsInternational`,
   `ApprovedBudget` (on a plain update), `PolicyId` (read by nothing), `GroupTravelId`,
   `ParentRequestId`, `OrganizationUnitId` and `EmployeeId` from the payload with no tenant check. The
   policy guard's own comment says *IsInternational is derived from the two countries* — it is not;
-  declaring a domestic trip international buys the international caps. → lane 1
+  declaring a domestic trip international buys the international caps. → lane 1 — **fixed in slice 1a,
+  2026-10-02**, except `GroupTravelId` on an edit, which slice 1c moves to the group endpoints
 - **A6 H** `GET /me/requests/{id}` returns every comment — `IsVisibleToTraveller` is read by nothing
   on the server, only the client filters — plus the budget, advances, claims and policy exceptions.
   → lane 1
@@ -290,7 +297,9 @@ Each finding names the lane that owns it.
   resolves to no policy and no cap. → lane 4
 - **O-5 M — policy scope can be chosen.** The guard resolves on `request.OrganizationUnitId`, a payload
   field (null on `/me`), with an exact match and no ancestry (l.71) — a directorate's policy does not
-  cover its departments, and a requester can pick a unit with a laxer policy. → lanes 1, 4
+  cover its departments, and a requester can pick a unit with a laxer policy. → lanes 1, 4 — **lane 1's
+  half fixed in slice 1a, 2026-10-02** (the request carries the traveller's own unit); the ancestry is
+  lane 4's
 - **O-6 M — "Paid by payroll offset" pays nobody.** `PayrollOffset` has no reader outside the posting
   factory, which posts nothing for it; the claim reads Paid and the employee is not paid. → lane 3 (D-10)
 - **O-7 M — passport and visa numbers are plain text** despite *encrypted at rest* and *encrypted*
@@ -312,10 +321,12 @@ Each finding names the lane that owns it.
   `LeaveAttendancePostingService` and travel posts nothing. → lane 9
 - **O-13 M — no conflict checks.** Overlapping trips for one traveller and trips over approved leave
   are accepted; training's `NomineeAvailabilityService` and recruitment read travel as a conflict, but
-  travel reads nothing back. → lanes 1, 9
+  travel reads nothing back. → lanes 1, 9 — **lane 1's half fixed in slice 1a, 2026-10-02** (an
+  overlapping trip is refused at submission, approved leave is a warning); leave's side is lane 9's
 - **O-14 M — leavers:** separation reads only outstanding advances (`SeparationService.cs:2312`); a
   leaver's open trips, bookings and undisbursed advances are not flagged; a request can be raised for
-  an inactive employee. → lanes 1, 9
+  an inactive employee. → lanes 1, 9 — **lane 1's half fixed in slice 1a, 2026-10-02** (create and
+  submit refuse a traveller who has left; so does adding them to a group); separation's side is lane 9's
 - **O-15 M — duty-of-care deletes:** risk assessments (acknowledged or not), verified passports, issued
   alerts and current itineraries delete with no status guard — reachable by every HR officer under
   D-3. → lanes 5, 7
@@ -515,17 +526,71 @@ is travel's; the second is recorded here for the HR identity owner.
 
 ### Lane 1 — Request lifecycle (A1–A6, A10–A12, D-6, D-9, O-5, O-10, O-11, O-13, O-14, T-16, T-17)
 
-- [ ] **Edit** only in Draft and ReturnedForRevision, on the desk and `/me`. The update DTO loses
+- [x] **Edit** only in Draft and ReturnedForRevision, on the desk and `/me`. The update DTO loses
   `ApprovedBudget`, `PolicyId` and `GroupTravelId` (group membership moves to the group endpoints).
-- [ ] **Server-derived facts:** `IsInternational` from the two countries on create and update; the
+  *Slice 1a; `GroupTravelId` stays on the edit until slice 1c gives the group its link endpoint, so the
+  form still sends it back.*
+- [x] **Server-derived facts:** `IsInternational` from the two countries on create and update; the
   organisation unit from the traveller's employee record; every FK tenant-validated (employee, unit,
-  group, parent). Create refuses an inactive or separated traveller.
-- [ ] **Submit preconditions:** cost > 0; return ≥ departure; departure ≥ today (the desk may override
+  group, parent). Create refuses an inactive or separated traveller. *Slice 1a.*
+- [x] **Submit preconditions:** cost > 0; return ≥ departure; departure ≥ today (the desk may override
   with a reason); a currency Finance holds; `MaxSingleTripBudget` of the applicable approved policy
   (D-1) — the 422 names the cap; a trip overlapping another Submitted/Approved/InProgress trip of the
   same traveller is refused; an overlap with approved leave is a warning; `SubmittedAt` from the clock.
-- [ ] **The request form shows the policy that will apply and its caps** (a read that resolves the
-  guard for a traveller and a date — T-16).
+  *Slice 1a.*
+- [x] **The request form shows the policy that will apply and its caps** (a read that resolves the
+  guard for a traveller and a date — T-16). *Slice 1a.*
+
+**Slice 1a as built (2026-10-02)** — `StaffTravelRequestService` (create, update, submit, group
+participants, the new `GetPolicyPreviewAsync`), the DTOs, the mapper, `StaffTravelPolicyGuard`
+(`ResolveForAsync`; the caps record carries the single-trip limit, the policy's currency and its
+version), `HrCurrencyBridge` (`GetBaseCurrencyCodeAsync`, `ConvertBetweenAsync`), both controllers;
+on the frontend the types, the payload builder, the service, a `TravelPolicyPreview` card on the
+request form (the desk's unit picker is gone), the late-submission dialog on the desk's request page,
+the portal's "departure has passed" note, and both edit pages' lock rule.
+- *The facts.* The unit is the employee's own, or their position's when the employee row has none (29
+  of 4,398 UAT staff; none where the two disagree). Create and submit re-derive it, so a draft written
+  before lane 1 is checked on the facts.
+- *Who has left* is a record switched off or a status of Inactive, Terminated or Retired — what
+  separation, termination and deactivation write. Probation, leave and suspension are statuses of
+  someone still employed. Adding participants to a group checks every one first, so one leaver refuses
+  the call instead of leaving half a group behind.
+- *A past departure* is the desk's to submit, with a reason kept as an internal note in the
+  submitter's name (so the caller must be employee-linked); the traveller cannot submit it from the
+  portal. *Trips may meet on a travel day* — back from one and off on the next the same day — but not
+  run over each other, and two cannot leave on the same day. Only Submitted, Approved and In-progress
+  trips count.
+- *The single-trip limit* applies only from an approved policy (UAT's only real policy is still an
+  unapproved draft, so nothing binds there yet). A policy written before batch 1 has no currency and is
+  read in the base; a trip in another currency is compared at Finance's rate and the 422 shows the
+  converted figure. The policy checked is recorded on the request (`PolicyId` finally has a writer).
+- *Submission answers* with the status, the policy and any warnings (approved leave over the days); the
+  portal's submit answered 204 before, so a warning had nowhere to go.
+- *An itinerary is not required* to submit (finding A4 listed it): trips are often approved before the
+  itinerary is drawn up.
+- *The demo pack* (`dev-harness/hr-demo-smoke/scenarios/080-travel.mjs`) broke on two new rules and is
+  fixed in this slice: the Sebrepor trip (taken twelve working days before the build) is submitted with
+  a late reason, and the Lagos request is linked to its group — and its health clearance set — while
+  still a Draft, before the submit loop (the edit after submission is now refused). The hand-made policy
+  links are gone: a request records the policy it was checked against, and the demo's policy stays an
+  unapproved draft until lane 4 (D-3) and lane 10 have hr.head approve it. Proven at the next demo
+  rebuild (lane 10); UAT's demo trips are already built and are not re-run.
+
+**Suite** `run-final-lifecycle.mjs` (slice 1a: 103 assertions) — §1 the facts, desk and portal; §2 what
+a create refuses; §3 the edit lock through Submitted, Approved and Rejected, desk and portal; §4
+submission — cost, the past departure, overlaps, the limit in GHS and in USD, the policy recorded, the
+leave warning, the clock, no approval task left by a refusal; §5 the preview, desk and portal; §6 group
+participants. Its fixture adds a TenantAdmin login (to approve the run's unit-scoped policy — HR cannot
+until lane 4), an employee deactivated through the API, and one approved leave planted for its own
+traveller and deleted after. Every request it submitted is decided before the teardown, so no
+approval task is left in a real approver's inbox, and the teardown retires the run's notifications
+(each run writes about 230, mostly the engine's *Approval Required* to the Manager, HR and TenantAdmin
+role holders; emails dead-letter on UAT, which has no mail server). **103/103 twice on UAT, 2026-10-02**
+(stamps 138908, 184961; and 308438 after a date-format fix in the suite — the server writes September
+as "Sept"). Regression: `run-final-truth.mjs` **114/114 twice** (stamps 207913, 223419) — O-5 and A5 now
+asserted, three findings still observed (the group link on an edit and A6 for slice 1c, B9 for lane 3).
+Four runs wrote 44 requests and 466 notifications to UAT and left none live, no open workflow instance,
+no fixture leave, policy or active login.
 - [ ] **Cancel:** cancels the engine instance while Submitted; refused once InProgress; from Approved
   it requires no disbursed advance with money outstanding (the 422 names it) and cancels pending and
   confirmed bookings and undispatched fleet trips (lanes 5, 6).
@@ -965,3 +1030,8 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   its teardown failed (the claim-rename collision in lane 0's checklist) — fixed, and the stranded
   claim renamed with `teardown-run.mjs`. Then 112/112 twice. Restaged for the user. Next: migration
   batch 1 (§ 5).
+- **2026-10-02** — The user committed lane 0 (`0b8cdf124`) and migration batch 1 (`d426f4ed3`).
+- **2026-10-02, later** — **Lane 1, slice 1a built and proven** (the request's write rules: the edit
+  lock, the server's facts, what create and submission refuse, the policy preview). The build
+  succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 103/103 twice (and once more after
+  a harness date fix), the truth suite 114/114 twice. Staged. Next: slice 1b.

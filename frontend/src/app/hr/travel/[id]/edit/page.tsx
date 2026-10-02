@@ -11,14 +11,14 @@ import { TRAVEL_REQUEST_STATUS_LABELS, enumLabel } from '@/components/hr/travel/
 import { travelService } from '@/services/hr/travel.service';
 
 /**
- * The server refuses an edit once the request is Approved, Completed, Cancelled or Closed. That
- * check is repeated here only to explain the refusal before the user retypes the whole form — the
- * server remains the authority.
+ * The server accepts an edit only while the request is a Draft or has been returned for revision
+ * (travel final closure, lane 1 — finding A1: it used to accept one while the request was out for
+ * approval). That rule is repeated here only to explain the refusal before the user retypes the
+ * whole form — the server remains the authority.
  *
  * ⚠ It used to say "raise an amendment instead". There is no amendment: `ParentRequestId` has no
- * writer and nothing creates a child request (travel final closure, finding O-10). Lane 1 gives an
- * approved trip a "Request change" that sends it back for re-approval; until then the honest
- * answer is to cancel and raise a new request.
+ * writer and nothing creates a child request (finding O-10). Slice 1b gives an approved trip a
+ * "Request change" that sends it back for re-approval.
  */
 export default function EditTravelRequestPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -50,7 +50,7 @@ export default function EditTravelRequestPage({ params }: { params: Promise<{ id
     );
   }
 
-  const locked = ['Approved', 'Completed', 'Cancelled', 'Closed'].includes(r.status);
+  const locked = r.status !== 'Draft' && r.status !== 'ReturnedForRevision';
 
   return (
     <div className="space-y-6 p-6">
@@ -61,11 +61,13 @@ export default function EditTravelRequestPage({ params }: { params: Promise<{ id
       />
       {locked ? (
         <EmptyState
-          title="This request can no longer be edited"
+          title="This request cannot be edited now"
           description={
-            r.status === 'Approved'
-              ? 'An approved trip cannot be changed, and there is no way to amend one yet. If the trip has changed, cancel it and raise a new request.'
-              : `A request that is ${enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status).toLowerCase()} cannot be changed.`
+            r.status === 'Submitted'
+              ? 'It is out for approval. Recall it, or ask the approver to return it for revision, and then edit it.'
+              : r.status === 'Approved'
+                ? 'An approved trip cannot be edited. Use Request change on the trip to send it back for re-approval.'
+                : `A request that is ${enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status).toLowerCase()} cannot be changed.`
           }
         />
       ) : (

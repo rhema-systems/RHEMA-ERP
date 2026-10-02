@@ -2486,13 +2486,24 @@ the module's argument.
 > hosted daily since 2026-08-17) and **T-28** (the server does refuse to cancel a Cancelled, Completed
 > or Closed request). This section is the record of the walk, not a to-do list.
 >
-> **Closure lane 0 (2026-10-01, staged)** changed what several steps here show: **T-3, T-12, T-15 and
-> T-27 are fixed** (every dropdown is written from its enum; the composer has an *Internal note*
-> toggle), the request form now sends back the fields the **T-29** replace would erase, the **T-6**
-> copy says recovery happens on payment, and the attachment upload accepts all seven types. It also
-> found that **no travel currency dropdown could be filled by an HR officer or a traveller** — they read
-> a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step below
-> warns about one of these, the warning describes the code before lane 0.
+> **Closure lane 0 (2026-10-01, committed `0b8cdf124`)** changed what several steps here show: **T-3,
+> T-12, T-15 and T-27 are fixed** (every dropdown is written from its enum; the composer has an
+> *Internal note* toggle), the request form now sends back the fields the **T-29** replace would erase,
+> the **T-6** copy says recovery happens on payment, and the attachment upload accepts all seven types.
+> It also found that **no travel currency dropdown could be filled by an HR officer or a traveller** —
+> they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
+> below warns about one of these, the warning describes the code before lane 0.
+>
+> **Closure lane 1, slice 1a (2026-10-02, staged)** changed the request form and submission: the form no
+> longer offers an organisation unit — a request carries the **traveller's own unit**, and whether it is
+> international follows from its two countries; a **Policy and limits** card shows the approved policy
+> that will apply and its limits before saving (**T-16 fixed**); submission refuses a trip estimated above
+> that policy's single-trip limit (**T-17 fixed** — it binds only once a policy is approved, which **T-1**
+> still blocks on the demo), a trip costed at nothing, a trip over the days of another of the traveller's
+> trips, and — from the portal — a trip whose departure has passed (the desk submits that one with a
+> reason, kept as an internal note). A request can be edited only while it is a Draft or returned for
+> revision, and travel cannot be raised for someone who has left. Approved leave over the trip's days is
+> shown as a warning on submission.
 
 **Fifty-eight findings.** This is the most complete module in HR by some distance — it was built as
 twelve slices with 506 harness assertions and two closure slices on top, and the density of

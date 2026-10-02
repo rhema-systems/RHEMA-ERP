@@ -47,7 +47,8 @@ export default function EditMyTravelRequestPage({ params }: { params: Promise<{ 
     );
   }
 
-  const locked = ['Approved', 'Completed', 'Cancelled', 'Closed'].includes(r.status);
+  // Lane 1: only a Draft or a request returned for revision can be edited (finding A1).
+  const locked = r.status !== 'Draft' && r.status !== 'ReturnedForRevision';
 
   return (
     <div className="space-y-6">
@@ -58,11 +59,13 @@ export default function EditMyTravelRequestPage({ params }: { params: Promise<{ 
       />
       {locked ? (
         <EmptyState
-          title="This request can no longer be edited"
+          title="This request cannot be edited now"
           description={
-            r.status === 'Approved'
-              ? 'An approved trip cannot be changed here. If it has changed, withdraw it and raise a new one, or ask the travel desk.'
-              : `A request that is ${enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status).toLowerCase()} cannot be changed.`
+            r.status === 'Submitted'
+              ? 'It is out for approval. Recall it first, or ask your approver to return it to you for revision.'
+              : r.status === 'Approved'
+                ? 'An approved trip cannot be edited. Use Request change on the trip to send it back for re-approval.'
+                : `A request that is ${enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status).toLowerCase()} cannot be changed.`
           }
         />
       ) : (

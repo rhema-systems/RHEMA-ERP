@@ -9,11 +9,23 @@ namespace ErpSystem.Core.Services.HR;
 /// rather than declared by the caller.
 /// </summary>
 /// <param name="PolicyId">Null when no policy covers this traveller and date — see the guard.</param>
+/// <param name="MaxSingleTripBudget">
+/// The most one trip may be estimated at, checked when the request is submitted (lane 1, decision
+/// D-1). Null when the policy sets none — the policy form stores "no limit" as 0.
+/// </param>
+/// <param name="CurrencyCode">
+/// The currency the policy's money limits are set in. Null on a policy written before migration
+/// batch 1 gave policies a currency; the caller then reads the limits in the base currency, which is
+/// what the batch backfilled.
+/// </param>
 public sealed record TravelPolicyCaps(
     Guid? PolicyId,
     string? PolicyName,
     FlightCabinClass? MaxFlightClass,
-    decimal? MaxHotelRatePerNight)
+    decimal? MaxHotelRatePerNight,
+    decimal? MaxSingleTripBudget = null,
+    string? CurrencyCode = null,
+    int? VersionNumber = null)
 {
     public static readonly TravelPolicyCaps None = new(null, null, null, null);
 
@@ -37,7 +49,10 @@ public sealed record TravelPolicyCaps(
 ///
 /// <para><b>Domestic or international is the request's answer, not the booking's.</b> The policy
 /// splits both caps that way, and the trip already knows: <c>StaffTravelRequest.IsInternational</c>
-/// is derived from the two countries. A booking does not get a second opinion.</para>
+/// is derived from the two countries. A booking does not get a second opinion. (⚠ That sentence was
+/// false until the travel final closure's lane 1: the request took the payload's word for it, so a
+/// domestic trip declared international bought the international caps. The request service now sets
+/// it from the countries on every create, edit and submission.)</para>
 ///
 /// <para><b>Who may approve a breach.</b> The exception flag is not a field the booking form fills
 /// in; it is an act of authority. It may only be set by a caller holding
@@ -67,18 +82,28 @@ public sealed class StaffTravelPolicyGuard
     /// The caps in force for this trip: the most specific current policy covering the traveller's
     /// staff level and organisation unit on the departure date.
     /// </summary>
-    public async Task<TravelPolicyCaps> ResolveAsync(
+    public Task<TravelPolicyCaps> ResolveAsync(
         StaffTravelRequest request, CancellationToken cancellationToken = default)
+        => ResolveForAsync(request.TenantId, request.EmployeeId, request.OrganizationUnitId,
+            request.TravelStartDate, request.IsInternational, cancellationToken);
+
+    /// <summary>
+    /// The same resolution for a trip that is not saved yet — the request form's policy preview
+    /// (finding T-16). Callers pass the unit the request will carry: the traveller's own.
+    /// </summary>
+    public async Task<TravelPolicyCaps> ResolveForAsync(
+        Guid tenantId, Guid employeeId, Guid? organizationUnitId, DateOnly departure, bool isInternational,
+        CancellationToken cancellationToken = default)
     {
         // The staff level lives on the traveller's POSITION, not on the employee, so it needs the
         // detail read. A traveller with no position simply resolves to the org-wide policy.
         Guid? staffLevelId = null;
-        var employee = await _employees.GetByIdWithDetailsAsync(request.EmployeeId);
-        if (employee is not null && employee.TenantId == request.TenantId)
+        var employee = await _employees.GetByIdWithDetailsAsync(employeeId);
+        if (employee is not null && employee.TenantId == tenantId)
             staffLevelId = employee.Position?.StaffLevelId;
 
         var candidates = await _policies.GetApplicablePoliciesAsync(
-            staffLevelId, request.OrganizationUnitId, request.TravelStartDate);
+            staffLevelId, organizationUnitId, departure);
 
         // ⚠ Two filters, both load-bearing.
         //
@@ -90,14 +115,17 @@ public sealed class StaffTravelPolicyGuard
         // `HR.Travel.Write` could author the rule constraining everyone's travel spending and have
         // it bind immediately. An unapproved policy caps nothing.
         var policy = candidates.FirstOrDefault(
-            p => p.TenantId == request.TenantId && p.ApprovedById is not null);
+            p => p.TenantId == tenantId && p.ApprovedById is not null);
         if (policy is null) return TravelPolicyCaps.None;
 
         return new TravelPolicyCaps(
             policy.Id,
             policy.PolicyName,
-            request.IsInternational ? policy.MaxFlightClassInternational : policy.MaxFlightClassDomestic,
-            request.IsInternational ? policy.MaxHotelRateInternational : policy.MaxHotelRateDomestic);
+            isInternational ? policy.MaxFlightClassInternational : policy.MaxFlightClassDomestic,
+            isInternational ? policy.MaxHotelRateInternational : policy.MaxHotelRateDomestic,
+            policy.MaxSingleTripBudget > 0m ? policy.MaxSingleTripBudget : null,
+            string.IsNullOrWhiteSpace(policy.CurrencyCode) ? null : policy.CurrencyCode.Trim(),
+            policy.VersionNumber);
     }
 
     /// <summary>

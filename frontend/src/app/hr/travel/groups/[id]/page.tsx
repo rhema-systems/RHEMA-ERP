@@ -168,7 +168,8 @@ export default function TravelGroupDetailPage({ params }: { params: Promise<{ id
         originCity: originCity.trim(),
         estimatedTotalCost: Number(estimatedTotalCost) || 0,
         currencyCode,
-        isInternational: group?.destinationCountryId !== originCountryId,
+        // No unit and no international flag: each participant's own unit, and the two countries,
+        // decide them on the server (lane 1).
         requiresVisa: false,
         requiresHealthClearance: false,
         riskLevel: 'Low',

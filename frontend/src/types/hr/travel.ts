@@ -13,6 +13,7 @@
  */
 
 import type { AuditFields } from './common';
+import type { FlightCabinClass } from './travel-bookings';
 
 /**
  * ⚠ Every union in this file is written from its C# enum in `src/ErpSystem.Core/Enums/HREnums.cs`,
@@ -168,12 +169,15 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   initiatedByName: string;
   initiatedByRole: TravelInitiatorRole;
   purposeDescription?: string | null;
+  /** The traveller's own unit, set by the server from their employee record (lane 1, O-5). */
   organizationUnitId?: string | null;
   organizationUnitName?: string | null;
   originCountryId: string;
   originCountryName: string;
   estimatedDurationDays: number;
+  /** The policy the trip was checked against when it was submitted; null before, or when none covers it. */
   policyId?: string | null;
+  policyName?: string | null;
   requiresVisa: boolean;
   requiresHealthClearance: boolean;
   groupTravelId?: string | null;
@@ -283,6 +287,11 @@ export interface StaffTravelDashboard {
  * ⚠ There is no `initiatedById`. Who raised the request is the caller's employee id, stamped
  * server-side — the desk raises travel for other people, so it is neither the traveller nor
  * anything a form can be trusted to say. Only the *role* it was raised under is an input.
+ *
+ * ⚠ No organisation unit, `isInternational` or `policyId` either (travel final closure, lane 1 —
+ * findings A5, O-5). The unit is the traveller's own, the international flag follows from the two
+ * countries, and the policy is the one the trip is checked against at submission — all three set by
+ * the server, which ignores them if they are sent.
  */
 export interface CreateStaffTravelRequest {
   employeeId: string;
@@ -290,7 +299,6 @@ export interface CreateStaffTravelRequest {
   travelType: StaffTravelType;
   travelPurpose: StaffTravelPurpose;
   purposeDescription?: string;
-  organizationUnitId?: string | null;
   priority: StaffTravelPriority;
   destinationCountryId: string;
   destinationCity: string;
@@ -300,8 +308,6 @@ export interface CreateStaffTravelRequest {
   travelEndDate: string;
   estimatedTotalCost: number;
   currencyCode: string;
-  policyId?: string | null;
-  isInternational: boolean;
   requiresVisa: boolean;
   requiresHealthClearance: boolean;
   riskLevel: TravelRiskLevel;
@@ -312,15 +318,53 @@ export interface CreateStaffTravelRequest {
 
 /**
  * ⚠ A REPLACE, not a patch: the server writes every field it receives, and an omitted one as its
- * default. `approvedBudget`, `policyId` and `groupTravelId` are on no form, so an edit must send
- * them back exactly as they were or the save erases them — a group participant edited on the form
- * left the group (finding A8). `buildTravelRequestUpdate` does this. The travel final closure's
- * lane 1 takes the three out of the update DTO.
+ * default. Since lane 1 it writes only what the requester may change — the unit, the international
+ * flag, the policy and the approved budget are no longer on it — and only while the request is a
+ * Draft or returned for revision. `groupTravelId` is still written as sent until slice 1c moves
+ * group membership to the group's own endpoints, so `buildTravelRequestUpdate` sends it back as the
+ * record has it (finding A8: an edit that omitted it took the traveller out of their group).
  */
 export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
   'employeeId' | 'initiatedByRole'
-> & { id: string; approvedBudget?: number | null };
+> & { id: string };
+
+/** What a submission did (lane 1). */
+export interface StaffTravelSubmitResult {
+  message: string;
+  status: StaffTravelRequestStatus;
+  statusName: string;
+  /** The policy the trip was checked against; null when no approved policy covers it. */
+  policyId?: string | null;
+  policyName?: string | null;
+  /**
+   * What did not stop the submission but should be known — approved leave over the same days. A
+   * conflict that must stop it is refused with a 422 instead.
+   */
+  warnings: string[];
+}
+
+/**
+ * The approved policy a trip would be checked against, before it is saved (finding T-16): the same
+ * resolution the server applies at submission — the traveller's own unit, the two countries, the
+ * departure date.
+ */
+export interface StaffTravelPolicyPreview {
+  employeeId: string;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  isInternational: boolean;
+  hasPolicy: boolean;
+  policyId?: string | null;
+  policyName?: string | null;
+  versionNumber?: number | null;
+  /** The currency the policy's money limits are set in. */
+  currencyCode?: string | null;
+  /** The most one trip may be estimated at; null when the policy sets no such limit. */
+  maxSingleTripBudget?: number | null;
+  maxFlightClass?: FlightCabinClass | null;
+  maxHotelRatePerNight?: number | null;
+}
 
 /**
  * ⚠ No `authorId`. Authorship is taken from the caller's token — sending one is ignored, because

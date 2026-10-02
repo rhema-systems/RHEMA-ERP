@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  FLIGHT_CABIN_CLASS_LABELS,
   TRAVEL_ATTACHMENT_TYPE_LABELS,
   TRAVEL_COMMENT_TYPE_LABELS,
   TRAVEL_INITIATOR_ROLE_LABELS,
@@ -93,6 +94,7 @@ describe('staff travel enums', () => {
     ['TravelRequestCommentType', TRAVEL_COMMENT_TYPE_LABELS],
     ['TravelAttachmentType', TRAVEL_ATTACHMENT_TYPE_LABELS],
     ['StaffTravelRequestStatus', TRAVEL_REQUEST_STATUS_LABELS],
+    ['FlightCabinClass', FLIGHT_CABIN_CLASS_LABELS],
   ] as const)('the %s options list C#\'s members in its order, labelled with its descriptions', (name, labels) => {
     const csharp = csharpEnum(name) ?? [];
     expect(csharp.length, `C# enum ${name} not found`).toBeGreaterThan(0);

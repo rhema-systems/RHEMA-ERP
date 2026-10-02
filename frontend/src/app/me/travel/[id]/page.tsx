@@ -34,6 +34,8 @@ import { travelService } from '@/services/hr/travel.service';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
+/** Today on the server's calendar (UTC), as the API compares a departure date. */
+const todayUtc = () => new Date().toISOString().slice(0, 10);
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -77,8 +79,11 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
 
   const submit = useMutation({
     mutationFn: () => travelService.submitMine(id),
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       toast({ title: 'Sent for approval' });
+      // Did not stop it, but the approver will see it too — approved leave over the same days.
+      if (result?.warnings?.length)
+        toast({ title: 'Please note', description: result.warnings.join(' ') });
       await refresh();
     },
     onError: (e: Error) =>
@@ -122,6 +127,9 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
 
   const isEditable = r.status === 'Draft' || r.status === 'ReturnedForRevision';
   const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed'].includes(r.status);
+  // The server refuses a past departure from this surface: the travel desk submits it, with the
+  // reason it is late (lane 1). Say so instead of offering a button that can only fail.
+  const departed = r.travelStartDate.slice(0, 10) < todayUtc();
   // Only what the desk chose to share — an internal note is not the traveller's to read.
   // ⚠ This filter is the only guard until lane 1 of the travel final closure: the self-service
   // read still returns internal notes to this browser (finding A6).
@@ -144,7 +152,11 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
                 >
                   <Pencil className="mr-2 h-4 w-4" /> Edit
                 </Button>
-                <Button onClick={() => submit.mutate()} disabled={submit.isPending}>
+                <Button
+                  onClick={() => submit.mutate()}
+                  disabled={submit.isPending || departed}
+                  title={departed ? 'The departure date has passed — change the dates, or ask the travel desk to submit it.' : undefined}
+                >
                   <Send className="mr-2 h-4 w-4" /> Send for approval
                 </Button>
               </>
@@ -157,6 +169,14 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           </div>
         }
       />
+
+      {isEditable && departed && (
+        <p role="note" className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+          This trip&apos;s departure date ({fmtDate(r.travelStartDate)}) has passed, so it cannot be sent
+          for approval from here. Change the dates if they moved, or ask the travel desk to submit it with
+          the reason it is late.
+        </p>
+      )}
 
       <Card>
         <CardHeader className="pb-2">

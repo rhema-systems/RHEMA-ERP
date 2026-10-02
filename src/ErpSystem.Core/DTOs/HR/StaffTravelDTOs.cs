@@ -135,6 +135,15 @@ public class StaffTravelRequestSummaryDto
     public DateTime? SubmittedAt { get; set; }
 }
 
+/// <remarks>
+/// <para><b>Three facts are the server's, not the payload's</b> (travel final closure, lane 1 —
+/// findings A5, O-5). The organisation unit is the traveller's own, read from their employee record;
+/// whether the trip is international is decided by its two countries; and the policy is the one the
+/// trip is checked against when it is submitted. All three used to be accepted as sent: a domestic
+/// trip declared international bought the international caps, and a requester could name a unit
+/// with a laxer policy. They are no longer on this DTO, so a client that still sends them is
+/// ignored rather than believed.</para>
+/// </remarks>
 public class CreateStaffTravelRequestDto : CreateDtoBase
 {
     [Required]
@@ -158,8 +167,6 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
 
     [MaxLength(1000)]
     public string? PurposeDescription { get; set; }
-
-    public Guid? OrganizationUnitId { get; set; }
 
     public StaffTravelPriority Priority { get; set; } = StaffTravelPriority.Routine;
 
@@ -190,20 +197,31 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public Guid? PolicyId { get; set; }
-    public bool IsInternational { get; set; }
     public bool RequiresVisa { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     public TravelRiskLevel RiskLevel { get; set; } = TravelRiskLevel.Low;
 
+    /// <summary>Must be a group trip of this organisation; checked on the server.</summary>
     public Guid? GroupTravelId { get; set; }
+
+    /// <summary>Must be an earlier request of the same traveller; checked on the server.</summary>
     public Guid? ParentRequestId { get; set; }
 
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 }
 
+/// <remarks>
+/// <para><b>An edit is allowed only while the request is a Draft or has been returned for
+/// revision</b> (lane 1, finding A1). It used to be refused only once Approved, so a Submitted
+/// request could be rewritten while the approver was deciding it.</para>
+///
+/// <para>Not on this DTO, deliberately: the organisation unit, whether the trip is international and
+/// the policy (the server's — see <see cref="CreateStaffTravelRequestDto"/>), and the approved
+/// budget, which is the approver's decision and is set only by approval. A plain edit could write
+/// it.</para>
+/// </remarks>
 public class UpdateStaffTravelRequestDto : UpdateDtoBase
 {
     [Required]
@@ -214,8 +232,6 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
 
     [MaxLength(1000)]
     public string? PurposeDescription { get; set; }
-
-    public Guid? OrganizationUnitId { get; set; }
 
     [Required]
     public StaffTravelPriority Priority { get; set; }
@@ -243,36 +259,102 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal EstimatedTotalCost { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal? ApprovedBudget { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public Guid? PolicyId { get; set; }
-    public bool IsInternational { get; set; }
     public bool RequiresVisa { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     [Required]
     public TravelRiskLevel RiskLevel { get; set; }
 
+    /// <summary>
+    /// ⚠ Still written as sent until slice 1c moves group membership to the group endpoints, so an
+    /// edit must send it back as the record has it (the form's payload builder does).
+    /// </summary>
     public Guid? GroupTravelId { get; set; }
 
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 }
 
+/// <summary>What the service needs to submit a request. Built by the controllers, never bound.</summary>
+/// <remarks>
+/// The time of submission is the server's clock, not a field: this DTO used to carry a
+/// <c>SubmittedAt</c> defaulted at binding, and a <c>SubmittedById</c> the service never read.
+/// </remarks>
 public class SubmitStaffTravelRequestDto
 {
     [Required]
     public Guid RequestId { get; set; }
 
-    [Required]
-    public Guid SubmittedById { get; set; }
+    /// <summary>
+    /// The travel desk's reason for submitting a trip whose departure date has already passed — the
+    /// trip was taken at short notice and the paperwork followed. Recorded on the request as an
+    /// internal note in the submitter's name. The self-service route never sets it: a traveller
+    /// cannot submit a past trip.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? LateSubmissionReason { get; set; }
 
-    public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>The submitting employee, from the token — the author of the late-submission note.</summary>
+    public Guid? SubmittedByEmployeeId { get; set; }
+}
+
+/// <summary>The desk's submit body: optional, and only for a trip whose departure has passed.</summary>
+public class SubmitStaffTravelRequestBodyDto
+{
+    [MaxLength(1000)]
+    public string? LateSubmissionReason { get; set; }
+}
+
+/// <summary>What a submission did: where the request now is, and anything the submitter should know.</summary>
+public class StaffTravelSubmitResultDto
+{
+    public string Message { get; set; } = string.Empty;
+    public StaffTravelRequestStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    /// <summary>The policy the trip was checked against, or null when no approved policy covers it.</summary>
+    public Guid? PolicyId { get; set; }
+    public string? PolicyName { get; set; }
+
+    /// <summary>
+    /// Things that did not stop the submission but that the approver and the traveller should know —
+    /// approved leave over the same days, for instance. A conflict that must stop it is a 422 instead.
+    /// </summary>
+    public List<string> Warnings { get; set; } = new();
+}
+
+/// <summary>
+/// The travel policy a trip would be checked against, before it is raised — so the form can show
+/// the limits instead of the traveller discovering them at submission (finding T-16).
+/// </summary>
+public class StaffTravelPolicyPreviewDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>The traveller's own unit — the one the request will carry.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>Decided by the two countries, as the server will decide it.</summary>
+    public bool IsInternational { get; set; }
+
+    public bool HasPolicy { get; set; }
+    public Guid? PolicyId { get; set; }
+    public string? PolicyName { get; set; }
+    public int? VersionNumber { get; set; }
+
+    /// <summary>The currency the policy's money limits are expressed in.</summary>
+    public string? CurrencyCode { get; set; }
+
+    /// <summary>The most one trip may be estimated at; null when the policy sets no such limit.</summary>
+    public decimal? MaxSingleTripBudget { get; set; }
+
+    public FlightCabinClass? MaxFlightClass { get; set; }
+    public decimal? MaxHotelRatePerNight { get; set; }
 }
 
 public class ApproveStaffTravelRequestDto

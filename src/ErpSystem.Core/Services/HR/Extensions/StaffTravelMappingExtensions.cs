@@ -108,6 +108,10 @@ public static class StaffTravelMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// The organisation unit, <c>IsInternational</c> and the policy are not mapped: the service sets
+    /// them from the traveller's record, the two countries and the policy guard (lane 1 — A5, O-5).
+    /// </remarks>
     public static StaffTravelRequest ToEntity(this CreateStaffTravelRequestDto dto, Guid tenantId, Guid userId)
     {
         return new StaffTravelRequest
@@ -119,7 +123,6 @@ public static class StaffTravelMappingExtensions
             TravelType = dto.TravelType,
             TravelPurpose = dto.TravelPurpose,
             PurposeDescription = dto.PurposeDescription,
-            OrganizationUnitId = dto.OrganizationUnitId,
             Status = StaffTravelRequestStatus.Draft,
             Priority = dto.Priority,
             DestinationCountryId = dto.DestinationCountryId,
@@ -131,8 +134,6 @@ public static class StaffTravelMappingExtensions
             EstimatedDurationDays = Math.Max(0, dto.TravelEndDate.DayNumber - dto.TravelStartDate.DayNumber + 1),
             EstimatedTotalCost = dto.EstimatedTotalCost,
             CurrencyCode = dto.CurrencyCode,
-            PolicyId = dto.PolicyId,
-            IsInternational = dto.IsInternational,
             RequiresVisa = dto.RequiresVisa,
             RequiresHealthClearance = dto.RequiresHealthClearance,
             RiskLevel = dto.RiskLevel,
@@ -143,12 +144,16 @@ public static class StaffTravelMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// Writes only what the requester may change. The unit, <c>IsInternational</c> and the policy
+    /// are the service's (see <see cref="ToEntity(CreateStaffTravelRequestDto, Guid, Guid)"/>), and
+    /// <c>ApprovedBudget</c> is the approver's — a plain edit used to overwrite all four.
+    /// </remarks>
     public static void UpdateEntity(this StaffTravelRequest entity, UpdateStaffTravelRequestDto dto, Guid userId)
     {
         entity.TravelType = dto.TravelType;
         entity.TravelPurpose = dto.TravelPurpose;
         entity.PurposeDescription = dto.PurposeDescription;
-        entity.OrganizationUnitId = dto.OrganizationUnitId;
         entity.Priority = dto.Priority;
         entity.DestinationCountryId = dto.DestinationCountryId;
         entity.DestinationCity = dto.DestinationCity;
@@ -158,10 +163,7 @@ public static class StaffTravelMappingExtensions
         entity.TravelEndDate = dto.TravelEndDate;
         entity.EstimatedDurationDays = Math.Max(0, dto.TravelEndDate.DayNumber - dto.TravelStartDate.DayNumber + 1);
         entity.EstimatedTotalCost = dto.EstimatedTotalCost;
-        entity.ApprovedBudget = dto.ApprovedBudget;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.PolicyId = dto.PolicyId;
-        entity.IsInternational = dto.IsInternational;
         entity.RequiresVisa = dto.RequiresVisa;
         entity.RequiresHealthClearance = dto.RequiresHealthClearance;
         entity.RiskLevel = dto.RiskLevel;

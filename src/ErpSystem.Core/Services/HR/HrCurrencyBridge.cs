@@ -142,4 +142,30 @@ public class HrCurrencyBridge
 
         return rate;
     }
+
+    /// <summary>The organisation's base currency code, or null when Finance marks none.</summary>
+    public async Task<string?> GetBaseCurrencyCodeAsync(CancellationToken cancellationToken = default)
+        => (await _currencies.GetBaseCurrencyAsync(cancellationToken))?.CurrencyCode;
+
+    /// <summary>
+    /// Expresses an amount in another currency, through the base currency, at the rates Finance
+    /// holds — so a figure in one currency can be compared with a limit set in another.
+    /// </summary>
+    /// <remarks>
+    /// Added for the travel policy's single-trip limit (travel final closure, lane 1): a trip costed
+    /// in USD against a limit set in GHS. Each leg is <see cref="GetRateToBaseAsync"/>, so it refuses
+    /// in the same words when Finance holds no rate, and it inherits that method's rate date (which
+    /// travel's lane 3 corrects for back-dated expenses). The same currency needs no rate at all.
+    /// </remarks>
+    public async Task<decimal> ConvertBetweenAsync(
+        decimal amount, string fromCurrency, string toCurrency, DateOnly asOf,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(fromCurrency?.Trim(), toCurrency?.Trim(), StringComparison.OrdinalIgnoreCase))
+            return amount;
+
+        var fromRate = await GetRateToBaseAsync(fromCurrency!, asOf, cancellationToken);
+        var toRate = await GetRateToBaseAsync(toCurrency!, asOf, cancellationToken);
+        return amount * fromRate / toRate;
+    }
 }

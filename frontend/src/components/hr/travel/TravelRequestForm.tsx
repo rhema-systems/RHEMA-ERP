@@ -21,10 +21,10 @@ import {
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
 import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
-import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import { countryService } from '@/services/hr/country.service';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
+import { TravelPolicyPreview } from './TravelPolicyPreview';
 import { TravelQueryError } from './TravelQueryError';
 import {
   TRAVEL_INITIATOR_ROLES_A_PERSON_CHOOSES,
@@ -68,7 +68,6 @@ const schema = z
     travelEndDate: z.string().min(1, 'Required'),
     estimatedTotalCost: z.coerce.number().min(0, 'Cannot be negative'),
     currencyCode: z.string().min(1, 'Select a currency'),
-    organizationUnitId: z.string().optional(),
     requiresVisa: z.boolean(),
     requiresHealthClearance: z.boolean(),
     amendmentReason: z.string().max(1000).optional(),
@@ -96,12 +95,14 @@ const toDateInput = (v?: string | null) => (v ? v.slice(0, 10) : '');
  * by the people who raise them (travel final closure, lane 0 — finding O-19). The server refuses a
  * code Finance does not hold, so this stays a list, never a free-text box.
  *
- * `isInternational` is derived from the two countries rather than asked for. It was a free boolean
- * on the DTO, which let a request claim a domestic trip between two countries; there is no case
- * where the answer is not already on the form. (The server still trusts the payload until lane 1.)
+ * Since lane 1 the server decides three things this form used to send: whether the trip is
+ * international (from the two countries), the organisation unit (the traveller's own, from their
+ * employee record — the desk's unit picker is gone; a requester could name a unit with a laxer
+ * policy) and the policy. `TravelPolicyPreview` shows the unit and the policy's limits before the
+ * request is saved, so the single-trip limit enforced at submission is not a surprise (T-16).
  *
- * ⚠ An edit REPLACES the record. `buildTravelRequestUpdate` sends back the three fields this form
- * does not show — see `travel-request-payload.ts`.
+ * ⚠ An edit REPLACES the record. `buildTravelRequestUpdate` sends the group link back as it is —
+ * see `travel-request-payload.ts`.
  */
 export function TravelRequestForm({
   surface,
@@ -124,10 +125,6 @@ export function TravelRequestForm({
     queryFn: () => countryService.getActive(),
   });
 
-  // Only the desk chooses a unit. The traveller's own form sends none, and until lane 1 the server
-  // does not fill it in from the traveller either — so a self-raised trip carries no unit, and a
-  // unit-scoped travel policy never applies to it (findings A8 and O-5).
-
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -146,7 +143,6 @@ export function TravelRequestForm({
       travelEndDate: toDateInput(existing?.travelEndDate),
       estimatedTotalCost: existing?.estimatedTotalCost ?? 0,
       currencyCode: existing?.currencyCode ?? '',
-      organizationUnitId: existing?.organizationUnitId ?? '',
       requiresVisa: existing?.requiresVisa ?? false,
       requiresHealthClearance: existing?.requiresHealthClearance ?? false,
       amendmentReason: '',
@@ -156,6 +152,11 @@ export function TravelRequestForm({
   const originCountryId = form.watch('originCountryId');
   const destinationCountryId = form.watch('destinationCountryId');
   const isInternational = isInternationalTrip(originCountryId, destinationCountryId);
+  // The preview's inputs: whose policy, on which day, for which estimate.
+  const pickedTraveller = form.watch('employeeId');
+  const departure = form.watch('travelStartDate');
+  const estimate = Number(form.watch('estimatedTotalCost')) || 0;
+  const currencyCode = form.watch('currencyCode');
 
   // A trip that crosses a border almost always needs a visa decision made deliberately, so the
   // switch is turned ON once and then left alone — re-forcing it would fight the user.
@@ -327,10 +328,6 @@ export function TravelRequestForm({
             />
           </FieldRow>
 
-          {isDesk && (
-            <OrganizationUnitPickerField form={form} name="organizationUnitId" label="Organisation unit" allowEmpty emptyLabel="Not specified" />
-          )}
-
           {/* ⚠ Both switches RECORD a need; neither enforces one. The visa section on the
               Compliance tab shows whatever this says, and nothing yet refuses a booking or a
               departure without a visa or a clearance (findings E4, T-24, T-25 — lanes 5 and 7). */}
@@ -357,6 +354,16 @@ export function TravelRequestForm({
           )}
         </CardContent>
       </Card>
+
+      <TravelPolicyPreview
+        surface={surface}
+        employeeId={isDesk ? (existing?.employeeId ?? pickedTraveller) : undefined}
+        departure={departure}
+        originCountryId={originCountryId}
+        destinationCountryId={destinationCountryId}
+        estimatedTotalCost={estimate}
+        currencyCode={currencyCode}
+      />
 
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={() => router.push(listHref)}>

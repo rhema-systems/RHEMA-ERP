@@ -24,7 +24,6 @@ const values = (overrides: Partial<TravelRequestFormOutput> = {}): TravelRequest
   travelEndDate: '2026-11-06',
   estimatedTotalCost: 18500,
   currencyCode: 'GHS',
-  organizationUnitId: '',
   requiresVisa: true,
   requiresHealthClearance: false,
   amendmentReason: '',
@@ -32,29 +31,25 @@ const values = (overrides: Partial<TravelRequestFormOutput> = {}): TravelRequest
 });
 
 describe('travel request payloads', () => {
-  it('sends back the three fields the form does not show, so a save does not erase them (A8)', () => {
-    const update = buildTravelRequestUpdate(values(), {
-      id: 'req-1',
-      approvedBudget: 20000,
-      policyId: 'policy-1',
-      groupTravelId: 'group-1',
-    });
+  it('sends the group link back, so a save does not take the traveller out of their group (A8)', () => {
+    const update = buildTravelRequestUpdate(values(), { id: 'req-1', groupTravelId: 'group-1' });
     expect(update.id).toBe('req-1');
-    expect(update.approvedBudget).toBe(20000);
-    expect(update.policyId).toBe('policy-1');
     expect(update.groupTravelId).toBe('group-1');
   });
 
-  it('sends null, not undefined, for those three when the record has none', () => {
-    const update = buildTravelRequestUpdate(values(), { id: 'req-1' });
-    expect(update.approvedBudget).toBeNull();
-    expect(update.policyId).toBeNull();
-    expect(update.groupTravelId).toBeNull();
+  it('sends null, not undefined, for the group link when the record has none', () => {
+    expect(buildTravelRequestUpdate(values(), { id: 'req-1' }).groupTravelId).toBeNull();
   });
 
-  it('never sends an empty string where the API expects an id', () => {
-    expect(buildTravelRequestFields(values({ organizationUnitId: '' }), false).organizationUnitId).toBeNull();
-    expect(buildTravelRequestFields(values({ organizationUnitId: 'unit-1' }), false).organizationUnitId).toBe('unit-1');
+  it("never sends what the server decides: the unit, international, the policy, the approved budget (lane 1)", () => {
+    const create = buildTravelRequestCreate(values(), 'emp-9');
+    const update = buildTravelRequestUpdate(values(), { id: 'req-1', groupTravelId: null });
+    for (const payload of [create, update, buildTravelRequestFields(values(), false)]) {
+      expect('organizationUnitId' in payload).toBe(false);
+      expect('isInternational' in payload).toBe(false);
+      expect('policyId' in payload).toBe(false);
+      expect('approvedBudget' in payload).toBe(false);
+    }
   });
 
   it('keeps the reason for a change on an edit only', () => {
@@ -63,11 +58,10 @@ describe('travel request payloads', () => {
     expect(buildTravelRequestFields(values({ amendmentReason: '' }), true).amendmentReason).toBeNull();
   });
 
-  it('derives international from the two countries', () => {
+  it('tells international from the two countries, as the server does', () => {
     expect(isInternationalTrip(GHANA, NIGERIA)).toBe(true);
     expect(isInternationalTrip(GHANA, GHANA)).toBe(false);
     expect(isInternationalTrip(GHANA, '')).toBe(false);
-    expect(buildTravelRequestFields(values({ destinationCountryId: GHANA }), false).isInternational).toBe(false);
   });
 
   it('a desk create names the traveller and the role, never the initiator', () => {

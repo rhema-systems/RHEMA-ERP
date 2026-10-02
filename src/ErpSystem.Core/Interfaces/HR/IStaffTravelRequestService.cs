@@ -25,6 +25,12 @@ public interface IStaffTravelRequestService
     Task<IEnumerable<StaffTravelRequestSummaryDto>> GetUpcomingTripsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestSummaryDto>> GetChildRequestsAsync(Guid parentRequestId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The approved policy a trip would be checked against — the traveller's own unit, the two
+    /// countries, the departure date — for the request form, before anything is saved (T-16).
+    /// </summary>
+    Task<StaffTravelPolicyPreviewDto> GetPolicyPreviewAsync(Guid employeeId, DateOnly departure, Guid? originCountryId, Guid? destinationCountryId, CancellationToken cancellationToken = default);
+
     // Dashboard
     Task<StaffTravelDashboardDto> GetDashboardAsync(int upcomingDays = 30, CancellationToken cancellationToken = default);
 
@@ -34,7 +40,11 @@ public interface IStaffTravelRequestService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Workflow
-    Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Sends a Draft or returned request for approval, once everything that must hold does (lane 1);
+    /// returns where it now is, the policy it was checked against and any warnings.
+    /// </summary>
+    Task<StaffTravelSubmitResultDto> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default);
     Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default);
     /// <summary>

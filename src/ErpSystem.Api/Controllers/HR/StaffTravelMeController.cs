@@ -139,17 +139,37 @@ public class StaffTravelMeController : HrControllerBase
     /// Submit your own request for approval. The submitter is stamped from the token, not taken
     /// from the payload.
     /// </summary>
+    /// <remarks>
+    /// Never carries a late-submission reason: a trip whose departure has passed is the travel desk's
+    /// to submit, with the reason (lane 1). Answers with where the request now is and any warnings —
+    /// it answered 204 with nothing before, so a warning had nowhere to go.
+    /// </remarks>
     [HttpPost("requests/{id:guid}/submit")]
-    public async Task<IActionResult> SubmitMyRequest(Guid id, CancellationToken ct)
+    public async Task<ActionResult<StaffTravelSubmitResultDto>> SubmitMyRequest(Guid id, CancellationToken ct)
     {
         if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
                 "Submitting a travel request") is { } error) return error;
 
         if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
 
-        await _service.SubmitAsync(
-            new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = employeeId }, ct);
-        return NoContent();
+        return Ok(await _service.SubmitAsync(
+            new SubmitStaffTravelRequestDto { RequestId = id, SubmittedByEmployeeId = employeeId }, ct));
+    }
+
+    /// <summary>
+    /// The approved travel policy your trip would be checked against, and its limits — for your own
+    /// request form, before you save it (finding T-16). Only the policy that covers you.
+    /// </summary>
+    [HttpGet("policy-preview")]
+    public async Task<ActionResult<StaffTravelPolicyPreviewDto>> GetMyPolicyPreview(
+        [FromQuery] DateOnly departure,
+        [FromQuery] Guid? originCountryId = null, [FromQuery] Guid? destinationCountryId = null,
+        CancellationToken ct = default)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading the travel policy that applies to you") is { } error) return error;
+
+        return Ok(await _service.GetPolicyPreviewAsync(employeeId, departure, originCountryId, destinationCountryId, ct));
     }
 
     /// <summary>

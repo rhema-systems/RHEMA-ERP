@@ -18,6 +18,7 @@ import type {
   TravelRequestCommentType,
   TravelRiskLevel,
 } from '@/types/hr/travel';
+import type { FlightCabinClass } from '@/types/hr/travel-bookings';
 
 export const TRAVEL_TYPE_LABELS: Record<StaffTravelType, string> = {
   Domestic: 'Domestic',
@@ -113,6 +114,13 @@ export const TRAVEL_REQUEST_STATUS_LABELS: Record<StaffTravelRequestStatus, stri
   InProgress: 'In Progress',
   Completed: 'Completed',
   Closed: 'Closed',
+};
+
+export const FLIGHT_CABIN_CLASS_LABELS: Record<FlightCabinClass, string> = {
+  Economy: 'Economy',
+  PremiumEconomy: 'Premium Economy',
+  Business: 'Business',
+  First: 'First',
 };
 
 /** Every member of a label map, in declaration order — the non-empty tuple `z.enum` needs. */
