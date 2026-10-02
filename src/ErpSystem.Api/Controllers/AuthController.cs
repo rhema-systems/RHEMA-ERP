@@ -973,7 +973,9 @@ namespace ErpSystem.Api.Controllers
                 }
 
                 await _refreshTokenService.MarkRefreshTokenAsUsedAsync(storedRefreshToken);
-                var newToken = await _tokenService.GenerateTokenAsync(user, sessionId);
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
 
                 if (!string.IsNullOrEmpty(sessionId))
                 {
@@ -1450,7 +1452,9 @@ namespace ErpSystem.Api.Controllers
 
                 // Generate the tenant-context JWT without dropping the browser session identity.
                 var sessionId = User.FindFirst("sid")?.Value;
-                var newToken = await _tokenService.GenerateTokenAsync(user, sessionId);
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
 
                 // Extract JTI from the new token and update the current session
                 try
