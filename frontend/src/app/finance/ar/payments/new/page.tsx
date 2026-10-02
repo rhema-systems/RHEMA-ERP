@@ -60,7 +60,7 @@ import { useAuth } from '@/hooks/use-auth';
 
 const optionalGuidSchema = z.preprocess(
     value => value === '' || value == null ? undefined : value,
-    z.string().uuid('Select a valid configured record').optional(),
+    z.guid('Select a valid configured record').optional(),
 );
 
 const paymentSchema = z.object({
@@ -736,7 +736,7 @@ export default function NewReceiptPage() {
                                 <Label htmlFor="customer">Customer</Label>
                                 <Select
                                     onValueChange={(val) => form.setValue('businessPartnerId', val)}
-                                    value={form.watch('businessPartnerId') || undefined}
+                                    value={form.watch('businessPartnerId') ?? ''}
                                     disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
                                     <SelectTrigger>
@@ -763,7 +763,7 @@ export default function NewReceiptPage() {
                                         form.setValue('paymentMethodId', val);
                                         form.setValue('paymentMethod', toCustomerPaymentMethod(method?.type));
                                     }}
-                                    value={form.watch('paymentMethodId') || undefined}
+                                    value={form.watch('paymentMethodId') ?? ''}
                                     disabled={isSubmitting}
                                 >
                                     <SelectTrigger>
@@ -790,7 +790,7 @@ export default function NewReceiptPage() {
                                     <Label htmlFor="bankAccount">Deposit To Bank Account</Label>
                                     <Select
                                         onValueChange={(val) => form.setValue('bankAccountId', val)}
-                                        value={form.watch('bankAccountId') || undefined}
+                                        value={form.watch('bankAccountId') ?? ''}
                                         disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
@@ -814,7 +814,7 @@ export default function NewReceiptPage() {
                                     <Label htmlFor="liquidityAccount">Receive Into Holding Account</Label>
                                     <Select
                                         onValueChange={(val) => form.setValue('liquidityAccountId', val)}
-                                        value={form.watch('liquidityAccountId') || undefined}
+                                        value={form.watch('liquidityAccountId') ?? ''}
                                         disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
                                         <SelectTrigger>
