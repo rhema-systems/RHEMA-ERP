@@ -66,6 +66,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
+        SeedPrecisionSettings(db, tenantId);
         var payable = SeedAccount(db, tenantId, "2200", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var receivable = SeedAccount(db, tenantId, "1140", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         await db.SaveChangesAsync();
@@ -135,6 +136,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
+        SeedPrecisionSettings(db, tenantId);
         var otherGroup = SeedEmptyTaxGroup(db, otherTenantId, TaxApplicability.Sales);
         await db.SaveChangesAsync();
 
@@ -298,6 +300,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
+        SeedPrecisionSettings(db, tenantId);
         var payableAccount = SeedAccount(db, tenantId, "2201", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var receivableAccount = SeedAccount(db, tenantId, "1401", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         await db.SaveChangesAsync();
@@ -349,6 +352,67 @@ public sealed class GhanaStatutoryTaxEngineTests
         historical.TotalTaxAmount.Should().Be(10m);
         current.TotalTaxAmount.Should().Be(15m);
         rounded.TotalTaxAmount.Should().Be(0.03m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-GhanaTax")]
+    [Trait("Category", "Tax")]
+    public async Task TaxCalculation_ShouldReportLineDeltaAndGateAggregateScopeWithoutDocumentOrchestrator()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var payable = SeedAccount(db, tenantId, "2211", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
+        var receivable = SeedAccount(db, tenantId, "1411", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
+        var first = SeedTax(db, tenantId, "LEVY-A", "Levy A", 10m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        var second = SeedTax(db, tenantId, "LEVY-B", "Levy B", 10m, TaxCategory.Standard, receivable.Id, payable.Id, new DateTime(2026, 1, 1));
+        var group = SeedTaxGroup(db, tenantId, "SCOPE-GRP", TaxApplicability.Sales);
+        AddComponent(db, tenantId, group.Id, first.Id, 1);
+        AddComponent(db, tenantId, group.Id, second.Id, 2);
+        var settings = new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            TaxPercentageDecimalPlaces = 4,
+            TaxRoundingMethod = GovernedRoundingMethod.Nearest,
+            TaxRoundingScope = TaxRoundingScope.Line
+        };
+        db.FinanceSettings.Add(settings);
+        await db.SaveChangesAsync();
+
+        var engine = new TaxCalculationEngine(db, CreateCurrentUser(tenantId).Object, Mock.Of<ILogger<TaxCalculationEngine>>());
+        var request = new TaxCalculationRequestDto
+        {
+            BaseAmount = 0.23m,
+            TaxGroupId = group.Id,
+            TransactionDate = new DateTime(2026, 7, 6),
+            TransactionType = TaxTransactionType.SaleOfGoods
+        };
+
+        var lineResult = await engine.CalculateTaxesAsync(request);
+        var unsupportedCurrency = new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "JPY", NumericCode = "392",
+            CurrencyName = "Japanese Yen", DecimalPlaces = 0, RoundingPrecision = 1m,
+            IsBaseCurrency = false, IsActive = true
+        };
+        db.Currencies.Add(unsupportedCurrency);
+        await db.SaveChangesAsync();
+        var currencyGateAct = async () => await engine.CalculateTaxesAsync(request);
+        await currencyGateAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*active transaction currencies all use 2 decimals*");
+
+        unsupportedCurrency.IsActive = false;
+        settings.TaxRoundingScope = TaxRoundingScope.Document;
+        await db.SaveChangesAsync();
+        var aggregateAct = async () => await engine.CalculateTaxesAsync(request);
+
+        lineResult.TotalTaxAmount.Should().Be(0.04m);
+        lineResult.TaxRoundingScope.Should().Be(TaxRoundingScope.Line);
+        lineResult.TaxRoundingDelta.Should().Be(-0.006m);
+        await aggregateAct.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*document-wide AR/AP tax orchestrator*");
     }
 
     [Fact]
@@ -488,6 +552,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
+        SeedPrecisionSettings(db, tenantId);
         var otherPayable = SeedAccount(db, otherTenantId, "2290", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var otherReceivable = SeedAccount(db, otherTenantId, "1490", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var otherTax = SeedTax(db, otherTenantId, "OTH-WHT", "Other Withholding", 7m, TaxCategory.Withholding, otherReceivable.Id, otherPayable.Id, new DateTime(2026, 1, 1));
@@ -516,6 +581,7 @@ public sealed class GhanaStatutoryTaxEngineTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         SeedTenant(db, otherTenantId, "OTH");
+        SeedPrecisionSettings(db, tenantId);
         var otherPayable = SeedAccount(db, otherTenantId, "2291", AccountType.Liability, isControlAccount: true, allowDirectPosting: false);
         var otherReceivable = SeedAccount(db, otherTenantId, "1491", AccountType.Asset, isControlAccount: true, allowDirectPosting: false);
         var otherTax = SeedTax(db, otherTenantId, "OTH-VAT", "Other VAT", 20m, TaxCategory.Standard, otherReceivable.Id, otherPayable.Id, new DateTime(2026, 1, 1));
@@ -1306,6 +1372,26 @@ public sealed class GhanaStatutoryTaxEngineTests
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        db.Currencies.Add(new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "GHS", NumericCode = "936",
+            CurrencyName = "Ghana Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
+            RoundingPrecision = 0.01m, IsBaseCurrency = true, IsActive = true
+        });
+    }
+
+    private static void SeedPrecisionSettings(ApplicationDbContext db, Guid tenantId)
+    {
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrency = "GHS",
+            TaxPercentageDecimalPlaces = 4,
+            TaxRoundingMethod = GovernedRoundingMethod.Nearest,
+            TaxRoundingScope = TaxRoundingScope.Line,
+            TaxRoundingIncrement = 0.01m
         });
     }
 

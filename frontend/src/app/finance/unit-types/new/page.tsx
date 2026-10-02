@@ -11,6 +11,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Ruler, Save, X } from 'lucide-react';
 import Link from 'next/link';
+import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 
 export default function NewUnitTypePage() {
     const router = useRouter();
@@ -19,8 +20,10 @@ export default function NewUnitTypePage() {
         name: '',
         description: '',
         decimalPlaces: '2',
+        roundingIncrement: '',
     });
     const [errors, setErrors] = useState<Record<string, string>>({});
+    const [busy, setBusy] = useState(false);
 
     const validateForm = () => {
         const newErrors: Record<string, string> = {};
@@ -43,21 +46,40 @@ export default function NewUnitTypePage() {
             newErrors.description = 'Description must be 500 characters or less';
         }
 
+        if (formData.roundingIncrement) {
+            const increment = Number(formData.roundingIncrement);
+            const minimumIncrement = 10 ** -Number(formData.decimalPlaces);
+            if (!Number.isFinite(increment) || increment <= 0 || increment < minimumIncrement) {
+                newErrors.roundingIncrement = `Increment must be at least ${minimumIncrement}.`;
+            }
+        }
+
         setErrors(newErrors);
         return Object.keys(newErrors).length === 0;
     };
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
         if (!validateForm()) {
             return;
         }
 
-        // TODO: Replace with API call
-        console.log('Creating unit type:', formData);
-
-        router.push('/finance/unit-types');
+        setBusy(true);
+        try {
+            await unitAccountsDataService.createUnitType({
+                code: formData.code,
+                name: formData.name.trim(),
+                description: formData.description.trim() || undefined,
+                decimalPlaces: Number(formData.decimalPlaces),
+                roundingIncrement: formData.roundingIncrement ? Number(formData.roundingIncrement) : undefined,
+            });
+            router.push('/finance/unit-types');
+        } catch (reason) {
+            setErrors({ submit: reason instanceof Error ? reason.message : 'Unable to create unit type.' });
+        } finally {
+            setBusy(false);
+        }
     };
 
     const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -174,6 +196,23 @@ export default function NewUnitTypePage() {
                                     Precision for quantity values. Use 0 for counts like employees.
                                 </p>
                             </div>
+
+                            <div className="space-y-2">
+                                <Label htmlFor="roundingIncrement">Quantity Increment</Label>
+                                <Input
+                                    id="roundingIncrement"
+                                    type="number"
+                                    disabled
+                                    min={10 ** -Number(formData.decimalPlaces)}
+                                    step={10 ** -Number(formData.decimalPlaces)}
+                                    placeholder="Optional, e.g. 0.125"
+                                    value={formData.roundingIncrement}
+                                    onChange={(e) => setFormData({ ...formData, roundingIncrement: e.target.value })}
+                                    className={errors.roundingIncrement ? 'border-destructive' : ''}
+                                />
+                                {errors.roundingIncrement && <p className="text-sm text-destructive">{errors.roundingIncrement}</p>}
+                                <p className="text-xs text-muted-foreground">Reserved until every quantity write and posting adapter enforces the increment.</p>
+                            </div>
                         </div>
 
                         {/* Description */}
@@ -198,13 +237,14 @@ export default function NewUnitTypePage() {
 
                         {/* Actions */}
                         <div className="flex justify-end gap-4 pt-4 border-t">
+                            {errors.submit && <p className="mr-auto text-sm text-destructive">{errors.submit}</p>}
                             <Link href="/finance/unit-types">
                                 <Button type="button" variant="outline">
                                     <X className="mr-2 h-4 w-4" />
                                     Cancel
                                 </Button>
                             </Link>
-                            <Button type="submit">
+                            <Button type="submit" disabled={busy}>
                                 <Save className="mr-2 h-4 w-4" />
                                 Create Unit Type
                             </Button>

@@ -1095,12 +1095,14 @@ class FinanceDataService {
   async reverseJournalEntry(
     id: string,
     reason: string,
+    reversalDatePolicy: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen',
     reversalDate?: string
   ): Promise<JournalEntry> {
     const raw = await apiService.post<any>(
       `/finance/journal-entries/${id}/reverse`,
       {
         reason,
+        reversalDatePolicy,
         reversalDate: reversalDate || undefined,
       }
     );

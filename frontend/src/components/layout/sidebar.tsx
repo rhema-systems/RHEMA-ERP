@@ -3714,7 +3714,7 @@ export const navigationItems: NavItem[] = [
                 icon: FileText,
               },
               {
-                title: 'Fiscal Calendar Setup',
+                title: 'Fiscal Calendar',
                 href: '/administration/finance/fiscal-calendar',
                 icon: Calendar,
               },

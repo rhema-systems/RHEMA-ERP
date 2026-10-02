@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -54,6 +55,55 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             {
                 BaseAmount = request.BaseAmount
             };
+
+            var precisionSettings = await _context.FinanceSettings
+                .AsNoTracking()
+                .SingleOrDefaultAsync(s => s.TenantId == TenantId && !s.IsDeleted, cancellationToken);
+            if (precisionSettings == null || string.IsNullOrWhiteSpace(precisionSettings.BaseCurrency))
+                throw new InvalidOperationException(
+                    "Finance precision settings and a canonical base currency are required before tax calculation.");
+
+            var baseCurrencyCode = precisionSettings.BaseCurrency.Trim().ToUpperInvariant();
+            var currencyDecimalPlaces = await _context.Currencies
+                .AsNoTracking()
+                .Where(currency => currency.TenantId == TenantId
+                    && !currency.IsDeleted
+                    && currency.CurrencyCode == baseCurrencyCode)
+                .Select(currency => (int?)currency.DecimalPlaces)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Base currency '{baseCurrencyCode}' is missing from the tenant currency master.");
+            CurrencyMinorUnitPolicy.Validate(baseCurrencyCode, currencyDecimalPlaces);
+            var hasUnsupportedTransactionCurrency = await _context.Currencies
+                .AsNoTracking()
+                .AnyAsync(currency => currency.TenantId == TenantId
+                    && !currency.IsDeleted
+                    && currency.IsActive
+                    && currency.DecimalPlaces != 2,
+                    cancellationToken);
+            if (currencyDecimalPlaces != 2 || hasUnsupportedTransactionCurrency)
+            {
+                throw new InvalidOperationException(
+                    "Tax posting is currently gated to tenants whose active transaction currencies all use 2 decimals until currency-aware AR/AP tax evidence and posting storage are widened.");
+            }
+
+            var percentageDecimalPlaces = precisionSettings?.TaxPercentageDecimalPlaces ?? 4;
+            var roundingMethod = precisionSettings?.TaxRoundingMethod ?? GovernedRoundingMethod.Nearest;
+            var roundingScope = precisionSettings?.TaxRoundingScope ?? TaxRoundingScope.Line;
+            var roundingIncrement = precisionSettings?.TaxRoundingIncrement
+                ?? CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            var currencyMinorUnit = CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            if (roundingIncrement < currencyMinorUnit || roundingIncrement % currencyMinorUnit != 0m)
+                throw new InvalidOperationException(
+                    $"Configured tax rounding increment must be a whole multiple of the currency minor unit {currencyMinorUnit}.");
+            if (!Enum.IsDefined(roundingMethod) || !Enum.IsDefined(roundingScope))
+                throw new InvalidOperationException("Configured tax rounding method or scope is invalid.");
+            if (roundingScope != TaxRoundingScope.Line)
+                throw new InvalidOperationException(
+                    "Configured aggregate tax rounding requires the document-wide AR/AP tax orchestrator.");
+            result.TaxRoundingScope = roundingScope;
+            result.TaxRoundingMethod = roundingMethod;
+            result.TaxRoundingIncrement = roundingIncrement;
 
             // Determine which taxes to apply
             List<TaxGroupComponent>? components = null;
@@ -116,8 +166,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             // Calculate taxes in order
             var calculatedTaxes = new Dictionary<string, decimal>(); // TaxCode -> Amount
+            var rawTaxTotal = 0m;
             
-            foreach (var component in components.OrderBy(c => c.CalculationOrder))
+            foreach (var component in components
+                .OrderBy(c => c.CalculationOrder)
+                .ThenBy(c => c.Tax != null ? c.Tax.Code : string.Empty, StringComparer.Ordinal)
+                .ThenBy(c => c.Id))
             {
                 var tax = component.Tax;
                 if (tax == null)
@@ -162,11 +216,18 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     component.CompoundBasis,
                     component.AppliesOnTaxCodes);
 
-                // Calculate tax amount
-                decimal taxAmount = Math.Round(taxableAmount * (effectiveRate.Value / 100), 2, MidpointRounding.AwayFromZero);
+                // Preserve raw tax for aggregate scopes; only line scope rounds here.
+                var governedRate = PrecisionRoundingPolicy.RoundPercentage(
+                    effectiveRate.Value,
+                    percentageDecimalPlaces);
+                var rawTaxAmount = taxableAmount * governedRate / 100m;
+                rawTaxTotal += rawTaxAmount;
+                var taxAmount = roundingScope == TaxRoundingScope.Line
+                    ? PrecisionRoundingPolicy.RoundToIncrement(rawTaxAmount, roundingIncrement, roundingMethod)
+                    : rawTaxAmount;
 
                 // Store calculated tax
-                calculatedTaxes[tax.Code] = taxAmount;
+                calculatedTaxes[tax.Code] = calculatedTaxes.GetValueOrDefault(tax.Code) + taxAmount;
 
                 // Add to breakdown
                 result.TaxBreakdowns.Add(new TaxBreakdownDto
@@ -180,7 +241,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     TaxReceivableAccountId = tax.TaxReceivableAccountId,
                     EffectiveFrom = tax.EffectiveFrom,
                     TaxableAmount = taxableAmount,
-                    TaxRate = effectiveRate.Value,
+                    TaxRate = governedRate,
                     TaxAmount = taxAmount,
                     CompoundBasis = component.CompoundBasis,
                     CalculationOrder = component.CalculationOrder,
@@ -193,11 +254,38 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                     tax.Code, taxAmount, taxableAmount, effectiveRate.Value);
             }
 
+            // Aggregate scopes round once at their configured accounting boundary and
+            // assign the deterministic residual to the last contributing breakdown.
+            if (roundingScope == TaxRoundingScope.TaxCodeGroup)
+            {
+                foreach (var group in result.TaxBreakdowns.GroupBy(tax => tax.TaxCode))
+                {
+                    var rawGroupAmount = group.Sum(tax => tax.TaxAmount);
+                    var roundedGroupAmount = PrecisionRoundingPolicy.RoundToIncrement(
+                        rawGroupAmount,
+                        roundingIncrement,
+                        roundingMethod);
+                    group.Last().TaxAmount += roundedGroupAmount - rawGroupAmount;
+                }
+            }
+            else if (roundingScope == TaxRoundingScope.Document && result.TaxBreakdowns.Count > 0)
+            {
+                var rawDocumentTax = result.TaxBreakdowns.Sum(tax => tax.TaxAmount);
+                var roundedDocumentTax = PrecisionRoundingPolicy.RoundToIncrement(
+                    rawDocumentTax,
+                    roundingIncrement,
+                    roundingMethod);
+                result.TaxBreakdowns[^1].TaxAmount += roundedDocumentTax - rawDocumentTax;
+            }
+
             // Calculate totals
             result.TotalTaxAmount = result.TaxBreakdowns.Sum(t => t.TaxAmount);
+            result.TaxRoundingDelta = result.TotalTaxAmount - rawTaxTotal;
             result.GrandTotal = request.BaseAmount + result.TotalTaxAmount;
             result.EffectiveTaxRate = request.BaseAmount > 0 
-                ? Math.Round((result.TotalTaxAmount / request.BaseAmount) * 100, 2) 
+                ? PrecisionRoundingPolicy.RoundPercentage(
+                    (result.TotalTaxAmount / request.BaseAmount) * 100m,
+                    precisionSettings?.ReportDisplayDecimalPlaces ?? 2)
                 : 0;
 
             _logger.LogInformation("Tax calculation complete: Base {Base}, Tax {Tax}, Total {Total}, Effective Rate {Rate}%",
@@ -522,11 +610,12 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 throw new InvalidOperationException("One or more selected taxes were not found for this tenant.");
             }
 
-            return taxes.Select((tax, index) => new TaxGroupComponent
+            var taxesById = taxes.ToDictionary(tax => tax.Id);
+            return requestedIds.Select((taxId, index) => new TaxGroupComponent
             {
                 Id = Guid.NewGuid(),
-                TaxId = tax.Id,
-                Tax = tax,
+                TaxId = taxId,
+                Tax = taxesById[taxId],
                 CalculationOrder = index + 1,
                 CompoundBasis = CompoundBasis.BaseOnly // Default for manual selection
             }).ToList();

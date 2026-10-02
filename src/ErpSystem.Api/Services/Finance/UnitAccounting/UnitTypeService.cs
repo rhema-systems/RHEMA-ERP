@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -74,6 +75,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> CreateAsync(CreateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
+            if (dto.RoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
+            PrecisionRoundingPolicy.ValidateQuantity(0m, dto.DecimalPlaces, dto.RoundingIncrement);
             // Check for duplicate code
             var exists = await _unitOfWork.Repository<UnitType>()
                 .GetQueryable(ut => ut.TenantId == TenantId && ut.Code == dto.Code && !ut.IsDeleted)
@@ -91,6 +96,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 Name = dto.Name,
                 Description = dto.Description,
                 DecimalPlaces = dto.DecimalPlaces,
+                RoundingIncrement = dto.RoundingIncrement,
                 IsActive = true,
                 CreatedAt = now,
                 CreatedBy = UserName
@@ -106,6 +112,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> UpdateAsync(Guid id, UpdateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
+            if (dto.RoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
             var unitType = await _unitOfWork.Repository<UnitType>()
                 .FirstOrDefaultAsync(ut => ut.Id == id && ut.TenantId == TenantId && !ut.IsDeleted);
 
@@ -118,6 +127,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 unitType.Description = dto.Description;
             if (dto.DecimalPlaces.HasValue)
                 unitType.DecimalPlaces = dto.DecimalPlaces.Value;
+            if (dto.RoundingIncrement.HasValue)
+                unitType.RoundingIncrement = dto.RoundingIncrement.Value;
+
+            PrecisionRoundingPolicy.ValidateQuantity(0m, unitType.DecimalPlaces, unitType.RoundingIncrement);
 
             unitType.UpdatedAt = DateTime.UtcNow;
             unitType.UpdatedBy = UserName;
@@ -214,6 +227,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 Name = unitType.Name,
                 Description = unitType.Description,
                 DecimalPlaces = unitType.DecimalPlaces,
+                RoundingIncrement = unitType.RoundingIncrement,
                 IsActive = unitType.IsActive,
                 AccountCount = accountCount,
                 CreatedAt = unitType.CreatedAt,

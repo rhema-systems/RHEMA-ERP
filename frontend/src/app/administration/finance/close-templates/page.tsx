@@ -21,10 +21,15 @@ import type {
 } from '@/types/finance';
 
 const CLOSE_TYPES: Array<{ value: FinanceCloseType; label: string }> = [
-    { value: 'MonthEnd', label: 'Month-end' },
+    { value: 'MonthEnd', label: 'Period-end' },
     { value: 'QuarterEnd', label: 'Quarter-end' },
     { value: 'YearEnd', label: 'Year-end' },
 ];
+
+const displayTemplateName = (template: Pick<FinanceCloseTemplate, 'closeType' | 'name'>) =>
+    template.closeType === 'MonthEnd'
+        ? template.name.replace(/month-end/gi, 'period-end')
+        : template.name;
 
 const NON_WAIVABLE_CHECKS = new Set([
     'POSTING_INTEGRITY',
@@ -183,7 +188,7 @@ export default function FinanceCloseTemplatesPage() {
                     <h1 className="flex items-center gap-2 text-3xl font-bold tracking-tight">
                         <ClipboardList className="h-8 w-8" /> Finance Close Templates
                     </h1>
-                    <p className="text-muted-foreground">Versioned month-, quarter-, and year-end controls for new close cycles.</p>
+                    <p className="text-muted-foreground">Versioned period-, quarter-, and year-end controls for new close cycles.</p>
                 </div>
                 <Button variant="outline" onClick={() => void loadTemplates()} disabled={loading}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -200,7 +205,7 @@ export default function FinanceCloseTemplatesPage() {
                                     <CardTitle className="text-lg">{type.label}</CardTitle>
                                     <Badge variant={active ? 'default' : 'destructive'}>{active ? 'Active' : 'Missing'}</Badge>
                                 </div>
-                                <CardDescription>{active ? `${active.name} · ${active.templateCode} v${active.version}` : 'No approved template'}</CardDescription>
+                                <CardDescription>{active ? displayTemplateName(active) + ' · ' + active.templateCode + ' v' + active.version : 'No approved template'}</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 {active && canAdminister ? (
@@ -222,7 +227,7 @@ export default function FinanceCloseTemplatesPage() {
                 <CardContent className="space-y-2">
                     {loading ? <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin" /></div> : templates.map(template => (
                         <div key={template.id} className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm">
-                            <span className="font-medium">{template.name}</span>
+                            <span className="font-medium">{displayTemplateName(template)}</span>
                             <Badge variant="outline">{template.closeType}</Badge>
                             <Badge variant="outline">v{template.version}</Badge>
                             <Badge variant={template.isActive ? 'default' : 'secondary'}>{template.status}</Badge>
@@ -243,7 +248,7 @@ export default function FinanceCloseTemplatesPage() {
             <Dialog open={Boolean(viewingTemplate)} onOpenChange={open => { if (!open) setViewingTemplate(null); }}>
                 <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
                     <DialogHeader>
-                        <DialogTitle>{viewingTemplate?.name} v{viewingTemplate?.version}</DialogTitle>
+                        <DialogTitle>{viewingTemplate ? displayTemplateName(viewingTemplate) : ''} v{viewingTemplate?.version}</DialogTitle>
                         <DialogDescription>
                             Read-only control steps retained for this {viewingTemplate?.status.toLowerCase()} template version.
                         </DialogDescription>

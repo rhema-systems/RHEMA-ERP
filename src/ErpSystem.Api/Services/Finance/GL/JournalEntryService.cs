@@ -671,9 +671,22 @@ namespace ErpSystem.Api.Services.Finance.GL
             return MapToDto(postedEntry);
         }
 
+        public Task<JournalEntryDto> ReverseJournalEntryAsync(
+            Guid id,
+            string reason,
+            DateTime? reversalDate = null,
+            CancellationToken cancellationToken = default) =>
+            ReverseJournalEntryAsync(
+                id,
+                reason,
+                FinanceReversalDatePolicy.CurrentOpenPeriod,
+                reversalDate,
+                cancellationToken);
+
         public async Task<JournalEntryDto> ReverseJournalEntryAsync(
             Guid id,
             string reason,
+            FinanceReversalDatePolicy reversalDatePolicy,
             DateTime? reversalDate = null,
             CancellationToken cancellationToken = default)
         {
@@ -694,9 +707,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                 throw new InvalidOperationException("Journal Entry has already been reversed.");
             if (original.OriginalJournalEntryId.HasValue)
                 throw new InvalidOperationException("Reversal journal entries cannot be reversed from this action. Reverse the original business transaction instead.");
+            if (!Enum.IsDefined(reversalDatePolicy))
+                throw new InvalidOperationException("Select a valid reversal date policy.");
 
             var originalBefore = BuildJournalAuditSnapshot(original);
-            var effectiveReversalDate = (reversalDate ?? DateTime.UtcNow).Date;
+            var effectiveReversalDate = await ResolveManualJournalReversalDateAsync(
+                original,
+                reversalDatePolicy,
+                reversalDate,
+                cancellationToken);
             var reversalFiscalPeriodId = await GetOpenFiscalPeriodIdAsync(effectiveReversalDate, original.TenantId);
             var trimmedReason = reason.Trim();
 
@@ -725,6 +744,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     reversalJournalEntryId = reversal.Id,
                     reversalJournalNumber = reversal.JournalEntryNumber,
                     reason = trimmedReason,
+                    reversalDatePolicy,
+                    effectiveReversalDate,
                     postingResult.PostingEventId
                 },
                 postingEventId: postingResult.PostingEventId,
@@ -739,6 +760,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     originalJournalEntryId = original.Id,
                     originalJournalNumber = original.JournalEntryNumber,
                     reason = trimmedReason,
+                    reversalDatePolicy,
+                    effectiveReversalDate,
                     postingResult.PostingEventId
                 },
                 postingEventId: postingResult.PostingEventId,
@@ -750,6 +773,65 @@ namespace ErpSystem.Api.Services.Finance.GL
                 "FinanceJournalReversed");
 
             return MapToDto(reversal);
+        }
+
+        private async Task<DateTime> ResolveManualJournalReversalDateAsync(
+            JournalEntry original,
+            FinanceReversalDatePolicy policy,
+            DateTime? requestedDate,
+            CancellationToken cancellationToken)
+        {
+            var openPeriods = await _context.FiscalPeriods
+                .AsNoTracking()
+                .Where(period =>
+                    period.TenantId == original.TenantId &&
+                    !period.IsDeleted &&
+                    period.IsOpen &&
+                    !period.IsClosed &&
+                    !period.IsLocked)
+                .OrderByDescending(period => period.StartDate)
+                .ToListAsync(cancellationToken);
+            if (openPeriods.Count == 0)
+                throw new InvalidOperationException("No open fiscal period is available for the journal reversal.");
+
+            var originalDate = original.EntryDate.Date;
+            if (policy == FinanceReversalDatePolicy.OriginalDocumentPeriodIfOpen)
+            {
+                if (openPeriods.Any(period =>
+                    period.StartDate.Date <= originalDate &&
+                    period.EndDate.Date >= originalDate))
+                {
+                    return originalDate;
+                }
+
+                return SelectSafeDateInOpenPeriod(openPeriods[0]);
+            }
+
+            var currentOpenPeriod = openPeriods[0];
+            if (requestedDate.HasValue)
+            {
+                var selectedDate = requestedDate.Value.Date;
+                if (selectedDate < currentOpenPeriod.StartDate.Date ||
+                    selectedDate > currentOpenPeriod.EndDate.Date)
+                {
+                    throw new InvalidOperationException(
+                        $"The reversal date must fall in the current open period '{currentOpenPeriod.PeriodName}'.");
+                }
+
+                return selectedDate;
+            }
+
+            return SelectSafeDateInOpenPeriod(currentOpenPeriod);
+        }
+
+        private static DateTime SelectSafeDateInOpenPeriod(FiscalPeriod period)
+        {
+            var today = DateTime.UtcNow.Date;
+            return today >= period.StartDate.Date && today <= period.EndDate.Date
+                ? today
+                : today > period.EndDate.Date
+                    ? period.EndDate.Date
+                    : period.StartDate.Date;
         }
 
         public async Task<bool> ValidateBalanceAsync(Guid id, CancellationToken cancellationToken = default)

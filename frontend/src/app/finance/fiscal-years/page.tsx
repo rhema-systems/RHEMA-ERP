@@ -37,6 +37,7 @@ export default function FiscalYearsPage() {
         endDate: '',
         periodType: 'Monthly' as keyof typeof PeriodType,
     });
+    const [establishedPeriodType, setEstablishedPeriodType] = useState<keyof typeof PeriodType | null>(null);
     const [equityAccounts, setEquityAccounts] = useState<Account[]>([]);
     const [books, setBooks] = useState<AccountingBook[]>([]);
     const [accountingBookId, setAccountingBookId] = useState('');
@@ -181,7 +182,7 @@ export default function FiscalYearsPage() {
             });
 
             setIsCreateDialogOpen(false);
-            resetForm();
+            void resetForm();
             loadData();
         } catch (error: any) {
             console.error('Failed to create fiscal year:', error?.message || error);
@@ -282,8 +283,37 @@ export default function FiscalYearsPage() {
         }
     };
 
-    const resetForm = () => {
+    const resetForm = async () => {
+        const latestYear = [...fiscalYears].sort((a, b) =>
+            new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0];
+        if (latestYear) {
+            const nextStart = new Date(latestYear.endDate);
+            nextStart.setUTCDate(nextStart.getUTCDate() + 1);
+            const nextEnd = new Date(nextStart);
+            nextEnd.setUTCFullYear(nextEnd.getUTCFullYear() + 1);
+            nextEnd.setUTCDate(nextEnd.getUTCDate() - 1);
+            const periods = periodsByYear[latestYear.id] ?? await financeDataService.getFiscalPeriods(latestYear.id);
+            if (!periodsByYear[latestYear.id]) {
+                setPeriodsByYear(previous => ({ ...previous, [latestYear.id]: periods }));
+            }
+            const rawPeriodType = periods[0]?.periodType as PeriodType | keyof typeof PeriodType | undefined;
+            const periodType = typeof rawPeriodType === 'string'
+                ? rawPeriodType
+                : rawPeriodType
+                    ? PeriodType[rawPeriodType] as keyof typeof PeriodType
+                    : 'Monthly';
+            setEstablishedPeriodType(periodType);
+            setFormData({
+                year: latestYear.year + 1,
+                startDate: nextStart.toISOString().slice(0, 10),
+                endDate: nextEnd.toISOString().slice(0, 10),
+                periodType,
+            });
+            return;
+        }
+
         const currentYear = new Date().getFullYear();
+        setEstablishedPeriodType(null);
         setFormData({
             year: currentYear,
             startDate: `${currentYear}-01-01`,
@@ -330,7 +360,7 @@ export default function FiscalYearsPage() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <Calendar className="h-8 w-8" />
-                        {administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}
+                        {administrationMode ? 'Fiscal Calendar' : 'Fiscal Years'}
                     </h1>
                     <p className="text-muted-foreground">
                         {administrationMode
@@ -345,7 +375,7 @@ export default function FiscalYearsPage() {
                     {administrationMode && canAdminister && (
                     <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                         <DialogTrigger asChild>
-                            <Button onClick={resetForm}>
+                            <Button onClick={() => void resetForm()}>
                                 <Plus className="mr-2 h-4 w-4" />
                                 Create Fiscal Year
                             </Button>
@@ -364,6 +394,7 @@ export default function FiscalYearsPage() {
                                         id="year"
                                         type="number"
                                         value={formData.year}
+                                        disabled={fiscalYears.length > 0}
                                         onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) || new Date().getFullYear() })}
                                     />
                                 </div>
@@ -374,6 +405,7 @@ export default function FiscalYearsPage() {
                                             id="startDate"
                                             type="date"
                                             value={formData.startDate}
+                                            disabled={fiscalYears.length > 0}
                                             onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                                         />
                                     </div>
@@ -383,6 +415,7 @@ export default function FiscalYearsPage() {
                                             id="endDate"
                                             type="date"
                                             value={formData.endDate}
+                                            disabled={fiscalYears.length > 0}
                                             onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                                         />
                                     </div>
@@ -392,6 +425,7 @@ export default function FiscalYearsPage() {
                                     <Select
                                         value={formData.periodType}
                                         onValueChange={(value: any) => setFormData({ ...formData, periodType: value })}
+                                        disabled={establishedPeriodType !== null}
                                     >
                                         <SelectTrigger id="periodType">
                                             <SelectValue />
@@ -403,6 +437,11 @@ export default function FiscalYearsPage() {
                                             <SelectItem value="Daily">Daily (365-366 periods)</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                    {establishedPeriodType && (
+                                        <p className="text-xs text-muted-foreground">
+                                            Locked to {establishedPeriodType} because the tenant&apos;s fiscal calendar already uses this period structure.
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded">
                                     <p className="font-semibold mb-1">Auto-generation:</p>
@@ -437,7 +476,7 @@ export default function FiscalYearsPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbPage>{administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}</BreadcrumbPage>
+                        <BreadcrumbPage>{administrationMode ? 'Fiscal Calendar' : 'Fiscal Years'}</BreadcrumbPage>
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>

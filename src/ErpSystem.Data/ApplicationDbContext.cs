@@ -3170,6 +3170,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FiscalYear>(entity =>
         {
             entity.ToTable("FiscalYears");
+            entity.HasIndex(e => new { e.TenantId, e.Year })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
             entity.HasOne(e => e.NextFiscalYear)
                 .WithOne(e => e.PreviousFiscalYear)
                 .HasForeignKey<FiscalYear>(e => e.NextFiscalYearId)
@@ -6939,6 +6942,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // Configure Compliance/Settings entities
         ConfigureComplianceAndSettingsEntities(builder);
+
+        // Apply precision-governance storage types last. Several legacy configuration
+        // passes intentionally normalize decimals by name, so these policy/evidence
+        // fields need a final narrow override to keep migration and runtime metadata
+        // aligned with the governed domain scales.
+        builder.Entity<FinanceSettings>(entity =>
+        {
+            entity.Property(s => s.TaxRoundingIncrement).HasColumnType("decimal(18,6)");
+            entity.Property(s => s.InvoiceRoundingIncrement).HasColumnType("decimal(18,6)");
+            entity.Property(s => s.SettlementToleranceAmount).HasColumnType("decimal(20,4)");
+            entity.Property(s => s.SettlementTolerancePercentage).HasColumnType("decimal(9,6)");
+        });
+        builder.Entity<UnitType>()
+            .Property(unitType => unitType.RoundingIncrement)
+            .HasColumnType("decimal(18,6)");
 
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
@@ -11272,6 +11290,35 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                         continue;
                     }
 
+                    // Precision-governance settings and UOM increments are policy evidence,
+                    // not ordinary two-decimal monetary amounts. Preserve their explicit scales
+                    // after all entity configuration and before the broad name convention.
+                    if (entityType.ClrType == typeof(FinanceSettings))
+                    {
+                        if (property.Name is nameof(ErpSystem.Core.Entities.Finance.FinanceSettings.TaxRoundingIncrement)
+                            or nameof(ErpSystem.Core.Entities.Finance.FinanceSettings.InvoiceRoundingIncrement))
+                        {
+                            property.SetColumnType("decimal(18,6)");
+                            continue;
+                        }
+                        if (property.Name == nameof(ErpSystem.Core.Entities.Finance.FinanceSettings.SettlementToleranceAmount))
+                        {
+                            property.SetColumnType("decimal(20,4)");
+                            continue;
+                        }
+                        if (property.Name == nameof(ErpSystem.Core.Entities.Finance.FinanceSettings.SettlementTolerancePercentage))
+                        {
+                            property.SetColumnType("decimal(9,6)");
+                            continue;
+                        }
+                    }
+                    if (entityType.ClrType == typeof(UnitType)
+                        && property.Name == nameof(UnitType.RoundingIncrement))
+                    {
+                        property.SetColumnType("decimal(18,6)");
+                        continue;
+                    }
+
                     if ((entityType.ClrType == typeof(InventoryItem) && property.Name == nameof(InventoryItem.Weight)) ||
                         (entityType.ClrType == typeof(GoodsReceiptNoteItem) && property.Name == nameof(GoodsReceiptNoteItem.UnitWeightKg)) ||
                         (entityType.ClrType == typeof(PurchaseOrderReceiptItem) && property.Name == nameof(PurchaseOrderReceiptItem.UnitWeightKg)) ||
@@ -13398,6 +13445,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_WhtStatutoryYearStart",
                     "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
+                table.HasCheckConstraint(
+                    "CK_FinanceSettings_PrecisionGovernance",
+                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
+                table.HasCheckConstraint(
+                    "CK_FinanceSettings_RoundingIncrements",
+                    "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
+                table.HasCheckConstraint(
+                    "CK_FinanceSettings_SettlementTolerance",
+                    "[SettlementToleranceAmount] >= 0 AND [SettlementTolerancePercentage] BETWEEN 0 AND 100");
+                table.HasCheckConstraint(
+                    "CK_FinanceSettings_InvoiceRoundingReadiness",
+                    "[InvoiceRoundingEnabled] = 0");
                 if (isSqlServer)
                     table.HasCheckConstraint(
                         "CK_FinanceSettings_BaseCurrencyCanonical_C3",
@@ -13413,6 +13472,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(s => s.RequireDepreciationBeforePeriodClose).HasDefaultValue(true);
             entity.Property(s => s.WhtStatutoryYearStartMonth).HasDefaultValue(1);
             entity.Property(s => s.WhtStatutoryYearStartDay).HasDefaultValue(1);
+            entity.Property(s => s.UnitPriceDecimalPlaces).HasDefaultValue(4);
+            entity.Property(s => s.ExchangeRateInputDecimalPlaces).HasDefaultValue(10);
+            entity.Property(s => s.ExchangeRateDisplayDecimalPlaces).HasDefaultValue(6);
+            entity.Property(s => s.TaxPercentageDecimalPlaces).HasDefaultValue(4);
+            entity.Property(s => s.TaxRoundingIncrement).HasPrecision(18, 6);
+            entity.Property(s => s.InvoiceRoundingIncrement).HasPrecision(18, 6);
+            entity.Property(s => s.SettlementToleranceAmount).HasPrecision(20, 4);
+            entity.Property(s => s.SettlementTolerancePercentage).HasPrecision(9, 6);
+            entity.Property(s => s.ReportDisplayDecimalPlaces).HasDefaultValue(2);
             entity.HasOne(s => s.UnrealizedFxGainAccount)
                 .WithMany()
                 .HasForeignKey(s => s.UnrealizedFxGainAccountId)
@@ -13434,6 +13502,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(s => s.ReturnedChequeBankChargeAccount)
                 .WithMany()
                 .HasForeignKey(s => s.ReturnedChequeBankChargeAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(s => s.InvoiceRoundingGainAccount)
+                .WithMany()
+                .HasForeignKey(s => s.InvoiceRoundingGainAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(s => s.InvoiceRoundingLossAccount)
+                .WithMany()
+                .HasForeignKey(s => s.InvoiceRoundingLossAccountId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

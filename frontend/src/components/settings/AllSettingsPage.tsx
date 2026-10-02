@@ -88,7 +88,6 @@ const financeSettingsGroups = [
     title: 'Fiscal & Close',
     hrefs: [
       '/administration/finance/fiscal-calendar',
-      '/finance/fiscal-years',
       '/finance/fiscal-periods',
       '/administration/finance/close-templates',
     ],

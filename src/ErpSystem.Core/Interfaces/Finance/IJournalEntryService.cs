@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Interfaces.Finance
 {
@@ -86,7 +87,19 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// Reverses a posted journal entry.
         /// Creates a reversing entry with opposite debits/credits.
         /// </summary>
-        Task<JournalEntryDto> ReverseJournalEntryAsync(Guid id, string reason, DateTime? reversalDate = null, CancellationToken cancellationToken = default);
+        Task<JournalEntryDto> ReverseJournalEntryAsync(
+            Guid id,
+            string reason,
+            DateTime? reversalDate = null,
+            CancellationToken cancellationToken = default);
+
+        Task<JournalEntryDto> ReverseJournalEntryAsync(
+            Guid id,
+            string reason,
+            FinanceReversalDatePolicy reversalDatePolicy,
+            DateTime? reversalDate = null,
+            CancellationToken cancellationToken = default) =>
+            ReverseJournalEntryAsync(id, reason, reversalDate, cancellationToken);
 
         /// <summary>
         /// Validates if a journal entry is balanced (debits = credits).
