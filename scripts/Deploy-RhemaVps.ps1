@@ -984,7 +984,7 @@ function Invoke-PublicSmoke {
 
     $base = $PublicBaseUrl.TrimEnd('/')
     foreach ($route in @(
-            '/api/tenant', '/api/auth/security-settings',
+            '/api/tenant', '/api/auth/security-settings', '/api/health/ready',
             '/login', '/supplier-application')) {
         $code = & curl.exe -k -sS --max-time 30 -o NUL -w '%{http_code}' `
             "$base$route"

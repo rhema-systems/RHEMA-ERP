@@ -916,7 +916,7 @@ Restore the database backup only when migration/data rollback is required and ex
 
 5. Preserve the existing Caddy gateway.
 
-   `RhemaERPCaddy` owns the public certificate and routes `/api/*` to `127.0.0.1:5000`; remaining paths go to `127.0.0.1:3001`. Check API health directly on loopback because the current Caddyfile does not expose `/health*` publicly.
+   `RhemaERPCaddy` owns the public certificate and routes `/api/*` to `127.0.0.1:5000`; remaining paths go to `127.0.0.1:3001`. Operators check `/health*` directly on loopback. Browser screens use the sanitized `/api/health*` aliases so they stay within the public API route without exposing the private loopback paths.
 
 6. Deploy API and frontend together when DTOs or browser-facing contracts change.
 

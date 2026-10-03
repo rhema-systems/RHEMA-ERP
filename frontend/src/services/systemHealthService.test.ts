@@ -29,7 +29,7 @@ describe('systemHealthService', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(systemHealthService.getReadiness()).resolves.toEqual(snapshot);
-    expect(fetchMock).toHaveBeenCalledWith('/health/ready', {
+    expect(fetchMock).toHaveBeenCalledWith('/api/health/ready', {
       cache: 'no-store',
       headers: { Accept: 'application/json' },
     });

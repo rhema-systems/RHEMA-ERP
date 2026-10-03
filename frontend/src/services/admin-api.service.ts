@@ -856,10 +856,10 @@ class AdminApiService {
     return apiService.request<SmsBalance>('/settings/sms/balance');
   }
 
-  async sendTestSms(phoneNumber: string): Promise<TestSmsResult> {
+  async sendTestSms(phoneNumber: string, isOtp = false): Promise<TestSmsResult> {
     return apiService.request<TestSmsResult>('/settings/sms/test', {
       method: 'POST',
-      body: JSON.stringify({ phoneNumber }),
+      body: JSON.stringify({ phoneNumber, isOtp }),
     });
   }
 

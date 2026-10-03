@@ -580,6 +580,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Register both email service implementations
             services.AddScoped<SimpleEmailService>();
             services.AddScoped<ProductionEmailService>();
+            services.AddScoped<ITenantEmailSender, TenantEmailSender>();
 
             services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
 

@@ -59,6 +59,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     private readonly ICaptchaVerificationService _captchaService;
     private readonly IOtpService _otpService;
     private readonly ITenantSmsSender _tenantSmsSender;
+    private readonly ITenantEmailSender _tenantEmailSender;
     private readonly ILogger<EstateExternalDocumentsController> _logger;
 
     public EstateExternalDocumentsController(
@@ -73,6 +74,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         ICaptchaVerificationService captchaService,
         IOtpService otpService,
         ITenantSmsSender tenantSmsSender,
+        ITenantEmailSender tenantEmailSender,
         ILogger<EstateExternalDocumentsController> logger)
     {
         _db = db;
@@ -86,6 +88,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _captchaService = captchaService;
         _otpService = otpService;
         _tenantSmsSender = tenantSmsSender;
+        _tenantEmailSender = tenantEmailSender;
         _logger = logger;
     }
 
@@ -2561,12 +2564,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             {
                 if (otpChannel == OtpChannel.Email)
                 {
-                    await _notificationService.SendEmailAsync(
+                    await _tenantEmailSender.SendAsync(
+                        tenantId,
                         normalizedContact,
                         "Property enquiry verification code",
                         $"<p>Your property enquiry verification code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
                         isHtml: true,
-                        persistBody: false);
+                        cancellationToken: cancellationToken);
                 }
                 else
                 {

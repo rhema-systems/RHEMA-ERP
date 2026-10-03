@@ -655,19 +655,40 @@ public class SettingsController : ControllerBase
 
         try
         {
-            await _tenantSmsSender.SendAsync(
-                tenantId.Value,
-                request.PhoneNumber.Trim(),
-                "Rhema ERP test SMS. Your tenant SMS configuration is working.",
-                HttpContext.RequestAborted);
+            if (request.IsOtp)
+            {
+                await _tenantSmsSender.SendOtpAsync(
+                    tenantId.Value,
+                    request.PhoneNumber.Trim(),
+                    "Rhema ERP test verification code: 123456. Your tenant OTP SMS configuration is working.",
+                    HttpContext.RequestAborted);
+            }
+            else
+            {
+                await _tenantSmsSender.SendAsync(
+                    tenantId.Value,
+                    request.PhoneNumber.Trim(),
+                    "Rhema ERP test SMS. Your tenant SMS configuration is working.",
+                    HttpContext.RequestAborted);
+            }
             await TryAuditAsync(
                 "TEST",
                 "SmsSettings",
                 tenantId.Value.ToString(),
                 oldValues: null,
-                newValues: new { Recipient = MaskSmsRecipient(request.PhoneNumber), MessageType = "Standard" });
+                newValues: new
+                {
+                    Recipient = MaskSmsRecipient(request.PhoneNumber),
+                    MessageType = request.IsOtp ? "Otp" : "Standard"
+                });
 
-            return Ok(new TestSmsResultDto { Success = true, Message = "Test SMS sent successfully." });
+            return Ok(new TestSmsResultDto
+            {
+                Success = true,
+                Message = request.IsOtp
+                    ? "Test verification SMS sent successfully."
+                    : "Test SMS sent successfully."
+            });
         }
         catch (Exception ex)
         {
@@ -990,6 +1011,7 @@ public class SmsSettingsDto
 public sealed class SendTestSmsRequestDto
 {
     public string PhoneNumber { get; set; } = string.Empty;
+    public bool IsOtp { get; set; }
 }
 
 public sealed class TestSmsResultDto
