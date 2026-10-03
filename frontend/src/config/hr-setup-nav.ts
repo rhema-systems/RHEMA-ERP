@@ -839,7 +839,7 @@ export const hrSetupGroups: HrSetupGroup[] = [
         title: 'Travel Reminders',
         href: '/administration/hr/travel/reminders',
         icon: Plane,
-        description: 'Passports and visas expiring, overdue advances and trips departing soon.',
+        description: 'Expiring passports and visas, overdue advances, departures, waiting approvals and claim windows.',
       },
       {
         // The retirement and contract-expiry sweeps RAISE separations. They run nightly on their

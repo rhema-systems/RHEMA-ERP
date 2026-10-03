@@ -2368,28 +2368,51 @@ closure lane 4 (D-3, T-52)** · **3 minutes**
 ### 📖 What it is
 
 > *"The thing that watches the dates nobody else is watching: a passport expiring, a visa about to
-> lapse, an advance past its settlement deadline, a departure coming up."*
+> lapse, an advance past its settlement deadline, a departure coming up — and, since closure lane 8, a
+> visa still missing, a request nobody has decided, a risk briefing not acknowledged, a claim window
+> about to close. Each goes to the people who act on it."*
+
+*Closure lane 8 (slice 8b — D-49, D-50, F2).* Before it, every reminder went to the HR role in the app only, and a
+document got one notice at 90 days and the next once it had lapsed. Now:
+
+| Kind | When | To |
+|---|---|---|
+| Travel document expiring | 90, 30 and 7 days before; then after a week and a month lapsed | its owner (in the app and by email; by email alone without a login; the desk told to tell them with neither) |
+| Visa expiring | the same rungs, on a trip still to happen or under way | the traveller |
+| Advance settlement overdue | the deadline passed; after a week; after a month | the traveller and the desk |
+| Trip departing | once, 14 days or less before an approved trip | the traveller |
+| Visa missing | once, 14 days or less before an approved trip needing a visa with none approved (or *not required*) | the traveller and the desk |
+| Approval waiting | 5 days after submission; after a week; after a month | whoever its current stage asks — named approvers and the stage's role holders, never the traveller — by email too; the desk when nobody can be asked |
+| Approval escalated | once, 3 days or less before departure (or after it), still waiting | the desk (O-11) |
+| Briefing unacknowledged | once per assessment, 7 days or less before departure | the traveller |
+| Claim window closing | once, 7 days before a completed trip's claim window closes, no claim submitted | the traveller |
+| Claim window passed | once, closed with a claim not submitted or advance cash still out | the desk |
+
+The windows are constants, each a question for TDC (closure plan § 6). Each reminder is sent once; a sweep that stopped
+between recording and sending one leaves it for the next. The words and recipients of each are on **Administration →
+Notification Topics**, under `StaffTravel.`.
 
 ### **This whole screen is Admin-gated, reads included.** Before closure lane 4, `hr.head` got a 403
 on the page itself. Since D-3 the HR desk opens it, because the desk that renews an expiring
-passport is the one that needs the queue (T-52). ⚠ **Run the sweep now** posts real in-app
-reminders, each of which is sent only once, so treat it as a live write.
+passport is the one that needs the queue (T-52). ⚠ **Run the sweep now** sends real reminders — to
+travellers and approvers by email too, since lane 8 — each only once, so treat it as a live write.
 
 ### 👁 On the page
 
 **Header:** *Travel reminders* — *"Expiring passports and visas, overdue advances, and departures
 coming up."*, with a **Run the sweep now** button.
 
-**Card 1 — What the sweep chases** — the four kinds and their thresholds.
+**Card 1 — What the sweep chases** — the ten kinds, their windows and who each reaches *(the table above)*.
 
-**Card 2 — Due now** — a preview, with an **as-of date** override and a **clear** button. Five
-columns: **Kind** · **Record** · **Due** · **Days** · **Tier** *(how urgent)*. Empty state:
-*"Nothing due."*
+**Card 2 — Due now** — a preview, with an **as-of date** override and a **clear** button. Six
+columns: **Kind** · **Record** · **Due** · **Days** · **Tier** *(how urgent)* · **Sent to** *(Traveller, Desk,
+Approvers — lane 8)*. Empty state: *"Nothing due."*
 
 **Card 3 — Sweeps** — the run history: Started · Finished · Trigger · Queued. Empty state:
 *"No sweeps yet — nothing has run for this tenant."*
 
-**Card 4 — Sent in the last 14 days** — the dispatch log.
+**Card 4 — Sent in the last 14 days** — the dispatch log, with **Sent** — when the sweep sent it, or *Not yet — next
+sweep* for one recorded and not sent (lane 8).
 
 ### ▶ Walk it *(read-only, from an admin window, or skip)*
 
@@ -2423,14 +2446,17 @@ columns: **Kind** · **Record** · **Due** · **Days** · **Tier** *(how urgent)
 | Run history | `GET …/reminders/runs` | **Admin** |
 | Dispatch log | `GET …/reminders/log` | **Admin** |
 
-Tables: `StaffTravelReminderRuns`, `StaffTravelReminderDispatchLogs`.
+Tables: `StaffTravelReminderRuns`, `StaffTravelReminderDispatchLogs` (`PublishedAt` — when the sweep sent it; batch 1's
+column, written since lane 8). The reminders themselves are `Notifications` rows, one per recipient and channel, on
+the `StaffTravel.*` topics.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-52 · The reads are Admin-gated along with the writes.** The travel desk — the people who would act on an expiring passport — cannot see the queue at all. An open TDC question: should the desk see the reminder log? | |
-| **T-53 · Nothing runs the sweep on a schedule.** There is no hosted service; the only trigger is the button on this screen | |
+| **T-52 · The reads are Admin-gated along with the writes.** The travel desk — the people who would act on an expiring passport — cannot see the queue at all. An open TDC question: should the desk see the reminder log? | *Fixed in closure lane 4 (D-3): the HR role holds `HR.Travel.Admin`* |
+| **T-53 · Nothing runs the sweep on a schedule.** There is no hosted service; the only trigger is the button on this screen | *Wrong when written: the sweep has run daily on a hosted service since 2026-08-17 (first 11 minutes after the API starts). Closure lane 8 proves the scheduled run — nobody signed in — on its own (`run-final-sweep-scheduled.mjs`)* |
+| **F2 · Every reminder went to the HR role, in the app only; a document got one notice before it lapsed; no visa-missing, claim or approval chase** | *Fixed in closure lane 8 (slice 8b) — the table above* |
 
 ---
 

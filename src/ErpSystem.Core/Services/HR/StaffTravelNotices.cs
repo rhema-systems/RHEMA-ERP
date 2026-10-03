@@ -14,7 +14,8 @@ namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
 /// Who hears what about a trip (travel final closure, lane 8, slice 8a — D-4, D-45, D-46): one topic per event and
-/// audience, <c>StaffTravel.{Event}.{Traveller|Desk}</c>, on leave's recipient rules.
+/// audience, <c>StaffTravel.{Event}.{Traveller|Desk|Approver}</c>, on leave's recipient rules. The nightly sweep (slice
+/// 8b) sends through it too — a document's owner, a waiting request's approvers.
 /// </summary>
 /// <remarks>
 /// <para><b>Why.</b> Every travel notice went to the HR role, in the app — every submission, approval, rejection,
@@ -30,6 +31,9 @@ namespace ErpSystem.Core.Services.HR;
 /// <para><b>The desk</b> is the HR role's active holders, resolved here so that whoever did the thing is left out
 /// (<c>UsersFromData</c>: the publisher can neither exclude nor dedupe). In the app only. D-46: the desk hears what it
 /// must act on — some events only when someone outside the desk did them.</para>
+///
+/// <para><b>The approvers</b> (slice 8b) are the logins a waiting request's current stage is asking, resolved by the
+/// sweep (<see cref="HrPendingApprovers"/>, the traveller left out) — in the app and by email.</para>
 ///
 /// <para><b>Never fails the act.</b> Every caller has already committed; a notice that cannot be sent is logged, not
 /// thrown, and the publisher saves its rows on the caller's unit of work (U2) — so callers publish only after their own
@@ -71,6 +75,7 @@ public sealed class StaffTravelNotices
     public const string TopicEntityType = "StaffTravel";
     public const string ToTraveller = "Traveller";
     public const string ToDesk = "Desk";
+    public const string ToApprover = "Approver";
 
     // ---- the events (the middle of the topic key) ----------------------------
     public const string Submitted = "Submitted";
@@ -94,6 +99,19 @@ public sealed class StaffTravelNotices
     public const string TravellerMessage = "TravellerMessage";
     public const string TravellerFile = "TravellerFile";
     public const string TravellerNotReachable = "TravellerNotReachable";
+    // The sweep's (lane 8, slice 8b).
+    public const string DocumentExpiring = "DocumentExpiring";
+    public const string VisaExpiring = "VisaExpiring";
+    public const string Departing = "Departing";
+    public const string VisaMissing = "VisaMissing";
+    public const string BriefingUnacknowledged = "BriefingUnacknowledged";
+    public const string ClaimWindowClosing = "ClaimWindowClosing";
+    public const string ClaimWindowPassed = "ClaimWindowPassed";
+    public const string SettlementOverdue = "SettlementOverdue";
+    public const string ApprovalWaiting = "ApprovalWaiting";
+
+    /// <summary>The traveller's own documents page on the portal.</summary>
+    public const string TravellerDocuments = "/me/travel/documents";
 
     // ---- links ----------------------------------------------------------------
     // The portal's trip page and the desk's open on a tab named in the query (8a gave both pages `?tab=`).
@@ -193,18 +211,81 @@ public sealed class StaffTravelNotices
         }
     }
 
+    /// <summary>
+    /// Tells the owner of a travel document — which belongs to the employee, not a trip (slice 8b). As a traveller is told:
+    /// in the app and by email with a login, by email alone without one; with neither, the desk is told to tell them.
+    /// </summary>
+    public async Task TellDocumentOwnerAsync(
+        Guid tenantId, Guid employeeId, Guid documentId, IReadOnlyDictionary<string, object> data,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureTopicsAsync(tenantId, cancellationToken);
+            var owner = await PersonAsync(tenantId, employeeId, cancellationToken);
+            var tokens = new Dictionary<string, object>(data)
+            {
+                ["Employee"] = owner.Name,
+                ["EmployeeId"] = employeeId,
+                ["ActionPath"] = TravellerDocuments,
+            };
+            if (!owner.HasLogin && string.IsNullOrWhiteSpace(owner.Email))
+            {
+                var desk = await DeskUsersAsync(tenantId, cancellationToken);
+                if (desk.Count == 0) return;
+                tokens["DeskUserIds"] = desk;
+                tokens["ActionPath"] = "/hr/travel/documents";
+                await PublishAsync(tenantId, documentId, DocumentExpiring, ToDesk, null, tokens, cancellationToken);
+                return;
+            }
+            if (!owner.HasLogin)
+                tokens["TravellerEmail"] = owner.Email!;
+            await PublishAsync(tenantId, documentId, DocumentExpiring, ToTraveller, null, tokens, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Travel notice {Event} to the owner of document {DocumentId} could not be sent", DocumentExpiring, documentId);
+        }
+    }
+
+    /// <summary>
+    /// Tells the logins a trip's current approval step is asking (slice 8b, "approval waiting") — in the app and by email.
+    /// The caller resolves them (<see cref="HrPendingApprovers"/>) and leaves out the traveller.
+    /// </summary>
+    public async Task TellApproversAsync(
+        StaffTravelRequest trip, IReadOnlyCollection<Guid> approverUserIds, string evt, string actionPath,
+        IReadOnlyDictionary<string, object>? data = null, CancellationToken cancellationToken = default)
+    {
+        if (approverUserIds.Count == 0) return;
+        try
+        {
+            await EnsureTopicsAsync(trip.TenantId, cancellationToken);
+            var traveller = await TravellerAsync(trip, cancellationToken);
+            var tokens = TripTokens(trip, traveller.Name, actionPath, data);
+            tokens["ApproverUserIds"] = approverUserIds.Distinct().ToList();
+            await PublishAsync(trip, evt, ToApprover, null, tokens, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Travel notice {Event} to the approvers of {Reference} could not be sent", evt, trip.RequestNumber);
+        }
+    }
+
     // ---- the pieces ------------------------------------------------------------------
 
     private sealed record TravellerFacts(string Name, string? Email, bool HasLogin);
 
-    private async Task<TravellerFacts> TravellerAsync(StaffTravelRequest trip, CancellationToken cancellationToken)
+    private Task<TravellerFacts> TravellerAsync(StaffTravelRequest trip, CancellationToken cancellationToken)
+        => PersonAsync(trip.TenantId, trip.EmployeeId, cancellationToken);
+
+    private async Task<TravellerFacts> PersonAsync(Guid tenantId, Guid employeeId, CancellationToken cancellationToken)
     {
         var employee = await _unitOfWork.Repository<Employee>().GetQueryable()
-            .Where(e => e.Id == trip.EmployeeId && e.TenantId == trip.TenantId)
+            .Where(e => e.Id == employeeId && e.TenantId == tenantId)
             .Select(e => new { e.FirstName, e.LastName, e.EmailAddress })
             .FirstOrDefaultAsync(cancellationToken);
         var hasLogin = await _userManager.Users
-            .AnyAsync(u => u.TenantId == trip.TenantId && u.IsActive && u.EmployeeId == trip.EmployeeId, cancellationToken);
+            .AnyAsync(u => u.TenantId == tenantId && u.IsActive && u.EmployeeId == employeeId, cancellationToken);
         var name = employee is null ? "The traveller" : $"{employee.FirstName} {employee.LastName}".Trim();
         return new TravellerFacts(name, employee?.EmailAddress, hasLogin);
     }
@@ -251,14 +332,19 @@ public sealed class StaffTravelNotices
         StaffTravelRequest trip, string evt, string audience, Guid? actorUserId,
         Dictionary<string, object> data, CancellationToken cancellationToken)
         // The trip's id is every notice's entity (U9): the suites' teardowns find a trip's notices by it, whatever the
-        // notice is about; the link carries the claim or advance.
+        // notice is about; the link carries the claim or advance. (A document's notice carries the document's.)
+        => PublishAsync(trip.TenantId, trip.Id, evt, audience, actorUserId, data, cancellationToken);
+
+    private Task PublishAsync(
+        Guid tenantId, Guid entityId, string evt, string audience, Guid? actorUserId,
+        Dictionary<string, object> data, CancellationToken cancellationToken)
         => _appEventBus.PublishAsync(new EntityActivityEvent
         {
-            TenantId = trip.TenantId,
+            TenantId = tenantId,
             EntityType = TopicEntityType,
             Activity = evt,
             Audience = audience,
-            EntityId = trip.Id,
+            EntityId = entityId,
             TriggeredByUserId = actorUserId is Guid a && a != Guid.Empty ? a : null,
             Data = data,
         }, cancellationToken);
@@ -362,6 +448,48 @@ public sealed class StaffTravelNotices
             "{{By}} wrote on {{Reference}} ({{Route}}, {{Dates}}). Read it — and reply — on the trip's Messages tab under My travel.",
             "{{By}} wrote a note to them on {{Reference}}"),
 
+        // ---- the sweep's, to the traveller (slice 8b): in the app and by email ----
+        new(DocumentExpiring, ToTraveller, "Travel: your travel document is expiring (traveller)",
+            "Sent by the nightly sweep to the owner of a travel document 90, 30 and 7 days before it expires, and once it has lapsed.",
+            "Your {{DocumentType}} {{Expiry}}",
+            "The {{DocumentType}} on your travel record {{Expiry}}. Renew it in good time — a passport takes weeks — and record the new one under My travel → My travel documents."),
+        new(VisaExpiring, ToTraveller, "Travel: your visa is expiring (traveller)",
+            "Sent by the nightly sweep to the traveller 90, 30 and 7 days before a visa recorded on their trip expires, and once it has lapsed.",
+            "Your visa for {{Reference}} {{Expiry}}",
+            "The visa recorded for {{Reference}} ({{Route}}, {{Dates}}) {{Expiry}}. Check it on the trip's Before you go tab under My travel, and talk to the travel desk.",
+            "The visa for their trip {{Reference}} {{Expiry}}"),
+        new(Departing, ToTraveller, "Travel: your trip starts soon (traveller)",
+            "Sent once by the nightly sweep when an approved trip is 14 days or less from departure.",
+            "Your trip {{Reference}} starts on {{StartDate}}",
+            "{{Reference}} — {{Route}}, {{Dates}} — starts in {{Days}} day(s). Your itinerary, bookings and what to have with you are under My travel.",
+            "Their trip {{Reference}} starts on {{StartDate}}"),
+        new(VisaMissing, ToTraveller, "Travel: your trip needs a visa (traveller)",
+            "Sent once by the nightly sweep when an approved trip needing a visa is 14 days or less from departure and no visa is recorded as approved.",
+            "Your trip {{Reference}} needs a visa",
+            "{{Reference}} — {{Route}}, {{Dates}} — starts in {{Days}} day(s), needs a visa, and none is recorded as approved. Talk to the travel desk now.",
+            "Their trip {{Reference}} starts in {{Days}} day(s) and has no approved visa"),
+        new(BriefingUnacknowledged, ToTraveller, "Travel: acknowledge your risk briefing (traveller)",
+            "Sent once by the nightly sweep when a trip is 7 days or less from departure and its risk assessment is not acknowledged.",
+            "Acknowledge the risk briefing for {{Reference}} before you go",
+            "{{Reference}} ({{Route}}, {{Dates}}) starts in {{Days}} day(s), and you have not acknowledged its risk assessment ({{RiskLevel}}). Read it on the trip's Before you go tab under My travel, and acknowledge it.",
+            "They have not acknowledged the risk briefing for {{Reference}}, which starts in {{Days}} day(s)"),
+        new(ClaimWindowClosing, ToTraveller, "Travel: your claim window is closing (traveller)",
+            "Sent once by the nightly sweep 7 days before the travel policy's claim window closes on a completed trip with no claim submitted.",
+            "Claims for {{Reference}} close on {{LastDay}}",
+            "Expense claims for {{Reference}} ({{Route}}, {{Dates}}) must be submitted by {{LastDay}}. If you have expenses to claim, file them on the trip's Money tab under My travel before then — after that day a claim cannot be submitted.",
+            "Claims for their trip {{Reference}} close on {{LastDay}}"),
+        new(SettlementOverdue, ToTraveller, "Travel: your advance is overdue (traveller)",
+            "Sent by the nightly sweep to the traveller when a travel advance passes its settlement deadline, and again after a week and a month.",
+            "Your travel advance {{Number}} is overdue",
+            "{{Amount}} of advance {{Number}} for {{Reference}} was to be accounted for by {{Deadline}}. File your expense claim, or hand back what you did not spend, on the trip's Money tab under My travel.",
+            "Their travel advance {{Number}} ({{Amount}}) was to be accounted for by {{Deadline}}"),
+
+        // ---- the sweep's, to the approvers (slice 8b): in the app and by email ----
+        new(ApprovalWaiting, ToApprover, "Travel: a request waits for your decision (approver)",
+            "Sent by the nightly sweep to the people the request's current approval stage is asking — never the traveller — once it has waited 5 days, then after a week and a month.",
+            "Travel request waiting for your decision: {{Reference}}",
+            "{{Traveller}}'s request {{Reference}} — {{Route}}, {{Dates}} — has waited {{Waited}} day(s) for a decision. Open it to approve, return or reject it."),
+
         // ---- the travel desk: in the app ----
         new(Approved, ToDesk, "Travel: approved, ready to book (desk)",
             "Sent to the HR role's holders, except whoever gave the last approval, when a trip is approved.",
@@ -399,6 +527,28 @@ public sealed class StaffTravelNotices
             "Sent to the HR role's holders when a traveller has no login and no email address on file, so a notice for them reached nobody.",
             "Tell {{Traveller}}: {{What}}",
             "{{What}} — {{Reference}} ({{Route}}, {{Dates}}). {{Traveller}} has no login and no email address on file, so nobody has told them."),
+
+        // ---- the sweep's, to the desk (slice 8b) ----
+        new(DocumentExpiring, ToDesk, "Travel: tell an employee their travel document is expiring (desk)",
+            "Sent by the nightly sweep to the HR role's holders when a travel document's owner has no login and no email address on file.",
+            "Tell {{Employee}}: their {{DocumentType}} {{Expiry}}",
+            "{{Employee}}'s {{DocumentType}} {{Expiry}}. {{Employee}} has no login and no email address on file, so nobody has told them."),
+        new(VisaMissing, ToDesk, "Travel: no visa for a trip departing soon (desk)",
+            "Sent once by the nightly sweep when an approved trip needing a visa is 14 days or less from departure and no visa is recorded as approved.",
+            "No visa yet: {{Reference}}",
+            "{{Traveller}}'s trip {{Reference}} — {{Route}}, {{Dates}} — starts in {{Days}} day(s), needs a visa, and none is recorded as approved."),
+        new(ApprovalWaiting, ToDesk, "Travel: a request waits with nobody else to move it (desk)",
+            "Sent by the nightly sweep when a request has waited 5 days and nobody else can be asked, and once when it is still waiting 3 days or less before departure (or after).",
+            "Travel request waiting: {{Reference}}",
+            "{{Traveller}}'s request {{Reference}} — {{Route}}, {{Dates}} — {{Why}}"),
+        new(SettlementOverdue, ToDesk, "Travel: an advance is overdue (desk)",
+            "Sent by the nightly sweep when a travel advance passes its settlement deadline, and again after a week and a month.",
+            "Advance overdue: {{Number}}",
+            "{{Traveller}} still holds {{Amount}} of advance {{Number}} for {{Reference}}, due to be accounted for by {{Deadline}}."),
+        new(ClaimWindowPassed, ToDesk, "Travel: claim window closed with money open (desk)",
+            "Sent once by the nightly sweep when a completed trip's claim window has closed with a claim not submitted or advance cash still out — the trip cannot close.",
+            "Claim window closed: {{Reference}}",
+            "The claim window for {{Traveller}}'s trip {{Reference}} ({{Route}}, {{Dates}}) closed on {{LastDay}} with {{Open}}. The trip cannot close until that is settled."),
     };
 
     /// <summary>What nothing publishes to any more (D-45, D-46, E6), switched off whenever the topics are ensured.</summary>
@@ -414,7 +564,12 @@ public sealed class StaffTravelNotices
         ("StaffTravelRequest.WorkflowRejected.Internal", RetiredEngine),
         ("StaffTravelAlert.Issued.Internal",
             "Switched off by Staff Travel (final closure lane 8): an alert now reaches the traveller in the app and by email, and the desk, through StaffTravel.AlertIssued.Traveller and .Desk."),
+        ("StaffTravelReminder.DueSoon.Internal", RetiredSweep),
+        ("StaffTravelReminder.Overdue.Internal", RetiredSweep),
     };
+
+    private const string RetiredSweep =
+        "Switched off by Staff Travel (final closure lane 8, slice 8b): every sweep reminder went to the HR role, in the app only. Each now reaches the people who act on it through a StaffTravel.* topic of its own.";
 
     private const string RetiredLifecycle =
         "Switched off by Staff Travel (final closure lane 8, D-46): the desk hears what it must act on through StaffTravel.*.Desk, and the traveller through StaffTravel.*.Traveller.";
@@ -422,7 +577,12 @@ public sealed class StaffTravelNotices
     private const string RetiredEngine =
         "Switched off by Staff Travel (final closure lane 8, D-45): this went to whoever pressed Submit — the traveller only on a self-service submission — and linked the desk's page, which the traveller cannot open. StaffTravel.*.Traveller replaces it. A workflow-topic seed switches it back on; the next travel notice switches it off again.";
 
-    private async Task EnsureTopicsAsync(Guid tenantId, CancellationToken cancellationToken)
+    /// <summary>
+    /// Seeds the travel topics a tenant does not have yet, and switches off the retired ones that are on. Every notice
+    /// calls it, and so does every sweep run (slice 8b) — which is what puts the engine's three back off daily after a
+    /// workflow-topic seed has switched them on.
+    /// </summary>
+    public async Task EnsureTopicsAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
         if (_topicsEnsured.Contains(tenantId)) return;
 
@@ -459,11 +619,12 @@ public sealed class StaffTravelNotices
             if (existing.Contains(key)) continue;
 
             var toTraveller = seed.Audience == ToTraveller;
+            var toApprover = seed.Audience == ToApprover;
             var topic = new NotificationTopic
             {
                 TenantId = tenantId, Key = key, Name = seed.Name, Description = seed.Description,
                 EntityType = TopicEntityType, IsSystem = true, IsActive = true,
-                EnableInApp = true, EnableEmail = toTraveller, EnableSms = false,
+                EnableInApp = true, EnableEmail = toTraveller || toApprover, EnableSms = false,
                 InAppTitleTemplate = seed.Title,
                 InAppBodyTemplate = seed.Body,
                 ActionUrlTemplate = "{{ActionPath}}",
@@ -485,6 +646,15 @@ public sealed class StaffTravelNotices
                     TenantId = tenantId, TopicId = topic.Id,
                     RecipientKind = "EmailFromData", RecipientValue = "TravellerEmail",
                     IsSystem = true, SendInApp = false, SendEmail = true, CreatedBy = "System",
+                });
+            }
+            else if (toApprover)
+            {
+                await recipientRepo.AddAsync(new NotificationTopicRecipient
+                {
+                    TenantId = tenantId, TopicId = topic.Id,
+                    RecipientKind = "UsersFromData", RecipientValue = "ApproverUserIds",
+                    IsSystem = true, SendInApp = true, SendEmail = true, CreatedBy = "System",
                 });
             }
             else

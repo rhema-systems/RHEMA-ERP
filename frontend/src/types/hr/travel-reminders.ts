@@ -20,6 +20,10 @@ export interface StaffTravelReminderRunResult {
   remindersQueued: number;
   /** Suppressed as duplicates — not failures. */
   alreadySent: number;
+  /** Claimed by an earlier sweep that stopped before sending them — sent by this one (lane 8, slice 8b). */
+  retried: number;
+  /** Advances this sweep marked overdue (lane 3). */
+  advancesMarkedOverdue: number;
 }
 
 export interface StaffTravelReminderRun {
@@ -45,6 +49,8 @@ export interface StaffTravelReminderPreviewItem {
   escalationTier: number;
   dedupeKey: string;
   alreadySent: boolean;
+  /** Whom it reaches: "Traveller", "Desk", "Approvers" (lane 8, slice 8b). */
+  sentTo: string[];
 }
 
 export interface StaffTravelReminderLogEntry {
@@ -58,4 +64,6 @@ export interface StaffTravelReminderLogEntry {
   daysRemaining: number;
   escalationTier: number;
   createdAt: string;
+  /** When the sweep sent it; null for one claimed and not yet sent (the next sweep sends it). */
+  publishedAt?: string | null;
 }

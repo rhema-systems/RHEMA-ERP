@@ -20,27 +20,51 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 
 /**
- * The horizons the engine actually uses. Stated so an admin can see why something is or isn't due.
+ * The kinds, their windows and who each reaches. Stated so an admin can see why something is or isn't due.
  *
- * ⚠ Worded from `StaffTravelReminderService.TierFor`, not from intent. Each item sends ONE
- * reminder when it comes inside its horizon, then nothing more until its date passes; after that
- * it escalates once in each of the windows 1–7, 8–30 and 31–90 days late. "Chased from 90 days
- * out" read as a repeating chase that does not happen (travel final closure, finding F2).
+ * ⚠ Worded from `StaffTravelReminderService` (its rungs, `TierFor` and the D-50 constants), not from intent. An
+ * expiry is chased at 90, 30 and 7 days — an item first seen inside a rung gets that rung's notice only — and after
+ * the date once in each of the windows 1–7, 8–30 and 31–90 days late. Before travel final closure lane 8 (slice 8b)
+ * every kind went to the HR role in the app only, and a document got one notice before it lapsed (finding F2).
  */
 const HORIZONS = [
   {
     kind: 'Travel document expiring',
-    detail: 'once when it comes within 90 days of expiry; then once it has lapsed, after a week and after a month',
+    detail: '90, 30 and 7 days before expiry, then after it lapses, after a week and after a month — to its owner',
   },
   {
     kind: 'Visa expiring',
-    detail: 'once when it comes within 90 days of expiry; then once it has lapsed, after a week and after a month',
+    detail: 'the same rungs, for a visa on a trip still to happen or under way — to the traveller',
   },
   {
     kind: 'Advance settlement overdue',
-    detail: 'once its settlement deadline has passed, then after a week and after a month',
+    detail: 'once its settlement deadline has passed, then after a week and after a month — to the traveller and the desk',
   },
-  { kind: 'Trip departing', detail: 'once, when an approved trip is 14 days or less away' },
+  { kind: 'Trip departing', detail: 'once, when an approved trip is 14 days or less away — to the traveller' },
+  {
+    kind: 'Visa missing',
+    detail: 'once, when an approved trip that needs a visa is 14 days or less away with none approved — to the traveller and the desk',
+  },
+  {
+    kind: 'Approval waiting',
+    detail: 'after 5 days, then after a week and a month — to the people its current stage is asking (the desk when nobody can be)',
+  },
+  {
+    kind: 'Approval escalated',
+    detail: 'once, when a request still waiting is 3 days or less from departure, or past it — to the desk',
+  },
+  {
+    kind: 'Briefing unacknowledged',
+    detail: 'once, when a trip 7 days or less away has a risk assessment the traveller has not acknowledged — to the traveller',
+  },
+  {
+    kind: 'Claim window closing',
+    detail: 'once, 7 days before a completed trip\'s claim window closes with no claim submitted — to the traveller',
+  },
+  {
+    kind: 'Claim window passed',
+    detail: 'once, when it has closed with a claim not submitted or advance cash still out — to the desk',
+  },
 ];
 
 /**
@@ -80,12 +104,13 @@ export default function TravelRemindersPage() {
   const run = useMutation({
     mutationFn: () => travelRemindersService.run(),
     onSuccess: async (result) => {
+      const notes = [
+        result.retried > 0 ? `${result.retried} left unsent by an earlier sweep were sent now.` : '',
+        result.alreadySent > 0 ? `${result.alreadySent} were already sent and were not repeated.` : '',
+      ].filter(Boolean);
       toast({
-        title: `Sweep complete — ${result.remindersQueued} queued`,
-        description:
-          result.alreadySent > 0
-            ? `${result.alreadySent} were already sent and were not repeated.`
-            : undefined,
+        title: `Sweep complete — ${result.remindersQueued} sent`,
+        description: notes.length ? notes.join(' ') : undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ['travel-reminder-runs'] });
       await queryClient.invalidateQueries({ queryKey: ['travel-reminder-log'] });
@@ -102,7 +127,7 @@ export default function TravelRemindersPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Travel reminders"
-        description="Expiring passports and visas, overdue advances, and departures coming up."
+        description="Expiring passports and visas, overdue advances, departures, waiting approvals and closing claim windows — each to the people who act on it."
         backHref="/administration/hr"
         actions={
           <Button onClick={() => run.mutate()} disabled={run.isPending}>
@@ -132,11 +157,13 @@ export default function TravelRemindersPage() {
             notice that still allows a Ghanaian passport renewal. A 30-day warning about a document
             that takes six weeks to replace is not a warning.
           </p>
-          {/* ⚠ Every kind is published to the HR role, in the app only (finding F2) — saying so
-              here stops a reader assuming travellers and approvers are reminded too. */}
+          {/* Lane 8, slice 8b: who is told, as the sweep sends it — before it, every kind went to the HR role in the
+              app only (finding F2), and this card said so. */}
           <p className="text-xs text-muted-foreground md:col-span-2">
-            Every reminder goes to the HR role, in the app only. The traveller and their approver
-            are not reminded of anything by this sweep.
+            The traveller and the approvers are told in the app and by email; the desk (the HR role) in the app.
+            A traveller with no login is emailed at the address on their employee record; with neither, the desk is
+            told to tell them. Each reminder is sent once — a run that stopped before sending one leaves it for the next.
+            The words and recipients of each are on Administration → Notification Topics, under StaffTravel.
           </p>
         </CardContent>
       </Card>
@@ -204,6 +231,7 @@ export default function TravelRemindersPage() {
                     <TableHead>Due</TableHead>
                     <TableHead className="w-24">Days</TableHead>
                     <TableHead className="w-20">Tier</TableHead>
+                    <TableHead>Sent to</TableHead>
                     <TableHead className="w-32" />
                   </TableRow>
                 </TableHeader>
@@ -215,6 +243,7 @@ export default function TravelRemindersPage() {
                       <TableCell className="whitespace-nowrap">{fmtDate(i.dueDate)}</TableCell>
                       <TableCell>{i.daysRemaining}</TableCell>
                       <TableCell>{i.escalationTier}</TableCell>
+                      <TableCell>{(i.sentTo ?? []).join(', ') || '—'}</TableCell>
                       <TableCell>
                         {i.alreadySent && <Badge variant="outline">Already sent</Badge>}
                       </TableCell>
@@ -286,6 +315,7 @@ export default function TravelRemindersPage() {
                   <TableHead>Record</TableHead>
                   <TableHead>Due</TableHead>
                   <TableHead className="w-20">Tier</TableHead>
+                  <TableHead>Sent</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -296,6 +326,9 @@ export default function TravelRemindersPage() {
                     <TableCell>{l.reference}</TableCell>
                     <TableCell className="whitespace-nowrap">{fmtDate(l.dueDate)}</TableCell>
                     <TableCell>{l.escalationTier}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {l.publishedAt ? fmtDateTime(l.publishedAt) : <Badge variant="outline">Not yet — next sweep</Badge>}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

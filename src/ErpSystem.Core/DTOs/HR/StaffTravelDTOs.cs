@@ -3704,8 +3704,14 @@ public class StaffTravelReminderRunResultDto
     public string Trigger { get; set; } = string.Empty;
     public int RemindersQueued { get; set; }
 
-    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    /// <summary>How many candidates were found but already sent by an earlier sweep.</summary>
     public int AlreadySent { get; set; }
+
+    /// <summary>
+    /// Reminders an earlier sweep claimed and never published — it stopped between the two — sent by this one (travel
+    /// final closure, lane 8, slice 8b).
+    /// </summary>
+    public int Retried { get; set; }
 
     /// <summary>Advances this sweep marked Overdue — cash out past its settlement deadline (lane 3).</summary>
     public int AdvancesMarkedOverdue { get; set; }
@@ -3726,8 +3732,12 @@ public class StaffTravelReminderPreviewItemDto
     public int EscalationTier { get; set; }
     public string DedupeKey { get; set; } = string.Empty;
 
-    /// <summary>True when a previous sweep already claimed this key, so a real run would skip it.</summary>
+    /// <summary>True when a previous sweep already sent this key, so a real run would skip it.</summary>
     public bool AlreadySent { get; set; }
+
+    /// <summary>Whom it reaches — Traveller, Desk, Approvers (lane 8, slice 8b). The traveller's goes to the desk when they
+    /// have neither a login nor an email address.</summary>
+    public List<string> SentTo { get; set; } = new();
 }
 
 public class StaffTravelReminderRunDto
@@ -3752,6 +3762,9 @@ public class StaffTravelReminderLogEntryDto
     public int DaysRemaining { get; set; }
     public int EscalationTier { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>When the sweep made the publish call (lane 8, slice 8b); null for a claim not yet published.</summary>
+    public DateTime? PublishedAt { get; set; }
 }
 
 #endregion
