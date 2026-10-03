@@ -1422,7 +1422,12 @@ public sealed class FinancePostingEngineTests
                         DocumentType = "Invoice", DocumentId = retry.SourceDocumentId,
                         TaxId = Guid.NewGuid(), BaseAmount = 100m, TaxableAmount = 100m,
                         TaxRate = 0.15m, TaxAmount = 15m, CalculationOrder = 1,
-                        CalculationDate = retry.PostingDate
+                        CalculationDate = retry.PostingDate, CurrencyCode = "GHS",
+                        CurrencyDecimalPlaces = 2, RawTaxAmount = 15m,
+                        RoundingAdjustment = 0m, AllocationSequence = 0,
+                        TaxRoundingScope = ErpSystem.Core.Finance.TaxRoundingScope.Line,
+                        TaxRoundingMethod = ErpSystem.Core.Finance.GovernedRoundingMethod.Nearest,
+                        TaxRoundingIncrement = 0.01m
                     }
                 ]; break;
         }

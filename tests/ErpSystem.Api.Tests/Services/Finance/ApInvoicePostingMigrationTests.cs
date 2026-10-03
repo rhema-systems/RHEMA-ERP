@@ -51,7 +51,7 @@ public sealed partial class ApInvoicePostingMigrationTests
             {
                 new { Code = "JPY", Places = 0, UnitPrice = 123.5m, Expected = 124m },
                 new { Code = "KWD", Places = 3, UnitPrice = 123.4565m, Expected = 123.457m },
-                new { Code = "X04", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
+                new { Code = "CLF", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
             };
 
             foreach (var item in cases)
@@ -70,6 +70,8 @@ public sealed partial class ApInvoicePostingMigrationTests
                 tenant.CurrencyDecimalPlaces = item.Places;
                 (await db.AccountingBooks.SingleAsync(value => value.TenantId == tenantId)).FunctionalCurrencyCode = item.Code;
                 (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).BaseCurrency = item.Code;
+                foreach (var account in await db.Accounts.Where(value => value.TenantId == tenantId).ToListAsync())
+                    account.CurrencyCode = item.Code;
                 var currency = await db.Currencies.SingleAsync(value => value.TenantId == tenantId);
                 currency.CurrencyCode = item.Code;
                 currency.NumericCode = item.Code;
@@ -1771,7 +1773,7 @@ public sealed partial class ApInvoicePostingMigrationTests
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
     {
-        var userId = Guid.NewGuid().ToString();
+        var userId = tenantId.ToString();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
@@ -1981,7 +1983,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         {
             Id = tenantId,
             Name = $"Tenant {code}",
-            Code = code,
+            Code = code == "TEN" ? $"TEN-{tenantId:N}" : code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
@@ -1998,6 +2000,21 @@ public sealed partial class ApInvoicePostingMigrationTests
             CurrencyName = "Ghanaian Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
             IsBaseCurrency = true, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
         });
+        if (!db.Users.Local.Any(user => user.Id == tenantId))
+        {
+            db.Users.Add(new ApplicationUser
+            {
+                Id = tenantId,
+                TenantId = tenantId,
+                UserName = $"ap.poster.{tenantId:N}",
+                NormalizedUserName = $"AP.POSTER.{tenantId:N}",
+                Email = $"ap.poster.{tenantId:N}@example.test",
+                NormalizedEmail = $"AP.POSTER.{tenantId:N}@EXAMPLE.TEST",
+                FirstName = "AP",
+                LastName = "Poster",
+                IsActive = true
+            });
+        }
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -2016,11 +2033,29 @@ public sealed partial class ApInvoicePostingMigrationTests
     {
         var startDate = new DateTime(periodDate.Year, periodDate.Month, 1);
         var endDate = startDate.AddMonths(1).AddDays(-1);
+        var fiscalYear = db.FiscalYears.Local.SingleOrDefault(year =>
+            year.TenantId == tenantId && year.Year == startDate.Year);
+        if (fiscalYear is null)
+        {
+            var yearStart = new DateTime(startDate.Year, 1, 1);
+            var yearEnd = new DateTime(startDate.Year, 12, 31);
+            fiscalYear = new FiscalYear
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                FiscalYearName = $"Fiscal Year {startDate.Year}",
+                FiscalYearCode = startDate.Year.ToString(CultureInfo.InvariantCulture),
+                Year = startDate.Year, FiscalYearType = "Calendar",
+                StartDate = yearStart, EndDate = yearEnd,
+                TotalDays = (yearEnd - yearStart).Days + 1,
+                NumberOfPeriods = 12, Status = "Open", IsActive = true
+            };
+            db.FiscalYears.Add(fiscalYear);
+        }
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = startDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
             PeriodCode = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture),
             PeriodNumber = startDate.Month,

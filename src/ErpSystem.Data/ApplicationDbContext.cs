@@ -4180,7 +4180,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Increment", "[Increment] > 0");
             entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Places",
                 "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
-            entity.HasOne<Tenant>()
+            entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -7050,12 +7050,96 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<UnitType>()
             .Property(unitType => unitType.RoundingIncrement)
             .HasColumnType("decimal(18,6)");
+        ConfigureFinancePrecisionStorage(builder);
 
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
 
         // Seed initial data
         SeedData(builder);
+    }
+
+    private static void ConfigureFinancePrecisionStorage(ModelBuilder builder)
+    {
+        // ConfigureDecimalPrecision is a legacy, name-based convention which intentionally runs
+        // after most entity configuration. Re-apply the governed Finance storage contract last so
+        // it cannot silently narrow ISO 0-4 minor-unit values, unit prices, tax evidence, or
+        // immutable rounding evidence back to two decimals at runtime.
+        var overrides = new (Type EntityType, string PropertyName, string ColumnType)[]
+        {
+            (typeof(Invoice), nameof(Invoice.SubTotal), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.TaxAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.DiscountAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.TotalAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.PaidAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.CreditedAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.EarlyPaymentDiscountAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.DiscountAmount), "decimal(20,4)"),
+
+            (typeof(VendorInvoice), nameof(VendorInvoice.SubTotal), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.TaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.DiscountAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.TotalAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.PaidAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.EarlyPaymentDiscountAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.WithholdingTaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.DiscountAmount), "decimal(20,4)"),
+
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.DirectInvoiceAppliedAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.SubTotal), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.DiscountAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.TotalAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.DiscountAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.LineTotal), "decimal(20,4)"),
+
+            (typeof(Tax), nameof(Tax.Rate), "decimal(18,6)"),
+            (typeof(TaxRateHistory), nameof(TaxRateHistory.Rate), "decimal(18,6)"),
+            (typeof(TaxConfigurationVersion), nameof(TaxConfigurationVersion.Rate), "decimal(18,6)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.BaseAmount), "decimal(20,4)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxableAmount), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxRate), "decimal(18,6)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxAmount), "decimal(20,4)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.RawTaxAmount), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.RoundingAdjustment), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxRoundingIncrement), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.BaseAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxableAmount), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxRate), "decimal(18,6)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.RawTaxAmount), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.RoundingAdjustment), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxRoundingIncrement), "decimal(20,4)"),
+
+            (typeof(CustomerPayment), nameof(CustomerPayment.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(VendorPayment), nameof(VendorPayment.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(CashTransaction), nameof(CashTransaction.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.OriginalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.RoundedAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.DeltaAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.Increment), "decimal(18,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.OriginalFunctionalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.RoundedFunctionalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.FunctionalDeltaAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.ExchangeRate), "decimal(18,10)")
+        };
+
+        foreach (var (entityType, propertyName, columnType) in overrides)
+            builder.Entity(entityType).Property(propertyName).HasColumnType(columnType);
     }
 
     private static void ConfigurePayrollEntities(ModelBuilder builder)

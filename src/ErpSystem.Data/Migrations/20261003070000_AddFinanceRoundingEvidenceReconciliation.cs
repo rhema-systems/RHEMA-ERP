@@ -105,8 +105,13 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
     {
         migrationBuilder.CreateIndex($"IX_{table}_TenantId_FinanceRoundingEvidenceId", table,
             new[] { "TenantId", "FinanceRoundingEvidenceId" });
-        migrationBuilder.AddForeignKey($"FK_{table}_FinanceRoundingEvidence_TenantId_FinanceRoundingEvidenceId", table,
-            new[] { "TenantId", "FinanceRoundingEvidenceId" }, "FinanceRoundingEvidence", new[] { "TenantId", "Id" }, onDelete: ReferentialAction.Restrict);
+        migrationBuilder.AddForeignKey(
+            name: $"FK_{table}_FinanceRoundingEvidence_TenantId_FinanceRoundingEvidenceId",
+            table: table,
+            columns: new[] { "TenantId", "FinanceRoundingEvidenceId" },
+            principalTable: "FinanceRoundingEvidence",
+            principalColumns: new[] { "TenantId", "Id" },
+            onDelete: ReferentialAction.Restrict);
     }
 
     private static void DropSourceEvidenceLink(MigrationBuilder migrationBuilder, string table, bool adjustment = true)

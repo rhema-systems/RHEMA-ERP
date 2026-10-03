@@ -1,3 +1,5 @@
+using ErpSystem.Core.Finance;
+
 namespace ErpSystem.Api.Services.Finance;
 
 /// <summary>Allocate a rounded nonnegative total without pushing a rounding loss onto the last item.</summary>

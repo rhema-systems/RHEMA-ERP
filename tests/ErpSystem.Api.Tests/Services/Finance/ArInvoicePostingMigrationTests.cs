@@ -49,7 +49,7 @@ public sealed partial class ArInvoicePostingMigrationTests
             {
                 new { Code = "JPY", Places = 0, UnitPrice = 123.5m, Expected = 124m },
                 new { Code = "KWD", Places = 3, UnitPrice = 123.4565m, Expected = 123.457m },
-                new { Code = "X04", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
+                new { Code = "CLF", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
             };
 
             foreach (var item in cases)
@@ -68,6 +68,8 @@ public sealed partial class ArInvoicePostingMigrationTests
                 tenant.CurrencyDecimalPlaces = item.Places;
                 (await db.AccountingBooks.SingleAsync(value => value.TenantId == tenantId)).FunctionalCurrencyCode = item.Code;
                 (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).BaseCurrency = item.Code;
+                foreach (var account in await db.Accounts.Where(value => value.TenantId == tenantId).ToListAsync())
+                    account.CurrencyCode = item.Code;
                 var currency = await db.Currencies.SingleAsync(value => value.TenantId == tenantId);
                 currency.CurrencyCode = item.Code;
                 currency.NumericCode = item.Code;
@@ -82,7 +84,28 @@ public sealed partial class ArInvoicePostingMigrationTests
                 stored.TotalAmount.Should().Be(item.Expected);
                 stored.LineItems.Single().UnitPrice.Should().Be(item.UnitPrice);
 
-                var (service, _) = CreateService(db, tenantId);
+                var currentUser = CreateCurrentUser(tenantId);
+                var sourceBookAuthority = new FinanceSourceBookAuthorityService(db, currentUser.Object);
+                await using (var authorityTransaction =
+                    await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable))
+                {
+                    var authority = await sourceBookAuthority.FreezeInitialPrimaryAsync(
+                        new FinanceSourceBookAuthorityFreezeRequest
+                        {
+                            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                            SourceDocumentType = "CustomerInvoice",
+                            SourceDocumentId = stored.Id,
+                            PostingAction = "Post",
+                            EffectiveDate = stored.InvoiceDate.Date,
+                            TransactionCurrencyCode = stored.CurrencyCode,
+                            FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+                            SourceWorkflowEntityType = "Invoice"
+                        });
+                    stored.SourceBookAuthorityId = authority.AuthorityId;
+                    await db.SaveChangesAsync();
+                    await authorityTransaction.CommitAsync();
+                }
+                var (service, _) = CreateService(db, tenantId, sourceBookAuthority: sourceBookAuthority);
                 var posted = await service.PostAsync(stored.Id);
                 var journal = await db.JournalEntries.Include(value => value.Transactions)
                     .SingleAsync(value => value.Id == posted.JournalEntryId);
@@ -1034,7 +1057,8 @@ public sealed partial class ArInvoicePostingMigrationTests
         ITaxCalculationEngine? taxEngine = null,
         IInventoryValuationService? valuation = null,
         IInventoryTrackingControlService? tracking = null,
-        IFinanceSourceDimensionService? dimensions = null)
+        IFinanceSourceDimensionService? dimensions = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -1072,7 +1096,8 @@ public sealed partial class ArInvoicePostingMigrationTests
             auditService,
             sourceDimensions: dimensions,
             workflowIntegration: (workflow ?? DirectWorkflow()).Object,
-            inventoryTracking: tracking);
+            inventoryTracking: tracking,
+            sourceBookAuthority: sourceBookAuthority);
 
         return (service, subledgerPostingMock);
     }
@@ -1285,7 +1310,7 @@ public sealed partial class ArInvoicePostingMigrationTests
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
     {
-        var userId = Guid.NewGuid().ToString();
+        var userId = tenantId.ToString();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
@@ -1388,7 +1413,7 @@ public sealed partial class ArInvoicePostingMigrationTests
         {
             Id = tenantId,
             Name = $"Tenant {code}",
-            Code = code,
+            Code = code == "TEN" ? $"TEN-{tenantId:N}" : code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
@@ -1405,6 +1430,21 @@ public sealed partial class ArInvoicePostingMigrationTests
             CurrencyName = "Ghanaian Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
             IsBaseCurrency = true, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
         });
+        if (!db.Users.Local.Any(user => user.Id == tenantId))
+        {
+            db.Users.Add(new ApplicationUser
+            {
+                Id = tenantId,
+                TenantId = tenantId,
+                UserName = $"ar.invoice.poster.{tenantId:N}",
+                NormalizedUserName = $"AR.INVOICE.POSTER.{tenantId:N}",
+                Email = $"ar.invoice.poster.{tenantId:N}@example.test",
+                NormalizedEmail = $"AR.INVOICE.POSTER.{tenantId:N}@EXAMPLE.TEST",
+                FirstName = "AR",
+                LastName = "Poster",
+                IsActive = true
+            });
+        }
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1413,11 +1453,25 @@ public sealed partial class ArInvoicePostingMigrationTests
         bool isOpen = true,
         bool isClosed = false)
     {
+        var fiscalYear = db.FiscalYears.Local.SingleOrDefault(year =>
+            year.TenantId == tenantId && year.Year == 2026);
+        if (fiscalYear is null)
+        {
+            fiscalYear = new FiscalYear
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                FiscalYearName = "Fiscal Year 2026", FiscalYearCode = "2026",
+                Year = 2026, FiscalYearType = "Calendar",
+                StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+                TotalDays = 365, NumberOfPeriods = 12, Status = "Open", IsActive = true
+            };
+            db.FiscalYears.Add(fiscalYear);
+        }
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -1528,6 +1582,7 @@ public sealed partial class ArInvoicePostingMigrationTests
             PartnerCode = $"CUS-{tenantId.ToString("N")[..6]}",
             PartnerName = "Test Customer",
             PartnerType = "Customer",
+            ApprovalStatus = "Approved",
             RegistrationStatus = "Approved",
             IsActive = true,
             IsBlacklisted = false,

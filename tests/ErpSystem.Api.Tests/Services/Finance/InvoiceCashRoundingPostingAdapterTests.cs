@@ -142,8 +142,9 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
         await fixture.ApplyAsync(request);
 
         request.FinanceRoundingEvidenceId.Should().BeNull();
-        request.Lines.Should().NotContain(x => x.TransactionTag is
-            InvoiceCashRoundingPostingAdapter.GainTag or InvoiceCashRoundingPostingAdapter.LossTag);
+        request.Lines.Should().NotContain(x =>
+            x.TransactionTag == InvoiceCashRoundingPostingAdapter.GainTag
+            || x.TransactionTag == InvoiceCashRoundingPostingAdapter.LossTag);
         source.TotalAmount.Should().Be(10.03m);
     }
 
@@ -191,6 +192,7 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
         await fixture.Context.SaveChangesAsync();
 
         await fixture.ApplyAsync(request, "GHS", 2);
+        await fixture.Context.SaveChangesAsync();
 
         invoice.TotalAmount.Should().Be(10.05m);
         invoice.BaseCurrencyAmount.Should().Be(120.60m);
@@ -328,7 +330,7 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
                     ExchangeRate = 1m, BusinessPartnerId = Guid.NewGuid() });
             else if (module == "AR" && documentType == "CustomerPayment")
             {
-                var method = new PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
+                var method = new ErpSystem.Core.Entities.Finance.PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
                     Name = "Cash", Type = PaymentMethodType.Cash };
                 var till = new LiquidityAccount { Id = Guid.NewGuid(), TenantId = TenantId,
                     Code = "TILL", Name = "Till", AccountType = LiquidityAccountType.CashTill,
@@ -344,7 +346,7 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
                     BusinessPartnerId = Guid.NewGuid(), PaymentMethod = VendorPaymentMethod.Cash });
             else if (module == "CASHBANK")
             {
-                var method = new PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
+                var method = new ErpSystem.Core.Entities.Finance.PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
                     Name = "Cash", Type = PaymentMethodType.Cash };
                 Context.AddRange(method, new CashTransaction { Id = sourceId, TenantId = TenantId,
                     TransactionNumber = "ROUND-1", TransactionType = documentType.Contains("Receipt")
