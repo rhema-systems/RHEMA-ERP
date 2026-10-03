@@ -68,7 +68,10 @@ public class StaffTravelRequestDto : BaseDto
     public Guid? PolicyId { get; set; }
     public string? PolicyName { get; set; }
     public bool IsInternational { get; set; }
+    /// <summary>Lane 7 (D-39): from the visa register when the traveller's passport is on file, unless overridden.</summary>
     public bool RequiresVisa { get; set; }
+    /// <summary>Why <see cref="RequiresVisa"/> stands against the register; null when the register (or nothing) set it.</summary>
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
     public TravelRiskLevel RiskLevel { get; set; }
     public string RiskLevelName => RiskLevel.ToString();
@@ -222,6 +225,12 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
     public string CurrencyCode { get; set; } = string.Empty;
 
     public bool RequiresVisa { get; set; }
+    /// <summary>
+    /// Lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the traveller's passport. Without
+    /// it the server sets the flag from the register whenever the passport is on file.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     public TravelRiskLevel RiskLevel { get; set; } = TravelRiskLevel.Low;
@@ -289,6 +298,12 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
     public string CurrencyCode { get; set; } = string.Empty;
 
     public bool RequiresVisa { get; set; }
+    /// <summary>
+    /// Lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the traveller's passport. Without
+    /// it the server sets the flag from the register whenever the passport is on file.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     [Required]
@@ -1605,6 +1620,34 @@ public class StaffTravelGroundTransportDto : BaseDto
     public string? DriverTravelRequestNumber { get; set; }
     public string? DriverTravelRequestStatus { get; set; }
     public bool DriverAwayOvernight { get; set; }
+}
+
+/// <summary>
+/// Lane 7 (D-36, T-25): a destination health requirement as it stands for one trip — what the traveller must hold, and
+/// whether the desk has checked it (who, when, a note). Nothing is blocked by an unticked one.
+/// </summary>
+public class StaffTravelTripHealthRequirementDto
+{
+    public Guid HealthRequirementId { get; set; }
+    public string RequirementName { get; set; } = string.Empty;
+    public TravelHealthRequirementType RequirementType { get; set; }
+    public string RequirementTypeName => RequirementType.ToString();
+    public bool IsMandatory { get; set; }
+    public int? ValidityDays { get; set; }
+    public string? Notes { get; set; }
+    public bool Cleared { get; set; }
+    public Guid? ClearanceId { get; set; }
+    public DateTime? ClearedAt { get; set; }
+    public Guid? ClearedById { get; set; }
+    public string? ClearedByName { get; set; }
+    public string? ClearanceNote { get; set; }
+}
+
+public class ClearStaffTravelHealthRequirementDto
+{
+    /// <summary>What was checked — e.g. "Yellow-fever certificate seen, valid to 2034".</summary>
+    [MaxLength(1000)]
+    public string? Note { get; set; }
 }
 
 /// <summary>
@@ -3003,6 +3046,8 @@ public class StaffTravelVisaRequirementDto : BaseDto
     public int? ProcessingDays { get; set; }
     public string? OfficialSourceUrl { get; set; }
     public DateOnly? LastVerifiedAt { get; set; }
+    /// <summary>Lane 7 (T-40): never verified, or not in the last 365 days.</summary>
+    public bool IsStale { get; set; }
     public string? Notes { get; set; }
 }
 

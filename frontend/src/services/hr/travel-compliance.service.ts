@@ -25,6 +25,7 @@ import type {
   UpdateStaffTravelInsurancePolicy,
   StaffTravelHealthRequirement,
   CreateStaffTravelHealthRequirement,
+  StaffTravelTripHealthRequirement,
   StaffTravelPolicy,
   StaffTravelPolicySummary,
   CreateStaffTravelPolicy,
@@ -297,6 +298,22 @@ class TravelComplianceService {
   acknowledgeAlertNotification(id: string) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/alert-notifications/${id}/acknowledge`, {});
+  }
+
+  // ── Health requirements on a trip (lane 7, D-36) ─────────────────────────────
+
+  getTripHealthRequirements(requestId: string) {
+    return apiService.get<StaffTravelTripHealthRequirement[]>(`${this.baseUrl}/requests/${requestId}/health-requirements`);
+  }
+
+  /** The desk ticks a requirement as checked for the traveller — the caller and the clock are the server's. */
+  clearHealthRequirement(requestId: string, healthRequirementId: string, note?: string | null) {
+    return apiService.post<StaffTravelTripHealthRequirement>(
+      `${this.baseUrl}/requests/${requestId}/health-requirements/${healthRequirementId}/clear`, { note: note ?? null });
+  }
+
+  unclearHealthRequirement(requestId: string, healthRequirementId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/requests/${requestId}/health-requirements/${healthRequirementId}/clear`);
   }
 
   // ── Insurance ──────────────────────────────────────────────────────────────

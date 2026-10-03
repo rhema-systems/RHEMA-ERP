@@ -37,6 +37,7 @@ export interface TravelRequestFormOutput {
   estimatedTotalCost: number;
   currencyCode: string;
   requiresVisa: boolean;
+  visaOverrideReason?: string;
   requiresHealthClearance: boolean;
   amendmentReason?: string;
 }
@@ -67,6 +68,8 @@ export function buildTravelRequestFields(v: TravelRequestFormOutput, isEdit: boo
     estimatedTotalCost: v.estimatedTotalCost,
     currencyCode: v.currencyCode,
     requiresVisa: v.requiresVisa,
+    // Lane 7 (D-39): sent back as it was, or the next save takes the register's answer again.
+    visaOverrideReason: v.visaOverrideReason?.trim() || null,
     requiresHealthClearance: v.requiresHealthClearance,
     riskLevel: v.riskLevel,
     amendmentReason: isEdit ? v.amendmentReason || null : null,

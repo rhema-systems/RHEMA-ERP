@@ -258,6 +258,51 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 $" rates the destination Prohibited, so the trip cannot be {verb}.");
     }
 
+    /// <summary>
+    /// Lane 7 (E4, D-39): the visa flag from the register, when the traveller's passport is on file and the register has
+    /// the pair — unless the requester answered differently and said why (<paramref name="overrideReason"/>), which then
+    /// stands and is kept on the trip, and as an internal note when the reason is new. Without a passport or an entry,
+    /// the requester's answer stands and there is nothing to override.
+    /// </summary>
+    private async Task ApplyVisaRegisterAsync(
+        StaffTravelRequest entity, bool askedFlag, string? overrideReason, CancellationToken cancellationToken)
+    {
+        var verdict = await StaffTravelComplianceRules.VisaVerdictAsync(
+            _unitOfWork, entity.TenantId, entity.EmployeeId, entity.DestinationCountryId, cancellationToken);
+        var reason = string.IsNullOrWhiteSpace(overrideReason) ? null : overrideReason.Trim();
+        if (!verdict.Known)
+        {
+            entity.RequiresVisa = askedFlag;
+            entity.VisaOverrideReason = null;
+            return;
+        }
+        if (askedFlag == verdict.Needs || reason is null)
+        {
+            entity.RequiresVisa = verdict.Needs;
+            entity.VisaOverrideReason = null;
+            return;
+        }
+        if (reason.Length < 5)
+            throw new InvalidOperationException(
+                "Say why the trip's visa answer differs from the visa register, in at least five characters.");
+        var isNew = !string.Equals(entity.VisaOverrideReason, reason, StringComparison.Ordinal);
+        entity.RequiresVisa = askedFlag;
+        entity.VisaOverrideReason = reason;
+        if (isNew && _currentUserService.EmployeeId is Guid author)
+            await _commentRepository.AddAsync(new StaffTravelRequestComment
+            {
+                TenantId = entity.TenantId,
+                StaffTravelRequestId = entity.Id,
+                AuthorId = author,
+                CommentType = TravelRequestCommentType.InternalNote,
+                Body = Clip($"The visa register says a {verdict.PassportCountry} passport " +
+                            (verdict.Needs ? "needs a visa" : "needs no visa applied for") + $" for {verdict.DestinationCountry}; " +
+                            $"the trip is marked as {(askedFlag ? "needing one" : "not needing one")}. Reason: {reason}", 2000),
+                IsVisibleToTraveller = false,
+                CreatedBy = RequireUserId().ToString(),
+            });
+    }
+
     private static void RequireDatesInOrder(DateOnly start, DateOnly end)
     {
         if (end < start)
@@ -826,6 +871,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         ApplyServerFacts(entity, traveller);
+        await ApplyVisaRegisterAsync(entity, createDto.RequiresVisa, createDto.VisaOverrideReason, cancellationToken);
         entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
         entity.Status = StaffTravelRequestStatus.Draft;
 
@@ -858,6 +904,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         ApplyServerFacts(entity, traveller);
+        await ApplyVisaRegisterAsync(entity, updateDto.RequiresVisa, updateDto.VisaOverrideReason, cancellationToken);
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1328,6 +1375,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 "Enter the trip's estimated cost before submitting it — the approver decides the budget against it.");
         RequireDatesInOrder(entity.TravelStartDate, entity.TravelEndDate);
         await RequireNotProhibitedAsync(entity, "submitted", cancellationToken);
+        // Lane 7 (D-39): the register read again — a passport may have been recorded since the trip was raised — and a
+        // passport refused entry at the destination is not submitted.
+        var visa = await StaffTravelComplianceRules.VisaVerdictAsync(
+            _unitOfWork, entity.TenantId, entity.EmployeeId, entity.DestinationCountryId, cancellationToken);
+        if (visa.Prohibited)
+            throw new InvalidOperationException(
+                $"The visa register records a {visa.PassportCountry} passport as refused entry to {visa.DestinationCountry}, so " +
+                $"travel request {entity.RequestNumber} is not submitted. If the entry is wrong, correct the register first.");
+        if (visa.Known && entity.VisaOverrideReason is null)
+            entity.RequiresVisa = visa.Needs;
         await _currency.RequireKnownCurrencyAsync(entity.CurrencyCode, cancellationToken);
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -1350,6 +1407,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         entity.PolicyId = caps.PolicyId;
 
         var warnings = await ApprovedLeaveWarningsAsync(entity, traveller, cancellationToken);
+        // Lane 7 (O-16): uninsured international days and a passport near expiry warn here; the ticket is what waits.
+        warnings.AddRange(await StaffTravelComplianceRules.SubmissionWarningsAsync(_unitOfWork, entity, cancellationToken));
 
         var (workflowResult, submitOutcome) =
             await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
@@ -2391,6 +2450,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             entity.GroupTravelId = group.Id;
             // Each participant's own unit — the template's single unit stamped the whole group with one.
             ApplyServerFacts(entity, traveller);
+            // ...and their own passport's answer from the visa register (lane 7, D-39).
+            await ApplyVisaRegisterAsync(entity, dto.RequiresVisa, null, cancellationToken);
             // Request numbers are derived from the persisted count, so save each in turn.
             entity.RequestNumber = await GenerateRequestNumberAsync(tenantId, cancellationToken);
             entity.Status = StaffTravelRequestStatus.Draft;

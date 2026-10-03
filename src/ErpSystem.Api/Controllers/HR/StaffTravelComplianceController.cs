@@ -34,6 +34,34 @@ public class StaffTravelComplianceController : HrControllerBase
         => Ok(await _fleet.GetIncidentsAsync(requestId));
 
     /// <summary>
+    /// Lane 7 (D-36, T-25): the destination's health requirements in force over the trip, mandatory first, each with
+    /// whether the desk has cleared it for this traveller. Nothing is blocked by an uncleared one.
+    /// </summary>
+    [HttpGet("requests/{requestId:guid}/health-requirements")]
+    public async Task<ActionResult<IReadOnlyList<StaffTravelTripHealthRequirementDto>>> GetTripHealthRequirements(Guid requestId)
+        => Ok(await _service.GetTripHealthRequirementsAsync(requestId));
+
+    /// <summary>Ticks a health requirement as checked for the trip — by the caller, a person, so it needs the employee link.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("requests/{requestId:guid}/health-requirements/{healthRequirementId:guid}/clear")]
+    public async Task<ActionResult<StaffTravelTripHealthRequirementDto>> ClearHealthRequirement(
+        Guid requestId, Guid healthRequirementId,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ClearStaffTravelHealthRequirementDto? dto)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Clearing a health requirement") is { } contextError) return contextError;
+        return Ok(await _service.ClearHealthRequirementAsync(requestId, healthRequirementId, dto?.Note, employeeId));
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpDelete("requests/{requestId:guid}/health-requirements/{healthRequirementId:guid}/clear")]
+    public async Task<IActionResult> UnclearHealthRequirement(Guid requestId, Guid healthRequirementId)
+    {
+        await _service.UnclearHealthRequirementAsync(requestId, healthRequirementId);
+        return NoContent();
+    }
+
+    /// <summary>
     /// Tenant + platform user id for audit fields. Deliberately does not require an employee
     /// link — see <see cref="HrControllerBase"/>.
     /// </summary>

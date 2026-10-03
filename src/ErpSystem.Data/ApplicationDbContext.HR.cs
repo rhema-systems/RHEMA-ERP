@@ -696,6 +696,7 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelAlertNotification> StaffTravelAlertNotifications { get; set; } = null!;
     public DbSet<StaffTravelInsurancePolicy> StaffTravelInsurancePolicies { get; set; } = null!;
     public DbSet<StaffTravelHealthRequirement> StaffTravelHealthRequirements { get; set; } = null!;
+    public DbSet<StaffTravelHealthClearance> StaffTravelHealthClearances { get; set; } = null!;
     public DbSet<NumberSequence> NumberSequences { get; set; } = null!;
 
     // Employee bulk import (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
@@ -14827,6 +14828,14 @@ private void ConfigureStaffTravelEntities(ModelBuilder builder)
         builder.Entity<StaffTravelHealthRequirement>(entity =>
         {
             entity.HasIndex(x => x.IsActive);
+        });
+
+        builder.Entity<StaffTravelHealthClearance>(entity =>
+        {
+            // Travel final closure, lane 7 (D-36): one live tick per trip and requirement. Filtered, so an untick (a
+            // soft delete) leaves the requirement free to be ticked again.
+            entity.HasIndex(x => new { x.TenantId, x.StaffTravelRequestId, x.HealthRequirementId })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
         });
 
         // --- Delete behaviour ----------------------------------------------------

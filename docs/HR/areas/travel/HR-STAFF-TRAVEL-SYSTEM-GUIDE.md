@@ -805,6 +805,14 @@ organisation unit and by parent — six reads this screen does not use.
 > *"Everything that has to be settled before anybody asks for the money: who is going, where, when,
 > why, what it will cost, how risky it is and what they will need to be allowed in."*
 
+> ⚠ **Changed by closure lane 7, slice 7b (2026-10-03) — the visa switch is now the register's.** When the traveller's
+> primary passport is on file (Staff Travel → Travel Documents) and the visa register has their passport's country to
+> the destination, the server sets *Requires a visa* from the register on save and again at submission — an E-Visa or
+> embassy visa means yes, visa-free or on arrival no — whatever the switch said. To keep a different answer, fill
+> **If this differs from the visa register, why**; it stands, and is kept as an internal note. A destination the register
+> records as refusing that passport entry cannot be submitted. Submitting an international trip warns when no insurance
+> covers it yet and when the passport expires within six months of the return.
+
 ### 🚫 **READ RULE 3 BEFORE THIS CHAPTER.** Do not choose *Negotiation* or *Extreme*.
 
 ### 👁 On the page
@@ -1307,6 +1315,16 @@ Tables: `StaffTravelBudgets`, `StaffTravelAdvances`, `StaffTravelExpenseClaims`.
 > vehicles on its fleet trip, a read-only **Company vehicle incidents (from Fleet)** card shows it — when, the vehicle
 > and driver, type, severity, status, where and what happened. Fleet records and closes incidents; telling the desk or
 > the traveller's line authority of a new one is lane 8's. UAT has no fleet, so the demo shows no such card.
+>
+> ⚠ **Added by closure lane 7, slice 7b (2026-10-03):**
+> - a **Health requirements** card — the destination's requirements over the trip, mandatory first; the desk **Clears**
+>   each with a note of what it saw (recorded in its name, today) or takes the tick off. Nothing is blocked by an
+>   unticked one (D-36, T-25);
+> - **the flight's ticket now waits**, in order, for the visa (lane 5), for insurance whose cover spans every day of an
+>   international trip, and — on a Critical trip — for the traveller's acknowledgement of the current risk assessment
+>   (D-37); the insurance and risk cards say so until each is met. The demo's London flight is still refused naming its
+>   visa first;
+> - the visa lookup flags an entry not checked for over a year (T-40).
 
 **The richest tab in HR, and the one that justifies the module.** Six sections:
 
@@ -1412,9 +1430,9 @@ Tables: `StaffTravelDocuments`, `StaffTravelVisaRequirements`, `StaffTravelVisaA
 | Gap | |
 |---|---|
 | **T-23 · The risk-assessment acknowledgement is unreachable by the people it is for** — the gate and the service check do not overlap. The alert acknowledgement had the same shape and was fixed with `/me` routes; this one was not | |
-| **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | *Ticketing half fixed in closure lane 5: a flight is not ticketed until a visa application is approved or not required. Deriving the flag from the requirements table, and health clearance, are lane 7's* |
-| **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one | |
-| **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry | |
+| **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | *Ticketing half fixed in closure lane 5: a flight is not ticketed until a visa application is approved or not required. the flag derived from the requirements table and health clearance ticked per trip in lane 7 (7b, D-39, D-36)* |
+| **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one || *Fixed in closure lane 7 (7b, D-36): the trip lists the destination's requirements and the desk ticks each off with a note; nothing is blocked by an unticked one* |
+| **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry || *Warned in closure lane 7 (7b, O-16): submitting an international trip warns when the primary passport expires within six months of the return (TDC to confirm the window)* |
 
 ---
 
@@ -2003,9 +2021,9 @@ Table: `StaffTravelVisaRequirements`.
 
 | Gap | |
 |---|---|
-| **T-40 · Nothing expires a requirement.** `lastVerifiedAt` is recorded and no screen or sweep flags a row nobody has checked for a year — on a page whose own subtitle says a wrong entry is worse than a missing one | |
+| **T-40 · Nothing expires a requirement.** `lastVerifiedAt` is recorded and no screen or sweep flags a row nobody has checked for a year — on a page whose own subtitle says a wrong entry is worse than a missing one || *Fixed in closure lane 7 (7b): an entry never verified, or not in 365 days, is flagged on this page and on the trip's Compliance tab* |
 | **T-41 · There is no reverse view.** You cannot ask "which destinations does a Ghanaian passport enter freely" — only "what does this destination require" | |
-| **T-42 · The requirement is not checked against the trip.** A trip flagged `RequiresVisa = false` into a visa-required country is accepted (and see T-24) | |
+| **T-42 · The requirement is not checked against the trip.** A trip flagged `RequiresVisa = false` into a visa-required country is accepted (and see T-24) || *Fixed in closure lane 7 (7b, D-39): with the traveller's passport on file the register sets the trip's visa flag; a different answer needs a reason; a passport refused entry is not submitted* |
 
 ---
 

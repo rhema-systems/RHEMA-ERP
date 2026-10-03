@@ -69,6 +69,7 @@ const schema = z
     estimatedTotalCost: z.coerce.number().min(0, 'Cannot be negative'),
     currencyCode: z.string().min(1, 'Select a currency'),
     requiresVisa: z.boolean(),
+    visaOverrideReason: z.string().max(1000).optional(),
     requiresHealthClearance: z.boolean(),
     amendmentReason: z.string().max(1000).optional(),
   })
@@ -144,6 +145,7 @@ export function TravelRequestForm({
       estimatedTotalCost: existing?.estimatedTotalCost ?? 0,
       currencyCode: existing?.currencyCode ?? '',
       requiresVisa: existing?.requiresVisa ?? false,
+      visaOverrideReason: existing?.visaOverrideReason ?? '',
       requiresHealthClearance: existing?.requiresHealthClearance ?? false,
       amendmentReason: '',
     },
@@ -328,20 +330,26 @@ export function TravelRequestForm({
             />
           </FieldRow>
 
-          {/* ⚠ Both switches RECORD a need; neither enforces one. The visa section on the
-              Compliance tab shows whatever this says, and nothing yet refuses a booking or a
-              departure without a visa or a clearance (findings E4, T-24, T-25 — lanes 5 and 7). */}
+          {/* Lane 7 (D-39, E4): when the traveller's primary passport is on file and the visa register has the pair, the
+              server sets this from the register and ignores the switch — unless the reason below says why it differs.
+              A trip that needs a visa is not ticketed until one is approved (lane 5, T-24). */}
           <SwitchField
             form={form}
             name="requiresVisa"
             label="Requires a visa"
-            description="Records that this trip needs a visa. The application is tracked on the trip's Compliance tab."
+            description="Set from the visa register when the traveller's passport is on file. The flight is ticketed once a visa application is approved or recorded as not required (the Compliance tab)."
+          />
+          <TextField
+            form={form}
+            name="visaOverrideReason"
+            label="If this differs from the visa register, why"
+            hint="Only when the answer above is deliberately not the register's — e.g. the traveller holds a residence permit. Kept on the trip as an internal note."
           />
           <SwitchField
             form={form}
             name="requiresHealthClearance"
             label="Requires health clearance"
-            description="Records that vaccination or fitness-to-travel evidence is needed. The travel desk confirms it; the system does not check it."
+            description="The destination's health requirements are listed on the trip's Compliance tab, where the travel desk ticks each one off. Nothing is blocked by an unticked one."
           />
 
           {isEdit && (

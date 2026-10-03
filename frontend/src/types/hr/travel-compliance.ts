@@ -191,6 +191,8 @@ export interface StaffTravelVisaRequirement extends AuditFields {
   officialSourceUrl?: string | null;
   /** `DateOnly` — 'YYYY-MM-DD'. When the entry was last checked against the official source. */
   lastVerifiedAt?: string | null;
+  /** Lane 7 (T-40): never verified, or not in the last 365 days. */
+  isStale?: boolean;
   notes?: string | null;
 }
 
@@ -457,6 +459,26 @@ export interface StaffTravelHealthRequirement extends AuditFields {
 
 export type CreateStaffTravelHealthRequirement =
   Omit<StaffTravelHealthRequirement, keyof AuditFields | 'countryName' | 'requirementTypeName'>;
+
+/**
+ * Lane 7 (D-36, T-25): `GET requests/{id}/health-requirements` — the destination's requirements in force over the trip,
+ * mandatory first, each cleared by the desk or not. Nothing is blocked by an uncleared one.
+ */
+export interface StaffTravelTripHealthRequirement {
+  healthRequirementId: string;
+  requirementName: string;
+  requirementType: TravelHealthRequirementType;
+  requirementTypeName: string;
+  isMandatory: boolean;
+  validityDays?: number | null;
+  notes?: string | null;
+  cleared: boolean;
+  clearanceId?: string | null;
+  clearedAt?: string | null;
+  clearedById?: string | null;
+  clearedByName?: string | null;
+  clearanceNote?: string | null;
+}
 
 // ── Policies ─────────────────────────────────────────────────────────────────
 

@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Plus, Send, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
+import { Loader2, Pencil, Plus, Send, ShieldAlert, Stamp, Stethoscope, Umbrella, Check, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -38,6 +38,8 @@ import { travelBookingsService } from '@/services/hr/travel-bookings.service';
 import { TravelQueryError } from './TravelQueryError';
 import { fmtTravelMoney as fmtMoney } from './travel-format';
 import { VISA_REQUIREMENT_TYPE_LABELS } from '@/types/hr/travel-compliance';
+import type { StaffTravelTripHealthRequirement } from '@/types/hr/travel-compliance';
+import { Textarea } from '@/components/ui/textarea';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 
 const VISA_STATUSES = [
@@ -150,6 +152,32 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   const { data: incidents, isError: incidentsFailed, error: incidentsError } = useQuery({
     queryKey: ['travel-fleet-incidents', requestId],
     queryFn: () => travelBookingsService.getFleetIncidents(requestId),
+  });
+
+  // Lane 7 (D-36, T-25): the destination's health requirements over the trip, each cleared by the desk or not.
+  const { data: health, isError: healthFailed, error: healthError } = useQuery({
+    queryKey: ['travel-health-requirements', requestId],
+    queryFn: () => travelComplianceService.getTripHealthRequirements(requestId),
+  });
+  const [clearing, setClearing] = useState<StaffTravelTripHealthRequirement | null>(null);
+  const [clearNote, setClearNote] = useState('');
+  const clearHealth = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string | null }) =>
+      travelComplianceService.clearHealthRequirement(requestId, id, note),
+    onSuccess: async () => {
+      toast({ title: 'Requirement cleared' });
+      setClearing(null);
+      await queryClient.invalidateQueries({ queryKey: ['travel-health-requirements', requestId] });
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not clear it', description: e.message }),
+  });
+  const unclearHealth = useMutation({
+    mutationFn: (id: string) => travelComplianceService.unclearHealthRequirement(requestId, id),
+    onSuccess: async () => {
+      toast({ title: 'Tick taken off' });
+      await queryClient.invalidateQueries({ queryKey: ['travel-health-requirements', requestId] });
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not take the tick off', description: e.message }),
   });
 
   // Who has already been told what, so the desk does not send the same alert twice.
@@ -471,7 +499,9 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           ) : !assessment ? (
             <EmptyState
               title="Not assessed"
-              description="No risk assessment has been recorded for this destination."
+              description={request.riskLevel === 'Critical'
+                ? 'No risk assessment has been recorded, and this trip is rated Critical: its flight is not ticketed until one is recorded and the traveller has acknowledged it.'
+                : 'No risk assessment has been recorded for this destination.'}
             />
           ) : (
             <div className="space-y-3">
@@ -510,6 +540,12 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                 </div>
               )}
 
+              {/* Lane 7 (D-37): a Critical trip's flight waits for the traveller's acknowledgement of this assessment. */}
+              {(request.riskLevel === 'Critical' || assessment.riskLevel === 'Critical') && !assessment.employeeAcknowledged && (
+                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950">
+                  This trip is rated Critical: its flight is not ticketed until the traveller acknowledges this assessment.
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-3 border-t pt-3">
                 {assessment.employeeAcknowledged ? (
                   <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -623,7 +659,13 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                 */}
                 <p className="text-xs text-muted-foreground">
                   {requirement.lastVerifiedAt ? (
-                    <>Last checked {requirement.lastVerifiedAt.slice(0, 10)}</>
+                    requirement.isStale
+                      ? (
+                        <span className="text-amber-600">
+                          Last checked {requirement.lastVerifiedAt.slice(0, 10)} — over a year ago; confirm it before relying on it.
+                        </span>
+                      )
+                      : <>Last checked {requirement.lastVerifiedAt.slice(0, 10)}</>
                   ) : (
                     <span className="text-amber-600">
                       Never checked against an official source — confirm before relying on it.
@@ -698,6 +740,92 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         </CardContent>
       </Card>
 
+      {/* Lane 7 (D-36, T-25): the destination's health requirements over the trip, each ticked off by the desk. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Stethoscope className="h-4 w-4" />
+            Health requirements for {request.destinationCountryName}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {healthFailed && !health ? (
+            <div className="p-4"><TravelQueryError error={healthError} what="the health requirements" /></div>
+          ) : (health ?? []).length === 0 ? (
+            <EmptyState title="None recorded" description="No health requirement is recorded for this destination over the trip's dates." />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Requirement</TableHead>
+                  <TableHead>Cleared</TableHead>
+                  <TableHead className="w-28" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(health ?? []).map((h) => (
+                  <TableRow key={h.healthRequirementId}>
+                    <TableCell>
+                      <span className="font-medium">{h.requirementName}</span>
+                      <span className="text-muted-foreground"> · {humanize(h.requirementTypeName)}</span>
+                      {h.isMandatory && <Badge variant="outline" className="ml-2">mandatory</Badge>}
+                      {h.notes && <span className="block text-xs text-muted-foreground">{h.notes}</span>}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {h.cleared
+                        ? (
+                          <span>
+                            <Check className="mr-1 inline h-4 w-4 text-green-600" />
+                            {h.clearedByName} · {fmtDate(h.clearedAt)}
+                            {h.clearanceNote && <span className="block text-xs text-muted-foreground">{h.clearanceNote}</span>}
+                          </span>
+                        )
+                        : <span className="text-muted-foreground">Not yet</span>}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {h.cleared
+                        ? (
+                          <Button variant="ghost" size="sm" disabled={unclearHealth.isPending}
+                            onClick={() => unclearHealth.mutate(h.healthRequirementId)}>
+                            Untick
+                          </Button>
+                        )
+                        : (
+                          <Button variant="outline" size="sm" onClick={() => { setClearing(h); setClearNote(''); }}>
+                            Clear
+                          </Button>
+                        )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!clearing} onOpenChange={(v) => !v && setClearing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear {clearing?.requirementName}</DialogTitle>
+            <DialogDescription>
+              You are recorded as having checked this for {request.employeeName}, today. Say what you saw — a certificate,
+              its validity.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea value={clearNote} maxLength={1000} onChange={(e) => setClearNote(e.target.value)}
+            placeholder="e.g. Yellow-fever certificate seen, valid to 2034" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearing(null)}>Cancel</Button>
+            <Button disabled={clearHealth.isPending}
+              onClick={() => clearing && clearHealth.mutate({ id: clearing.healthRequirementId, note: clearNote.trim() || null })}>
+              {clearHealth.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Clear it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -709,6 +837,14 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           </Button>
         </CardHeader>
         <CardContent className="p-0">
+          {/* Lane 7 (O-16): an international trip's flight waits for cover across every day of it. */}
+          {request.isInternational && !insuranceFailed && !(insurance ?? []).some((p) =>
+            String(p.coverageStart).slice(0, 10) <= String(request.travelStartDate).slice(0, 10)
+            && String(p.coverageEnd).slice(0, 10) >= String(request.travelEndDate).slice(0, 10)) && (
+            <p className="m-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950">
+              This trip is international and no cover recorded here spans every day of it — its flight is not ticketed until one does.
+            </p>
+          )}
           {insuranceFailed && !insurance ? (
             <div className="p-4">
               <TravelQueryError error={insuranceError} what="the insurance cover" />

@@ -934,6 +934,102 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         return true;
     }
 
+    // ---- Health requirements cleared per trip (lane 7, D-36, T-25) -----------------------------------------------
+
+    /// <summary>The trip and the destination's health requirements in force over its dates, mandatory first.</summary>
+    private async Task<(StaffTravelRequest Request, List<StaffTravelHealthRequirement> Applicable)> TripHealthAsync(
+        Guid requestId, CancellationToken cancellationToken)
+    {
+        var request = await RequireOwnedRequestAsync(requestId);
+        var applicable = await _unitOfWork.Repository<StaffTravelHealthRequirement>()
+            .GetQueryable(h => h.TenantId == request.TenantId && !h.IsDeleted && h.IsActive && h.CountryId == request.DestinationCountryId
+                            && h.EffectiveFrom <= request.TravelEndDate && (h.EffectiveTo == null || h.EffectiveTo >= request.TravelStartDate))
+            .OrderByDescending(h => h.IsMandatory)
+            .ThenBy(h => h.RequirementName)
+            .ToListAsync(cancellationToken);
+        return (request, applicable);
+    }
+
+    public async Task<IReadOnlyList<StaffTravelTripHealthRequirementDto>> GetTripHealthRequirementsAsync(
+        Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var (request, applicable) = await TripHealthAsync(requestId, cancellationToken);
+        var ids = applicable.Select(h => h.Id).ToList();
+        var cleared = await _unitOfWork.Repository<StaffTravelHealthClearance>()
+            .GetQueryable(c => c.TenantId == request.TenantId && c.StaffTravelRequestId == request.Id && !c.IsDeleted
+                            && ids.Contains(c.HealthRequirementId))
+            .Select(c => new
+            {
+                c.Id, c.HealthRequirementId, c.ClearedAt, c.ClearedById, c.Note,
+                Name = (c.ClearedBy.FirstName + " " + c.ClearedBy.LastName).Trim(),
+            })
+            .ToListAsync(cancellationToken);
+        return applicable.Select(h =>
+        {
+            var c = cleared.FirstOrDefault(x => x.HealthRequirementId == h.Id);
+            return new StaffTravelTripHealthRequirementDto
+            {
+                HealthRequirementId = h.Id, RequirementName = h.RequirementName, RequirementType = h.RequirementType,
+                IsMandatory = h.IsMandatory, ValidityDays = h.ValidityDays, Notes = h.Notes,
+                Cleared = c is not null, ClearanceId = c?.Id, ClearedAt = c?.ClearedAt, ClearedById = c?.ClearedById,
+                ClearedByName = c?.Name, ClearanceNote = c?.Note,
+            };
+        }).ToList();
+    }
+
+    /// <summary>Ticks a requirement as checked for the trip's traveller — by the caller, now, with what was seen.</summary>
+    public async Task<StaffTravelTripHealthRequirementDto> ClearHealthRequirementAsync(
+        Guid requestId, Guid healthRequirementId, string? note, Guid clearedByEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var (request, applicable) = await TripHealthAsync(requestId, cancellationToken);
+        if (request.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected or StaffTravelRequestStatus.Closed)
+            throw new InvalidOperationException(
+                $"Travel request {request.RequestNumber} is {request.Status}; its health requirements are not cleared now.");
+        var requirement = applicable.FirstOrDefault(h => h.Id == healthRequirementId)
+                          ?? throw new ArgumentException(
+                              $"Health requirement '{healthRequirementId}' does not apply to travel request {request.RequestNumber}.");
+        var existing = await _unitOfWork.Repository<StaffTravelHealthClearance>()
+            .GetQueryable(c => c.TenantId == request.TenantId && c.StaffTravelRequestId == request.Id && !c.IsDeleted
+                            && c.HealthRequirementId == requirement.Id)
+            .Select(c => new { c.ClearedAt, Name = (c.ClearedBy.FirstName + " " + c.ClearedBy.LastName).Trim() })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (existing is not null)
+            throw new InvalidOperationException(
+                $"{requirement.RequirementName} was cleared for this trip by {existing.Name} on {existing.ClearedAt:dd MMM yyyy}.");
+
+        var text = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        await _unitOfWork.Repository<StaffTravelHealthClearance>().AddAsync(new StaffTravelHealthClearance
+        {
+            TenantId = request.TenantId,
+            StaffTravelRequestId = request.Id,
+            HealthRequirementId = requirement.Id,
+            ClearedById = clearedByEmployeeId,   // the caller, not a payload value
+            ClearedAt = DateTime.UtcNow,         // ...and the clock
+            Note = text is { Length: > 1000 } ? text[..1000] : text,
+            CreatedBy = _currentUserProvider.UserId.ToString(),
+        });
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return (await GetTripHealthRequirementsAsync(requestId, cancellationToken)).First(r => r.HealthRequirementId == requirement.Id);
+    }
+
+    /// <summary>Takes a tick off (a soft delete) — the requirement can be cleared again.</summary>
+    public async Task<bool> UnclearHealthRequirementAsync(Guid requestId, Guid healthRequirementId, CancellationToken cancellationToken = default)
+    {
+        var request = await RequireOwnedRequestAsync(requestId);
+        if (request.Status == StaffTravelRequestStatus.Closed)
+            throw new InvalidOperationException($"Travel request {request.RequestNumber} is closed; its record stands.");
+        var live = await _unitOfWork.Repository<StaffTravelHealthClearance>()
+            .GetQueryable(c => c.TenantId == request.TenantId && c.StaffTravelRequestId == request.Id && !c.IsDeleted
+                            && c.HealthRequirementId == healthRequirementId)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new ArgumentException($"Health requirement '{healthRequirementId}' is not cleared on travel request {request.RequestNumber}.");
+        live.IsDeleted = true;
+        live.DeletedAt = DateTime.UtcNow;
+        live.DeletedBy = _currentUserProvider.UserId.ToString();
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     // ---- Insurance policies ------------------------------------------------
 
     public async Task<StaffTravelInsurancePolicyDto> GetInsuranceByIdAsync(Guid id, CancellationToken cancellationToken = default)

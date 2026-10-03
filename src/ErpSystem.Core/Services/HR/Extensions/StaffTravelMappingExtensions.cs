@@ -52,6 +52,7 @@ public static class StaffTravelMappingExtensions
             PolicyName = entity.Policy?.PolicyName,
             IsInternational = entity.IsInternational,
             RequiresVisa = entity.RequiresVisa,
+            VisaOverrideReason = entity.VisaOverrideReason,
             RequiresHealthClearance = entity.RequiresHealthClearance,
             RiskLevel = entity.RiskLevel,
             GroupTravelId = entity.GroupTravelId,
@@ -1846,6 +1847,10 @@ public static class StaffTravelMappingExtensions
             ProcessingDays = entity.ProcessingDays,
             OfficialSourceUrl = entity.OfficialSourceUrl,
             LastVerifiedAt = entity.LastVerifiedAt,
+            // Lane 7 (T-40): an entry nobody has checked for a year — or ever — is flagged, on a register whose own page
+            // says a wrong entry is worse than a missing one.
+            IsStale = entity.LastVerifiedAt is not DateOnly verified
+                      || verified < DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-365),
             Notes = entity.Notes,
         };
     }

@@ -180,6 +180,9 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   policyId?: string | null;
   policyName?: string | null;
   requiresVisa: boolean;
+  /** Lane 7 (D-39): why `requiresVisa` differs from the visa register; without it the server sets the flag from the
+   *  register whenever the traveller's primary passport is on file. */
+  visaOverrideReason?: string | null;
   requiresHealthClearance: boolean;
   groupTravelId?: string | null;
   parentRequestId?: string | null;
@@ -330,6 +333,9 @@ export interface CreateStaffTravelRequest {
   estimatedTotalCost: number;
   currencyCode: string;
   requiresVisa: boolean;
+  /** Lane 7 (D-39): why `requiresVisa` differs from the visa register; without it the server sets the flag from the
+   *  register whenever the traveller's primary passport is on file. */
+  visaOverrideReason?: string | null;
   requiresHealthClearance: boolean;
   riskLevel: TravelRiskLevel;
   parentRequestId?: string | null;

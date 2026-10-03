@@ -1144,17 +1144,30 @@ public class StaffTravelBookingService : IStaffTravelBookingService
     /// the visa is recorded as not required. <c>RequiresVisa</c> gated nothing, so a flight was ticketed — the fare
     /// spent — for a traveller who might never be let in.
     /// </summary>
-    private async Task RequireVisaForTicketAsync(StaffTravelRequest request, CancellationToken cancellationToken)
+    /// <remarks>Lane 7 (D-39): the need is the trip's flag or, with no override recorded, the visa register now — a
+    /// passport may have been recorded after the trip was raised. Then two more waits, in this order after the visa (the
+    /// demo's London flight is refused naming its visa): cover across an international trip's dates (O-16), and a
+    /// Critical trip's acknowledged risk assessment (D-37).</remarks>
+    private async Task RequireTicketReadyAsync(StaffTravelRequest request, CancellationToken cancellationToken)
     {
-        if (!request.RequiresVisa) return;
-        var settled = await _unitOfWork.Repository<StaffTravelVisaApplication>()
-            .GetQueryable(v => v.TenantId == request.TenantId && v.StaffTravelRequestId == request.Id && !v.IsDeleted
-                            && (v.Status == VisaApplicationStatus.Approved || v.Status == VisaApplicationStatus.NotRequired))
-            .AnyAsync(cancellationToken);
-        if (!settled)
+        if (await StaffTravelComplianceRules.NeedsVisaAsync(_unitOfWork, request, cancellationToken))
+        {
+            var settled = await _unitOfWork.Repository<StaffTravelVisaApplication>()
+                .GetQueryable(v => v.TenantId == request.TenantId && v.StaffTravelRequestId == request.Id && !v.IsDeleted
+                                && (v.Status == VisaApplicationStatus.Approved || v.Status == VisaApplicationStatus.NotRequired))
+                .AnyAsync(cancellationToken);
+            if (!settled)
+                throw new InvalidOperationException(
+                    $"Travel request {request.RequestNumber} needs a visa, and no visa application on it is approved — the " +
+                    "flight is ticketed once one is, or once the visa is recorded as not required (the Compliance tab).");
+        }
+        if (request.IsInternational && !await StaffTravelComplianceRules.InsuranceCoversAsync(_unitOfWork, request, cancellationToken))
             throw new InvalidOperationException(
-                $"Travel request {request.RequestNumber} needs a visa, and no visa application on it is approved — the " +
-                "flight is ticketed once one is, or once the visa is recorded as not required (the Compliance tab).");
+                $"Travel request {request.RequestNumber} is international and no travel insurance on it covers every day of " +
+                $"it ({request.TravelStartDate:dd MMM} to {request.TravelEndDate:dd MMM yyyy}) — the flight is ticketed once the " +
+                "cover is recorded (the Compliance tab).");
+        if (await StaffTravelComplianceRules.CriticalUnacknowledgedAsync(_unitOfWork, request, cancellationToken) is { } critical)
+            throw new InvalidOperationException(critical);
     }
 
     /// <summary>
@@ -1216,7 +1229,7 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             var number = ticketNumber?.Trim();
             if (string.IsNullOrEmpty(number))
                 throw new InvalidOperationException("Give the ticket number the airline issued.");
-            await RequireVisaForTicketAsync(request, cancellationToken);
+            await RequireTicketReadyAsync(request, cancellationToken);
             entity.TicketNumber = number;
         }
         if (verb == TravelBookingVerb.Cancel)

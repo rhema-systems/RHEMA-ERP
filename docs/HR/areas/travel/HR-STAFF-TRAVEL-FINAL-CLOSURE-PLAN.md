@@ -73,10 +73,13 @@ baseline (D-13); lane 0 was built the same day.**
    the suite makes and removes its own (D-28). The sweep's fleet signals are lane 8's (D-29).
 10. **Lane 7** (compliance and the portal) — **IN PROGRESS.** Source-checked after `aba756a29` (lane 7's *Source
    check*: K1–K5; D-36…D-39; slices 7a–7d). **7a** the desk's compliance records (the documents register, masking,
-   the visa edit, the risk and delete guards, an alert's fan-out) — compliance 51/51 twice — staged. No migration in 7a.
+   the visa edit, the risk and delete guards, an alert's fan-out) — committed `7a22f177c`. **7b** the checks against the
+   trip (the visa flag from the register, health clearances, the ticket's insurance and Critical waits, submission's
+   warnings, stale entries) — migration `20261003002540_TravelClosureHealthClearance` **applied to UAT** (restore point
+   `ErpSystemDB_UAT_before_travell7b.bak`), compliance 96/96 twice — staged.
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
-   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7b** the checks against the
-   trip (D-36's migration — the user scaffolds it), **7c** the portal's views and acts, **7d** the portal's claims.
+   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7c** the portal's views and
+   acts (E1's acknowledgement door — D-37's ticket wait needs it), **7d** the portal's claims.
 11. **Then** lanes **8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -156,7 +159,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
-| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a staged 2026-10-03 (compliance 51/51 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123, fleet 165 twice each); D-36…D-39; next 7b, 7c, 7d |
+| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b staged 2026-10-03, its migration applied to UAT (compliance 96/96 twice; bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-39; next 7c, 7d |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
@@ -2158,6 +2161,66 @@ bookings **148** (952000, 981592), money **288** (000861, 058251), policy **131*
 slow request (the slowest travel call 149 ms; the cold start's first login 1.5 s). **No alert notification was written
 on any trip but the fixture's** (checked in SQL after the compliance and the bookings runs), and no run left a document,
 alert, trip or fleet row live. The API log held only the known noise.
+
+**As built — slice 7b (2026-10-03).** Migration `20261003002540_TravelClosureHealthClearance`.
+
+- *Migration (D-36, D-39).* Scaffolded by the user, rewritten as guarded SQL: `StaffTravelHealthClearances` (the trip,
+  the health requirement, who cleared it — an Employee — when, a note; four foreign keys, none cascading; unique on
+  tenant, trip and requirement among live rows) and `StaffTravelRequests.VisaOverrideReason` (nvarchar(1000), null).
+  **Why the column (a refinement of D-39):** kept only as an internal note, an override would be undone by the next
+  edit and by submission, which read the register again; on the trip it stands until the requester drops it. No data
+  step. Down refuses while a clearance is live. Proven on a scratch copy of UAT (session scratchpad `m3/`, 26/26): the
+  copy has UAT's schema; Up adds exactly the scaffold's 27 lines; Up again changes nothing; a second live clearance of a
+  pair is refused while a deleted twin sits beside the live one; Down refuses, changing nothing, while a clearance is
+  live, and once none is restores UAT's schema exactly; Up after Down gives the same schema.
+- *The rules in one place.* `StaffTravelComplianceRules` (Core): the register's verdict for a traveller's primary passport
+  (E-Visa and Embassy need a visa, Free and On arrival do not, Prohibited refuses entry — D-39); whether a trip needs a
+  visa now (its flag, or — no override — the register, for a passport recorded after the trip was raised); insurance
+  across every day of a trip; a Critical trip's acknowledgement (its own level, or the latest assessment valid at
+  departure — D-37); and submission's warnings.
+- *The visa flag (E4, D-39).* Create, edit and each group participant take the register's answer whenever the traveller's
+  primary passport is on file and the register has the pair; a different answer stands only with a reason of five
+  characters or more, kept on the trip and — when new — as an internal note. Submission reads the register again and
+  refuses a passport the register records as refused entry. The request form's switch says the register sets it and
+  offers *If this differs from the visa register, why*; the payload sends the reason back, or the next save takes the
+  register's answer again.
+- *Health (D-36, T-25).* `GET compliance/requests/{id}/health-requirements` (Read): the destination's active
+  requirements in force over the trip, mandatory first, each cleared or not; `POST …/{requirementId}/clear` (Write, the
+  caller's employee) and `DELETE …/clear` (an untick, a soft delete). Not twice; only a requirement that applies (404
+  otherwise); not on a cancelled, rejected or closed trip; nothing blocked by an unticked one. The Compliance tab's
+  *Health requirements* card lists them with *Clear* (a note) and *Untick*.
+- *Ticketing (O-16, D-37).* The ticket verb waits, in order: the visa (lane 5, now with the register's live answer — the
+  demo's London flight is still refused naming its visa); for an international trip, insurance whose cover spans every
+  day of it; for a Critical trip, a risk assessment the traveller has acknowledged. The Compliance tab warns on the
+  insurance and risk cards until each is met.
+- *Submission's warnings (O-16).* An international trip with no cover spanning it, and a primary passport expiring less
+  than six months after the return (both windows TDC's to confirm), come back in the submit result's warnings.
+- *Stale entries (T-40).* The requirement DTO says `IsStale` — never verified, or not in 365 days — and the register page
+  and the Compliance tab flag it.
+
+**Applied to UAT 2026-10-03, on the user's go.** Restore point `ErpSystemDB_UAT_before_travell7b.bak` (COPY_ONLY,
+verified), taken just before; the API's startup applied it — history 111 rows, newest
+`20261003002540_TravelClosureHealthClearance` — verified in SQL: UAT's fingerprint equals the scratch copy's after Up,
+and every new object has the model's shape.
+
+**Suite** `run-final-compliance.mjs` 51 → **96**. The run picks three destinations no register entry covers for the
+fixture's passport country and makes its own entries (embassy visa, refused entry, visa free). §5 with no passport the
+requester's "no visa" stands; with the traveller's primary passport on file, "no visa" to the embassy-visa country is
+saved needing one and "visa" to the visa-free country needing none; a different answer stands with a reason and an
+internal note, a four-character reason is refused, an edit dropping the reason takes the register's answer again; the
+refused-entry trip is not submitted. §6 a mandatory vaccination listed uncleared, cleared with a note against the desk
+officer, not twice, another country's requirement 404, the traveller 403, unticked and cleared again. §7 an
+international trip warned at submission of no cover and of a passport expiring in 100 days; its confirmed flight
+refused a ticket uninsured and with cover that misses a day, ticketed once cover spans the trip; a Critical domestic
+trip's flight refused with no assessment and with an unacknowledged one, ticketed once the acknowledgement is planted.
+§8 a never-verified entry stale, one verified 400 days ago stale, one verified this week fresh. **96/96 twice**
+(325897, 370849). Regression, twice each: bookings **148** (400379, 429258), money **288** (465468, 507213), policy
+**131** (545087, 558128), truth **118** (656300, 662144), approvals **123** (667049, 690076), fleet **165** (709486,
+734300), and lifecycle **257** (789468, 845376) — its first two runs (569215, 613017) failed one check, *submitted
+"with no warnings"*: its trip crosses a border with no cover, so O-16 now warns, as designed. The check now asserts no
+leave warning (what it meant) and the insurance warning (+1). No slow request (the slowest travel call 161 ms); no
+alert notice on a non-fixture trip; no run left a register entry, health requirement, clearance, document, alert, trip or
+override live. The API log held only the known noise.
 
 ### Lane 8 — Notifications and the sweep (D-4, D-6, F1, F2, E6, O-11, O-17)
 

@@ -301,7 +301,10 @@ export default function VisaRequirementsPage() {
                       </TableCell>
                       <TableCell className="text-sm">
                         {r.lastVerifiedAt ? (
-                          <span className="text-muted-foreground">{r.lastVerifiedAt.slice(0, 10)}</span>
+                          // Lane 7 (T-40): an entry not checked for a year is flagged, as one never checked is.
+                          <span className={r.isStale ? 'text-amber-600' : 'text-muted-foreground'}>
+                            {r.lastVerifiedAt.slice(0, 10)}{r.isStale ? ' · over a year ago' : ''}
+                          </span>
                         ) : (
                           <span className="text-amber-600">Never</span>
                         )}

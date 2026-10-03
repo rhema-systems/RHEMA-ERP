@@ -80,6 +80,14 @@ public class StaffTravelRequest : TenantEntity
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 
+    /// <summary>
+    /// Travel final closure, lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the
+    /// traveller's passport. Null — the server derives the flag from the register whenever the passport is known; set —
+    /// the flag stands as the requester left it. Also kept as an internal note on the trip.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
+
     [MaxLength(1000)]
     public string? CancellationReason { get; set; }
 
@@ -1601,6 +1609,34 @@ public class StaffTravelHealthRequirement : TenantEntity
     public virtual Country Country { get; set; } = null!;
 }
 
+
+/// <summary>
+/// Travel final closure, lane 7 (D-36, T-25): that a destination's health requirement was checked for a trip's traveller —
+/// a vaccination certificate seen, a test taken — by whom and when. One live row per trip and requirement; removing the
+/// tick soft-deletes it. Nothing is blocked by a missing tick: the trip shows which requirements are cleared.
+/// </summary>
+public class StaffTravelHealthClearance : TenantEntity
+{
+    public Guid StaffTravelRequestId { get; set; }                  // FK -> StaffTravelRequest
+
+    public Guid HealthRequirementId { get; set; }                   // FK -> StaffTravelHealthRequirement
+
+    public Guid ClearedById { get; set; }                           // FK -> Employee — the officer who checked
+
+    public DateTime ClearedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? Note { get; set; }
+
+    [ForeignKey(nameof(StaffTravelRequestId))]
+    public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
+
+    [ForeignKey(nameof(HealthRequirementId))]
+    public virtual StaffTravelHealthRequirement HealthRequirement { get; set; } = null!;
+
+    [ForeignKey(nameof(ClearedById))]
+    public virtual Employee ClearedBy { get; set; } = null!;
+}
 
 // =========================================================================
 //  GROUP 8 — CONFIGURATION
