@@ -105,10 +105,10 @@ const insuranceSchema = z.object({
  * ⚠ **The acknowledgement is the traveller's alone.** The server answers 403 for anyone else,
  * because it records that a specific person read a security briefing about where they are going.
  * It was previously settable by any Write holder, which made the record assert something that had
- * not happened. Nothing here should become a desk-side "mark as briefed". The button now shows
- * only to the traveller — on this desk page, an HR officer looking at their own trip — because
- * for everyone else it could only fail. A traveller without desk access has no screen to
- * acknowledge from at all yet (travel final closure, finding E1 — lane 7 builds it).
+ * not happened. Nothing here should become a desk-side "mark as briefed". Since lane 7 (slice 7c1,
+ * E1) the traveller records it on their own trip page under My travel, through the token-scoped
+ * `/me` route, and this card only reports it — an HR officer looking at their own trip is pointed
+ * there too.
  *
  * The reference data behind these — visa requirements between two countries, health requirements
  * per destination, the destination alert feed — lives under `/administration/hr/travel`, because it
@@ -362,21 +362,6 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
     onError: refused('Could not record the insurance'),
   });
 
-  const acknowledge = useMutation({
-    mutationFn: (id: string) => travelComplianceService.acknowledgeRiskAssessment(id),
-    onSuccess: async () => {
-      toast({ title: 'Acknowledged' });
-      await queryClient.invalidateQueries({ queryKey: ['travel-risk-assessment', requestId] });
-    },
-    // A 403 here means "this is not your trip" — worth saying plainly rather than as a failure.
-    onError: (e: Error) =>
-      toast({
-        variant: 'destructive',
-        title: 'Only the traveller can acknowledge this',
-        description: e.message,
-      }),
-  });
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-10">
@@ -553,22 +538,15 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                     Acknowledged by the traveller · {fmtDateTime(assessment.acknowledgedAt)}
                   </p>
                 ) : isTraveller ? (
-                  <>
-                    <Button
-                      size="sm"
-                      disabled={acknowledge.isPending}
-                      onClick={() => acknowledge.mutate(assessment.id)}
-                    >
-                      I have read this
-                    </Button>
-                    <p className="text-xs text-muted-foreground">
-                      This is your trip, so the acknowledgement is yours to record.
-                    </p>
-                  </>
+                  <p className="text-xs text-muted-foreground">
+                    Not yet acknowledged. This is your trip — confirm it on{' '}
+                    <Link href={`/me/travel/${requestId}`} className="underline">My travel</Link>, under
+                    Before you go.
+                  </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
                     Not yet acknowledged. Only {request.employeeName} can acknowledge their own
-                    assessment, and there is no self-service screen for it yet.
+                    assessment, on their My travel page.
                   </p>
                 )}
               </div>

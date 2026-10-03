@@ -14,6 +14,12 @@
 
 import type { AuditFields } from './common';
 import type { FlightCabinClass } from './travel-bookings';
+import type {
+  StaffTravelInsurancePolicy,
+  StaffTravelRiskAssessment,
+  StaffTravelVisaApplicationSummary,
+} from './travel-compliance';
+import type { StaffTravelAdvanceSummary, StaffTravelExpenseClaimSummary } from './travel-finance';
 
 /**
  * ⚠ Every union in this file is written from its C# enum in `src/ErpSystem.Core/Enums/HREnums.cs`,
@@ -216,6 +222,15 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   closedByName?: string | null;
   comments?: StaffTravelRequestComment[];
   attachments?: StaffTravelRequestAttachment[];
+  /**
+   * The trip's records as the request's own read carries them (lane 7, 7c1 — the portal reads these). The bookings and
+   * itinerary arrive here as summaries only; their detail is a read of its own.
+   */
+  advances?: StaffTravelAdvanceSummary[];
+  expenseClaims?: StaffTravelExpenseClaimSummary[];
+  visaApplications?: StaffTravelVisaApplicationSummary[];
+  riskAssessments?: StaffTravelRiskAssessment[];
+  insurancePolicies?: StaffTravelInsurancePolicy[];
 }
 
 /**

@@ -1388,12 +1388,12 @@ insurance**.
 > act — nobody can acknowledge a security briefing on your behalf, because an acknowledgement
 > anyone can record for you records nothing."*
 
-⚠ On this database **the Lagos assessment is not acknowledged and cannot be**: the desk route sits
-on `HR.Travel.Write`, which the `Employee` role never holds, while the service refuses anyone but
-the addressee. So **only a trip belonging to somebody who also holds Write** can be acknowledged at
-all — which on the demo data is the London trip, `hr.head`'s own. This is finding **T-23**, and the
-destination-alert half of it was fixed with token-scoped `/me` routes (chapter 15) while the risk
-assessment's was not.
+⚠ On this database **the Lagos assessment is not acknowledged** — and until closure lane 7 it could
+not be: the desk route sits on `HR.Travel.Write`, which the `Employee` role never holds, while the
+service refuses anyone but the traveller (finding **T-23**). Since slice 7c1 the traveller records it
+on **My travel → the trip → Before you go** (chapter 15), and this card only reports it: *"Not yet
+acknowledged. Only … can acknowledge their own assessment, on their My travel page."* Nobody on the
+desk can record it — that is the point.
 
 **7 — Section ③, and the passport that is about to expire.** Switch to the Kumasi trip or look at
 the documents list.
@@ -1416,7 +1416,7 @@ chapter 4.
 | **Verify a document** | `POST …/documents/{id}/verify` | Write |
 | Visa applications | `GET`/`POST …/visa-applications…` | Read / Write |
 | Risk assessments | `GET`/`POST`/`PUT …/risk-assessments…` | Read / Write |
-| **Acknowledge a risk assessment** | `POST …/risk-assessments/{id}/acknowledge` | Write ⚠ see T-23 |
+| **Acknowledge a risk assessment** | `POST …/risk-assessments/{id}/acknowledge` — no button on this tab since 7c1; the traveller uses `POST …/me/risk-assessments/{id}/acknowledge` (chapter 15) | Write, and the traveller only — see T-23 |
 | Insurance | `GET`/`POST`/`PUT …/insurance…` | Read / Write |
 | Health requirements | `GET …/health-requirements/country/{id}` | Read |
 | Every delete | `DELETE …` | **Admin** |
@@ -1429,10 +1429,10 @@ Tables: `StaffTravelDocuments`, `StaffTravelVisaRequirements`, `StaffTravelVisaA
 
 | Gap | |
 |---|---|
-| **T-23 · The risk-assessment acknowledgement is unreachable by the people it is for** — the gate and the service check do not overlap. The alert acknowledgement had the same shape and was fixed with `/me` routes; this one was not | |
+| **T-23 · The risk-assessment acknowledgement is unreachable by the people it is for** — the gate and the service check do not overlap. The alert acknowledgement had the same shape and was fixed with `/me` routes; this one was not | *Fixed in closure lane 7 (7c1, E1): the traveller records it on My travel, under Before you go; the desk's button became a read-only state* |
 | **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | *Ticketing half fixed in closure lane 5: a flight is not ticketed until a visa application is approved or not required. the flag derived from the requirements table and health clearance ticked per trip in lane 7 (7b, D-39, D-36)* |
-| **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one || *Fixed in closure lane 7 (7b, D-36): the trip lists the destination's requirements and the desk ticks each off with a note; nothing is blocked by an unticked one* |
-| **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry || *Warned in closure lane 7 (7b, O-16): submitting an international trip warns when the primary passport expires within six months of the return (TDC to confirm the window)* |
+| **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one | *Fixed in closure lane 7 (7b, D-36): the trip lists the destination's requirements and the desk ticks each off with a note; nothing is blocked by an unticked one* |
+| **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry | *Warned in closure lane 7 (7b, O-16): submitting an international trip warns when the primary passport expires within six months of the return (TDC to confirm the window)* |
 
 ---
 
@@ -2021,9 +2021,9 @@ Table: `StaffTravelVisaRequirements`.
 
 | Gap | |
 |---|---|
-| **T-40 · Nothing expires a requirement.** `lastVerifiedAt` is recorded and no screen or sweep flags a row nobody has checked for a year — on a page whose own subtitle says a wrong entry is worse than a missing one || *Fixed in closure lane 7 (7b): an entry never verified, or not in 365 days, is flagged on this page and on the trip's Compliance tab* |
+| **T-40 · Nothing expires a requirement.** `lastVerifiedAt` is recorded and no screen or sweep flags a row nobody has checked for a year — on a page whose own subtitle says a wrong entry is worse than a missing one | *Fixed in closure lane 7 (7b): an entry never verified, or not in 365 days, is flagged on this page and on the trip's Compliance tab* |
 | **T-41 · There is no reverse view.** You cannot ask "which destinations does a Ghanaian passport enter freely" — only "what does this destination require" | |
-| **T-42 · The requirement is not checked against the trip.** A trip flagged `RequiresVisa = false` into a visa-required country is accepted (and see T-24) || *Fixed in closure lane 7 (7b, D-39): with the traveller's passport on file the register sets the trip's visa flag; a different answer needs a reason; a passport refused entry is not submitted* |
+| **T-42 · The requirement is not checked against the trip.** A trip flagged `RequiresVisa = false` into a visa-required country is accepted (and see T-24) | *Fixed in closure lane 7 (7b, D-39): with the traveller's passport on file the register sets the trip's visa flag; a different answer needs a reason; a passport refused entry is not submitted* |
 
 ---
 
@@ -2118,7 +2118,7 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
 | Gap | |
 |---|---|
-| **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | |
+| **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | *Fixed in closure lane 7 (7a, E6): an alert raised active goes at once to the traveller of every approved or under-way trip to its country (and city) in its window; raised inactive, it goes to nobody. The traveller's bell is lane 8's* |
 | **T-45 · An alert does not block or flag a booking** to the destination it warns about, at any severity — including `Emergency` | *Flagged since closure lane 5: a Critical or Emergency alert in force over the trip shows as a warning on the request page — for the approver and the desk. Blocking is TDC's question* |
 | **T-46 · `TravelRiskLevel.Prohibited` exists and prohibits nothing** | |
 
@@ -2428,25 +2428,54 @@ Tables: `StaffTravelReminderRuns`, `StaffTravelReminderDispatchLogs`.
 
 ### 📍 Where you are
 
-**Portal:** Time, Leave & Pay → **My Travel** · `/me/travel` (+ `new`, `[id]`, `[id]/edit`) ·
+**Portal:** Time, Leave & Pay → **My Travel** · `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `documents`) ·
 **as the `staff` persona**, in window B · **5 minutes**
 
 ### 📖 What it is
 
-> *"The traveller's own side. Four screens, no permissions, and one thing only they can do."*
+> *"The traveller's own side. Five screens, no permissions, and two things only they can do."*
 
-### 👁 The four screens
+### 👁 The five screens
 
 **`/me/travel` — My travel.** *"Trips you have requested, and where each one has got to."* Five
-columns: Number · Route · Dates · Estimated · Status. Plus the **destination-alerts panel** (below).
+columns: Number · Route · Dates · Estimated · Status. Plus the **destination-alerts panel** (below), and
+**My travel documents** in the header *(closure lane 7, slice 7c1)*.
 
 **`/me/travel/new` — Request travel.** Chapter 4's form on the **`self` surface**: the traveller and
 the initiator fields are **absent, not disabled** — because the self-service endpoint overwrites
 them server-side, and a disabled control would imply the value was sent. Subtitle: *"Saved as a
 draft. Submit it when you are ready for approval."*
 
-**`/me/travel/[id]` — one trip.** The overview, the itinerary, the bookings and the compliance
-summary, read-only, plus **Submit** on a draft and **Cancel** while it is live.
+**`/me/travel/[id]` — one trip.** *Before closure lane 7 this was one card of the trip and the desk's
+shared notes — nothing the desk arranged reached the traveller (E7).* Since slice 7c1, four tabs, read-only
+but for one button, plus **Send for approval** on a draft, **Recall**, **Request change** and **Withdraw**
+as each applies:
+
+- **The trip** — the request, its lifecycle notes and the desk's shared notes, as before.
+- **Before you go** — the **risk assessment** with **I have read this** (below); every **alert in force**
+  for the destination over the trip, with its text — including ones never sent to this traveller; the
+  destination's **health requirements**, each *cleared by the travel desk* or not; the **visas** (the number
+  to its last four); the **insurance** (policy number, cover dates, the emergency line). While a Critical trip
+  waits for the acknowledgement, or an international one for cover, the card says the flight is not
+  ticketed until it is.
+- **Itinerary & bookings** — the itinerary **the desk finalised**, its legs and activities; while the desk is
+  drafting one, *"The travel desk is planning your itinerary"* instead (D-42). Every flight with its segments
+  — flight numbers, times, terminals, seats, baggage — hotels with their addresses, ground transport (a company
+  car's vehicle and driver), car rentals. **Not shown:** who asked for or authorised a policy exception on a
+  booking, and why — the desk's decision, kept off the traveller's read as the request's policy exceptions are.
+- **Money** — the advances: asked, approved, paid, what the traveller still holds and by when it is settled;
+  the claims and where each has got to.
+
+**I have read this — the risk assessment.** *Only the traveller can record it, and only here* (E1). Before
+slice 7c1 nobody could: the desk route needs `HR.Travel.Write`, which the `Employee` role never holds, and the
+service accepts only the traveller. A Critical trip's flight is not ticketed until it is recorded (D-37). The
+desk's Compliance tab now only reports it.
+
+**`/me/travel/documents` — My travel documents.** The traveller's passport and other travel documents:
+**Add a document**, change one, remove one **while it is unverified**. The travel desk verifies; a change
+takes the verification off; one primary per type. The list shows numbers to the last four; changing a
+document shows it in full. *Why it matters:* the primary passport decides which trips need a visa (chapter
+4) and is checked for expiry at submission.
 
 **`/me/travel/[id]/edit`.** The self form. **Locked** once the request is Approved, Completed,
 Cancelled or Closed — with an explanation rather than a disabled form.
@@ -2510,14 +2539,19 @@ this may be empty)*.
 | Cancel mine | `POST …/me/requests/{id}/cancel` | signed-in |
 | My alerts | `GET …/me/alert-notifications` · `…/unacknowledged` | signed-in |
 | **Acknowledge one** | `POST …/me/alert-notifications/{id}/acknowledge` | signed-in, **addressee only** |
+| The itinerary in force | `GET …/me/requests/{id}/itinerary` | signed-in, 404 if not yours |
+| The bookings in full | `GET …/me/requests/{id}/bookings` | signed-in, 404 if not yours |
+| Alerts in force · health requirements | `GET …/me/requests/{id}/destination-alerts` · `…/health-requirements` | signed-in, 404 if not yours |
+| **Acknowledge the risk assessment** | `POST …/me/risk-assessments/{id}/acknowledge` | signed-in, **the traveller only** (404 otherwise) |
+| My travel documents | `GET`/`POST …/me/travel-documents` · `GET`/`PUT`/`DELETE …/me/travel-documents/{id}` | signed-in, 404 if not yours; delete refused (422) once verified |
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | |
-| **T-55 · The traveller cannot see or acknowledge their risk assessment** — T-23's other half | |
-| **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | |
+| **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | *Lane 7, slice 7d (D-38): the traveller files and submits their own claim* |
+| **T-55 · The traveller cannot see or acknowledge their risk assessment** — T-23's other half | *Fixed in closure lane 7 (7c1, E1): Before you go shows it, and I have read this records it; a Critical trip's ticket waits for it (D-37)* |
+| **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | *Lane 7, slice 7c2: attachments up and down through the scan gate; receipts with 7d's claims* |
 
 ---
 

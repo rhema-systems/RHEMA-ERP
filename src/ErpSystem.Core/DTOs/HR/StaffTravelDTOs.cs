@@ -781,6 +781,16 @@ public class StaffTravelItinerarySummaryDto
 }
 
 /// <summary>
+/// The itinerary a traveller reads on the portal (lane 7, slice 7c1, D-42): the version in force — the one the desk
+/// finalised — or none, saying whether the desk is still drafting one.
+/// </summary>
+public class StaffTravelTravellerItineraryDto
+{
+    public StaffTravelItineraryDto? InForce { get; set; }
+    public bool BeingPlanned { get; set; }
+}
+
+/// <summary>
 /// A new itinerary version (lane 5, slice 5b): the server numbers it, makes it a Draft and works its days out from the
 /// trip's dates — the payload's <c>VersionNumber</c> and day totals left the contract.
 /// </summary>
@@ -1963,6 +1973,19 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     public bool DriverLicenseRequired { get; set; }
 
     // Lane 5 (D1, D5): no Status (the verbs move it), total or BookedAt (stamped by confirm).
+}
+
+/// <summary>
+/// A trip's bookings as its traveller reads them on the portal (lane 7, slice 7c1): every flight with its segments, every
+/// hotel, ground leg and car rental. The policy-exception decision — who asked, who authorised it, why — is the desk's, as
+/// A6 made the request's policy exceptions (P3); a driver's own travel request is the driver's.
+/// </summary>
+public class StaffTravelTravellerBookingsDto
+{
+    public List<StaffTravelFlightBookingDto> Flights { get; set; } = new();
+    public List<StaffTravelHotelBookingDto> Hotels { get; set; } = new();
+    public List<StaffTravelGroundTransportDto> GroundTransports { get; set; } = new();
+    public List<StaffTravelCarRentalBookingDto> CarRentals { get; set; } = new();
 }
 
 #endregion
@@ -3358,6 +3381,10 @@ public class StaffTravelAlertSummaryDto
     public string Title { get; set; } = string.Empty;
     public DateTime EffectiveFrom { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>The alert's text and end — on a trip's destination alerts (lane 7, 7c1: the traveller reads them).</summary>
+    public string? Body { get; set; }
+    public DateTime? EffectiveTo { get; set; }
 }
 
 public class CreateStaffTravelAlertDto : CreateDtoBase

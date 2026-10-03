@@ -580,6 +580,9 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
             throw new UnauthorizedAccessException(
                 "Only the traveller can acknowledge their own travel risk assessment.");
 
+        // Lane 7 (7c1): a second click keeps the first acknowledgement's time — that is when they read it.
+        if (entity.EmployeeAcknowledged) return true;
+
         entity.EmployeeAcknowledged = true;
         entity.AcknowledgedAt = DateTime.UtcNow;   // the clock, not a payload value
         entity.UpdatedAt = DateTime.UtcNow;

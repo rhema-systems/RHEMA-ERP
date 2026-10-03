@@ -132,14 +132,14 @@ export function MyTravelAlertsPanel() {
           ))
         )}
         {/*
-          ⚠ This sent travellers to "your trip's compliance tab" — which exists only on the travel
-          desk's page; the self-service trip page has no such tab (travel final closure, finding E7,
-          lane 7). It says where the rest of the picture actually is.
+          ⚠ This sent travellers to "your trip's compliance tab" — which existed only on the travel
+          desk's page (travel final closure, finding E7). Since lane 7 (slice 7c1) the trip's own page
+          has a "Before you go" tab with the rest of the picture, and this says so.
         */}
         <p className="text-xs text-muted-foreground">
-          The travel desk keeps the rest of the picture for your trip — visas, insurance and every
-          alert for the destination, including ones not sent to you directly. Ask them if you need
-          any of it.
+          Open a trip and its <span className="font-medium">Before you go</span> tab for the rest of the
+          picture — the risk assessment to confirm, every alert in force for the destination
+          (including ones not sent to you directly), health requirements, visas and insurance.
         </p>
       </CardContent>
     </Card>

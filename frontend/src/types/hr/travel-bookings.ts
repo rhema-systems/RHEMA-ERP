@@ -623,3 +623,25 @@ export interface CreateStaffTravelCarRentalBooking {
 
 export type UpdateStaffTravelCarRentalBooking =
   Omit<CreateStaffTravelCarRentalBooking, 'staffTravelRequestId'> & { id: string };
+
+// ── The traveller's portal (lane 7, slice 7c1) ───────────────────────────────
+
+/**
+ * `GET staff-travel/me/requests/{id}/itinerary` — the version in force (the one the desk finalised, D-42), or none and
+ * whether the desk is still drafting one.
+ */
+export interface StaffTravelTravellerItinerary {
+  inForce?: StaffTravelItinerary | null;
+  beingPlanned: boolean;
+}
+
+/**
+ * `GET staff-travel/me/requests/{id}/bookings` — every booking in full, a flight's segments in flying order. The
+ * exception's decision fields arrive empty: who asked, who authorised and why are the desk's (P3).
+ */
+export interface StaffTravelTravellerBookings {
+  flights: StaffTravelFlightBooking[];
+  hotels: StaffTravelHotelBooking[];
+  groundTransports: StaffTravelGroundTransport[];
+  carRentals: StaffTravelCarRentalBooking[];
+}

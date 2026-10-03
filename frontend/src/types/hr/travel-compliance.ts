@@ -306,6 +306,8 @@ export type TravelAlertSeverity = 'Info' | 'Warning' | 'Critical' | 'Emergency';
  * happening at their destination — returns {@link StaffTravelAlert} in full, because the body IS
  * the alert. The client used to type all three as the full record, which is why the compliance
  * panel could bind `body` against a payload that never carried it and TypeScript said nothing.
+ * A trip's destination alerts (the approver's door and the traveller's, lane 7, 7c1) carry `body` and
+ * `effectiveTo` — the reader is deciding or making that one trip.
  */
 export interface StaffTravelAlertSummary {
   id: string;
@@ -318,6 +320,9 @@ export interface StaffTravelAlertSummary {
   title: string;
   effectiveFrom: string;
   isActive: boolean;
+  /** A trip's destination alerts carry the text and the end (lane 7, 7c1); other summaries leave them empty. */
+  body?: string | null;
+  effectiveTo?: string | null;
 }
 
 export interface StaffTravelAlert extends AuditFields {

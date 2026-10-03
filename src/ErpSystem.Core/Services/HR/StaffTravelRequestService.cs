@@ -1244,7 +1244,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             .GetQueryable(a => a.TenantId == request.TenantId && !a.IsDeleted && a.IsActive
                             && a.CountryId == request.DestinationCountryId
                             && a.EffectiveFrom <= to && (a.EffectiveTo == null || a.EffectiveTo >= from))
-            .Select(a => new { a.Id, a.AlertType, a.Severity, CountryName = a.Country.Name, a.City, a.Title, a.EffectiveFrom, a.IsActive })
+            .Select(a => new { a.Id, a.AlertType, a.Severity, CountryName = a.Country.Name, a.City, a.Title, a.EffectiveFrom, a.IsActive, a.Body, a.EffectiveTo })
             .ToListAsync(cancellationToken);
         return rows
             .Where(a => string.IsNullOrWhiteSpace(a.City)
@@ -1254,6 +1254,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             {
                 Id = a.Id, AlertType = a.AlertType, Severity = a.Severity, CountryName = a.CountryName, City = a.City,
                 Title = a.Title, EffectiveFrom = a.EffectiveFrom, IsActive = a.IsActive,
+                Body = a.Body, EffectiveTo = a.EffectiveTo,
             })
             .ToList();
     }

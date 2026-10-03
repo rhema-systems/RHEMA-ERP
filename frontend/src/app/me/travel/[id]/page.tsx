@@ -15,10 +15,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { MyTripBeforeYouGo } from '@/components/hr/travel/MyTripBeforeYouGo';
+import { MyTripMoney } from '@/components/hr/travel/MyTripMoney';
+import { MyTripPlan } from '@/components/hr/travel/MyTripPlan';
 import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
@@ -52,11 +56,12 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  * One of your own travel requests.
  *
  * <b>Deliberately narrower than the desk's page.</b> The self-service surface exposes read, amend,
- * submit, recall, withdraw and — once approved — request a change (lane 1), and nothing else — there
- * is no comment, attachment or approval endpoint under
- * `api/staff-travel/me`, and pointing this page at the desk's routes to get them would 403 for the
- * employee it exists to serve. Comments the desk marked visible arrive embedded on the record, so
- * they are read here without a second call.
+ * submit, recall, withdraw and — once approved — request a change (lane 1); since lane 7 (slice 7c1)
+ * the traveller also reads what the desk arranged — the itinerary in force and the bookings, the
+ * risk assessment (and acknowledges it, E1), the destination's alerts and health requirements, the
+ * visas, the insurance, the advances and claims — each through `api/staff-travel/me`. Pointing this
+ * page at the desk's routes would 403 for the employee it exists to serve. Comments the desk marked
+ * visible arrive embedded on the record, so they are read here without a second call.
  *
  * ⚠ A 404 means the request is not yours. The surface answers the same way for a request that does
  * not exist, so it cannot be used to enumerate ids.
@@ -216,89 +221,110 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
         </p>
       )}
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">The trip</CardTitle>
-        </CardHeader>
-        <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
-          <InfoRow label="Type" value={enumLabel(TRAVEL_TYPE_LABELS, r.travelType)} />
-          <InfoRow label="Purpose" value={enumLabel(TRAVEL_PURPOSE_LABELS, r.travelPurpose)} />
-          <InfoRow label="Priority" value={enumLabel(TRAVEL_PRIORITY_LABELS, r.priority)} />
-          <InfoRow
-            label="Route"
-            value={
-              <span className="flex items-center gap-1.5">
-                {r.isInternational && <Globe className="h-3.5 w-3.5 text-muted-foreground" />}
-                {r.originCity}, {r.originCountryName} → {r.destinationCity},{' '}
-                {r.destinationCountryName}
-              </span>
-            }
-          />
-          <InfoRow label="Departs" value={fmtDate(r.travelStartDate)} />
-          <InfoRow label="Returns" value={fmtDate(r.travelEndDate)} />
-          <InfoRow label="Estimated" value={fmtMoney(r.estimatedTotalCost, r.currencyCode)} />
-          <InfoRow label="Approved budget" value={fmtMoney(r.approvedBudget, r.currencyCode)} />
-          <InfoRow label="Submitted" value={fmtDateTime(r.submittedAt)} />
-          <InfoRow
-            label="Approved"
-            value={r.approvedAt ? [fmtDateTime(r.approvedAt), r.approvedByName].filter(Boolean).join(' · ') : '—'}
-          />
-          <InfoRow label="Visa required" value={r.requiresVisa ? 'Yes' : 'No'} />
-          <InfoRow label="Health clearance" value={r.requiresHealthClearance ? 'Yes' : 'No'} />
-          <InfoRow label="Risk level" value={enumLabel(TRAVEL_RISK_LEVEL_LABELS, r.riskLevel)} />
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="trip">
+        <TabsList className="flex-wrap">
+          <TabsTrigger value="trip">The trip</TabsTrigger>
+          <TabsTrigger value="before">Before you go</TabsTrigger>
+          <TabsTrigger value="plan">Itinerary &amp; bookings</TabsTrigger>
+          <TabsTrigger value="money">Money</TabsTrigger>
+        </TabsList>
 
-      <TravelLifecycleNotes request={r} />
+        <TabsContent value="before" className="pt-4">
+          <MyTripBeforeYouGo request={r} />
+        </TabsContent>
+        <TabsContent value="plan" className="pt-4">
+          <MyTripPlan request={r} />
+        </TabsContent>
+        <TabsContent value="money" className="pt-4">
+          <MyTripMoney request={r} />
+        </TabsContent>
 
-      {r.purposeDescription && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Justification</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{r.purposeDescription}</p>
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="trip" className="space-y-6 pt-4">
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">The trip</CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-3">
+              <InfoRow label="Type" value={enumLabel(TRAVEL_TYPE_LABELS, r.travelType)} />
+              <InfoRow label="Purpose" value={enumLabel(TRAVEL_PURPOSE_LABELS, r.travelPurpose)} />
+              <InfoRow label="Priority" value={enumLabel(TRAVEL_PRIORITY_LABELS, r.priority)} />
+              <InfoRow
+                label="Route"
+                value={
+                  <span className="flex items-center gap-1.5">
+                    {r.isInternational && <Globe className="h-3.5 w-3.5 text-muted-foreground" />}
+                    {r.originCity}, {r.originCountryName} → {r.destinationCity},{' '}
+                    {r.destinationCountryName}
+                  </span>
+                }
+              />
+              <InfoRow label="Departs" value={fmtDate(r.travelStartDate)} />
+              <InfoRow label="Returns" value={fmtDate(r.travelEndDate)} />
+              <InfoRow label="Estimated" value={fmtMoney(r.estimatedTotalCost, r.currencyCode)} />
+              <InfoRow label="Approved budget" value={fmtMoney(r.approvedBudget, r.currencyCode)} />
+              <InfoRow label="Submitted" value={fmtDateTime(r.submittedAt)} />
+              <InfoRow
+                label="Approved"
+                value={r.approvedAt ? [fmtDateTime(r.approvedAt), r.approvedByName].filter(Boolean).join(' · ') : '—'}
+              />
+              <InfoRow label="Visa required" value={r.requiresVisa ? 'Yes' : 'No'} />
+              <InfoRow label="Health clearance" value={r.requiresHealthClearance ? 'Yes' : 'No'} />
+              <InfoRow label="Risk level" value={enumLabel(TRAVEL_RISK_LEVEL_LABELS, r.riskLevel)} />
+            </CardContent>
+          </Card>
 
-      {r.cancellationReason && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Ban className="h-4 w-4" />
-              {r.status === 'Rejected' ? 'Why it was rejected' : 'Why it was withdrawn'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm whitespace-pre-wrap">{r.cancellationReason}</p>
-            {r.cancelledByName && (
-              <p className="mt-2 text-xs text-muted-foreground">
-                {r.cancelledByName} · {fmtDateTime(r.cancelledAt)}
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          <TravelLifecycleNotes request={r} />
 
-      {visibleComments.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Notes from the travel desk</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {visibleComments.map((c) => (
-              <div key={c.id} className="rounded-md border p-3">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium">{c.authorName || 'Travel desk'}</p>
-                  <p className="text-xs text-muted-foreground">{fmtDateTime(c.createdAt)}</p>
-                </div>
-                <p className="mt-1 text-sm whitespace-pre-wrap">{c.body}</p>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
+          {r.purposeDescription && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Justification</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{r.purposeDescription}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {r.cancellationReason && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Ban className="h-4 w-4" />
+                  {r.status === 'Rejected' ? 'Why it was rejected' : 'Why it was withdrawn'}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm whitespace-pre-wrap">{r.cancellationReason}</p>
+                {r.cancelledByName && (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {r.cancelledByName} · {fmtDateTime(r.cancelledAt)}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {visibleComments.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Notes from the travel desk</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {visibleComments.map((c) => (
+                  <div key={c.id} className="rounded-md border p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium">{c.authorName || 'Travel desk'}</p>
+                      <p className="text-xs text-muted-foreground">{fmtDateTime(c.createdAt)}</p>
+                    </div>
+                    <p className="mt-1 text-sm whitespace-pre-wrap">{c.body}</p>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <TravelReasonDialog
         open={reasonFor === 'recall'}

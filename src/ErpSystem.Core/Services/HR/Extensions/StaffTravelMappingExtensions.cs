@@ -202,6 +202,7 @@ public static class StaffTravelMappingExtensions
     {
         dto.Comments = SharedWithTraveller(dto.Comments);
         dto.PolicyExceptions = new List<StaffTravelPolicyExceptionDto>();
+        dto.GroundTransports = dto.GroundTransports.Select(g => g.ToTravellerView()).ToList();
         return dto;
     }
 
@@ -210,6 +211,47 @@ public static class StaffTravelMappingExtensions
             .Where(c => c.IsVisibleToTraveller)
             .Select(c => { c.Replies = SharedWithTraveller(c.Replies); return c; })
             .ToList();
+
+    /// <summary>
+    /// A flight as its traveller reads it (lane 7, 7c1, P3): the exception's state stays — it says why a booking waits —
+    /// but the decision, who asked for it, who authorised it and why, is the desk's, as A6 made the request's policy
+    /// exceptions. The segments in flying order.
+    /// </summary>
+    public static StaffTravelFlightBookingDto ToTravellerView(this StaffTravelFlightBookingDto dto)
+    {
+        dto.ClassExceptionReason = null;
+        dto.ExceptionRequestedById = null;
+        dto.ExceptionRequestedByName = null;
+        dto.ExceptionAuthorisedById = null;
+        dto.ExceptionAuthorisedByName = null;
+        dto.ExceptionAuthorisedAt = null;
+        dto.Segments = dto.Segments.OrderBy(s => s.SegmentOrder).ToList();
+        return dto;
+    }
+
+    /// <summary>A hotel as its traveller reads it — without the rate exception's decision (P3).</summary>
+    public static StaffTravelHotelBookingDto ToTravellerView(this StaffTravelHotelBookingDto dto)
+    {
+        dto.RateExceptionReason = null;
+        dto.ExceptionRequestedById = null;
+        dto.ExceptionRequestedByName = null;
+        dto.ExceptionAuthorisedById = null;
+        dto.ExceptionAuthorisedByName = null;
+        dto.ExceptionAuthorisedAt = null;
+        return dto;
+    }
+
+    /// <summary>
+    /// A ground leg as its traveller reads it: the vehicle and the driver who takes them, not the driver's own travel
+    /// request (lane 6, D-33) — that is a colleague's record.
+    /// </summary>
+    public static StaffTravelGroundTransportDto ToTravellerView(this StaffTravelGroundTransportDto dto)
+    {
+        dto.DriverTravelRequestId = null;
+        dto.DriverTravelRequestNumber = null;
+        dto.DriverTravelRequestStatus = null;
+        return dto;
+    }
 
     #endregion
 

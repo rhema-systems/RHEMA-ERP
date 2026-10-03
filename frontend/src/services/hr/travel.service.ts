@@ -1,7 +1,15 @@
 import { apiService } from '../api.service';
 import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
-import type { StaffTravelAlertNotification, StaffTravelAlertSummary } from '@/types/hr/travel-compliance';
+import type {
+  CreateStaffTravelDocument,
+  StaffTravelAlertNotification,
+  StaffTravelAlertSummary,
+  StaffTravelDocument,
+  StaffTravelTripHealthRequirement,
+  UpdateStaffTravelDocument,
+} from '@/types/hr/travel-compliance';
+import type { StaffTravelTravellerBookings, StaffTravelTravellerItinerary } from '@/types/hr/travel-bookings';
 import type {
   StaffTravelRequest,
   StaffTravelRequestSummary,
@@ -402,6 +410,60 @@ class TravelService {
   /** Confirms the caller has read a destination alert. Nobody can do this on their behalf. */
   acknowledgeMyAlert(id: string) {
     return apiService.post<void>(`${this.meUrl}/alert-notifications/${id}/acknowledge`, {});
+  }
+
+  // ── My trip: what the desk arranged (lane 7, slice 7c1) ────────────────────
+  //
+  // Each answers 404 for a trip that is not the caller's.
+
+  /** The itinerary in force (the one the desk finalised), or none and whether one is being drafted. */
+  getMyItinerary(requestId: string) {
+    return apiService.get<StaffTravelTravellerItinerary>(`${this.meUrl}/requests/${requestId}/itinerary`);
+  }
+
+  /** Every booking on the trip in full — a flight's segments are its times. */
+  getMyBookings(requestId: string) {
+    return apiService.get<StaffTravelTravellerBookings>(`${this.meUrl}/requests/${requestId}/bookings`);
+  }
+
+  getMyHealthRequirements(requestId: string) {
+    return apiService.get<StaffTravelTripHealthRequirement[]>(
+      `${this.meUrl}/requests/${requestId}/health-requirements`);
+  }
+
+  /** Every alert in force for the destination over the trip, with its text — not only the ones sent to the caller. */
+  getMyDestinationAlerts(requestId: string) {
+    return apiService.get<StaffTravelAlertSummary[]>(`${this.meUrl}/requests/${requestId}/destination-alerts`);
+  }
+
+  /** E1: confirms the caller has read their trip's risk assessment. A Critical trip's ticket waits for it (D-37). */
+  acknowledgeMyRiskAssessment(id: string) {
+    return apiService.post<void>(`${this.meUrl}/risk-assessments/${id}/acknowledge`, {});
+  }
+
+  // ── My travel documents (lane 7, slice 7c1, E2) ────────────────────────────
+  //
+  // Whose they are is the token's. The list masks numbers to the last four; a document's own read shows its owner the
+  // full number. An edit takes the desk's verification off; a verified document is not deleted.
+
+  getMyDocuments() {
+    return apiService.get<StaffTravelDocument[]>(`${this.meUrl}/travel-documents`);
+  }
+
+  getMyDocument(id: string) {
+    return apiService.get<StaffTravelDocument>(`${this.meUrl}/travel-documents/${id}`);
+  }
+
+  createMyDocument(payload: Omit<CreateStaffTravelDocument, 'employeeId'>) {
+    return apiService.post<StaffTravelDocument>(`${this.meUrl}/travel-documents`, payload);
+  }
+
+  updateMyDocument(payload: Omit<UpdateStaffTravelDocument, 'employeeId'>) {
+    return apiService.put<StaffTravelDocument>(`${this.meUrl}/travel-documents/${payload.id}`, payload);
+  }
+
+  deleteMyDocument(id: string) {
+    return apiService.delete<void>(`${this.meUrl}/travel-documents/${id}`);
   }
 }
 

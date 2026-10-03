@@ -1039,6 +1039,25 @@ public class StaffTravelBookingService : IStaffTravelBookingService
             .ToList();
     }
 
+    /// <summary>
+    /// Lane 7 (7c1): every booking on the trip in full — a flight's segments are its times — as the traveller reads it,
+    /// without the exception's decision (P3). The request's own read carries only summaries.
+    /// </summary>
+    public async Task<StaffTravelTravellerBookingsDto> GetTravellerBookingsAsync(Guid requestId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var flights = (await _flightRepository.GetByRequestIdAsync(requestId)).Where(f => f.TenantId == tenantId);
+        var hotels = (await _hotelRepository.GetByRequestIdAsync(requestId)).Where(h => h.TenantId == tenantId);
+        return new StaffTravelTravellerBookingsDto
+        {
+            Flights = flights.Select(f => f.ToDto().ToTravellerView()).ToList(),
+            Hotels = hotels.Select(h => h.ToDto().ToTravellerView()).ToList(),
+            GroundTransports = (await GetGroundTransportsByRequestAsync(requestId, cancellationToken))
+                .Select(g => g.ToTravellerView()).ToList(),
+            CarRentals = (await GetCarRentalsByRequestAsync(requestId, cancellationToken)).ToList(),
+        };
+    }
+
     public async Task<StaffTravelCarRentalBookingDto> CreateCarRentalAsync(CreateStaffTravelCarRentalBookingDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);

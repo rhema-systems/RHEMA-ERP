@@ -44,15 +44,21 @@ public class StaffTravelMeController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
     private readonly IStaffTravelComplianceService _compliance;
+    private readonly IStaffTravelItineraryService _itineraries;
+    private readonly IStaffTravelBookingService _bookings;
 
     public StaffTravelMeController(
         IStaffTravelRequestService service,
         IStaffTravelComplianceService compliance,
+        IStaffTravelItineraryService itineraries,
+        IStaffTravelBookingService bookings,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
         _compliance = compliance;
+        _itineraries = itineraries;
+        _bookings = bookings;
     }
 
     /// <summary>
@@ -238,6 +244,179 @@ public class StaffTravelMeController : HrControllerBase
         if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
 
         await _service.RequestChangeAsync(id, dto.Reason, ct);
+        return NoContent();
+    }
+
+    // =========================================================================
+    // MY TRIP — what the desk arranged (lane 7, slice 7c1, E7)
+    // =========================================================================
+    //
+    // The request's own read already carries the trip's records, as summaries; these give the traveller the
+    // detail — a flight's times, the itinerary's legs — and what is in force over the trip. Each resolves the
+    // request through GetOwnActiveRequestAsync first: someone else's trip is a 404.
+
+    /// <summary>
+    /// The itinerary in force on your trip — the version the travel desk finalised (D-42) — or none, saying whether
+    /// the desk is still drafting one.
+    /// </summary>
+    [HttpGet("requests/{id:guid}/itinerary")]
+    public async Task<ActionResult<StaffTravelTravellerItineraryDto>> GetMyItinerary(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your itinerary") is { } error) return error;
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        var current = await _itineraries.GetCurrentVersionAsync(id, ct);
+        var inForce = current?.Status is TravelItineraryStatus.Approved
+            or TravelItineraryStatus.Active or TravelItineraryStatus.Completed;
+        return Ok(new StaffTravelTravellerItineraryDto
+        {
+            InForce = inForce ? current : null,
+            BeingPlanned = current?.Status is TravelItineraryStatus.Draft or TravelItineraryStatus.PendingReview,
+        });
+    }
+
+    /// <summary>Your trip's bookings in full — flights with their times, hotels, ground legs, car rentals.</summary>
+    [HttpGet("requests/{id:guid}/bookings")]
+    public async Task<ActionResult<StaffTravelTravellerBookingsDto>> GetMyBookings(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your bookings") is { } error) return error;
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        return Ok(await _bookings.GetTravellerBookingsAsync(id, ct));
+    }
+
+    /// <summary>The destination's health requirements over your trip, and which the travel desk has cleared (D-36).</summary>
+    [HttpGet("requests/{id:guid}/health-requirements")]
+    public async Task<ActionResult<IReadOnlyList<StaffTravelTripHealthRequirementDto>>> GetMyHealthRequirements(
+        Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your trip's health requirements") is { } error) return error;
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        return Ok(await _compliance.GetTripHealthRequirementsAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Every alert in force for your destination over the trip — including ones the desk raised before you booked,
+    /// which were never sent to you.
+    /// </summary>
+    [HttpGet("requests/{id:guid}/destination-alerts")]
+    public async Task<ActionResult<IEnumerable<StaffTravelAlertSummaryDto>>> GetMyDestinationAlerts(
+        Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your destination's alerts") is { } error) return error;
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        return Ok(await _service.GetDestinationAlertsAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Confirm you have read the risk assessment for your trip (E1). A Critical trip's flight is not ticketed until you
+    /// have (D-37).
+    /// </summary>
+    /// <remarks>
+    /// The desk's route sits on Travel WRITE, which the Employee role never holds, and the service accepts only the
+    /// traveller — so before this route no traveller could record it. The acknowledger is the token's; someone else's
+    /// assessment is a 404, as a request is here.
+    /// </remarks>
+    [HttpPost("risk-assessments/{id:guid}/acknowledge")]
+    public async Task<IActionResult> AcknowledgeMyRiskAssessment(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Acknowledging your travel risk assessment") is { } error) return error;
+
+        try
+        {
+            await _compliance.AcknowledgeRiskAssessmentAsync(
+                new AcknowledgeStaffTravelRiskAssessmentDto { RiskAssessmentId = id }, employeeId, ct);
+        }
+        catch (UnauthorizedAccessException) { return NotFound(); }
+        catch (ArgumentException) { return NotFound(); }
+
+        return NoContent();
+    }
+
+    // =========================================================================
+    // MY TRAVEL DOCUMENTS (lane 7, slice 7c1, E2)
+    // =========================================================================
+    //
+    // The traveller's own passport and other travel documents, so the visa register can answer for them (D-39) and
+    // the passport's expiry is checked (O-16). The desk's rules hold: an edit takes the verification off, one primary
+    // per type, a verified document is not deleted. The list shows numbers to the last four (O-7); a document's own
+    // read shows its owner the full number.
+
+    /// <summary>Your document, or null when it is not yours / does not exist — callers answer 404 for both.</summary>
+    private async Task<StaffTravelDocumentDto?> GetOwnDocumentAsync(Guid id, Guid employeeId, CancellationToken ct)
+    {
+        try
+        {
+            var document = await _compliance.GetDocumentByIdAsync(id, ct);
+            return document.EmployeeId == employeeId ? document : null;
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    [HttpGet("travel-documents")]
+    public async Task<ActionResult<IEnumerable<StaffTravelDocumentDto>>> GetMyDocuments(CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your travel documents") is { } error) return error;
+        return Ok(await _compliance.GetDocumentsByEmployeeAsync(employeeId, ct));
+    }
+
+    [HttpGet("travel-documents/{id:guid}")]
+    public async Task<ActionResult<StaffTravelDocumentDto>> GetMyDocument(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading a travel document") is { } error) return error;
+        var document = await GetOwnDocumentAsync(id, employeeId, ct);
+        return document is null ? NotFound() : Ok(document);
+    }
+
+    /// <summary>Record one of your own travel documents. Whose it is comes from the token; the desk verifies it.</summary>
+    [HttpPost("travel-documents")]
+    public async Task<ActionResult<StaffTravelDocumentDto>> CreateMyDocument(
+        [FromBody] CreateStaffTravelDocumentDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Recording a travel document") is { } error) return error;
+
+        dto.EmployeeId = employeeId;
+        var created = await _compliance.CreateDocumentAsync(dto, tenantId, userId, ct);
+        return CreatedAtAction(nameof(GetMyDocument), new { id = created.Id }, created);
+    }
+
+    /// <summary>Correct one of your documents — the desk's verification comes off, as for any edit.</summary>
+    [HttpPut("travel-documents/{id:guid}")]
+    public async Task<ActionResult<StaffTravelDocumentDto>> UpdateMyDocument(
+        Guid id, [FromBody] UpdateStaffTravelDocumentDto dto, CancellationToken ct)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Correcting a travel document") is { } error) return error;
+        if (await GetOwnDocumentAsync(id, employeeId, ct) is null) return NotFound();
+
+        return Ok(await _compliance.UpdateDocumentAsync(dto, userId, ct));
+    }
+
+    /// <summary>Remove one of your documents while it is unverified — a verified one is kept (O-15).</summary>
+    [HttpDelete("travel-documents/{id:guid}")]
+    public async Task<IActionResult> DeleteMyDocument(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Removing a travel document") is { } error) return error;
+        if (await GetOwnDocumentAsync(id, employeeId, ct) is null) return NotFound();
+
+        await _compliance.DeleteDocumentAsync(id, ct);
         return NoContent();
     }
 

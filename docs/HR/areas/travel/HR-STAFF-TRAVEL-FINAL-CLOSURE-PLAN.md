@@ -76,10 +76,12 @@ baseline (D-13); lane 0 was built the same day.**
    the visa edit, the risk and delete guards, an alert's fan-out) — committed `7a22f177c`. **7b** the checks against the
    trip (the visa flag from the register, health clearances, the ticket's insurance and Critical waits, submission's
    warnings, stale entries) — migration `20261003002540_TravelClosureHealthClearance` **applied to UAT** (restore point
-   `ErpSystemDB_UAT_before_travell7b.bak`), compliance 96/96 twice — staged.
+   `ErpSystemDB_UAT_before_travell7b.bak`) — committed `81bd93074`. **7c1** the traveller's reads and E1's
+   acknowledgement (D-42; the itinerary in force, the bookings in full, what is in force over the trip, the traveller's
+   own documents) — no migration, `run-final-portal.mjs` 84/84 twice — staged.
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
-   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7c** the portal's views and
-   acts (E1's acknowledgement door — D-37's ticket wait needs it), **7d** the portal's claims.
+   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7c2** the traveller's files
+   and messages (D-40, D-41, P4), **7d** the portal's claims.
 11. **Then** lanes **8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -139,6 +141,9 @@ lane's slice.
 | **D-37** | Where D-18 binds — nothing fires at departure until lane 8 (K3) | **Ticketing waits:** a Critical trip is approved and booked as any other, but its flight is not ticketed until the traveller has acknowledged the current risk assessment (as lane 5's visa gate); the trip page warns until then. Lane 7, slice 7b. |
 | **D-38** | How much of a claim the traveller does on the portal (T-54) | **File and submit:** the traveller starts a claim on their own approved, under-way or completed trip, adds lines with receipts (uploaded as the trip's attachments) and submits it; the desk reviews and pays as now, and can still file for them. Lane 7, slice 7d. |
 | **D-39** | Which register results set *requires a visa* when the passport country is known (K2) | **E-Visa and Embassy Visa set it; Visa Free and On Arrival clear it;** an override against the register needs a note, kept as an internal note; a **Prohibited** entry refuses submission. Lane 7, slice 7b. |
+| **D-40** | Whether a traveller removes a file they put on their own trip (lane 7, 7c) | **Their own uploads, before submission:** only a file the traveller uploaded, only while the trip is a draft or returned to them; after that the desk may be relying on it — they ask the desk. Lane 7, slice 7c2. |
+| **D-41** | What the traveller writes to the travel desk (E7) | **A reply, or a new message:** a reply to a note the desk shared with them, or a question of their own; both visible to the traveller; no edit or delete afterwards, so the desk's record stands. Lane 7, slice 7c2. |
+| **D-42** | Which itinerary the traveller sees (E7, D-25) | **The one in force only:** the version the desk finalised; while the desk is still drafting, the portal says the itinerary is being planned. Lane 7, slice 7c1. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -159,7 +164,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
-| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b staged 2026-10-03, its migration applied to UAT (compliance 96/96 twice; bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-39; next 7c, 7d |
+| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 staged 2026-10-03 (portal 84/84 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-42; next 7c2, 7d |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
@@ -2031,29 +2036,30 @@ has no `EmailSettings` row; neither recurred on the other run. The API log other
 
 ### Lane 7 — Compliance and the portal (E1–E7, D-5, O-7, O-15, O-16, O-17, T-23–T-26, T-40, T-44, T-54–T-56)
 
-- [ ] **E1:** `/me/risk-assessments/{id}/acknowledge` and a portal screen; the desk button becomes a
-  read-only state.
-- [ ] **E2:** a travel-documents register (`/hr/travel/documents`: list, create, edit, verify, delete,
+- [x] **E1:** `/me/risk-assessments/{id}/acknowledge` and a portal screen; the desk button becomes a
+  read-only state. *(7c1)*
+- [x] **E2:** a travel-documents register (`/hr/travel/documents`: list, create, edit, verify, delete,
   an expiring filter) and `/me/travel/documents` for the traveller's own passport; `IsVerified` reset
-  on edit; one primary document per type per employee.
-- [ ] **E3:** the visa-application create DTO takes status, number, dates and fee; the edit dialog
+  on edit; one primary document per type per employee. *(7a; the traveller's page 7c1)*
+- [x] **E3:** the visa-application create DTO takes status, number, dates and fee; the edit dialog
   wired; the list typed from the summary DTO, with a detail read for the drawer; `GetRequirementAsync`
-  tenant-scoped.
-- [ ] **E4:** `RequiresVisa` derived from the visa-requirement register when the traveller's passport
+  tenant-scoped. *(lane 0, 7a)*
+- [x] **E4:** `RequiresVisa` derived from the visa-requirement register when the traveller's passport
   country is known (an override needs a note); health requirements shown on the request with a
-  *cleared* tick each (no block); a requirement not verified for twelve months shows as stale (T-40).
-- [ ] **E5:** a risk update ignores `AssessedById`; an acknowledgement is reset when the risk level
-  rises.
+  *cleared* tick each (no block); a requirement not verified for twelve months shows as stale (T-40). *(7b)*
+- [x] **E5:** a risk update ignores `AssessedById`; an acknowledgement is reset when the risk level
+  rises. *(7a)*
 - [ ] **E6:** `CreateAlertAsync` fans out one notification per Approved or InProgress request to the
-  country within the alert's window (the button's path), and the traveller gets it in the app.
-- [ ] **O-7:** passport and visa numbers masked (last four) in every list and summary read and on the
+  country within the alert's window (the button's path), and the traveller gets it in the app. *(The fan-out 7a; the
+  traveller's bell is lane 8's — a per-audience topic.)*
+- [x] **O-7:** passport and visa numbers masked (last four) in every list and summary read and on the
   request's screens; the full number only on the document's own detail; the false *encrypted* comments
-  corrected; column encryption recorded as a platform item (§ 6).
-- [ ] **O-15:** delete refused for an acknowledged risk assessment, a verified document, an alert that
-  has notifications (deactivate it instead).
-- [ ] **O-16:** an international trip with no insurance spanning its dates gets a warning at submit and
+  corrected; column encryption recorded as a platform item (§ 6). *(7a)*
+- [x] **O-15:** delete refused for an acknowledged risk assessment, a verified document, an alert that
+  has notifications (deactivate it instead). *(7a)*
+- [x] **O-16:** an international trip with no insurance spanning its dates gets a warning at submit and
   refused ticketing; a primary passport expiring within six months of the return gets a warning (both
-  windows to be confirmed by TDC).
+  windows to be confirmed by TDC). *(7b)*
 - [ ] **Portal (D-5, E7, O-17):** `/me/claims` — create, lines, receipt upload through the controlled
   gate, submit, status; the traveller's advances, itinerary, bookings, visas and risk assessment;
   `/me` attachment upload and download; a reply to a desk comment. Upload precedent
@@ -2221,6 +2227,85 @@ trip's flight refused with no assessment and with an unacknowledged one, tickete
 leave warning (what it meant) and the insurance warning (+1). No slow request (the slowest travel call 161 ms); no
 alert notice on a non-fixture trip; no run left a register entry, health requirement, clearance, document, alert, trip or
 override live. The API log held only the known noise.
+
+**Source check for 7c (2026-10-03, HEAD `81bd93074`).** The `/me` controller and pages, `MyTravelAlertsPanel`, the
+desk's comment and attachment routes, the approver door's attachment read, the profile-evidence upload precedent, the
+request repository's full read and the DTOs it embeds were re-read. E1 and E7 hold. Five more:
+- **P1 — the traveller's read already carries the trip.** `GET /me/requests/{id}` is the repository's full read:
+  attachments, itinerary versions, every booking, advances, claims, visa applications, risk assessments and insurance
+  all arrive, soft-deleted rows filtered by the model. The portal page renders none of it.
+- **P2 — but as summaries.** The embedded itinerary rows carry no legs and the flights no segments — no flight time
+  reaches the traveller. The detail needs `/me` reads of its own.
+- **P3 — a booking says who authorised its exception, and why.** A6 (lane 1) took the policy-exception decisions off the
+  traveller's read; the flight and hotel details carry the same decision (`ClassExceptionReason`,
+  `RateExceptionReason`, the requester and authoriser). The traveller's booking read drops them.
+- **P4 — a reply's parent is not checked.** `AddCommentAsync` checks the request but not that `ParentCommentId` is a
+  comment on it, so a reply can hang off another trip's comment.
+- **P5 — every attachment type is the traveller's business.** Invitation letter, brochure, receipt, visa document,
+  insurance certificate, medical certificate, other: nothing the desk keeps from the traveller. The traveller sees all
+  of a trip's attachments; the desk's own reasoning lives in internal notes.
+
+**Slices (the user, 2026-10-03).** 7c split in two:
+- **7c1 — the traveller's reads and the acknowledgement.** E1 (`/me` acknowledgement; the desk's button a read-only
+  state), the itinerary in force (D-42), the bookings with flight segments (P3), visas, insurance, the risk assessment,
+  7b's health requirements, the destination alerts in force over the trip, the traveller's own documents at
+  `/me/travel/documents` (add, edit — an edit un-verifies — and delete while unverified: 7a's rules), the trip page in
+  tabs. Suite `run-final-portal.mjs`, as a plain employee: the acknowledgement lifts D-37's ticket wait.
+- **7c2 — files and messages.** Attachments up and down through the controlled gate (not on a cancelled, rejected or
+  closed trip), D-40's removal, D-41's reply and new message (P4 for every caller), `MyTravelAlertsPanel` pointing at
+  the trip's tab. The suite grows, with the clamd stub.
+
+**Decisions (the user, 2026-10-03):** D-40 (a traveller removes their own upload before submission, 7c2), D-41 (a reply
+or a new message, never edited, 7c2), D-42 (the itinerary in force only, 7c1) — § 1.
+
+**As built — slice 7c1 (2026-10-03).** No migration. Every new `/me` route takes no employee id and resolves the trip
+through `GetOwnActiveRequestAsync` first — someone else's is a 404, never a 403.
+- *The acknowledgement (E1, D-37).* `POST /me/risk-assessments/{id}/acknowledge`: the token's employee, refused (404) for
+  anyone but the traveller and for an id that does not exist; a second click keeps the first time. The desk's route stays
+  (the service accepts only the traveller, so it serves only an officer's own trip); the desk's button became a state —
+  *not yet acknowledged*, and where the traveller does it. A Critical trip's ticket now waits on something a traveller can
+  do.
+- *The itinerary (D-42).* `GET /me/requests/{id}/itinerary` answers `{ inForce, beingPlanned }`: the current version when
+  it is Approved, Active or Completed, with its legs, activities and linked bookings; otherwise none, and whether a Draft
+  or PendingReview version is being worked on. ⚠ A new version the desk makes current supersedes the finalised one at once
+  (D-25), so from then until it is finalised the traveller reads *being planned* — D-42 taken literally.
+- *Bookings (P2, P3).* `GET /me/requests/{id}/bookings` (`IStaffTravelBookingService.GetTravellerBookingsAsync`): every
+  flight with its segments in flying order, hotel, ground leg (Fleet's description included) and car rental. New
+  `ToTravellerView` mappers clear the exception's decision — reason, requester, authoriser, time — on flights and hotels
+  (its state stays: it says why a booking waits), and a driver's own request on a ground leg; the request's own traveller
+  view clears the latter too.
+- *In force over the trip.* `GET /me/requests/{id}/destination-alerts` (the approver's read; the summary DTO gained `Body`
+  and `EffectiveTo`, filled by this read only) and `GET /me/requests/{id}/health-requirements` (7b's, read-only).
+- *The traveller's documents (E2).* `GET/POST /me/travel-documents`, `GET/PUT/DELETE /me/travel-documents/{id}`: the
+  owner is the token's whatever the payload names; the list masked, a document's own read in full to its owner; the
+  desk's rules unchanged (an edit un-verifies, one primary per type, a verified one kept — 422).
+- *Screens.* `/me/travel/[id]` in four tabs — *The trip* (as before), *Before you go* (the risk assessment and its
+  button, the destination's alerts, health requirements, visas, insurance — each warning while D-37 or O-16 holds the
+  ticket), *Itinerary & bookings*, *Money* (advances, what is still held and by when, claims). `/me/travel/documents`,
+  linked from *My travel*. `MyTravelAlertsPanel` points at *Before you go* (brought forward from 7c2 — the tab exists
+  now). The request's TypeScript type gained the five lists the read already carried.
+- *The guide.* Chapter 15 (five screens, the four tabs, the acknowledgement, the documents page, the routes), chapter 5.5's
+  walk and route row, gap rows T-23, T-44, T-54, T-55, T-56 — and a fix: the gap-row script of 7b had left a doubled pipe
+  (an extra empty cell) on T-25, T-26, T-40 and T-42; the six rows filled since read as two columns again.
+
+**Suite** `run-final-portal.mjs` (new; `buildApprovalsFixture`, its lone traveller travC on a plain Employee login, travB
+as someone else). §1 a Critical trip's confirmed flight refused a ticket before the acknowledgement; travB and a desk
+officer on `/me` 404, the desk officer on the desk's route 403; the traveller reads the assessment with what to do, and
+acknowledges it — recorded, a second click keeping the time — and the flight is ticketed. §2 no itinerary; a draft with a
+leg and an activity reads *being planned*, not shown; finalised, in force with both; a new version made current, *being
+planned* again. §3 a flight with two segments recorded out of order, a hotel, a taxi and a car rental; the exception's
+decision and a driver's own request planted in SQL; the traveller reads the segments in order, seats included, and none
+of the decision nor the driver's request, while the desk's reads (the control) carry them. §4 the run's alert (raised
+inactive, switched on — no notice sent) read with its text and end; a health requirement on a country with none of its
+own, read uncleared then cleared. §5 the traveller's documents: theirs whatever the payload names; masked list, full own
+read; travB 404 on read, change and removal; verified, kept (422); a correction un-verifies; a new primary stands the old
+down; the unverified one removed. §6 the trip read carries the visa (masked), the insurance and the rest, no policy
+exceptions; no sign-in 401. **84/84 twice** (557740, 587346). Regression, twice each, all unchanged: compliance **96**
+(597686, 780412), bookings **148** (616674, 798779), money **288** (633576, 814964), policy **131** (665690, 847155),
+lifecycle **257** (678011, 859337), truth **118** (726616, 907630), approvals **123** (731939, 913223), fleet **165**
+(755093, 934389). No alert notice on a non-fixture trip; nothing of any run left live; every fixture login off; the demo
+Kumasi trip still Approved. The API log held only the known noise — the missing email settings and payroll's profile
+defect (#23), one per fixture employee.
 
 ### Lane 8 — Notifications and the sweep (D-4, D-6, F1, F2, E6, O-11, O-17)
 
