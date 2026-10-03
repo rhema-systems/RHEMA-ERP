@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Interfaces.Inventory;
 
 namespace ErpSystem.Core.Services.Sales
 {
@@ -16,15 +17,18 @@ namespace ErpSystem.Core.Services.Sales
         private readonly IGenericRepository<SalesForecast> _forecastRepo;
         private readonly IGenericRepository<SalesForecastLine> _lineRepo;
         private readonly IGenericRepository<SalesOrder> _salesOrderRepo;
+        private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
         public ForecastService(
             IGenericRepository<SalesForecast> forecastRepo,
             IGenericRepository<SalesForecastLine> lineRepo,
-            IGenericRepository<SalesOrder> salesOrderRepo)
+            IGenericRepository<SalesOrder> salesOrderRepo,
+            ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
         {
             _forecastRepo = forecastRepo;
             _lineRepo = lineRepo;
             _salesOrderRepo = salesOrderRepo;
+            _commercialQuantityValidator = commercialQuantityValidator;
         }
 
         public async Task<(IEnumerable<ForecastSummaryDto> Items, int TotalCount)> GetForecastsAsync(int page, int pageSize, string? search = null, string? status = null)
@@ -70,15 +74,18 @@ namespace ErpSystem.Core.Services.Sales
 
             foreach (var line in dto.Lines)
             {
-                forecast.Lines.Add(new SalesForecastLine
+                var forecastLine = new SalesForecastLine
                 {
                     SalesForecastId = forecast.Id,
                     Category = line.Category, ProductName = line.ProductName,
                     ProductId = line.ProductId, SalesRepName = line.SalesRepName,
                     SalesRepId = line.SalesRepId,
                     ForecastQuantity = line.ForecastQuantity, ForecastAmount = line.ForecastAmount,
+                    Unit = line.Unit, UnitOfMeasureId = line.UnitOfMeasureId,
                     Notes = line.Notes
-                });
+                };
+                await ValidateLineQuantityAsync(forecastLine, "Forecast create");
+                forecast.Lines.Add(forecastLine);
             }
 
             forecast.TotalForecastAmount = forecast.Lines.Sum(l => l.ForecastAmount);
@@ -92,6 +99,7 @@ namespace ErpSystem.Core.Services.Sales
             var f = await GetForecast(id);
             if (f.Status != SalesForecastStatus.Draft)
                 throw new InvalidOperationException("Only draft forecasts can be submitted");
+            await ValidateForecastQuantitiesAsync(f, "Forecast submit");
             f.Status = SalesForecastStatus.Submitted; f.SubmittedDate = DateTime.UtcNow; f.UpdatedAt = DateTime.UtcNow;
             await _forecastRepo.UpdateAsync(f); await _forecastRepo.SaveChangesAsync();
             return MapDetail(f);
@@ -102,6 +110,7 @@ namespace ErpSystem.Core.Services.Sales
             var f = await GetForecast(id);
             if (f.Status != SalesForecastStatus.Submitted)
                 throw new InvalidOperationException("Only submitted forecasts can be approved");
+            await ValidateForecastQuantitiesAsync(f, "Forecast approve");
             f.Status = SalesForecastStatus.Approved; f.ApprovedDate = DateTime.UtcNow; f.UpdatedAt = DateTime.UtcNow;
             await _forecastRepo.UpdateAsync(f); await _forecastRepo.SaveChangesAsync();
             return MapDetail(f);
@@ -112,6 +121,7 @@ namespace ErpSystem.Core.Services.Sales
             var f = await GetForecast(id);
             if (f.Status != SalesForecastStatus.Approved)
                 throw new InvalidOperationException("Only approved forecasts can be locked");
+            await ValidateForecastQuantitiesAsync(f, "Forecast lock");
             f.Status = SalesForecastStatus.Locked; f.UpdatedAt = DateTime.UtcNow;
             await _forecastRepo.UpdateAsync(f); await _forecastRepo.SaveChangesAsync();
             return MapDetail(f);
@@ -146,6 +156,20 @@ namespace ErpSystem.Core.Services.Sales
                 ?? throw new InvalidOperationException("Forecast not found");
         }
 
+        private async Task ValidateForecastQuantitiesAsync(SalesForecast forecast, string boundary)
+        {
+            foreach (var line in forecast.Lines.Where(line => !line.IsDeleted))
+                await ValidateLineQuantityAsync(line, boundary);
+        }
+
+        private Task ValidateLineQuantityAsync(SalesForecastLine line, string boundary)
+        {
+            var validator = _commercialQuantityValidator
+                ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales forecasts.");
+            return SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+                validator, line, line.Unit, line.ForecastQuantity, $"{boundary} line {line.Id}");
+        }
+
         private ForecastDetailDto MapDetail(SalesForecast f)
         {
             return new ForecastDetailDto
@@ -164,6 +188,10 @@ namespace ErpSystem.Core.Services.Sales
                     Id = l.Id, Category = l.Category, ProductName = l.ProductName,
                     SalesRepName = l.SalesRepName,
                     ForecastQuantity = l.ForecastQuantity, ForecastAmount = l.ForecastAmount,
+                    Unit = l.Unit, UnitOfMeasureId = l.UnitOfMeasureId,
+                    UnitOfMeasureCodeSnapshot = l.UnitOfMeasureCodeSnapshot,
+                    UnitOfMeasureDecimalPlacesSnapshot = l.UnitOfMeasureDecimalPlacesSnapshot,
+                    UnitOfMeasureRoundingIncrementSnapshot = l.UnitOfMeasureRoundingIncrementSnapshot,
                     ActualQuantity = l.ActualQuantity, ActualAmount = l.ActualAmount,
                     Variance = l.ActualAmount - l.ForecastAmount, Notes = l.Notes
                 }).ToList()

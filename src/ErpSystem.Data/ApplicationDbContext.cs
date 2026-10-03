@@ -296,6 +296,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<Opportunity> Opportunities { get; set; }
     public DbSet<Quote> Quotes { get; set; }
     public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
+    public DbSet<SalesForecast> SalesForecasts { get; set; }
+    public DbSet<SalesForecastLine> SalesForecastLines { get; set; }
     public DbSet<Activity> CrmActivities { get; set; }
     public DbSet<Campaign> Campaigns { get; set; }
     public DbSet<CampaignMember> CampaignMembers { get; set; }
@@ -11222,7 +11224,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 var itemId = InventoryItemId(entry.Entity);
                 if (itemId.HasValue)
                 {
-                    var currentTenantId = (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+                    var currentTenantId = entry.Metadata.FindProperty(nameof(TenantEntity.TenantId)) is null
+                        ? _tenantId
+                        : (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
                     var item = await Set<InventoryItem>().AsNoTracking()
                         .Where(value => value.TenantId == currentTenantId && value.Id == itemId.Value)
                         .Select(value => new { value.UnitOfMeasureId, value.UnitOfMeasure })
@@ -11242,7 +11246,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 legacyCode = receiptEvidence?.UnitOfMeasureCodeSnapshot ?? receiptEvidence?.UnitOfMeasure;
             }
 
-            var tenantId = (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+            var tenantId = entry.Metadata.FindProperty(nameof(TenantEntity.TenantId)) is null
+                ? _tenantId
+                : (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
             var normalizedCode = legacyCode?.Trim().ToUpperInvariant();
             var candidates = line.UnitOfMeasureId.HasValue
                 ? await Set<UnitOfMeasure>().AsNoTracking().Where(value => value.TenantId == tenantId &&
@@ -11294,6 +11300,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         SalesOrderLine value => [(nameof(value.Quantity), value.Quantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.InvoicedQuantity), value.InvoicedQuantity)],
         DeliveryNoteLine value => [(nameof(value.DispatchedQuantity), value.DispatchedQuantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.DamagedQuantity), value.DamagedQuantity)],
         ReturnOrderLine value => [(nameof(value.QuantityReturned), value.QuantityReturned)],
+        QuoteLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        SalesForecastLine value => [(nameof(value.ForecastQuantity), value.ForecastQuantity)],
+        SalesAgreementLine value => [(nameof(value.MinimumQuantity), value.MinimumQuantity), (nameof(value.MaximumQuantity), value.MaximumQuantity), (nameof(value.UtilizedQuantity), value.UtilizedQuantity)],
         _ => []
     };
 
@@ -11317,6 +11326,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         VendorInvoiceLineItem value => value.Unit,
         SalesOrderLine value => value.Unit,
         DeliveryNoteLine value => value.Unit,
+        QuoteLineItem value => value.Unit,
+        SalesForecastLine value => value.Unit,
+        SalesAgreementLine value => value.Unit,
         _ => null
     };
 

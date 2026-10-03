@@ -9,6 +9,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Services.Sales;
 using ErpSystem.Core.Services.Projects;
 using ErpSystem.Data;
 
@@ -27,6 +29,7 @@ public class SalesAgreementService : ISalesAgreementService
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
+    private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
     public SalesAgreementService(
         ApplicationDbContext context,
@@ -34,7 +37,8 @@ public class SalesAgreementService : ISalesAgreementService
         ICurrentUserService currentUserService,
         IDocumentNumberingService documentNumberingService,
         IWorkflowIntegrationService workflowIntegrationService,
-        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry)
+        IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
     {
         _context = context;
         _logger = logger;
@@ -43,6 +47,7 @@ public class SalesAgreementService : ISalesAgreementService
         _documentNumberingService = documentNumberingService;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
+        _commercialQuantityValidator = commercialQuantityValidator;
     }
 
     // ── CRUD ─────────────────────────────────────────────────────────────
@@ -209,7 +214,7 @@ public class SalesAgreementService : ISalesAgreementService
             int lineNum = 1;
             foreach (var l in dto.Lines)
             {
-                agreement.Lines.Add(new SalesAgreementLine
+                var agreementLine = new SalesAgreementLine
                 {
                     Id = Guid.NewGuid(),
                     SalesAgreementId = agreement.Id,
@@ -221,11 +226,14 @@ public class SalesAgreementService : ISalesAgreementService
                     MinimumQuantity = l.MinimumQuantity,
                     MaximumQuantity = l.MaximumQuantity,
                     Unit = l.Unit,
+                    UnitOfMeasureId = l.UnitOfMeasureId,
                     DiscountPercentage = l.DiscountPercentage,
                     DiscountTiersJson = l.DiscountTiersJson,
                     Notes = l.Notes,
                     TenantId = tenantId,
-                });
+                };
+                await ValidateLineQuantitiesAsync(agreementLine, "Sales agreement create");
+                agreement.Lines.Add(agreementLine);
             }
         }
 
@@ -344,6 +352,8 @@ public class SalesAgreementService : ISalesAgreementService
         if (agreement.AgreementStatus != SalesAgreementStatus.Draft)
             throw new InvalidOperationException("Only Draft agreements can be submitted for approval");
 
+        await ValidateAgreementQuantitiesAsync(agreement, "Sales agreement submit");
+
         var userId = GetCurrentUserId();
         var workflowResult = await _workflowIntegrationService.SubmitAsync(WorkflowEntityType, id);
         if (!workflowResult.ExecutionResult.Success)
@@ -365,6 +375,8 @@ public class SalesAgreementService : ISalesAgreementService
 
         if (agreement.AgreementStatus != SalesAgreementStatus.PendingApproval)
             throw new InvalidOperationException("Only PendingApproval agreements can be approved/rejected");
+
+        await ValidateAgreementQuantitiesAsync(agreement, "Sales agreement approval");
 
         var userId = GetCurrentUserId();
         var canApprove = await _workflowIntegrationService.CanUserApproveAsync(WorkflowEntityType, id, userId);
@@ -419,6 +431,8 @@ public class SalesAgreementService : ISalesAgreementService
         if (agreement.AgreementStatus != SalesAgreementStatus.Suspended)
             throw new InvalidOperationException("Agreement cannot be activated from current status");
 
+        await ValidateAgreementQuantitiesAsync(agreement, "Sales agreement activate");
+
         if (await _workflowIntegrationService.HasActiveApprovalInstanceAsync(WorkflowEntityType, id))
             throw new InvalidOperationException("Complete the existing agreement approval process before activation.");
 
@@ -433,9 +447,27 @@ public class SalesAgreementService : ISalesAgreementService
         var tenantId = _currentUserService.TenantId;
         if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
             throw new UnauthorizedAccessException("A current tenant is required.");
-        return await _context.Set<SalesAgreement>().FirstOrDefaultAsync(agreement =>
+        return await _context.Set<SalesAgreement>().Include(agreement => agreement.Lines).FirstOrDefaultAsync(agreement =>
             agreement.Id == id && agreement.TenantId == tenantId.Value && !agreement.IsDeleted)
             ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
+    }
+
+    private async Task ValidateAgreementQuantitiesAsync(SalesAgreement agreement, string boundary)
+    {
+        foreach (var line in agreement.Lines.Where(line => !line.IsDeleted))
+            await ValidateLineQuantitiesAsync(line, boundary);
+    }
+
+    private async Task ValidateLineQuantitiesAsync(SalesAgreementLine line, string boundary)
+    {
+        var validator = _commercialQuantityValidator
+            ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales agreements.");
+        await SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, line.MinimumQuantity, $"{boundary} minimum line {line.LineNumber}");
+        await SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, line.MaximumQuantity, $"{boundary} maximum line {line.LineNumber}");
+        await SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, line.UtilizedQuantity, $"{boundary} utilized line {line.LineNumber}");
     }
 
     public async Task<SalesAgreementDetailDto> SuspendAsync(Guid id, string? reason = null)
@@ -732,7 +764,11 @@ public class SalesAgreementService : ISalesAgreementService
                 Description = l.Description, ProductCode = l.ProductCode,
                 AgreedPrice = l.AgreedPrice, MinimumQuantity = l.MinimumQuantity,
                 MaximumQuantity = l.MaximumQuantity, UtilizedQuantity = l.UtilizedQuantity,
-                Unit = l.Unit, DiscountPercentage = l.DiscountPercentage,
+                Unit = l.Unit, UnitOfMeasureId = l.UnitOfMeasureId,
+                UnitOfMeasureCodeSnapshot = l.UnitOfMeasureCodeSnapshot,
+                UnitOfMeasureDecimalPlacesSnapshot = l.UnitOfMeasureDecimalPlacesSnapshot,
+                UnitOfMeasureRoundingIncrementSnapshot = l.UnitOfMeasureRoundingIncrementSnapshot,
+                DiscountPercentage = l.DiscountPercentage,
                 DiscountTiersJson = l.DiscountTiersJson, Notes = l.Notes,
             }).ToList(),
             Milestones = a.Milestones.OrderBy(m => m.SequenceNumber).Select(m => new SalesAgreementMilestoneDto

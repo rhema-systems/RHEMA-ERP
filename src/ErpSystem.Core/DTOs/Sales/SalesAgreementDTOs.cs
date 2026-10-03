@@ -122,6 +122,10 @@ public class SalesAgreementLineDto
     public decimal MaximumQuantity { get; set; }
     public decimal UtilizedQuantity { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public decimal DiscountPercentage { get; set; }
     public string? DiscountTiersJson { get; set; }
     public string? Notes { get; set; }
@@ -250,6 +254,7 @@ public class CreateSalesAgreementLineDto
     public decimal MinimumQuantity { get; set; }
     public decimal MaximumQuantity { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
     public decimal DiscountPercentage { get; set; }
     public string? DiscountTiersJson { get; set; }
     public string? Notes { get; set; }

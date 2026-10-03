@@ -324,6 +324,10 @@ public class QuoteLineItemDto
     public decimal LineTotal { get; set; }
     public string? ProductCode { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public decimal DiscountPercentage { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
@@ -373,6 +377,7 @@ public class CreateQuoteLineItemDto
 
     [StringLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
 
     public decimal? DiscountPercentage { get; set; }
     public decimal? TaxAmount { get; set; }

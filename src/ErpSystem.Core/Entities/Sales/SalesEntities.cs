@@ -212,7 +212,7 @@ public class Quote : DocumentEntity
 /// <summary>
 /// Quote line items
 /// </summary>
-public class QuoteLineItem : BaseEntity
+public class QuoteLineItem : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid QuoteId { get; set; }
     public virtual Quote Quote { get; set; } = null!;
@@ -235,6 +235,10 @@ public class QuoteLineItem : BaseEntity
 
     [StringLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal DiscountPercentage { get; set; }

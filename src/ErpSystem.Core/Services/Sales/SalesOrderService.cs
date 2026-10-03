@@ -164,6 +164,9 @@ public class SalesOrderService : ISalesOrderService
                     TaxGroupId = tax.TaxGroupId,
                     Unit = lineDto.Unit,
                     UnitOfMeasureId = lineDto.UnitOfMeasureId,
+                    UnitOfMeasureCodeSnapshot = lineDto.UnitOfMeasureCodeSnapshot,
+                    UnitOfMeasureDecimalPlacesSnapshot = lineDto.UnitOfMeasureDecimalPlacesSnapshot,
+                    UnitOfMeasureRoundingIncrementSnapshot = lineDto.UnitOfMeasureRoundingIncrementSnapshot,
                     WarehouseId = lineDto.WarehouseId ?? dto.WarehouseId,
                     LocationId = lineDto.LocationId,
                     GLAccountId = lineDto.GLAccountId,
@@ -298,6 +301,9 @@ public class SalesOrderService : ISalesOrderService
                         TaxGroupId = tax.TaxGroupId,
                         Unit = lineDto.Unit,
                         UnitOfMeasureId = lineDto.UnitOfMeasureId,
+                        UnitOfMeasureCodeSnapshot = lineDto.UnitOfMeasureCodeSnapshot,
+                        UnitOfMeasureDecimalPlacesSnapshot = lineDto.UnitOfMeasureDecimalPlacesSnapshot,
+                        UnitOfMeasureRoundingIncrementSnapshot = lineDto.UnitOfMeasureRoundingIncrementSnapshot,
                         WarehouseId = lineDto.WarehouseId ?? so.WarehouseId,
                         LocationId = lineDto.LocationId,
                         GLAccountId = lineDto.GLAccountId,
@@ -782,17 +788,7 @@ public class SalesOrderService : ISalesOrderService
                 ReferenceNumber = quote.DocumentNumber,
                 Terms = quote.Proposal,
                 ExternalNotes = $"Converted from CRM Quote {quote.DocumentNumber}",
-                Lines = quote.LineItems.Select(li => new CreateSalesOrderLineDto
-                {
-                    ProductCode = li.ProductCode,
-                    Description = li.Description,
-                    Quantity = li.Quantity,
-                    UnitPrice = li.UnitPrice,
-                    DiscountPercentage = li.DiscountPercentage,
-                    DiscountAmount = li.DiscountAmount,
-                    TaxCode = li.TaxCode,
-                    Unit = li.Unit
-                }).ToList()
+                Lines = quote.LineItems.Select(ToSalesOrderLineRequest).ToList()
             };
 
             var result = await CreateSalesOrderAsync(createDto);
@@ -816,6 +812,23 @@ public class SalesOrderService : ISalesOrderService
     #endregion
 
     #region Utilities
+
+    private static CreateSalesOrderLineDto ToSalesOrderLineRequest(QuoteLineItem line)
+    {
+        var request = new CreateSalesOrderLineDto
+        {
+            ProductCode = line.ProductCode,
+            Description = line.Description,
+            Quantity = line.Quantity,
+            UnitPrice = line.UnitPrice,
+            DiscountPercentage = line.DiscountPercentage,
+            DiscountAmount = line.DiscountAmount,
+            TaxCode = line.TaxCode,
+            Unit = line.Unit
+        };
+        SalesCommercialQuantityEvidence.CopyToSalesOrderRequest(line, request);
+        return request;
+    }
 
     public async Task<string> GenerateOrderNumberAsync()
     {

@@ -13,7 +13,10 @@ public sealed class SalesCommercialQuantityEvidenceTests
     {
         new SalesOrderLine(),
         new DeliveryNoteLine(),
-        new ReturnOrderLine()
+        new ReturnOrderLine(),
+        new QuoteLineItem(),
+        new SalesForecastLine(),
+        new SalesAgreementLine()
     };
 
     [Theory]
@@ -75,5 +78,33 @@ public sealed class SalesCommercialQuantityEvidenceTests
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*whole multiple*");
+    }
+
+    [Fact]
+    public void CopyToSalesOrderRequest_PreservesFrozenQuoteEvidence()
+    {
+        var uomId = Guid.NewGuid();
+        var quoteLine = new QuoteLineItem
+        {
+            UnitOfMeasureId = uomId,
+            UnitOfMeasureCodeSnapshot = "MICRO",
+            UnitOfMeasureDecimalPlacesSnapshot = 6,
+            UnitOfMeasureRoundingIncrementSnapshot = 0.000001m
+        };
+        var request = new ErpSystem.Core.DTOs.Sales.CreateSalesOrderLineDto();
+
+        SalesCommercialQuantityEvidence.CopyToSalesOrderRequest(quoteLine, request);
+
+        request.UnitOfMeasureId.Should().Be(uomId);
+        request.UnitOfMeasureCodeSnapshot.Should().Be("MICRO");
+        request.UnitOfMeasureDecimalPlacesSnapshot.Should().Be(6);
+        request.UnitOfMeasureRoundingIncrementSnapshot.Should().Be(0.000001m);
+    }
+
+    [Fact]
+    public void ForecastPersistence_IsTenantScopedAtHeaderAndLine()
+    {
+        new SalesForecast().Should().BeAssignableTo<ErpSystem.Core.Entities.TenantEntity>();
+        new SalesForecastLine().Should().BeAssignableTo<ErpSystem.Core.Entities.TenantEntity>();
     }
 }
