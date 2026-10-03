@@ -17,8 +17,6 @@ import { ClientOnly } from '../ClientOnly';
 import HeaderNotificationBell from '../notifications/HeaderNotificationBell';
 import { AccountSidebar } from './AccountSidebar';
 import { FontSizeToggle } from './FontSizeToggle';
-import { InterfaceStyleToggle } from './InterfaceStyleToggle';
-import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import { settingsNavigationItems } from './sidebar';
 import { hasAnyAccessibleSettings } from '../settings/settings-access';
 
@@ -33,7 +31,6 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   const [mounted, setMounted] = useState(false);
   const { user, logout, isLoggingOut, hasAnyRole, hasAnyPermission } = useAuth();
   const { currentTenant, currentTenantCode, setCurrentTenantCode } = useTenant();
-  const { interfaceStyle } = useInterfaceStyle();
 
   // Sync tenant code when user logs in
   useEffect(() => {
@@ -71,10 +68,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
   return (
     <>
     <header className={cn(
-      'sticky top-0 z-50 w-full border-b transition-all',
-      interfaceStyle === 'immersive'
-        ? 'border-blue-100/80 bg-white/82 shadow-[0_8px_30px_-24px_rgba(37,99,235,0.5)] backdrop-blur-xl supports-[backdrop-filter]:bg-white/72 dark:border-neutral-700/70 dark:bg-neutral-900/88'
-        : 'border-slate-200/80 bg-white/95 shadow-[0_6px_22px_-22px_rgba(15,23,42,0.5)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95',
+      'sticky top-0 z-50 w-full border-b border-blue-100/80 bg-white/82 shadow-[0_8px_30px_-24px_rgba(37,99,235,0.5)] backdrop-blur-xl transition-all supports-[backdrop-filter]:bg-white/72 dark:border-neutral-700/70 dark:bg-neutral-900/88',
       className
     )}>
       <div className="flex min-h-16 w-full min-w-0 flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:flex-nowrap sm:px-5">
@@ -134,7 +128,6 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
           </div> */}
 
           {/* Notifications */}
-          <InterfaceStyleToggle />
           <FontSizeToggle />
           <HeaderNotificationBell />
 

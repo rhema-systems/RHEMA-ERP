@@ -151,7 +151,6 @@ import {
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { useAuth } from '../../hooks/use-auth';
-import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import {
   hrOperationalTrainingLinks,
   hrSetupNavChildren,
@@ -4477,7 +4476,6 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
   const openTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pathname = usePathname() ?? '';
   const { hasAnyRole, hasAnyPermission } = useAuth();
-  const { interfaceStyle } = useInterfaceStyle();
   const sidebarIsCollapsed = collapsed && !hoverExpanded;
 
   useEffect(() => {
@@ -4853,11 +4851,8 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'flex h-full flex-col border-r shadow-[8px_0_30px_-28px_rgba(15,23,42,0.55)] transition-all duration-300',
-          interfaceStyle === 'immersive'
-            ? 'border-blue-100/70 bg-white/94 backdrop-blur-xl dark:border-neutral-800/70 dark:bg-[#181818]/95'
-            : 'border-slate-200/80 bg-slate-50/45 dark:border-neutral-800 dark:bg-[#141414]',
-          sidebarIsCollapsed ? 'w-16' : interfaceStyle === 'immersive' ? 'w-56' : 'w-52',
+          'flex h-full flex-col border-r border-blue-100/70 bg-white/94 shadow-[8px_0_30px_-28px_rgba(15,23,42,0.55)] backdrop-blur-xl transition-all duration-300 dark:border-neutral-800/70 dark:bg-[#181818]/95',
+          sidebarIsCollapsed ? 'w-16' : 'w-56',
           className
         )}
       >
@@ -4923,9 +4918,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                         ? 'rounded-xl px-4 py-3 text-sm'
                         : 'min-h-9 gap-2 rounded-xl border border-transparent px-3 py-1.5 text-[0.78rem] leading-5',
                       itemIsActive
-                        ? interfaceStyle === 'immersive'
-                          ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
-                          : 'border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-300'
+                        ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
@@ -4948,9 +4941,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                         ? 'space-x-4 rounded-xl px-4 py-3 text-sm'
                         : 'min-h-9 gap-2.5 rounded-xl border border-transparent px-3 py-1.5 text-[0.78rem] leading-5',
                       itemIsActive
-                        ? interfaceStyle === 'immersive'
-                          ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
-                          : 'border-blue-100 bg-blue-50 text-blue-700 shadow-sm dark:border-blue-900/70 dark:bg-blue-950/40 dark:text-blue-300'
+                        ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
@@ -4965,10 +4956,10 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
 
         {!sidebarIsCollapsed ? (
           <div className="border-t border-slate-200/60 p-2.5 dark:border-neutral-800/70">
-            <div className={cn('relative overflow-hidden rounded-2xl px-3 py-3.5', interfaceStyle === 'immersive' ? 'bg-gradient-to-br from-blue-600 via-blue-500 to-sky-400 text-white' : 'border border-blue-100 bg-gradient-to-br from-blue-50 to-indigo-50 text-slate-900 dark:border-blue-900/60 dark:from-blue-950/40 dark:to-indigo-950/30 dark:text-white')}>
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-400 px-3 py-3.5 text-white">
               <div className="absolute -bottom-6 -right-5 h-20 w-20 rounded-full bg-white/20 blur-xl" />
               <p className="relative text-[0.72rem] font-bold leading-4">Building a smarter organization</p>
-              <p className={cn('relative mt-1 text-[0.55rem]', interfaceStyle === 'immersive' ? 'text-blue-50' : 'text-slate-500 dark:text-slate-400')}>Integrated. Intelligent. Impactful.</p>
+              <p className="relative mt-1 text-[0.55rem] text-blue-50">Integrated. Intelligent. Impactful.</p>
             </div>
           </div>
         ) : null}
@@ -4979,7 +4970,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         <div
           data-sidebar-flyout="true"
           className="fixed z-40"
-          style={getBridgeStyle(sidebarIsCollapsed ? 64 : interfaceStyle === 'immersive' ? 224 : 208, hoveredItem)}
+          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 224, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />

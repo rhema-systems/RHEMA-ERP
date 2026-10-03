@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
@@ -49,13 +50,11 @@ import { formatCurrencyAmount } from '../../lib/currency';
 import { authService } from '../../services/auth';
 import { dashboardService, getUnavailableDashboardModules, resolveDashboardReportingCurrency } from '../../services/dashboard';
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
-import { useInterfaceStyle } from '../../contexts/InterfaceStyleContext';
 import { systemHealthService } from '../../services/systemHealthService';
 import {
   CompactProgressWidget,
   ConversionFunnelWidget,
   DashboardEmptyState,
-  DashboardHeroArtwork,
   ExecutiveWidget,
   ExpenseAccountsWidget,
   FinancialPerformanceWidget,
@@ -140,14 +139,14 @@ function DashboardSkeleton() {
   return (
     <div className="space-y-5" aria-label="Loading enterprise dashboard">
       <Skeleton className="h-36 w-full rounded-[28px]" />
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-36 rounded-xl" />
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-12">
+        {Array.from({ length: 5 }).map((_, index) => (
+          <Skeleton key={index} className={cn('h-32 rounded-2xl', index === 4 ? 'md:col-span-2 xl:col-span-4' : 'xl:col-span-2')} />
         ))}
       </div>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
-        {Array.from({ length: 6 }).map((_, index) => (
-          <Skeleton key={index} className="h-[300px] rounded-xl" />
+      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Skeleton key={index} className={cn('h-[285px] rounded-2xl', index < 2 ? 'xl:col-span-4' : 'xl:col-span-2')} />
         ))}
       </div>
     </div>
@@ -168,7 +167,6 @@ const toDashboardDate = (value: Date) => format(value, 'yyyy-MM-dd');
 
 export default function Dashboard() {
   const router = useRouter();
-  const { interfaceStyle } = useInterfaceStyle();
   const { user } = useAuth();
   const storedUser = authService.getStoredUser();
   const effectiveUser = user ?? storedUser;
@@ -572,47 +570,43 @@ export default function Dashboard() {
     trendValues: [] as number[],
   }));
 
-  const moduleOverviewCards = summaryCards.filter((card) => card.title !== 'Revenue');
-
   return (
     <DashboardLayout>
-      <div className="space-y-3.5" data-dashboard-style={interfaceStyle}>
+      <div className="space-y-3.5" data-dashboard-style="immersive">
         <section
-          className={cn(
-            'relative isolate overflow-hidden',
-            interfaceStyle === 'immersive'
-              ? 'min-h-[128px] rounded-[24px] border border-blue-200/60 bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 px-5 py-3.5 shadow-[0_24px_55px_-32px_rgba(37,99,235,0.48)] dark:border-blue-900/60 dark:from-blue-950/50 dark:via-neutral-900 dark:to-emerald-950/30 lg:px-6'
-              : 'px-1 pb-1 pt-2',
-          )}
+          className="relative isolate min-h-[128px] overflow-hidden rounded-[24px] border border-blue-200/60 bg-gradient-to-r from-blue-50 via-sky-50 to-emerald-50 px-5 py-3.5 shadow-[0_24px_55px_-32px_rgba(37,99,235,0.48)] dark:border-blue-900/60 dark:from-blue-950/50 dark:via-neutral-900 dark:to-emerald-950/30 lg:px-6"
           aria-labelledby="dashboard-welcome-title"
         >
-          {interfaceStyle === 'immersive' ? (
-            <div className="pointer-events-none absolute inset-y-0 right-0 -z-10 hidden w-[58%] opacity-90 lg:block">
-              <DashboardHeroArtwork />
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-50 via-blue-50/70 to-transparent dark:from-blue-950 dark:via-blue-950/55" />
-            </div>
-          ) : null}
+          <div className="pointer-events-none absolute inset-0 -z-20">
+            <Image
+              src="/images/dashboard/dashboard-hero-office.png"
+              alt=""
+              fill
+              priority
+              sizes="100vw"
+              className="object-cover object-[center_62%] dark:opacity-70"
+            />
+          </div>
+          <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-r from-blue-50/95 via-blue-50/80 to-white/15 dark:from-blue-950/95 dark:via-blue-950/80 dark:to-neutral-950/35" />
 
           <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
             <div className="relative max-w-xl">
               <p className="text-sm font-medium text-slate-500 dark:text-slate-400">
                 Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 18 ? 'afternoon' : 'evening'},
               </p>
-              <h1 id="dashboard-welcome-title" className={cn('font-extrabold tracking-[-0.035em] text-slate-950 dark:text-white', interfaceStyle === 'immersive' ? 'mt-0.5 text-3xl sm:text-4xl' : 'text-[1.85rem]')}>
+              <h1 id="dashboard-welcome-title" className="mt-0.5 text-2xl font-semibold tracking-[-0.02em] text-slate-950 dark:text-white sm:text-[1.75rem]">
                 Welcome back, {displayName}!
               </h1>
               <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
                 Here&apos;s what&apos;s happening across your organization today.
               </p>
-              {interfaceStyle === 'immersive' ? (
-                <p className="mt-3 hidden items-center gap-2 text-xs font-semibold italic text-slate-700 dark:text-slate-200 2xl:flex">
-                  <Sparkles className="h-4 w-4 text-blue-600" aria-hidden="true" />
-                  People. Process. Progress. A stronger tomorrow, together.
-                </p>
-              ) : null}
+              <p className="mt-3 hidden items-center gap-2 text-xs font-semibold italic text-slate-700 dark:text-slate-200 2xl:flex">
+                <Sparkles className="h-4 w-4 text-blue-600" aria-hidden="true" />
+                People. Process. Progress. A stronger tomorrow, together.
+              </p>
             </div>
 
-            <div className={cn('relative flex flex-wrap items-center gap-2', interfaceStyle === 'immersive' && 'mt-auto lg:justify-end')}>
+            <div className="relative mt-auto flex flex-wrap items-center gap-2 lg:justify-end">
               <DatePickerWithRange value={selectedRange} onChange={handleRangeChange} className="w-full sm:w-[252px]" placeholder="Select dashboard period" />
               <Select value={warehouseId} onValueChange={(value) => { setWarehouseId(value); setLocationId('all'); }}>
                 <SelectTrigger className="h-10 w-full border-white/80 bg-white/90 shadow-sm sm:w-[185px] dark:border-neutral-700 dark:bg-neutral-900/85" aria-label="Dashboard warehouse">
@@ -663,100 +657,80 @@ export default function Dashboard() {
           </Alert>
         )}
 
-        <section className={cn('grid gap-3 sm:grid-cols-2 xl:grid-cols-4', interfaceStyle === 'executive' && '2xl:grid-cols-5')} aria-label="Executive financial indicators">
-          {financialOverviewCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <Link
-                key={card.title}
-                href={card.href}
-                aria-label={`Open ${card.title} details`}
-                className="group block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
-              >
-                <article className={cn('h-full min-h-[124px] overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.55)] transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg dark:border-neutral-700/80', card.surfaceClassName)}>
-                  <div className="flex items-start gap-3">
-                    <span className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm', card.iconClassName)}>
-                      <Icon className="h-5 w-5" />
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[0.7rem] font-semibold text-slate-600 dark:text-slate-300">{card.title}</p>
-                      <p className="mt-1 truncate text-[1.35rem] font-extrabold tracking-tight text-slate-950 dark:text-white">{card.value}</p>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <p className="truncate text-[0.68rem] font-medium text-slate-500 dark:text-slate-400">{card.meta}</p>
-                    <MiniTrend values={card.trendValues} color={card.trendColor} />
-                  </div>
-                </article>
-              </Link>
-            );
-          })}
-          {interfaceStyle === 'executive' ? (
-            <article className="relative hidden min-h-[124px] overflow-hidden rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-50 via-sky-50 to-emerald-50 p-4 shadow-[0_10px_30px_-24px_rgba(37,99,235,0.5)] 2xl:block dark:border-blue-900/60 dark:from-blue-950/50 dark:via-neutral-900 dark:to-emerald-950/30">
-              <div className="absolute -bottom-9 -right-7 h-28 w-28 rounded-full bg-blue-300/30 blur-2xl" />
-              <p className="relative text-base font-extrabold leading-tight text-slate-900 dark:text-white">Empowering<br />smarter operations</p>
-              <p className="relative mt-2 text-[0.68rem] text-slate-600 dark:text-slate-300">Integrated. Efficient. Sustainable.</p>
-              <Activity className="absolute bottom-3 right-4 h-8 w-8 text-blue-600/70" aria-hidden="true" />
-            </article>
-          ) : null}
-        </section>
+        <section className="grid items-start gap-3 xl:grid-cols-[minmax(0,4fr)_minmax(13.5rem,0.82fr)]" aria-label="Executive financial indicators, performance and system status">
+          <div className="min-w-0 space-y-3">
+            <div className="grid items-start gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Executive financial indicators">
+              {financialOverviewCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <Link
+                    key={card.title}
+                    href={card.href}
+                    aria-label={`Open ${card.title} details`}
+                    className="group block min-w-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                  >
+                    <article className={cn('min-h-[124px] overflow-hidden rounded-2xl border border-slate-200/70 bg-gradient-to-br p-4 shadow-[0_10px_30px_-24px_rgba(15,23,42,0.55)] transition-all group-hover:-translate-y-0.5 group-hover:shadow-lg dark:border-neutral-700/80', card.surfaceClassName)}>
+                      <div className="flex items-start gap-3">
+                        <span className={cn('flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-sm', card.iconClassName)}>
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[0.7rem] font-semibold text-slate-600 dark:text-slate-300">{card.title}</p>
+                          <p className="mt-1 whitespace-normal break-words text-[clamp(1rem,1.35vw,1.35rem)] font-extrabold leading-tight tracking-tight text-slate-950 tabular-nums dark:text-white">{card.value}</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 flex items-end justify-between gap-3">
+                        <p className="truncate text-[0.68rem] font-medium text-slate-500 dark:text-slate-400">{card.meta}</p>
+                        <MiniTrend values={card.trendValues} color={card.trendColor} />
+                      </div>
+                    </article>
+                  </Link>
+                );
+              })}
+            </div>
 
-        <section className="grid gap-3 xl:grid-cols-12" aria-label="Executive performance overview">
-          <div className="space-y-3 xl:col-span-9">
-            {data.financeOverview ? (
-              <div className="grid gap-3 lg:grid-cols-5">
-                <div className="lg:col-span-3">
-                  <FinancialPerformanceWidget data={data.financeOverview.monthly} formatValue={formatReportingMoney} href={detailedLedgerHref} />
+            <section aria-label="Executive performance overview">
+              {data.financeOverview ? (
+                <div className="grid gap-3 lg:grid-cols-5">
+                  <div className="lg:col-span-3">
+                    <FinancialPerformanceWidget data={data.financeOverview.monthly} formatValue={formatReportingMoney} href={detailedLedgerHref} />
+                  </div>
+                  <div className="lg:col-span-2">
+                    <ExpenseAccountsWidget data={data.financeOverview.expenseChart} formatValue={formatReportingMoney} href={detailedLedgerHref} />
+                  </div>
                 </div>
-                <div className="lg:col-span-2">
-                  <ExpenseAccountsWidget data={data.financeOverview.expenseChart} formatValue={formatReportingMoney} href={detailedLedgerHref} />
-                </div>
-              </div>
-            ) : (
-              <ExecutiveWidget title="Financial performance" description="Posted general-ledger movement" href="/finance" actionLabel="Open finance">
-                <DashboardEmptyState title="Financial data is not available" description="This panel appears when the finance dashboard is permitted and available." href="/finance" actionLabel="Open finance" />
-              </ExecutiveWidget>
-            )}
-
-            {moduleOverviewCards.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label="Module performance snapshot">
-                {moduleOverviewCards.slice(0, 3).map((card) => {
-                  const Icon = card.icon;
-                  return (
-                    <Link key={card.title} href={card.href} className="group flex items-center gap-3 rounded-2xl border border-slate-200/75 bg-white px-4 py-3 shadow-[0_8px_24px_-22px_rgba(15,23,42,0.5)] transition-colors hover:border-blue-200 hover:bg-blue-50/40 dark:border-neutral-700/80 dark:bg-[#1d1d1d] dark:hover:border-blue-900/70 dark:hover:bg-blue-950/20">
-                      <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl', card.iconClassName)}><Icon className="h-4 w-4" /></span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[0.68rem] font-semibold text-slate-500 dark:text-slate-400">{card.title}</span>
-                        <strong className="block truncate text-base text-slate-950 dark:text-white">{card.value}</strong>
-                      </span>
-                      <span className="max-w-24 truncate text-right text-[0.62rem] text-slate-500 dark:text-slate-400">{card.meta}</span>
-                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-blue-600 transition-transform group-hover:translate-x-0.5" />
-                    </Link>
-                  );
-                })}
-              </div>
-            ) : null}
+              ) : (
+                <ExecutiveWidget title="Financial performance" description="Posted general-ledger movement" href="/finance" actionLabel="Open finance">
+                  <DashboardEmptyState title="Financial data is not available" description="This panel appears when the finance dashboard is permitted and available." href="/finance" actionLabel="Open finance" />
+                </ExecutiveWidget>
+              )}
+            </section>
           </div>
 
-          <aside className="grid gap-3 sm:grid-cols-2 xl:col-span-3 xl:grid-cols-1" aria-label="System status and attention">
-            <ExecutiveWidget title="Systems Health" description={systemHealthError ? 'Readiness checks unavailable' : 'Live service readiness'} icon={<Server className="h-4 w-4" />} className="sm:col-span-2 xl:col-span-1">
-              <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
+          <aside className="space-y-3" aria-label="System status and active alerts">
+            <ExecutiveWidget
+              title="System Health"
+              description={systemHealthError ? 'Readiness checks unavailable' : 'Live service readiness'}
+              icon={<Server className="h-4 w-4" />}
+              className="min-h-[124px]"
+            >
+              <div className="grid gap-x-4 px-4 pb-3 pt-0.5 sm:grid-cols-2 sm:px-5 xl:grid-cols-1 xl:px-4">
                 {systemHealth?.checks.slice(0, 4).map((check) => {
                   const healthy = check.status.toLowerCase() === 'healthy';
                   return (
                     <div key={check.name} className="flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-neutral-800">
                       <span className={cn('h-2 w-2 rounded-full', healthy ? 'bg-emerald-500' : 'bg-rose-500')} />
-                      <span className="min-w-0 flex-1 truncate text-[0.7rem] font-medium capitalize text-slate-700 dark:text-slate-200">{check.name.replaceAll('-', ' ')}</span>
-                      <span className={cn('rounded-full px-2 py-0.5 text-[0.6rem] font-semibold', healthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300')}>{check.status}</span>
+                      <span className="min-w-0 flex-1 truncate text-[0.68rem] font-medium capitalize text-slate-700 dark:text-slate-200">{check.name.replaceAll('-', ' ')}</span>
+                      <span className={cn('rounded-full px-2 py-0.5 text-[0.58rem] font-semibold', healthy ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-rose-50 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300')}>{check.status}</span>
                     </div>
                   );
                 })}
-                {!systemHealth && !systemHealthError ? <p className="py-3 text-center text-xs text-slate-500">Checking service readiness…</p> : null}
-                {systemHealthError ? <p className="py-3 text-center text-xs text-rose-600">Readiness checks are currently unavailable.</p> : null}
+                {!systemHealth && !systemHealthError ? <p className="py-3 text-center text-xs text-slate-500 sm:col-span-2">Checking service readiness…</p> : null}
+                {systemHealthError ? <p className="py-3 text-center text-xs text-rose-600 sm:col-span-2">Readiness checks are currently unavailable.</p> : null}
               </div>
             </ExecutiveWidget>
 
-            <ExecutiveWidget title="Alerts & Attention" description={`${criticalAlertCount} records require review`} icon={<AlertTriangle className="h-4 w-4 text-rose-500" />}>
+            <ExecutiveWidget title="Active Alerts" description={`${criticalAlertCount} records require review`} icon={<AlertTriangle className="h-4 w-4 text-rose-500" />} className="min-h-[285px]">
               <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
                 {operationalAlerts.length === 0 ? (
                   <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-3 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"><CircleCheckBig className="h-4 w-4" />No active operational alerts</div>
@@ -769,8 +743,25 @@ export default function Dashboard() {
                 ))}
               </div>
             </ExecutiveWidget>
+          </aside>
+        </section>
 
-            <ExecutiveWidget title="My Tasks & Queues" description="Live workload across permitted modules" href="/workflow/inbox" actionLabel="View all" icon={<ListTodo className="h-4 w-4 text-violet-600" />}>
+        <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12" aria-label="Customer relationship performance and personal work">
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <PipelineWidget
+              data={pipelineStageData}
+              href="/crm/opportunities"
+              getHref={(stage) => buildQueryHref('/crm/opportunities', { stage })}
+            />
+          </div>
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <ConversionFunnelWidget data={crmFunnelData} href="/crm/leads" getHref={getCrmFunnelHref} />
+          </div>
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <RiskMixWidget data={crmHealthData} href="/crm/accounts" />
+          </div>
+          <aside className="xl:col-span-3" aria-label="My tasks and approvals">
+            <ExecutiveWidget title="My Tasks & Approvals" description="Live workload across permitted modules" href="/workflow/inbox" actionLabel="View all" icon={<ListTodo className="h-4 w-4 text-violet-600" />} className="h-full">
               {operationalWorkQueues.length === 0 ? (
                 <DashboardEmptyState title="No permitted queues" description="Available operational work will appear here." href="/workflow/inbox" actionLabel="Open inbox" />
               ) : (
@@ -787,6 +778,52 @@ export default function Dashboard() {
             </ExecutiveWidget>
           </aside>
         </section>
+
+        <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12" aria-label="Operational delivery overview">
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <CompactProgressWidget
+              title="Project Delivery Pressure"
+              description="Tasks, milestones, risks and issues"
+              data={projectPressureData}
+              href="/development/projects"
+              actionLabel="View projects"
+              emptyTitle="No project pressure"
+              emptyDescription="No overdue tasks, milestones, risks or issues are currently visible."
+            />
+          </div>
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <CompactProgressWidget
+              title="Inventory Queue"
+              description="Approvals and issue workload"
+              data={inventoryQueueData.map((item) => ({ name: item.label, value: item.count }))}
+              href="/inventory/requisitions"
+              actionLabel="View queue"
+              emptyTitle="Inventory queue is clear"
+              emptyDescription="No permitted approvals or issue requests are waiting."
+            />
+          </div>
+          <div className="xl:col-span-3 [&>section]:h-full">
+            <MaintenanceTrendWidget data={maintenanceTrendData} href="/maintenance/work-orders" />
+          </div>
+          <aside className="relative min-h-[190px] overflow-hidden rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-400 p-5 text-white shadow-[0_14px_34px_-22px_rgba(37,99,235,0.72)] xl:col-span-3" aria-label="RHEMA ERP brand message">
+            <div className="absolute -bottom-16 -right-10 h-44 w-44 rounded-full bg-white/20 blur-2xl" />
+            <Activity className="relative h-7 w-7 text-blue-100" aria-hidden="true" />
+            <p className="relative mt-5 text-xl font-extrabold leading-tight">Operational excellence<br />today for a better tomorrow</p>
+            <p className="relative mt-3 text-xs text-blue-50">People. Process. Progress.</p>
+          </aside>
+        </section>
+
+        {queueLoadData.length > 0 ? (
+          <CompactProgressWidget
+            title="Operational Queue Load"
+            description="Where work is building across permitted modules"
+            data={queueLoadData.map((item) => ({ name: item.module, value: item.items }))}
+            href="/workflow/inbox"
+            actionLabel="View work"
+            emptyTitle="Operational queues are clear"
+            emptyDescription="No open work is currently visible across permitted modules."
+          />
+        ) : null}
 
         {management && (
           <details className="group rounded-2xl border border-slate-200/75 bg-white shadow-[0_8px_24px_-22px_rgba(15,23,42,0.5)] dark:border-neutral-700/80 dark:bg-[#1d1d1d]">
@@ -977,50 +1014,6 @@ export default function Dashboard() {
           </details>
         )}
 
-        <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" aria-label="Customer relationship performance">
-          <PipelineWidget
-            data={pipelineStageData}
-            href="/crm/opportunities"
-            getHref={(stage) => buildQueryHref('/crm/opportunities', { stage })}
-          />
-          <ConversionFunnelWidget data={crmFunnelData} href="/crm/leads" getHref={getCrmFunnelHref} />
-          <RiskMixWidget data={crmHealthData} href="/crm/accounts" />
-        </section>
-
-        <section className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3" aria-label="Operational delivery overview">
-          <CompactProgressWidget
-            title="Project Delivery Pressure"
-            description="Tasks, milestones, risks and issues"
-            data={projectPressureData}
-            href="/development/projects"
-            actionLabel="View projects"
-            emptyTitle="No project pressure"
-            emptyDescription="No overdue tasks, milestones, risks or issues are currently visible."
-          />
-          <CompactProgressWidget
-            title="Inventory Queue"
-            description="Approvals and issue workload"
-            data={inventoryQueueData.map((item) => ({ name: item.label, value: item.count }))}
-            href="/inventory/requisitions"
-            actionLabel="View queue"
-            emptyTitle="Inventory queue is clear"
-            emptyDescription="No permitted approvals or issue requests are waiting."
-          />
-          <MaintenanceTrendWidget data={maintenanceTrendData} href="/maintenance/work-orders" />
-          {queueLoadData.length > 0 ? (
-            <div className="lg:col-span-2 2xl:col-span-3">
-              <CompactProgressWidget
-                title="Operational Queue Load"
-                description="Where work is building across permitted modules"
-                data={queueLoadData.map((item) => ({ name: item.module, value: item.items }))}
-                href="/workflow/inbox"
-                actionLabel="View work"
-                emptyTitle="Operational queues are clear"
-                emptyDescription="No open work is currently visible across permitted modules."
-              />
-            </div>
-          ) : null}
-        </section>
       </div>
     </DashboardLayout>
   );

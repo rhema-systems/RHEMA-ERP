@@ -119,8 +119,8 @@ function ChartTooltip({ active, payload, label, formatValue }: {
   return (
     <div className="rounded-xl border border-slate-200 bg-white/95 p-3 shadow-xl backdrop-blur dark:border-neutral-700 dark:bg-neutral-900/95">
       <p className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-200">{label}</p>
-      {payload.map((entry) => (
-        <p key={entry.name} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+      {payload.map((entry, index) => (
+        <p key={`${entry.dataKey ?? entry.name ?? 'series'}-${index}`} className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
           <span className="h-2 w-2 rounded-full" style={{ backgroundColor: entry.color }} />
           <span>{entry.name}</span>
           <strong className="ml-auto pl-3 text-slate-900 dark:text-white">{formatValue(Number(entry.value ?? 0))}</strong>
@@ -188,7 +188,7 @@ export function ExpenseAccountsWidget({
   const visible = data.slice(0, 5);
   const maximum = Math.max(1, ...visible.map((item) => item.value));
   return (
-    <ExecutiveWidget title="Top Expense Accounts" description="Largest posted balances" href={href} actionLabel="View all" icon={<TrendingUp className="h-4 w-4" />}>
+    <ExecutiveWidget title="Top Expense Accounts" description="Largest posted balances" href={href} actionLabel="View all" icon={<TrendingUp className="h-4 w-4" />} className="min-h-[285px]">
       {visible.length === 0 ? (
         <DashboardEmptyState title="No expense balances yet" description="Posted expense accounts will appear here." href={href} actionLabel="Open ledger" />
       ) : (
@@ -390,7 +390,7 @@ export function MaintenanceTrendWidget({
               <Tooltip content={<ChartTooltip formatValue={(value) => String(value)} />} cursor={{ fill: '#eff6ff', opacity: 0.4 }} />
               <Bar dataKey="created" name="Created" fill="#2474ff" radius={[4, 4, 0, 0]} barSize={10} />
               <Bar dataKey="completed" name="Completed" fill="#46cc9a" radius={[4, 4, 0, 0]} barSize={10} />
-              <Line type="monotone" dataKey="completed" name="Completed" stroke="#14a973" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="completed" name="Completion trend" stroke="#14a973" strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -409,44 +409,6 @@ export function MiniTrend({ values, color = '#2474ff' }: { values: number[]; col
   return (
     <svg viewBox="0 0 80 32" className="h-8 w-20 overflow-visible" aria-hidden="true">
       <polyline points={points} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-export function DashboardHeroArtwork() {
-  return (
-    <svg viewBox="0 0 560 170" className="h-full w-full" role="img" aria-label="Abstract city skyline">
-      <defs>
-        <linearGradient id="heroSky" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0" stopColor="#dbeafe" />
-          <stop offset="0.55" stopColor="#f0f9ff" />
-          <stop offset="1" stopColor="#dcfce7" />
-        </linearGradient>
-        <linearGradient id="heroGlass" x1="0" x2="1" y1="0" y2="1">
-          <stop offset="0" stopColor="#60a5fa" stopOpacity="0.75" />
-          <stop offset="1" stopColor="#1d4ed8" stopOpacity="0.32" />
-        </linearGradient>
-      </defs>
-      <rect width="560" height="170" rx="28" fill="url(#heroSky)" />
-      <circle cx="468" cy="38" r="20" fill="#fff" fillOpacity="0.8" />
-      <path d="M0 136C76 112 114 145 184 126c63-18 84 4 141-7 68-13 118-4 235 6v45H0z" fill="#a7f3d0" fillOpacity="0.48" />
-      <g fill="url(#heroGlass)" stroke="#fff" strokeOpacity="0.58">
-        <path d="M250 59h54v87h-54z" />
-        <path d="M310 35h67v111h-67z" />
-        <path d="M384 70h50v76h-50z" />
-        <path d="M438 52h65v94h-65z" />
-        <path d="M202 83h43v63h-43z" />
-      </g>
-      <g stroke="#eff6ff" strokeOpacity="0.72">
-        {[326, 343, 360].map((x) => <path key={x} d={`M${x} 40v103`} />)}
-        {[83, 100, 117, 134].map((y) => <path key={y} d={`M205 ${y}h294`} />)}
-      </g>
-      <g fill="#1e3a8a" fillOpacity="0.55">
-        <circle cx="115" cy="121" r="19" />
-        <rect x="111" y="120" width="8" height="28" rx="3" />
-        <circle cx="160" cy="116" r="25" />
-        <rect x="156" y="116" width="9" height="32" rx="3" />
-      </g>
     </svg>
   );
 }

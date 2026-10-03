@@ -53,7 +53,7 @@ function LoginFormWithSearchParams() {
   const [twoFactorToken, setTwoFactorToken] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [storedLoginData, setStoredLoginData] = useState<{ username: string; password: string; rememberMe: boolean } | null>(null);
-  const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
+  const [authMode] = useState<'password' | 'otp'>('password');
   const [otpStage, setOtpStage] = useState<'request' | 'verify'>('request');
   const [otpChannel, setOtpChannel] = useState<OtpChannel>('Email');
   const [otpIdentifier, setOtpIdentifier] = useState('');
@@ -504,41 +504,6 @@ function LoginFormWithSearchParams() {
             )}
           </CardHeader>
           <CardContent className="px-5 pb-5">
-            {/* Auth mode switch (not shown during password 2FA step) */}
-            {!showTwoFactor && (
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                <Button
-                  type="button"
-                  variant={authMode === 'password' ? 'default' : 'outline'}
-                  onClick={() => {
-                    setAuthMode('password');
-                    setOtpStage('request');
-                    setOtpRequiresTwoFactor(false);
-                    setOtpErrorMessage('');
-                    setOtpInfoMessage('');
-                  }}
-                >
-                  Password
-                </Button>
-                <Button
-                  type="button"
-                  variant={authMode === 'otp' ? 'default' : 'outline'}
-                  onClick={() => {
-                    setAuthMode('otp');
-                    setShowTwoFactor(false);
-                    setTwoFactorCode('');
-                    setStoredLoginData(null);
-                    setOtpErrorMessage('');
-                    setOtpInfoMessage('');
-                    setOtpStage('request');
-                    setOtpRequiresTwoFactor(false);
-                  }}
-                >
-                  One-time code
-                </Button>
-              </div>
-            )}
-
             {authMode === 'password' ? (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
 
@@ -662,20 +627,9 @@ function LoginFormWithSearchParams() {
                 </div>
               )}
 
-              {/* Remember Me & Forgot Password - Hidden during 2FA step */}
+              {/* Password recovery - Hidden during 2FA step */}
               {!showTwoFactor && (
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      id="rememberMe"
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      {...register('rememberMe')}
-                    />
-                    <Label htmlFor="rememberMe" className="text-sm font-normal">
-                      Remember me for 30 days
-                    </Label>
-                  </div>
+                <div className="flex justify-end">
                   <a
                     href="/forgot-password"
                     className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
