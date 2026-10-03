@@ -60,7 +60,7 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
                 table.CheckConstraint("CK_FinanceRoundingEvidence_Places", "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
                 table.ForeignKey("FK_FinanceRoundingEvidence_Accounts_TenantId_GainAccountId", x => new { x.TenantId, x.GainAccountId }, "Accounts", new[] { "TenantId", "Id" }, onDelete: ReferentialAction.Restrict);
                 table.ForeignKey("FK_FinanceRoundingEvidence_Accounts_TenantId_LossAccountId", x => new { x.TenantId, x.LossAccountId }, "Accounts", new[] { "TenantId", "Id" }, onDelete: ReferentialAction.Restrict);
-                table.ForeignKey("FK_FinanceRoundingEvidence_ExchangeRates_ExchangeRateId", x => x.ExchangeRateId, "ExchangeRates", "Id", onDelete: ReferentialAction.Restrict);
+                table.ForeignKey("FK_FinanceRoundingEvidence_ExchangeRates_TenantId_ExchangeRateId", x => new { x.TenantId, x.ExchangeRateId }, "ExchangeRates", new[] { "TenantId", "Id" }, onDelete: ReferentialAction.Restrict);
                 table.ForeignKey("FK_FinanceRoundingEvidence_Tenants_TenantId", x => x.TenantId, "Tenants", "Id", onDelete: ReferentialAction.Restrict);
             });
 
@@ -71,7 +71,7 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
         AddSourceColumns(migrationBuilder, "CashTransactions");
         migrationBuilder.AddColumn<Guid>("FinanceRoundingEvidenceId", "FinancePostingEvents", "uniqueidentifier", nullable: true);
 
-        migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_ExchangeRateId", "FinanceRoundingEvidence", "ExchangeRateId");
+        migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_TenantId_ExchangeRateId", "FinanceRoundingEvidence", new[] { "TenantId", "ExchangeRateId" });
         migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_TenantId_GainAccountId", "FinanceRoundingEvidence", new[] { "TenantId", "GainAccountId" });
         migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_TenantId_LossAccountId", "FinanceRoundingEvidence", new[] { "TenantId", "LossAccountId" });
         migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_TenantId_PostingIdempotencyKey", "FinanceRoundingEvidence", new[] { "TenantId", "PostingIdempotencyKey" }, unique: true, filter: "[IsDeleted] = 0");
@@ -103,7 +103,8 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
 
     private static void AddSourceEvidenceLink(MigrationBuilder migrationBuilder, string table, bool adjustment = true)
     {
-        migrationBuilder.CreateIndex($"IX_{table}_FinanceRoundingEvidenceId", table, "FinanceRoundingEvidenceId");
+        migrationBuilder.CreateIndex($"IX_{table}_TenantId_FinanceRoundingEvidenceId", table,
+            new[] { "TenantId", "FinanceRoundingEvidenceId" });
         migrationBuilder.AddForeignKey($"FK_{table}_FinanceRoundingEvidence_TenantId_FinanceRoundingEvidenceId", table,
             new[] { "TenantId", "FinanceRoundingEvidenceId" }, "FinanceRoundingEvidence", new[] { "TenantId", "Id" }, onDelete: ReferentialAction.Restrict);
     }
@@ -111,7 +112,7 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
     private static void DropSourceEvidenceLink(MigrationBuilder migrationBuilder, string table, bool adjustment = true)
     {
         migrationBuilder.DropForeignKey($"FK_{table}_FinanceRoundingEvidence_TenantId_FinanceRoundingEvidenceId", table);
-        migrationBuilder.DropIndex($"IX_{table}_FinanceRoundingEvidenceId", table);
+        migrationBuilder.DropIndex($"IX_{table}_TenantId_FinanceRoundingEvidenceId", table);
         migrationBuilder.DropColumn("FinanceRoundingEvidenceId", table);
         if (adjustment) migrationBuilder.DropColumn("RoundingAdjustmentAmount", table);
     }

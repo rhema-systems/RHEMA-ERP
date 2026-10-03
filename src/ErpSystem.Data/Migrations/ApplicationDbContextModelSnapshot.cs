@@ -13773,6 +13773,8 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[TransferPairId] IS NOT NULL AND [TransferLeg] IS NOT NULL");
 
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
+
                     b.ToTable("CashTransaction");
                 });
 
@@ -14623,6 +14625,8 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "PaymentMethodId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "SourceBookAuthorityId");
 
@@ -17737,6 +17741,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "HasForeignCurrencyLines");
 
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
+
                     b.HasIndex("TenantId", "AccountingBookId", "IdempotencyKey")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
@@ -18177,7 +18183,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
                     b.HasAlternateKey("TenantId", "Id");
-                    b.HasIndex("ExchangeRateId");
+                    b.HasIndex("TenantId", "ExchangeRateId");
                     b.HasIndex("TenantId", "GainAccountId");
                     b.HasIndex("TenantId", "LossAccountId");
                     b.HasIndex("TenantId", "PostingIdempotencyKey").IsUnique().HasFilter("[IsDeleted] = 0");
@@ -24556,6 +24562,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ExchangeRateId");
 
                     b.HasIndex("TenantId", "SourceBookAuthorityId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.ToTable("Invoices", null, t =>
                         {
@@ -31501,6 +31509,8 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [AcceptedSupplyKind] IN (2, 3) AND [AcceptedSupplySourceId] IS NOT NULL");
 
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
+
                     b.ToTable("VendorInvoice", null, t =>
                         {
                             t.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
@@ -32981,6 +32991,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "PaymentMethodId");
 
                     b.HasIndex("TenantId", "BusinessPartnerId", "PaymentDate");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.ToTable("VendorPayment", null, t =>
                         {
@@ -191086,6 +191098,12 @@ namespace ErpSystem.Data.Migrations
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("BankAccount");
 
                     b.Navigation("ExchangeRateRecord");
@@ -191294,6 +191312,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceSourceBookAuthority", "SourceBookAuthority")
                         .WithMany()
                         .HasForeignKey("TenantId", "SourceBookAuthorityId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
@@ -192008,11 +192032,48 @@ namespace ErpSystem.Data.Migrations
                         .HasPrincipalKey("TenantId", "Id", "AccountingBookId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AccountingBook");
 
                     b.Navigation("JournalEntry");
 
                     b.Navigation("PrimaryExchangeRateRecord");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "GainAccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "LossAccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ExchangeRateId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -194356,6 +194417,12 @@ namespace ErpSystem.Data.Migrations
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("BusinessPartner");
 
                     b.Navigation("BusinessPartnerArProfileVersion");
@@ -196254,6 +196321,12 @@ namespace ErpSystem.Data.Migrations
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ApAccount");
 
                     b.Navigation("BusinessPartner");
@@ -196809,6 +196882,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
