@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -31,6 +32,72 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed partial class ArInvoicePostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinancePrecisionRelational")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task InvoiceStorageAndPosting_RoundTripsZeroThreeAndFourDecimalCurrencies()
+    {
+        var databaseName = $"ArPrecision_{Guid.NewGuid():N}";
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer($"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;ConnectRetryCount=0")
+            .Options);
+        db.Database.SetCommandTimeout(TimeSpan.FromMinutes(3));
+        try
+        {
+            await db.Database.EnsureCreatedAsync();
+            var cases = new[]
+            {
+                new { Code = "JPY", Places = 0, UnitPrice = 123.5m, Expected = 124m },
+                new { Code = "KWD", Places = 3, UnitPrice = 123.4565m, Expected = 123.457m },
+                new { Code = "X04", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
+            };
+
+            foreach (var item in cases)
+            {
+                var tenantId = Guid.NewGuid();
+                var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+                {
+                    invoice.CurrencyCode = item.Code;
+                    invoice.LineItems.Single().UnitPrice = item.UnitPrice;
+                    invoice.SubTotal = item.Expected;
+                    invoice.TotalAmount = item.Expected;
+                    invoice.BaseCurrencyAmount = item.Expected;
+                });
+                var tenant = await db.Tenants.SingleAsync(value => value.Id == tenantId);
+                tenant.BaseCurrency = item.Code;
+                tenant.CurrencyDecimalPlaces = item.Places;
+                (await db.AccountingBooks.SingleAsync(value => value.TenantId == tenantId)).FunctionalCurrencyCode = item.Code;
+                (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).BaseCurrency = item.Code;
+                var currency = await db.Currencies.SingleAsync(value => value.TenantId == tenantId);
+                currency.CurrencyCode = item.Code;
+                currency.NumericCode = item.Code;
+                currency.CurrencyName = item.Code;
+                currency.CurrencySymbol = item.Code;
+                currency.DecimalPlaces = item.Places;
+                await db.SaveChangesAsync();
+
+                db.ChangeTracker.Clear();
+                var stored = await db.Invoices.Include(value => value.LineItems)
+                    .SingleAsync(value => value.Id == fixture.Invoice.Id);
+                stored.TotalAmount.Should().Be(item.Expected);
+                stored.LineItems.Single().UnitPrice.Should().Be(item.UnitPrice);
+
+                var (service, _) = CreateService(db, tenantId);
+                var posted = await service.PostAsync(stored.Id);
+                var journal = await db.JournalEntries.Include(value => value.Transactions)
+                    .SingleAsync(value => value.Id == posted.JournalEntryId);
+                journal.Transactions.Sum(value => value.DebitAmount).Should().Be(item.Expected);
+                journal.Transactions.Sum(value => value.CreditAmount).Should().Be(item.Expected);
+                journal.Transactions.Should().OnlyContain(value =>
+                    value.TransactionDebitAmount + value.TransactionCreditAmount == item.Expected);
+            }
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     [Fact]
     public async Task Distribution_preview_does_not_post_or_mutate_invoice_customer_or_audit()
     {
@@ -1331,6 +1398,12 @@ public sealed partial class ArInvoicePostingMigrationTests
             Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
+        });
+        db.Currencies.Add(new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "GHS", NumericCode = "936",
+            CurrencyName = "Ghanaian Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
+            IsBaseCurrency = true, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
         });
     }
 

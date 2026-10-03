@@ -173,15 +173,22 @@ public sealed class FinanceTaxCalculationSnapshotDto
     public Guid? TaxGroupId { get; set; }
     /// <summary>Frozen GL account used for this tax component at source posting time.</summary>
     public Guid? PostingAccountId { get; set; }
-    public string CurrencyCode { get; set; } = string.Empty;
-    public int CurrencyDecimalPlaces { get; set; }
+    /// <summary>
+    /// Immutable currency evidence. Both values may be null only for tax calculations that
+    /// pre-date governed currency-precision capture; newly created snapshots must populate both.
+    /// </summary>
+    public string? CurrencyCode { get; set; }
+    public int? CurrencyDecimalPlaces { get; set; }
     public decimal BaseAmount { get; set; }
     public decimal TaxableAmount { get; set; }
     public decimal TaxRate { get; set; }
     public decimal TaxAmount { get; set; }
-    public decimal RawTaxAmount { get; set; }
-    public decimal RoundingAdjustment { get; set; }
-    public int AllocationSequence { get; set; }
+    public decimal? RawTaxAmount { get; set; }
+    public decimal? RoundingAdjustment { get; set; }
+    public int? AllocationSequence { get; set; }
+    public ErpSystem.Core.Finance.TaxRoundingScope? TaxRoundingScope { get; set; }
+    public ErpSystem.Core.Finance.GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+    public decimal? TaxRoundingIncrement { get; set; }
     public ErpSystem.Core.Enums.CompoundBasis CompoundBasis { get; set; }
     public int CalculationOrder { get; set; }
     public DateTime CalculationDate { get; set; } = DateTime.UtcNow;

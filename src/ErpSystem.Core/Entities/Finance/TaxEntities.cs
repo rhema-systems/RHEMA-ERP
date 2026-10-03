@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.Entities.Finance
 {
@@ -434,11 +435,10 @@ namespace ErpSystem.Core.Entities.Finance
         /// <summary>Immutable posting account selected for this tax component.</summary>
         public Guid? PostingAccountId { get; set; }
 
-        [Required]
         [StringLength(3)]
-        public string CurrencyCode { get; set; } = string.Empty;
+        public string? CurrencyCode { get; set; }
 
-        public int CurrencyDecimalPlaces { get; set; }
+        public int? CurrencyDecimalPlaces { get; set; }
 
         /// <summary>
         /// Base amount
@@ -469,12 +469,18 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal TaxAmount { get; set; }
 
         [Column(TypeName = "decimal(20,10)")]
-        public decimal RawTaxAmount { get; set; }
+        public decimal? RawTaxAmount { get; set; }
 
         [Column(TypeName = "decimal(20,10)")]
-        public decimal RoundingAdjustment { get; set; }
+        public decimal? RoundingAdjustment { get; set; }
 
-        public int AllocationSequence { get; set; }
+        public int? AllocationSequence { get; set; }
+
+        public TaxRoundingScope? TaxRoundingScope { get; set; }
+        public GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+
+        [Column(TypeName = "decimal(20,4)")]
+        public decimal? TaxRoundingIncrement { get; set; }
 
         /// <summary>
         /// Compound basis used

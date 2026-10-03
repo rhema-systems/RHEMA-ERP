@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -1008,7 +1009,7 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "TaxPrecision")]
-    public async Task ExactReversal_ShouldCloneSignedTaxEvidence_AndRemainIdempotent()
+    public async Task SupplierDebitNoteExactReversal_ShouldCloneSignedPrecisionEvidence_AndReplayIdempotently()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -1019,6 +1020,10 @@ public sealed class FinancePostingEngineTests
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
         var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.SourceModule = "AP";
+        request.OriginModuleCode = "FIN";
+        request.SourceDocumentType = "SupplierDebitNote";
+        request.IdempotencyKey = $"AP:SupplierDebitNote:{tenantId:N}:{request.SourceDocumentId:N}:Post";
         var original = await service.PostAsync(request);
         var taxId = Guid.NewGuid();
         var sourceLineId = Guid.NewGuid();
@@ -1031,8 +1036,8 @@ public sealed class FinancePostingEngineTests
             DocumentLineId = sourceLineId,
             TaxId = taxId,
             PostingAccountId = credit.Id,
-            CurrencyCode = "GHS",
-            CurrencyDecimalPlaces = 2,
+            CurrencyCode = "X04",
+            CurrencyDecimalPlaces = 4,
             BaseAmount = 100m,
             TaxableAmount = 100m,
             TaxRate = 15m,
@@ -1040,6 +1045,9 @@ public sealed class FinancePostingEngineTests
             RawTaxAmount = 15.004m,
             RoundingAdjustment = -0.004m,
             AllocationSequence = 1,
+            TaxRoundingScope = TaxRoundingScope.Document,
+            TaxRoundingMethod = GovernedRoundingMethod.Up,
+            TaxRoundingIncrement = 0.0001m,
             CompoundBasis = CompoundBasis.BaseOnly,
             CalculationOrder = 1,
             CalculationDate = request.PostingDate
@@ -1066,7 +1074,57 @@ public sealed class FinancePostingEngineTests
         evidence[0].TaxAmount.Should().Be(-15m);
         evidence[0].RawTaxAmount.Should().Be(-15.004m);
         evidence[0].RoundingAdjustment.Should().Be(0.004m);
+        evidence[0].CurrencyCode.Should().Be("X04");
+        evidence[0].CurrencyDecimalPlaces.Should().Be(4);
+        evidence[0].AllocationSequence.Should().Be(1);
+        evidence[0].TaxRoundingScope.Should().Be(TaxRoundingScope.Document);
+        evidence[0].TaxRoundingMethod.Should().Be(GovernedRoundingMethod.Up);
+        evidence[0].TaxRoundingIncrement.Should().Be(0.0001m);
         evidence[0].CalculationDate.Should().Be(reversalDate);
+    }
+
+    [Fact]
+    [Trait("Category", "TaxPrecision")]
+    public void PrecisionMigrations_TargetPhysicalInvoiceTables_AndPreserveUnknownLegacyEvidence()
+    {
+        var migration = new FinanceTaxPrecisionCompletion();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(FinanceTaxPrecisionCompletion)
+            .GetMethod("Up", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+
+        var alteredTables = builder.Operations.OfType<AlterColumnOperation>()
+            .Select(operation => operation.Table)
+            .ToArray();
+        alteredTables.Should().Contain(["Invoices", "InvoiceLineItem", "VendorInvoice", "VendorInvoiceLineItem"]);
+        alteredTables.Should().NotContain(["InvoiceLineItems", "VendorInvoices", "VendorInvoiceLineItems"]);
+
+        var evidenceColumns = builder.Operations.OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "TaxCalculations")
+            .ToDictionary(operation => operation.Name);
+        foreach (var column in new[]
+                 {
+                     "CurrencyCode", "CurrencyDecimalPlaces", "RawTaxAmount", "RoundingAdjustment",
+                     "AllocationSequence", "TaxRoundingScope", "TaxRoundingMethod", "TaxRoundingIncrement"
+                 })
+        {
+            evidenceColumns.Should().ContainKey(column);
+            evidenceColumns[column].IsNullable.Should().BeTrue();
+            evidenceColumns[column].DefaultValue.Should().BeNull();
+        }
+
+        builder.Operations.OfType<AddCheckConstraintOperation>()
+            .Should().ContainSingle(operation =>
+                operation.Name == "CK_TaxCalculations_PrecisionEvidence"
+                && operation.Sql.Contains("[RawTaxAmount] IS NULL")
+                && operation.Sql.Contains("[TaxRoundingIncrement] > 0"));
+
+        using var discoveryContext = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=FinancePrecisionMigrationDiscovery;Trusted_Connection=True")
+            .Options);
+        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should().Contain([
+            "20261002183000_FinanceTaxPrecisionCompletion",
+            "20261002213000_FinancePrecisionStorageCorrections"]);
     }
 
     public static TheoryData<string> ExactReversalMutationCases => new()

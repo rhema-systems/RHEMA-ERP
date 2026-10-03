@@ -1676,15 +1676,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Reference).HasMaxLength(100);
             entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.CreditedAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.CreditedAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.EarlyPaymentDiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(20,4)");
             entity.Ignore(e => e.BalanceAmount);
             entity.HasIndex(e => e.BusinessPartnerId);
             entity.HasIndex(e => e.BusinessPartnerRoleId);
@@ -1838,14 +1838,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("InvoiceLineItem", table => table.HasTrigger("TR_InvoiceLineItem_DisposalEconomics"));
             entity.Property(e => e.Description).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(20,6)");
             entity.Property(e => e.UnitCost).HasColumnType("decimal(18,2)");
             entity.Property(e => e.CostTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.TaxTreatment).HasDefaultValue(TaxTreatment.Standard);
             entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
             entity.Ignore(e => e.LineTotal);
             entity.HasOne(e => e.Invoice)
                 .WithMany(i => i.LineItems)
@@ -2718,11 +2718,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.ApprovalSource).HasMaxLength(40).IsRequired();
             entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
-            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.ReversalReason).HasMaxLength(1000);
             entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasOne(e => e.Vendor)
@@ -2784,12 +2784,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
             entity.Property(e => e.LineItemType).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(20,6)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(20,4)");
             entity.HasOne(e => e.SupplierDebitNote)
                 .WithMany(d => d.LineItems)
                 .HasForeignKey(e => e.SupplierDebitNoteId)
@@ -2825,11 +2825,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<SupplierDebitNoteTaxComponent>(entity =>
         {
-            entity.ToTable("SupplierDebitNoteTaxComponents");
-            entity.Property(e => e.BaseAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxableAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.ToTable("SupplierDebitNoteTaxComponents", table =>
+                table.HasCheckConstraint(
+                    "CK_SupplierDebitNoteTaxComponents_PrecisionEvidence",
+                    "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)"));
+            entity.Property(e => e.BaseAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxableAmount).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.RawTaxAmount).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.RoundingAdjustment).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.TaxRoundingIncrement).HasColumnType("decimal(20,4)");
             entity.HasOne(e => e.SupplierDebitNoteLineItem)
                 .WithMany(line => line.TaxComponents)
                 .HasForeignKey(e => e.SupplierDebitNoteLineItemId)
@@ -4396,9 +4402,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<TaxCalculation>(entity =>
         {
             entity.ToTable("TaxCalculations", table =>
+            {
                 table.HasCheckConstraint(
-                    "CK_TaxCalculations_CurrencyPrecision",
-                    "[CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND LEN([CurrencyCode]) = 3"));
+                    "CK_TaxCalculations_PrecisionEvidence",
+                    "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)");
+            });
             entity.HasIndex(e => new
             {
                 e.TenantId,
@@ -13461,7 +13469,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_PrecisionGovernance",
-                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
+                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] IN (0, 1, 2) AND [InvoiceRoundingMethod] IN (0, 1, 2)");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_RoundingIncrements",
                     "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");

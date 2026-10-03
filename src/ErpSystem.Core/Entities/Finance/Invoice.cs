@@ -50,25 +50,25 @@ namespace ErpSystem.Core.Entities.Finance
 
         public DateTime? DueDate { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal SubTotal { get; set; }
         
         [Column(TypeName = "decimal(20,4)")]
         public decimal TaxAmount { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal DiscountAmount { get; set; }
 
         [MaxLength(500)]
         public string? DiscountReason { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal TotalAmount { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal PaidAmount { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal CreditedAmount { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
@@ -110,7 +110,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// Used for reporting and credit limit checks.
         /// Formula: TotalAmount * ExchangeRate (if using direct quote)
         /// </summary>
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal BaseCurrencyAmount { get; set; }
 
         // Payment terms
@@ -123,7 +123,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal EarlyPaymentDiscountAmount { get; set; }
 
         // Taxation
@@ -195,10 +195,10 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal Quantity { get; set; } = 1;
 
         [Required]
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,6)")]
         public decimal UnitPrice { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal LineTotal => Quantity * UnitPrice;
 
         public Guid? TaxGroupId { get; set; }
@@ -223,7 +223,7 @@ namespace ErpSystem.Core.Entities.Finance
         [Column(TypeName = "decimal(5,2)")]
         public decimal DiscountPercentage { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal DiscountAmount { get; set; }
 
         // Multi-tenant

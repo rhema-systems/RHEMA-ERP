@@ -189,19 +189,19 @@ public class VendorInvoice : TenantEntity
 
     // ── Financial ───────────────────────────────────────────────────────
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal SubTotal { get; set; }
 
     [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal PaidAmount { get; set; }
 
     [NotMapped]
@@ -231,7 +231,7 @@ public class VendorInvoice : TenantEntity
     public Guid? ExchangeRateId { get; set; }
     public virtual ExchangeRate? ExchangeRateRecord { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal BaseCurrencyAmount { get; set; }
 
     // ── Payment Terms ───────────────────────────────────────────────────
@@ -248,7 +248,7 @@ public class VendorInvoice : TenantEntity
 
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal EarlyPaymentDiscountAmount { get; set; }
 
     // ── Withholding Tax ─────────────────────────────────────────────────
@@ -260,7 +260,7 @@ public class VendorInvoice : TenantEntity
     public decimal? WithholdingTaxRateOverride { get; set; }
     public bool WithholdingDecisionPending { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal WithholdingTaxAmount { get; set; }
 
     public Guid? WithholdingTaxId { get; set; }
@@ -488,7 +488,7 @@ public class VendorInvoiceLineItem : TenantEntity
     public decimal Quantity { get; set; } = 1;
 
     [Required]
-    [Column(TypeName = "decimal(18,4)")]
+    [Column(TypeName = "decimal(20,6)")]
     public decimal UnitPrice { get; set; }
 
     [NotMapped]
@@ -515,7 +515,7 @@ public class VendorInvoiceLineItem : TenantEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal DiscountPercentage { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
     // ── Unit of Measure ─────────────────────────────────────────────────

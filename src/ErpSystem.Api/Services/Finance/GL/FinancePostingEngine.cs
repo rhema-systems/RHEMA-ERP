@@ -537,6 +537,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 RawTaxAmount = -item.RawTaxAmount,
                 RoundingAdjustment = -item.RoundingAdjustment,
                 AllocationSequence = item.AllocationSequence,
+                TaxRoundingScope = item.TaxRoundingScope,
+                TaxRoundingMethod = item.TaxRoundingMethod,
+                TaxRoundingIncrement = item.TaxRoundingIncrement,
                 CompoundBasis = item.CompoundBasis,
                 CalculationOrder = item.CalculationOrder,
                 CalculationDate = resolvedReversalDate,
@@ -637,6 +640,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 RawTaxAmount = snapshot.RawTaxAmount,
                 RoundingAdjustment = snapshot.RoundingAdjustment,
                 AllocationSequence = snapshot.AllocationSequence,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
                 CompoundBasis = snapshot.CompoundBasis,
                 CalculationOrder = snapshot.CalculationOrder,
                 CalculationDate = snapshot.CalculationDate,
@@ -669,6 +675,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             RawTaxAmount = snapshot.RawTaxAmount,
             RoundingAdjustment = snapshot.RoundingAdjustment,
             AllocationSequence = snapshot.AllocationSequence,
+            TaxRoundingScope = snapshot.TaxRoundingScope,
+            TaxRoundingMethod = snapshot.TaxRoundingMethod,
+            TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
             CompoundBasis = snapshot.CompoundBasis,
             CalculationOrder = snapshot.CalculationOrder,
             CalculationDate = snapshot.CalculationDate,
@@ -1582,6 +1591,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             sourceModule,
             request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
+        ValidateTaxCalculationSnapshots(request.TaxCalculationSnapshots);
         if (yearEndCycle == null && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
             || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Year-end postings must use the governed book-close cycle workflow.");
@@ -2148,6 +2158,33 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             RequestFingerprintVersion,
             requestFingerprint,
             allowHistoricalMappingException);
+    }
+
+    private static void ValidateTaxCalculationSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.CurrencyCode)
+                || !snapshot.CurrencyDecimalPlaces.HasValue
+                || !snapshot.RawTaxAmount.HasValue
+                || !snapshot.RoundingAdjustment.HasValue
+                || !snapshot.AllocationSequence.HasValue
+                || !snapshot.TaxRoundingScope.HasValue
+                || !snapshot.TaxRoundingMethod.HasValue
+                || !snapshot.TaxRoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "FINANCE_TAX_EVIDENCE_INCOMPLETE: posting tax evidence must include currency precision, signed raw/rounded delta, allocation sequence, and rounding policy.");
+
+            var currencyCode = snapshot.CurrencyCode.Trim().ToUpperInvariant();
+            if (currencyCode.Length != 3)
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence currency code must contain three characters.");
+            CurrencyMinorUnitPolicy.Validate(currencyCode, snapshot.CurrencyDecimalPlaces.Value);
+            if (snapshot.TaxRoundingIncrement.Value <= 0m
+                || !Enum.IsDefined(snapshot.TaxRoundingScope.Value)
+                || !Enum.IsDefined(snapshot.TaxRoundingMethod.Value))
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence rounding policy is invalid.");
+        }
     }
 
     private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
@@ -3493,6 +3530,9 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             AddDecimal($"{prefix}.rawTaxAmount", item.RawTaxAmount);
             AddDecimal($"{prefix}.roundingAdjustment", item.RoundingAdjustment);
             AddInt($"{prefix}.allocationSequence", item.AllocationSequence);
+            AddInt($"{prefix}.taxRoundingScope", item.TaxRoundingScope.HasValue ? (int)item.TaxRoundingScope.Value : null);
+            AddInt($"{prefix}.taxRoundingMethod", item.TaxRoundingMethod.HasValue ? (int)item.TaxRoundingMethod.Value : null);
+            AddDecimal($"{prefix}.taxRoundingIncrement", item.TaxRoundingIncrement);
             AddInt($"{prefix}.compoundBasis", (int)item.CompoundBasis);
             AddInt($"{prefix}.calculationOrder", item.CalculationOrder);
             AddDate($"{prefix}.calculationDate", item.CalculationDate);
