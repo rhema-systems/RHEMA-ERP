@@ -78,10 +78,11 @@ baseline (D-13); lane 0 was built the same day.**
    warnings, stale entries) — migration `20261003002540_TravelClosureHealthClearance` **applied to UAT** (restore point
    `ErpSystemDB_UAT_before_travell7b.bak`) — committed `81bd93074`. **7c1** the traveller's reads and E1's
    acknowledgement (D-42; the itinerary in force, the bookings in full, what is in force over the trip, the traveller's
-   own documents) — no migration, `run-final-portal.mjs` 84/84 twice — staged.
+   own documents) — committed `584993d0a`. **7c2** the traveller's files and messages (D-40, D-41, P4 for every caller)
+   — no migration, `run-final-portal.mjs` 129/129 twice with the clamd stub — staged.
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
-   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7c2** the traveller's files
-   and messages (D-40, D-41, P4), **7d** the portal's claims.
+   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7d** the portal's claims
+   (D-38) — the last slice of lane 7.
 11. **Then** lanes **8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -164,7 +165,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
-| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 staged 2026-10-03 (portal 84/84 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-42; next 7c2, 7d |
+| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 staged 2026-10-03 (portal 129/129 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-42; next 7d |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
@@ -2067,7 +2068,8 @@ has no `EmailSettings` row; neither recurred on the other run. The API log other
   `GetOwnActiveRequestAsync` — then `HrAttachmentUpload.ExecuteAsync` with
   `ControlledFileUploadCategories.HrStaffTravelAttachments`); `StaffTravelMeController` gains
   `IHrControlledDocumentService` and a logger. `MyTravelAlertsPanel` stops pointing at a tab `/me`
-  does not have.
+  does not have. *(Built in 7c1 — the reads and the alerts panel — and 7c2 — files and messages; `/me/claims` is 7d's,
+  so this stays open.)*
 
 Suites `run-final-compliance.mjs` and `run-final-portal.mjs` — every portal check runs as a plain
 employee (HR passes its own guards); the upload category requires a clean scan, so both need the
@@ -2307,6 +2309,50 @@ lifecycle **257** (678011, 859337), truth **118** (726616, 907630), approvals **
 Kumasi trip still Approved. The API log held only the known noise — the missing email settings and payroll's profile
 defect (#23), one per fixture employee.
 
+**As built — slice 7c2 (2026-10-03).** No migration. The traveller's acts sit in `StaffTravelRequestService` — each
+resolves the request as the traveller's again, so no rule depends on the controller remembering to.
+- *Files (E7, T-56).* `POST /me/requests/{id}/attachments` (multipart; type and description): the trip resolved as the
+  caller's, then `RequireTravellerMayAttachAsync` — not a cancelled, rejected or closed trip (422) — both **before**
+  anything is stored; then `HrAttachmentUpload.ExecuteAsync`, category `HrStaffTravelAttachments`, the uploader the
+  token's employee. It answers **201** with the row, as the desk's door does. `GET /me/attachments/{id}/download`: the
+  attachment's trip must be the caller's (404 otherwise), served by `HrDocumentDownload`. The trip's files themselves
+  arrive on the request's read (P1) — no list route.
+- *Removal (D-40).* `DELETE /me/attachments/{id}` → `DeleteTravellerAttachmentAsync`: someone else's trip 404; a file the
+  desk added 422 (*"The travel desk added this file…"*); a trip no longer a draft or returned 422 (*"…sent for approval,
+  so the travel desk may be relying on this file"*). Returned to the traveller, it is theirs to remove again.
+- *Messages (D-41, P4).* `POST /me/requests/{id}/comments` with `CreateMyStaffTravelCommentDto` (body ≤ 2000, an optional
+  parent) → `AddTravellerCommentAsync`: a reply is a **Response**, a new message a **Query**, both visible to the traveller
+  and theirs; a reply only to a comment on the same trip that the traveller can see (404 otherwise — an internal note is
+  "not found" to them); a blank body 422. No edit or delete on the portal. **P4 for every caller:** `AddCommentAsync`
+  refuses a parent that is not a comment on the same trip (404) — the desk's door included.
+- *Screens.* Two more tabs on `/me/travel/[id]`: **Messages** (threads built from `parentCommentId` — the read carries
+  every comment flat — the desk's shared notes moved here from *The trip*; a reply box per thread, answering its latest
+  message; a box for a new question) and **Files** (every file with who added it — *You* for the traveller's own; upload
+  with type and description, not on a closed trip; download; remove on the traveller's own while the trip is theirs).
+  The tab labels count what is there. The desk reads the traveller's messages on its Comments tab as *Query* and
+  *Response* under the traveller's name, and their files on its Attachments tab. ⚠ The desk is **not told** a traveller
+  wrote or attached — notifications are lane 8's (its topic list now names both).
+- *The guide.* Chapter 15's Messages and Files tabs, four routes, T-56 (documents fixed; receipts with 7d); chapter 5.6
+  says where the traveller's messages land — and that T-27 (the desk composer's internal-note switch) was fixed in lane
+  0, which 5.6 and its gap row still called open.
+
+**Suite** `run-final-portal.mjs` 84 → **129**, now **with the clamd stub**. §7 a draft for the traveller: their visa
+document attached (201), theirs and on their read; travB attaching 404 with nothing stored; the traveller downloads it
+byte for byte, travB 404, the desk's door 200 (the control); the desk's invitation letter downloaded by the traveller
+but not removed (422, *the travel desk added this file*); travB removing the traveller's file 404; the traveller removes
+it on the draft; a second file, the trip submitted, 422 (*sent for approval*); returned, removed; a withdrawn trip takes
+no file (422, nothing stored); no file 400. §8 the desk's shared note, internal note, and a note on another trip; the
+traveller's question (a Query, trimmed, theirs) and reply (a Response under the note); a reply to the internal note and
+to the other trip's note 404; blank and 2,001 characters refused; travB 404; the traveller's read has the three, not the
+internal note; the desk reads the question under the traveller's name; the desk's reply to the other trip's note 404
+(P4); its reply in the thread reaches the traveller; the desk's edit route 403 to the traveller. The first run (701550)
+failed three checks that expected 200 from the upload gate — it answers **201 Created**, on the desk's door too; the
+checks were corrected. **129/129 twice** (761419, 776311). Regression, twice each, all unchanged: compliance **96**
+(790263, 979735), bookings **148** (809085, 998503), money **288** (825534, 015027), policy **131** (859299, 046648),
+lifecycle **257** (871958, 058937), truth **118** (925556, 110200), approvals **123** (930587, 115601), fleet **165**
+(953817, 138406). No slow request; no alert notice on a non-fixture trip; nothing of any run left live — comments and
+attachments included; every fixture login off; the demo Kumasi trip still Approved. The API log held only the known noise.
+
 ### Lane 8 — Notifications and the sweep (D-4, D-6, F1, F2, E6, O-11, O-17)
 
 - [ ] **Topics per event and audience** (leave's shape). Traveller: submitted (acknowledgement),
@@ -2316,6 +2362,8 @@ defect (#23), one per fixture employee.
   engine's pending approvers): request waiting — the link opens through lane 2's door. HR and the
   travel desk: claim submitted, advance requested, settlement overdue, traveller comment, approval
   waiting with nobody else to ask, fleet incident (lane 6). Traveller and approver topics send email.
+  *Since lane 7 (7c2) the traveller writes (a Query or a Response, D-41) and attaches files from the portal — the
+  "traveller comment" topic covers the first; a "traveller attached a file" topic joins it. Nothing tells the desk yet.*
 - [ ] **Legacy topics** deactivated as `LeaveReminderService.cs:468-499` does — a `LegacyTopicKeys`
   array; `IsActive = false` and a replacement description on `IsSystem` rows nothing publishes to any
   more: `StaffTravelReminder.DueSoon.Internal`, `StaffTravelReminder.Overdue.Internal`, and the five

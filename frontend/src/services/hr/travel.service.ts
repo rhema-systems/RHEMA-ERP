@@ -441,6 +441,31 @@ class TravelService {
     return apiService.post<void>(`${this.meUrl}/risk-assessments/${id}/acknowledge`, {});
   }
 
+  // ── My trip's files and messages (lane 7, slice 7c2) ───────────────────────
+  //
+  // Uploads go through the controlled gate (scanned, registered in the DMS) like the desk's; downloads are streamed with
+  // the token. A trip that is not the caller's is a 404 on every one of these.
+
+  /** A file on your own trip. Not on a cancelled, rejected or closed trip (422). */
+  uploadMyAttachment(requestId: string, file: File, attachmentType: string, description?: string) {
+    return hrDocumentService.upload<StaffTravelRequestAttachment>(
+      `${this.meUrl}/requests/${requestId}/attachments`, file, { attachmentType, description });
+  }
+
+  downloadMyAttachment(attachmentId: string, fileName: string) {
+    return hrDocumentService.download(`${this.meUrl}/attachments/${attachmentId}/download`, fileName);
+  }
+
+  /** D-40: only a file you uploaded, only while the trip is a draft or returned to you (422 otherwise). */
+  deleteMyAttachment(attachmentId: string) {
+    return apiService.delete<void>(`${this.meUrl}/attachments/${attachmentId}`);
+  }
+
+  /** D-41: a reply to a note the desk shared (`parentCommentId`), or a question of your own. Never edited afterwards. */
+  addMyComment(requestId: string, payload: { body: string; parentCommentId?: string | null }) {
+    return apiService.post<StaffTravelRequestComment>(`${this.meUrl}/requests/${requestId}/comments`, payload);
+  }
+
   // ── My travel documents (lane 7, slice 7c1, E2) ────────────────────────────
   //
   // Whose they are is the token's. The list masks numbers to the last four; a document's own read shows its owner the

@@ -668,6 +668,20 @@ public class CreateStaffTravelRequestCommentDto : CreateDtoBase
     public Guid? ParentCommentId { get; set; }
 }
 
+/// <summary>
+/// The traveller's message to the travel desk on the portal (lane 7, slice 7c2, D-41): a reply to a note the desk shared
+/// (<see cref="ParentCommentId"/>) or a question of their own. No type, visibility or author: the server sets them — a
+/// Response or a Query, visible to the traveller, theirs.
+/// </summary>
+public class CreateMyStaffTravelCommentDto
+{
+    [Required]
+    [MaxLength(2000)]
+    public string Body { get; set; } = string.Empty;
+
+    public Guid? ParentCommentId { get; set; }
+}
+
 public class UpdateStaffTravelRequestCommentDto : UpdateDtoBase
 {
     [Required]

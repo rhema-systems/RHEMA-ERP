@@ -2,11 +2,15 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Api.Filters;
+using ErpSystem.Api.Services.HR;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -46,12 +50,16 @@ public class StaffTravelMeController : HrControllerBase
     private readonly IStaffTravelComplianceService _compliance;
     private readonly IStaffTravelItineraryService _itineraries;
     private readonly IStaffTravelBookingService _bookings;
+    private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly ILogger<StaffTravelMeController> _logger;
 
     public StaffTravelMeController(
         IStaffTravelRequestService service,
         IStaffTravelComplianceService compliance,
         IStaffTravelItineraryService itineraries,
         IStaffTravelBookingService bookings,
+        IHrControlledDocumentService hrDocuments,
+        ILogger<StaffTravelMeController> logger,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
@@ -59,6 +67,8 @@ public class StaffTravelMeController : HrControllerBase
         _compliance = compliance;
         _itineraries = itineraries;
         _bookings = bookings;
+        _hrDocuments = hrDocuments;
+        _logger = logger;
     }
 
     /// <summary>
@@ -338,6 +348,114 @@ public class StaffTravelMeController : HrControllerBase
         catch (ArgumentException) { return NotFound(); }
 
         return NoContent();
+    }
+
+    // =========================================================================
+    // MY TRIP'S FILES AND MESSAGES (lane 7, slice 7c2, E7, D-40, D-41)
+    // =========================================================================
+    //
+    // The trip's attachments and the desk's shared notes already arrive on the request's read; these let the traveller
+    // add to them. Each establishes the trip is the caller's BEFORE anything is stored — neither the upload gate nor the
+    // DMS checks entitlement.
+
+    /// <summary>
+    /// Attach a file to your own trip — an invitation letter, a visa document, a certificate — through the controlled
+    /// gate (scanned, registered in the DMS, stored outside the web root). Not on a cancelled, rejected or closed trip.
+    /// </summary>
+    [HttpPost("requests/{id:guid}/attachments")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> AddMyAttachment(
+        Guid id,
+        IFormFile? file,
+        [FromForm] TravelAttachmentType attachmentType = TravelAttachmentType.Other,
+        [FromForm] string? description = null,
+        CancellationToken ct = default)
+    {
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Attaching a file to your trip") is { } error) return error;
+
+        var request = await GetOwnActiveRequestAsync(id, employeeId, ct);
+        if (request is null) return NotFound();
+        await _service.RequireTravellerMayAttachAsync(id, employeeId, ct);
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.StaffTravel.StaffTravelRequest),
+            sourceRecordId: id,
+            sourceLabel: request.RequestNumber,
+            documentType: "StaffTravelAttachment",
+            description: description,
+            persist: (_, document) => _service.AddAttachmentAsync(
+                new CreateStaffTravelRequestAttachmentDto
+                {
+                    StaffTravelRequestId = id,
+                    FileName = document.OriginalFileName,
+                    FileSizeBytes = document.FileSize,
+                    MimeType = document.ContentType,
+                    AttachmentType = attachmentType,
+                    FileUploadRecordId = document.FileUploadRecordId,
+                    DocumentRecordId = document.DocumentRecordId,
+                    DocumentVersionId = document.DocumentVersionId,
+                },
+                // The uploader is the traveller's employee record — the token's, as everywhere here.
+                tenantId, userId, employeeId, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrStaffTravelAttachments);
+    }
+
+    /// <summary>Download a file on your own trip — the desk's or yours. Someone else's trip's file is a 404.</summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    public async Task<IActionResult> DownloadMyAttachment(
+        [FromServices] ApplicationDbContext db,
+        [FromServices] ICentralDocumentRepositoryFileService centralDocuments,
+        [FromServices] IFileStorageService fileStorage,
+        Guid attachmentId, CancellationToken ct = default)
+    {
+        if (TryGetEmployeeWriteContext(out var tenantId, out _, out var employeeId,
+                "Downloading a file from your trip") is { } error) return error;
+
+        var attachment = await db.Set<Core.Entities.HR.StaffTravel.StaffTravelRequestAttachment>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, ct);
+        if (attachment is null) return NotFound();
+        if (await GetOwnActiveRequestAsync(attachment.StaffTravelRequestId, employeeId, ct) is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, centralDocuments, fileStorage, db, tenantId,
+            attachment.DocumentRecordId, attachment.DocumentVersionId,
+            attachment.FileUploadRecordId, attachment.FileUrl,
+            attachment.FileName, fallbackContentType: attachment.MimeType,
+            inline: false, ct);
+    }
+
+    /// <summary>
+    /// Remove a file you uploaded, while the trip is still yours to change — a draft, or returned to you (D-40). Once it
+    /// is out for approval the desk may be relying on it, and a file the desk added is theirs: both 422.
+    /// </summary>
+    [HttpDelete("attachments/{attachmentId:guid}")]
+    public async Task<IActionResult> DeleteMyAttachment(Guid attachmentId, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Removing a file from your trip") is { } error) return error;
+
+        await _service.DeleteTravellerAttachmentAsync(attachmentId, employeeId, ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Write to the travel desk about your trip (D-41): a reply to a note they shared with you, or a question of your own.
+    /// It is yours and you see it; the portal keeps no edit or delete, so what was said stands.
+    /// </summary>
+    [HttpPost("requests/{id:guid}/comments")]
+    public async Task<ActionResult<StaffTravelRequestCommentDto>> AddMyComment(
+        Guid id, [FromBody] CreateMyStaffTravelCommentDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Writing to the travel desk") is { } error) return error;
+        if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
+
+        return Ok(await _service.AddTravellerCommentAsync(id, dto.Body, dto.ParentCommentId, tenantId, userId, employeeId, ct));
     }
 
     // =========================================================================

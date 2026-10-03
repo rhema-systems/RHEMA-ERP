@@ -21,6 +21,8 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { MyTripBeforeYouGo } from '@/components/hr/travel/MyTripBeforeYouGo';
+import { MyTripFiles } from '@/components/hr/travel/MyTripFiles';
+import { MyTripMessages } from '@/components/hr/travel/MyTripMessages';
 import { MyTripMoney } from '@/components/hr/travel/MyTripMoney';
 import { MyTripPlan } from '@/components/hr/travel/MyTripPlan';
 import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
@@ -59,9 +61,11 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  * submit, recall, withdraw and — once approved — request a change (lane 1); since lane 7 (slice 7c1)
  * the traveller also reads what the desk arranged — the itinerary in force and the bookings, the
  * risk assessment (and acknowledges it, E1), the destination's alerts and health requirements, the
- * visas, the insurance, the advances and claims — each through `api/staff-travel/me`. Pointing this
- * page at the desk's routes would 403 for the employee it exists to serve. Comments the desk marked
- * visible arrive embedded on the record, so they are read here without a second call.
+ * visas, the insurance, the advances and claims — each through `api/staff-travel/me`; since slice 7c2
+ * they attach files (and remove their own before submission, D-40) and write to the desk (D-41).
+ * Pointing this page at the desk's routes would 403 for the employee it exists to serve. Comments the
+ * desk marked visible, and the trip's files, arrive embedded on the record, so they are read here
+ * without a second call.
  *
  * ⚠ A 404 means the request is not yours. The surface answers the same way for a request that does
  * not exist, so it cannot be used to enumerate ids.
@@ -227,6 +231,12 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
           <TabsTrigger value="before">Before you go</TabsTrigger>
           <TabsTrigger value="plan">Itinerary &amp; bookings</TabsTrigger>
           <TabsTrigger value="money">Money</TabsTrigger>
+          <TabsTrigger value="messages">
+            Messages{visibleComments.length > 0 && ` (${visibleComments.length})`}
+          </TabsTrigger>
+          <TabsTrigger value="files">
+            Files{(r.attachments ?? []).length > 0 && ` (${(r.attachments ?? []).length})`}
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="before" className="pt-4">
@@ -304,25 +314,14 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
               </CardContent>
             </Card>
           )}
+        </TabsContent>
 
-          {visibleComments.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Notes from the travel desk</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {visibleComments.map((c) => (
-                  <div key={c.id} className="rounded-md border p-3">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium">{c.authorName || 'Travel desk'}</p>
-                      <p className="text-xs text-muted-foreground">{fmtDateTime(c.createdAt)}</p>
-                    </div>
-                    <p className="mt-1 text-sm whitespace-pre-wrap">{c.body}</p>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-          )}
+        {/* Lane 7 (7c2): the desk's shared notes moved here from "The trip", with the traveller's replies (D-41). */}
+        <TabsContent value="messages" className="pt-4">
+          <MyTripMessages request={r} />
+        </TabsContent>
+        <TabsContent value="files" className="pt-4">
+          <MyTripFiles request={r} />
         </TabsContent>
       </Tabs>
 

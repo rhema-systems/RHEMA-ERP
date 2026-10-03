@@ -1442,8 +1442,14 @@ A textarea, a **note that the comment is posted in your name and visible to the 
 **Add comment** button. Below it, the thread: author, timestamp, body, and *"Internal — not shown to
 the traveller"* on the ones marked private.
 
-> ⚠ **The composer always posts `isVisibleToTraveller: true`.** There is no control to post an
-> internal note from this screen, even though the model supports it and the demo has one. **T-27.**
+> *Fixed in closure lane 0 (T-27):* the composer **always posted `isVisibleToTraveller: true`**, so no
+> internal note could be written from this screen. It now has an **internal note** switch — a note for
+> the travel desk only, which never reaches the traveller's read.
+
+> *Since closure lane 7 (7c2)* the traveller writes here too, from My travel (chapter 15): their
+> questions arrive labelled **Query** and their replies **Response**, under their own name. A reply —
+> the desk's or theirs — answers a comment on the same trip, or it is refused (P4). Nothing tells the
+> desk a traveller has written yet (lane 8).
 
 ### ▶ Walk the Comments
 
@@ -1540,7 +1546,7 @@ raised. Say it rather than hoping nobody notices.
 |---|---|
 | **T-7 · `InProgress` and `Closed` are unreachable.** Nothing moves a trip into progress when it departs, and nothing closes it after the claim is paid — so the lifecycle's last two states never occur | |
 | **T-10 · `approvedBudget` is never sent on approval** — see § 1.6 | |
-| **T-27 · An internal comment cannot be posted from the screen** | |
+| **T-27 · An internal comment cannot be posted from the screen** | *Fixed in closure lane 0: the composer's internal-note switch* |
 | **T-28 · Cancelling has no status guard on the server** — a completed trip can be cancelled, and the screen's own `isLive` check is the only thing stopping it | |
 
 ---
@@ -2447,11 +2453,11 @@ them server-side, and a disabled control would imply the value was sent. Subtitl
 draft. Submit it when you are ready for approval."*
 
 **`/me/travel/[id]` — one trip.** *Before closure lane 7 this was one card of the trip and the desk's
-shared notes — nothing the desk arranged reached the traveller (E7).* Since slice 7c1, four tabs, read-only
-but for one button, plus **Send for approval** on a draft, **Recall**, **Request change** and **Withdraw**
-as each applies:
+shared notes — nothing the desk arranged reached the traveller (E7).* Since closure lane 7, six tabs (four from
+slice 7c1, *Messages* and *Files* from 7c2), plus **Send for approval** on a draft, **Recall**, **Request change**
+and **Withdraw** as each applies:
 
-- **The trip** — the request, its lifecycle notes and the desk's shared notes, as before.
+- **The trip** — the request and its lifecycle notes.
 - **Before you go** — the **risk assessment** with **I have read this** (below); every **alert in force**
   for the destination over the trip, with its text — including ones never sent to this traveller; the
   destination's **health requirements**, each *cleared by the travel desk* or not; the **visas** (the number
@@ -2465,6 +2471,14 @@ as each applies:
   booking, and why — the desk's decision, kept off the traveller's read as the request's policy exceptions are.
 - **Money** — the advances: asked, approved, paid, what the traveller still holds and by when it is settled;
   the claims and where each has got to.
+- **Messages** — the desk's shared notes (internal notes never reach this browser), threaded, with **Reply** on
+  each thread and a **Write to the travel desk** box for a question of the traveller's own (D-41). A reply is
+  saved as a *Response*, a new message as a *Query*; neither can be changed once sent — *"Messages are kept with
+  the trip and cannot be changed once sent."* The desk reads them on its Comments tab (5.6).
+- **Files** — every file on the trip, the desk's and the traveller's (*You*), with **Download**; **Attach** (a
+  type and a description; scanned before it is stored) on any trip not cancelled, rejected or closed; a remove
+  button on the traveller's **own** files **only while the trip is a draft or returned to them** (D-40) — after
+  that *"This trip has been sent for approval, so a file you added stays — ask the travel desk if one should go."*
 
 **I have read this — the risk assessment.** *Only the traveller can record it, and only here* (E1). Before
 slice 7c1 nobody could: the desk route needs `HR.Travel.Write`, which the `Employee` role never holds, and the
@@ -2544,6 +2558,10 @@ this may be empty)*.
 | Alerts in force · health requirements | `GET …/me/requests/{id}/destination-alerts` · `…/health-requirements` | signed-in, 404 if not yours |
 | **Acknowledge the risk assessment** | `POST …/me/risk-assessments/{id}/acknowledge` | signed-in, **the traveller only** (404 otherwise) |
 | My travel documents | `GET`/`POST …/me/travel-documents` · `GET`/`PUT`/`DELETE …/me/travel-documents/{id}` | signed-in, 404 if not yours; delete refused (422) once verified |
+| Attach a file | `POST …/me/requests/{id}/attachments` (multipart) — **201** | signed-in, 404 if not yours; 422 on a cancelled, rejected or closed trip |
+| Download a file | `GET …/me/attachments/{id}/download` | signed-in, 404 unless the file's trip is yours |
+| Remove a file | `DELETE …/me/attachments/{id}` | signed-in; **your upload, the trip a draft or returned** — 422 otherwise (D-40) |
+| Write to the desk | `POST …/me/requests/{id}/comments` — `{ body, parentCommentId? }` | signed-in, 404 if not yours or the note is not one you can see |
 
 ### ⚠ Known gaps
 
@@ -2551,7 +2569,7 @@ this may be empty)*.
 |---|---|
 | **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | *Lane 7, slice 7d (D-38): the traveller files and submits their own claim* |
 | **T-55 · The traveller cannot see or acknowledge their risk assessment** — T-23's other half | *Fixed in closure lane 7 (7c1, E1): Before you go shows it, and I have read this records it; a Critical trip's ticket waits for it (D-37)* |
-| **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | *Lane 7, slice 7c2: attachments up and down through the scan gate; receipts with 7d's claims* |
+| **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | *Documents fixed in closure lane 7 (7c2): the Files tab attaches through the scan gate, downloads, and removes the traveller's own before submission (D-40); receipts come with 7d's claims* |
 
 ---
 

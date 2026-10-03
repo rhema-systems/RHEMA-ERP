@@ -125,6 +125,18 @@ public interface IStaffTravelRequestService
     Task<IEnumerable<StaffTravelRequestAttachmentDto>> GetAttachmentsAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
 
+    // The traveller's own acts on the portal (lane 7, slice 7c2) — each refuses a request that is not the traveller's
+    // as "not found".
+    /// <summary>A file is not added to a cancelled, rejected or closed trip from the portal — checked before it is stored.</summary>
+    Task RequireTravellerMayAttachAsync(Guid requestId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>D-40: only the traveller's own upload, and only while the trip is a draft or returned to them.</summary>
+    Task<bool> DeleteTravellerAttachmentAsync(Guid attachmentId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// D-41: a reply to a note the desk shared with the traveller (<paramref name="parentCommentId"/>), or a question of
+    /// their own; visible to the traveller, authored by them.
+    /// </summary>
+    Task<StaffTravelRequestCommentDto> AddTravellerCommentAsync(Guid requestId, string body, Guid? parentCommentId, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+
     // Group travel operations
     Task<StaffGroupTravelDto> CreateGroupTravelAsync(CreateStaffGroupTravelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffGroupTravelDto> GetGroupTravelByIdAsync(Guid id, CancellationToken cancellationToken = default);

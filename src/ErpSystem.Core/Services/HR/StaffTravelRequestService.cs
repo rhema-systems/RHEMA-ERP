@@ -2020,6 +2020,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // all — including another tenant's. GetOwnedRequestAsync raises "not found" for both.
         await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
 
+        // Lane 7 (7c2, P4): nor was a reply's parent — a reply could hang off another trip's comment. It answers a comment
+        // on the same trip, or it is "not found".
+        if (createDto.ParentCommentId is Guid parentId)
+        {
+            var parent = await _commentRepository.GetByIdAsync(parentId);
+            if (parent is null || parent.TenantId != tenantId || parent.StaffTravelRequestId != createDto.StaffTravelRequestId)
+                throw new ArgumentException($"Comment with ID '{parentId}' not found on this travel request.");
+        }
+
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
         // AuthorId arrived on the payload, so a caller could post a comment under a colleague's
@@ -2118,6 +2127,76 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    // ---- The traveller's own acts on the portal (lane 7, slice 7c2) --------
+    //
+    // The /me controller has already resolved the request as the caller's; each of these checks it again, so a rule here
+    // never depends on a controller remembering to. Someone else's request is "not found", as everywhere on the portal.
+
+    private async Task<StaffTravelRequest> GetTravellersRequestAsync(Guid requestId, Guid travellerEmployeeId)
+    {
+        var request = await GetOwnedRequestAsync(requestId);
+        if (request.EmployeeId != travellerEmployeeId)
+            throw new ArgumentException($"Staff travel request with ID '{requestId}' not found.");
+        return request;
+    }
+
+    public async Task RequireTravellerMayAttachAsync(Guid requestId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var request = await GetTravellersRequestAsync(requestId, travellerEmployeeId);
+        if (request.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected or StaffTravelRequestStatus.Closed)
+            throw new InvalidOperationException(
+                $"This trip is {request.Status.ToString().ToLowerInvariant()}, so no file is added to it here — ask the travel desk if one is needed.");
+    }
+
+    /// <summary>
+    /// D-40: the traveller removes a file they uploaded, while the trip is still theirs to change (a draft, or returned to
+    /// them). Once it is out for approval or approved, the desk may be relying on it.
+    /// </summary>
+    public async Task<bool> DeleteTravellerAttachmentAsync(Guid attachmentId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var attachment = await GetOwnedAttachmentAsync(attachmentId);
+        var request = await GetOwnedRequestAsync(attachment.StaffTravelRequestId);
+        if (request.EmployeeId != travellerEmployeeId)
+            throw new ArgumentException($"Attachment with ID '{attachmentId}' not found.");
+        if (attachment.UploadedById != travellerEmployeeId)
+            throw new InvalidOperationException("The travel desk added this file, so it is theirs to remove — ask them.");
+        if (request.Status is not (StaffTravelRequestStatus.Draft or StaffTravelRequestStatus.ReturnedForRevision))
+            throw new InvalidOperationException(
+                "This trip has been sent for approval, so the travel desk may be relying on this file — ask them to remove it.");
+        await _attachmentRepository.DeleteAsync(attachment);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// D-41: the traveller writes to the travel desk — a reply to a note the desk shared with them, or a question of their
+    /// own. Always visible to the traveller; the portal has no edit or delete, so what was said stands.
+    /// </summary>
+    public async Task<StaffTravelRequestCommentDto> AddTravellerCommentAsync(Guid requestId, string body, Guid? parentCommentId, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var request = await GetTravellersRequestAsync(requestId, travellerEmployeeId);
+        var text = body?.Trim();
+        if (string.IsNullOrEmpty(text))
+            throw new InvalidOperationException("Write the message.");
+        if (parentCommentId is Guid parentId)
+        {
+            // A note the traveller cannot see is not one they can answer: the same "not found" as one that does not exist.
+            var parent = await _commentRepository.GetByIdAsync(parentId);
+            if (parent is null || parent.TenantId != request.TenantId || parent.StaffTravelRequestId != requestId
+                || !parent.IsVisibleToTraveller)
+                throw new ArgumentException($"Comment with ID '{parentId}' not found.");
+        }
+
+        return await AddCommentAsync(new CreateStaffTravelRequestCommentDto
+        {
+            StaffTravelRequestId = requestId,
+            CommentType = parentCommentId is null ? TravelRequestCommentType.Query : TravelRequestCommentType.Response,
+            Body = text,
+            IsVisibleToTraveller = true,
+            ParentCommentId = parentCommentId,
+        }, tenantId, createdByUserId, travellerEmployeeId, cancellationToken);
     }
 
     // ---- Group travel ------------------------------------------------------
