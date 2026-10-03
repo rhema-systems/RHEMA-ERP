@@ -458,6 +458,17 @@ function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
               <InfoRow label="Departs" value={fmtDate(r.travelStartDate)} />
               <InfoRow label="Returns" value={fmtDate(r.travelEndDate)} />
               <InfoRow label="Duration" value={`${r.estimatedDurationDays} day(s)`} />
+              {/* Lane 9 (D-54): the trip's working days on the traveller's attendance, as on duty. */}
+              {r.attendanceDaysRecorded != null && (
+                <InfoRow
+                  label="On attendance"
+                  value={r.attendanceDaysRecorded > 0
+                    ? `${r.attendanceDaysRecorded} working day(s) on duty`
+                    : ['Approved', 'InProgress', 'Completed', 'Closed'].includes(r.status)
+                      ? 'None — its days already carry other attendance, or the nightly sweep has yet to post them'
+                      : 'None — a trip’s days are posted once it is approved'}
+                />
+              )}
               {/* Both are the server's: the traveller's own unit, and the policy the trip was
                   checked against when it was submitted (lane 1). */}
               <InfoRow label="Organisation unit" value={r.organizationUnitName || '—'} />

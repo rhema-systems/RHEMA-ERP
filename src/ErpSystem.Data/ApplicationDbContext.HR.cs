@@ -14167,6 +14167,13 @@ private void ConfigureSuccessionPlanningEntities(ModelBuilder builder)
                 .WithMany()
                 .HasForeignKey(e => e.PublicHolidayId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            // Travel final closure, lane 9 (D-53): the trip that posted the day as OnDuty. No navigation either way —
+            // travel's posting reads and writes by the id alone.
+            entity.HasOne<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+                .WithMany()
+                .HasForeignKey(e => e.StaffTravelRequestId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<StaffAttendanceLog>(entity =>

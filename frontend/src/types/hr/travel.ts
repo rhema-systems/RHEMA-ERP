@@ -196,6 +196,8 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   /** Lane 6 (D-33): a driver's own request names the trip whose company vehicle they drive. */
   driverForRequestId?: string | null;
   driverForRequestNumber?: string | null;
+  /** Lane 9 (D-54): the trip's working days on the traveller's attendance as on duty — on the single read only. */
+  attendanceDaysRecorded?: number | null;
   cancellationReason?: string | null;
   cancelledById?: string | null;
   cancelledByName?: string | null;

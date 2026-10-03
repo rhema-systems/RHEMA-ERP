@@ -52,6 +52,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     private readonly IUnitOfWork _unitOfWork;
     private readonly StaffTravelNotices _notices;
     private readonly IStaffTravelFleetService _fleet;
+    private readonly StaffTravelAttendancePosting _attendance;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<StaffTravelReminderService> _logger;
@@ -60,6 +61,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         IUnitOfWork unitOfWork,
         StaffTravelNotices notices,
         IStaffTravelFleetService fleet,
+        StaffTravelAttendancePosting attendance,
         UserManager<ApplicationUser> userManager,
         ICurrentUserProvider currentUserProvider,
         ILogger<StaffTravelReminderService> logger)
@@ -67,6 +69,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         _unitOfWork = unitOfWork;
         _notices = notices;
         _fleet = fleet;
+        _attendance = attendance;
         _userManager = userManager;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
@@ -168,6 +171,18 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         var plan = await PlanTransitionsAsync(tenantId, now, cancellationToken);
         await ApplyTransitionsAsync(tenantId, run.Id, now, plan, cancellationToken);
 
+        // Lane 9 (O-12, D-54): every trip's days on the traveller's attendance put in line with its status — the trips
+        // approved before this existed, and any change whose own posting failed. Best-effort: never stops the reminders.
+        var attendance = (Trips: 0, Added: 0, Removed: 0);
+        try
+        {
+            attendance = await _attendance.ReconcileRecentAsync(tenantId, DateOnly.FromDateTime(now), cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Travel sweep for tenant {TenantId}: the attendance reconcile failed", tenantId);
+        }
+
         var candidates = (await FindCandidatesAsync(tenantId, now, plan, cancellationToken)).ToList();
 
         var keys = candidates.Select(c => c.DedupeKey).ToList();
@@ -249,6 +264,8 @@ public class StaffTravelReminderService : IStaffTravelReminderService
             TripsCompleted = plan.Completed.Count,
             TripsClosed = plan.Closed.Count,
             GroupsUpdated = plan.Groups.Count,
+            AttendanceDaysAdded = attendance.Added,
+            AttendanceDaysRemoved = attendance.Removed,
         };
     }
 

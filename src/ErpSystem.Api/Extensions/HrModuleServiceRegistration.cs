@@ -835,6 +835,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<StaffTravelBudgetRollup>();
         // Who hears what about a trip — one topic per event and audience (travel final closure, lane 8).
         services.AddScoped<StaffTravelNotices>();
+        // Travel final closure, lane 9 (O-12, D-53, D-54): a trip's working days on the traveller's attendance as OnDuty.
+        services.AddScoped<StaffTravelAttendancePosting>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();

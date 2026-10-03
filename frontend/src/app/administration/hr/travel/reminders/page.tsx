@@ -97,6 +97,10 @@ const MOVES = [
     kind: 'Group trips',
     detail: 'under way once any traveller\'s trip is, completed once every one is completed or closed',
   },
+  {
+    kind: 'Attendance',
+    detail: 'each approved trip\'s working days on the traveller\'s attendance as on duty, the last 14 days and ahead — never over a punch, leave or a clerk\'s entry',
+  },
 ];
 
 /**
@@ -144,6 +148,9 @@ export default function TravelRemindersPage() {
       const notes = [
         moved.length ? `Trips moved: ${moved.join(', ')}.` : '',
         result.groupsUpdated > 0 ? `${result.groupsUpdated} group trip(s) moved.` : '',
+        result.attendanceDaysAdded > 0 || result.attendanceDaysRemoved > 0
+          ? `Attendance: ${result.attendanceDaysAdded} day(s) on duty added, ${result.attendanceDaysRemoved} removed.`
+          : '',
         result.retried > 0 ? `${result.retried} left unsent by an earlier sweep were sent now.` : '',
         result.alreadySent > 0 ? `${result.alreadySent} were already sent and were not repeated.` : '',
       ].filter(Boolean);

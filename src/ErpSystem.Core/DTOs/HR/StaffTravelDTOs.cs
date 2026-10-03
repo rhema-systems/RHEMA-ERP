@@ -90,6 +90,12 @@ public class StaffTravelRequestDto : BaseDto
     public Guid? DriverForRequestId { get; set; }
     public string? DriverForRequestNumber { get; set; }
 
+    /// <summary>
+    /// Lane 9 (D-54): how many of the trip's working days are on the traveller's attendance as on duty — read on the single
+    /// read only; null on lists.
+    /// </summary>
+    public int? AttendanceDaysRecorded { get; set; }
+
     // Cancellation
     public string? CancellationReason { get; set; }
     public Guid? CancelledById { get; set; }
@@ -3727,6 +3733,12 @@ public class StaffTravelReminderRunResultDto
 
     /// <summary>Group trips this sweep moved under way or completed, from their travellers' trips.</summary>
     public int GroupsUpdated { get; set; }
+
+    /// <summary>Working days this sweep put on travellers' attendance as on duty (lane 9, D-54).</summary>
+    public int AttendanceDaysAdded { get; set; }
+
+    /// <summary>Attendance days this sweep gave up — trips cancelled, sent back, shortened or deleted.</summary>
+    public int AttendanceDaysRemoved { get; set; }
 }
 
 /// <summary>

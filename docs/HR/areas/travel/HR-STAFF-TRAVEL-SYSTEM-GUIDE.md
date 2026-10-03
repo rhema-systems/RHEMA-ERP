@@ -978,7 +978,11 @@ either) or marked it completed (closure lane 8, D-52).
 
 **Card 1 — The trip** — ten fields in a three-column grid: Traveller · **Raised by** *(name and the
 role in brackets)* · Type · Purpose · Priority · **Route** *(with the globe icon)* · Departs ·
-Returns · Duration · Organisation unit.
+Returns · Duration · Organisation unit. Since closure lane 9 (slice 9a, D-54) also **On attendance** — how many of
+the trip's working days (Monday to Friday, not a public holiday) are on the traveller's attendance as *On duty*. They
+go on when the trip is approved, come off if it is cancelled or sent back for a change, and stop at an early return;
+a day already recorded otherwise — a clock-in, leave, a clerk's entry — is never overwritten. The monthly attendance
+summary counts *On duty* as present.
 
 **Card 2 — Cost and risk** — eight: Estimated · **Approved budget** · **Risk level** *(with a red
 shield icon at High or above)* · Visa required · Health clearance · Submitted · Approved ·
@@ -2422,6 +2426,11 @@ its reminders read them as they now stand:
 An approved trip already past its end takes several steps in one run. Each move is logged beside the reminders (kinds
 *Trip started*, *Trip completed*, *Trip closed*, *Group started*, *Group completed*) and listed in the preview before
 it is made. A trip moved under way that did not happen is the desk's **Did not travel** (chapter 5).
+
+*Closure lane 9 (slice 9a, D-54).* Each run also puts travellers' attendance right: every approved, under-way,
+completed or closed trip that has not ended, or ended in the last 14 days, holds its working days as *On duty*; a trip
+cancelled or sent back holds none. It repairs what a path missed — the days themselves go on and off as the trip is
+decided (chapter 5.1). The run's toast says how many days it added and removed.
 
 ### **This whole screen is Admin-gated, reads included.** Before closure lane 4, `hr.head` got a 403
 on the page itself. Since D-3 the HR desk opens it, because the desk that renews an expiring

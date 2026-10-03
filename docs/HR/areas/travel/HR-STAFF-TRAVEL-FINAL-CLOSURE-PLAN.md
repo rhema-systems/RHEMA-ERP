@@ -83,20 +83,28 @@ baseline (D-13); lane 0 was built the same day.**
    `run-final-portal.mjs` 177/177 twice with the clamd stub — committed `8f6df4f08`.
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
    a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved).
-11. **Lane 8** (notifications and the sweep) — **SOURCE-CHECKED 2026-10-03** against `8f6df4f08` (lane 8's *Source
+11. **Lane 8** (notifications and the sweep) — **COMPLETE 2026-10-03**, 8c committed `6de559255`. Source-checked against `8f6df4f08` (lane 8's *Source
    check*: U1–U9; slices 8a–8c; decisions D-45…D-50 taken by the user, all as recommended). **8a** the event notices
    (D-4, D-45, D-46, E6's in-app half, O-17's notice half; no migration) — `run-final-reminders.mjs` 110/110 twice, the
    regression unchanged twice — committed `707207602`. **8b** the sweep's kinds (D-49, D-50, F2, O-11; no migration) —
    the scheduled run proven with nobody signed in (`run-final-sweep-scheduled.mjs` 10/10), `run-final-reminders.mjs`
    172/172 twice, the regression unchanged twice — committed `b5808d29b`. **8c** the transitions and Fleet's signals
    (D-6, D-29, D-47, D-48, D-51 kept as built, **D-52** found by the regression; no migration) — the scheduled run
-   15/15, `run-final-reminders.mjs` 222/222, the regression unchanged twice with fleet 194 — **staged 2026-10-03**. Its
-   first sweep on UAT (the user's go) completed the demo's Sebrepor trip, as measured. **Lane 8 is then complete.** The harness's fixture employees, units and positions left on UAT since lane 0 were **retired on UAT** on the
+   15/15, `run-final-reminders.mjs` 222/222, the regression unchanged twice with fleet 194 — committed `6de559255`. Its
+   first sweep on UAT (the user's go) completed the demo's Sebrepor trip, as measured. The harness's fixture employees, units and positions left on UAT since lane 0 were **retired on UAT** on the
    user's go (restore point `ErpSystemDB_UAT_before_fixretire.bak`), and every teardown now retires its own (8b's *Found on
    the way*). ⚠ Cross-module defect #36 (the notification
    dispatcher undoes soft deletes) — the shared teardown deletes a run's notices again 35 s later.
-12. **Then** lanes **9 → 10** in that order (§ 2). Source-check each lane against this
-   document before building it — line numbers are as of HEAD `bad482a8d`.
+12. **Lane 9** (cross-module touchpoints) — **SOURCE-CHECKED 2026-10-03** against `6de559255` (lane 9's *Source check*:
+   V1–V10; slices 9a–9d; decisions D-53…D-58 taken by the user, all as recommended). Three of the checklist's premises do not hold:
+   attendance has no column for travel's rows (V1 — § 5's "no schema" was wrong), leave has no warning path (V5), and the
+   clearance never sees travel (V6); a recovered advance stays out in travel after the final settlement (V7). **9a**
+   attendance (D-53, D-54) — migration `TravelClosureAttendanceLink` (proven 28/28 on a scratch copy; applied to UAT after
+   restore point `ErpSystemDB_UAT_before_travell9.bak`), the scheduled run 15/15, `run-final-touchpoints.mjs` 43/43 twice,
+   reminders 222, the regression unchanged twice — **staged 2026-10-03**; its first sweep put Kumasi's two days on duty.
+   Next: **9b** (the leave warning, D-55), **9c** (separation, D-56…D-58), **9d** (the payroll hand-off).
+13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
+   `bad482a8d`.
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -167,6 +175,12 @@ lane's slice.
 | **D-50** | The sweep's windows | **Constants in one place, each a TDC question in § 6:** approval waiting 5 days; HR escalation 3 days before departure; visa missing 14 days before; briefing unacknowledged 7 days before; passport rungs 90, 30 and 7 days; the claim reminder 7 days before the window closes. No settings screen. Lane 8, slice 8b. |
 | **D-51** | When the sweep closes a completed trip (D-6). "When settled" alone closes a trip with no claim yet the day after it is completed — and a closed trip takes no claim, so the traveller loses the window | **Once its claim window has passed and nothing is open:** the approved policy's window, or lane 3's 30 days when it has none (the settlement deadline's own default); the settled test the Close verb's own (`StaffTravelLifecycleRules.OpenItemAsync`). The desk's Close keeps lane 1's rule alone. Lane 8, slice 8c. *Proposed with the build and **taken by the user, 2026-10-03, as built** — with the 30 days a TDC question in § 6.* (Alternatives, kept as the record: close on settled alone — a trip with no claim yet would close the night after it completes, and a closed trip takes no claim; or never close by the sweep, only by the desk's verb.) |
 | **D-52** | 8c's first build let the desk's cancel of a trip take an **under-way** driver's request with it as "did not travel" (D-48 passed down the cascade) — while the leg's cancel, delete and new driver and Request change still refused it (D-35, G3), so the answer hung on which button the desk pressed. Found by lane 6's fleet suite (§13) in 8c's regression | **Lane 6's refusal everywhere:** a driver's request under way never goes with the trip or its leg, whoever cancels. The refusal tells the desk to cancel the driver's request on its own page first — as not travelled if the driver did not go either (D-48) — or mark it completed. The driver is someone else, who may have set off (collecting the vehicle the day before); "under way" now only means the date came. Lane 8, slice 8c. *The user, 2026-10-03, as recommended.* (Alternative, kept as the record: every desk path takes it when nothing was spent on it — one click.) |
+| **D-53** | Attendance has no column for travel's rows, so a reversal could not tell them from a clerk's `OnDuty` day (V1) | **A lane-9 migration:** `StaffDailyAttendances.StaffTravelRequestId` — nullable, foreign key set-null, indexed — exactly as leave's `LeaveRequestId`; travel's posting and reversal touch only rows carrying the trip's id. Lane 9, slice 9a. |
+| **D-54** | Which days travel posts, and what wins on a clash | **The trip's working days** (Mon–Fri, not a public holiday on the tenant's calendar), posted while it is approved, under way, completed or closed; an early completion keeps the days up to it; a cancel, *did not travel* or Request change removes them. Nothing already recorded is overwritten — a punch, a note, leave's day, a clerk's status: first writer wins, as leave's posting; a removed day with a punch is kept, unlinked. The monthly summary counts `OnDuty` as present, as the dashboard does. Lane 9, slice 9a. |
+| **D-55** | Leave has no warning path (V5) | **Computed on every read of a leave request** — so its creation, an approver's suggested dates and a reschedule are all covered: *"{name} has staff travel TR-… ({status}) from … to …, over these days"*, for trips Submitted, Approved or under way that overlap (inclusive), shown on the request page to the employee, the approver and HR. Lane 9, slice 9b. |
+| **D-56** | The clearance never sees travel (V6) | **A computed, read-only Travel block**, read live like the asset register: open trips, live bookings, advances undisbursed and cash out, open claims. Advisory — it does not block completion; the money flows through the settlement. Lane 9, slice 9c. |
+| **D-57** | A separation's approval touches no trip, and a leaver can still travel (V8) | **The approval cancels the leaver's Draft, Submitted and ReturnedForRevision trips** — after its save, each through travel's own cancel, best-effort, *"Left the organisation on {day}"*; any it cannot cancel is named in the Travel block. Approved and under-way trips are listed for the desk. Travel refuses, at create and submit, a trip that starts after an approved separation's day. Lane 9, slice 9c. |
+| **D-58** | An advance the final settlement recovered stays out in travel (V7) | **The settlement's release settles it in travel** — unsettled to nothing, fully settled, *"recovered from the final settlement"* as an internal note on its trip — with no travel posting: the settlement's journal is the posting. Lane 9, slice 9c. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -188,8 +202,8 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
-| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ◐ source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
-| **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
+| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a staged 2026-10-03 (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice) |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
@@ -2862,6 +2876,162 @@ the user as a separate item.
 Suite `run-final-touchpoints.mjs`: attendance rows written and reversed; the leave warning; the
 separation lists.
 
+**Source check (2026-10-03, HEAD `6de559255`).** Attendance's posting and summary, leave's create, submit and date-moving
+paths, separation's clearance, approval, completion and settlement, the payroll offset, and UAT's attendance rows and
+separations were re-read and counted. Three of the checklist's premises do not hold (V1, V5, V6), and the settlement has
+a money gap the plan did not name (V7). Ten:
+- **V1 — attendance cannot tell travel's rows apart.** Leave owns its `StaffDailyAttendance` rows by `LeaveRequestId` and
+  `OnLeave` (`LeaveAttendancePostingService.cs:195-200`) and reverses only those — hard-deleting them, since the unique
+  index (TenantId, EmployeeId, AttendanceDate) is not filtered on `IsDeleted` (l.243-248). The row carries
+  `LeaveRequestId`, `RemoteWorkRequestId` and `PublicHolidayId` — nothing for travel (`StaffAttendanceEntities.cs:133-152`).
+  § 5's *"attendance posting needs no schema"* is wrong: without a column travel would know its rows only by `OnDuty` and the
+  wording of `StatusReason`, and a clerk can set `OnDuty` by hand (the records and daily-entry screens offer it) — a
+  reversal could delete their row.
+- **V2 — `OnDuty` counts as nothing in the monthly summary.** `RecalculateAsync` counts Present, Absent and OnLeave
+  (`AttendanceCoreServices.cs:1364-1366, 1385-1387`); the dashboard counts `OnDuty` as present
+  (`AttendanceDashboardService.cs:153, 161, 282, 289, 352`). Posted travel days would vanish from the monthly figures. The
+  payroll export reads only the summary's row count (`AttendanceOperationsServices.cs:983-996`); alerts fire on Absent
+  only. No code writes `OnDuty` today.
+- **V3 — leave's model, to reuse.** `LeaveAttendancePostingService` is tenant-explicit and never saves; `LeaveService` calls
+  it after each commit, best-effort, through one dispatcher (`ReconcileAttendanceAsync`: post while the leave counts as
+  taken, else reverse — `LeaveService.cs:3697-3717`) and a nightly 14-day `ReconcileRecentAttendanceAsync` (l.3719-3779) on
+  leave's sweep host. A day with a punch, a note, another status or another source is skipped, never overwritten; only an
+  empty absence is taken over (posting l.99-119); a released row with a punch is kept and unlinked (l.227-235). Working
+  days: `IHrWorkingDayCalculator.GetHolidayDatesAsync` (the tenant's calendar; optional holidays are working days) and
+  Sat/Sun — leave's `LeaveChargeableDays.Between` needs a leave type. Travel's own `StaffTravelItineraryRules.Days()` skips
+  weekends but not public holidays (l.61-77).
+- **V4 — attendance has no guard.** A punch on a posted day fills the times and keeps the status and the link
+  (`AttendanceCoreServices.cs:754-767`); a clerk's edit changes the status freely (`AttendanceMappingExtensions.cs:245-267`).
+  So, as leave's, travel's release keeps a punched row (unlinked) and its posting never overwrites one.
+- **V5 — leave has no warning path.** Every check at leave's create and submit refuses or passes silently
+  (`LeaveService.cs:277-445, 649-807`); `LeaveRequestDto` carries no warnings (`LeaveDTOs.cs:871-1033`); submit answers a
+  fixed message (`LeavesController.cs:817`); the frontend's submit is `Promise<void>` and the desk page's workflow hook
+  drops any result (`useWorkflowRecord.ts:104`). Dates also move through suggest-changes, respond-to-suggestion and
+  reschedule (`LeaveService.cs:1120, 1194, 1270`), which bypass submit. Leave reads no other module. Training and
+  recruitment read travel as a conflict — Submitted, Approved, InProgress, inclusive days
+  (`NomineeAvailabilityService.cs:93-98`, `PanelistCommitmentSources.cs:165-182`); travel reads leave at its submission —
+  Approved, InProgress (`StaffTravelRequestService.cs:395-416`).
+- **V6 — separation sees travel only at the settlement.** Clearance lines come once, at the start, from the template
+  catalogue (seven defaults, no travel kind — `SeparationService.cs:3251-3269, 3507-3580`), plus one computed source: HR
+  assets, through a read-only, tenant-explicit bridge (`AssetCustodyClearanceBridge.cs:126-160`), refreshable
+  (l.3817-3883). Travel appears only when the settlement is prepared, after clearance: each cash-out advance becomes a
+  `TravelAdvanceRecovery` deduction (l.2312-2342; another currency → *cannot compute*, which holds finalisation). Open trips,
+  live bookings, undisbursed advances and open claims are never shown. The checklist's *"it lists outstanding advances
+  already"* is true of the settlement, not the clearance.
+- **V7 — a recovered advance stays out in travel.** The settlement deducts the unsettled advance from the final pay and its
+  release posts it (`HrFinancePostingCommandFactory.cs:534` → staff advances receivable), but nothing writes back: the
+  advance stays cash out, the sweep marks it overdue and chases the leaver and the desk (lanes 3, 8b), its trip never
+  closes (`OpenItemAsync`), and a claim paid later would recover it a second time. Settling it in travel must not post
+  again — lane 3's refund verb posts `TRAVEL_ADVANCE_REFUNDED`, a second credit to the same receivable.
+- **V8 — approval touches nothing else, and a leaver can still travel.** `ApproveAsync` (l.750-827) changes only the
+  separation (its adapter sets Approved, l.810-811; the generic inbox never calls that adapter). The cascade pattern is
+  `AppraisalWithdrawalService.StageLeaverWithdrawalsAsync` (tenant explicit, tracked, the caller saves; called at
+  completion through `EmployeeService.ApplySeparationOutcomeAsync`). Travel's `CancelAsync` reads the tenant from the
+  signed-in user, needs a non-null `CancelledById`, saves on its own (Fleet's cancel at once) and notifies — so a cascade
+  calls it per trip after the separation's save, best-effort. Travel treats someone as a leaver only once their status is
+  Inactive, Terminated or Retired (`StaffTravelRequestService.cs:172-213`), set at completion: between approval and
+  completion a trip can be raised that starts after they have gone. The separation's day is `EffectiveDate` (always set by
+  submission) or `LastWorkingDay`, read `EffectiveDate ?? LastWorkingDay` (l.2402).
+- **V9 — payroll.** D-10's refusal holds (`StaffTravelFinanceService.cs:719-722`; the pay dialog hides the option since lane
+  3). The hand-off it promised the payroll owner is not written — no row in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`, no
+  travel hand-off in `docs/HR/integration/handoffs/` (`HANDOFF-PAYROLL-LEAVE.md` is the shape).
+- **V10 — UAT.** 54 attendance rows in all (10 Aug – 19 Oct), none `OnDuty`, none on any trip's days. The first reconcile
+  would post three days: Sebrepor (TR-2026-00004, TDC/00017) 17 Sep; Kumasi (TR-2026-00001, TDC/00006) 19 and 20 Oct. No
+  live separation is of anyone with a trip or an advance (the demo's TDC/00028 awaiting approval, TDC/00052 and TDC/00096
+  have none).
+
+**Proposed slices:**
+- **9a — attendance (V1–V4; D-53, D-54).** A lane-9 migration (D-53) — `StaffDailyAttendances.StaffTravelRequestId`,
+  nullable, foreign key set-null, indexed — scaffolded by the user, rewritten as guarded SQL, proven on a scratch copy of
+  UAT. `TravelAttendancePostingService` on leave's model; one dispatcher run after each status change commits (approval,
+  cancel and *did not travel*, Request change, an early completion), and the nightly travel sweep reconciling recent trips
+  (8c's host). The monthly summary counts `OnDuty` as present (V2). The trip's page says how many days are on the
+  traveller's attendance.
+- **9b — leave (V5; D-55).** A travel conflict on the leave request, computed when it is read.
+- **9c — separation (V6–V8; D-56, D-57, D-58).** A computed Travel block on the clearance; the approval's cascade to the
+  leaver's trips; travel refusing a trip after an approved separation's day; the settlement's release settling the
+  advances it recovered.
+- **9d — payroll (V9).** The D-10 hand-off and its cross-module row — documents only.
+
+**Decisions (the user, 2026-10-03 — all six as recommended; the alternatives are kept below as the record):** D-53…D-58,
+now in § 1.
+- **D-53 — how attendance knows travel's rows (V1).** *Recommended:* a lane-9 migration adding `StaffTravelRequestId` to
+  `StaffDailyAttendances` (nullable, set-null, indexed), exactly as leave's `LeaveRequestId`; a reversal touches only rows
+  carrying the trip's id. (Alternative: no schema — travel's rows are `OnDuty` with the trip's number in the reason; a
+  clerk's own `OnDuty` row could be removed or taken over.)
+- **D-54 — which days, and who wins.** *Recommended:* the trip's working days (Mon–Fri, not a public holiday on the
+  tenant's calendar), posted while the trip is approved, under way, completed or closed; an early completion keeps the
+  days up to it; a cancel, *did not travel* or Request change removes them. Never overwrite a punch, a note, leave's day or
+  a clerk's status — first writer wins, as leave's posting does; a removed day with a punch is kept, unlinked. The monthly
+  summary counts `OnDuty` as present, as the dashboard does. (Alternative: post weekends and holidays too — a traveller is
+  away — though attendance keeps no rows on non-working days.)
+- **D-55 — the leave warning (V5).** *Recommended:* computed on every read of a leave request, so it covers its creation,
+  an approver's suggested dates and a reschedule alike: *"{name} has staff travel TR-… ({status}) from … to …, over these
+  days"*, for trips Submitted, Approved or under way that overlap (inclusive, as training and recruitment read travel) —
+  shown on the leave request page to the employee, the approver and HR, before anyone decides. (Alternative: warnings
+  returned by create, submit and the three date-moving verbs — four frontend doors, one of which drops its result.)
+- **D-56 — travel on the clearance (V6).** *Recommended:* a computed, read-only **Travel** block, read live like the asset
+  register: the leaver's open trips (by status and dates), live bookings, advances — undisbursed (withdrawn with their
+  trip) and cash out (recovered in the settlement) — and open claims; advisory, not a line that blocks completion, since
+  the money already flows through the settlement. (Alternative: a mandatory clearance line the desk must clear.)
+- **D-57 — the separation's approval (V8).** *Recommended:* it cancels the leaver's Draft, Submitted and
+  ReturnedForRevision trips — after the separation's save, each through travel's own cancel, best-effort, with *"Left the
+  organisation on {day}"*; any it cannot cancel is named in the Travel block. Approved and under-way trips are listed for
+  the desk, not cancelled (bookings and money hang off them). And travel refuses a trip — at create and submit — that
+  starts after an approved separation's day. (Alternative: cancel only at the separation's completion.)
+- **D-58 — the advance the settlement recovered (V7).** *Recommended:* when the settlement is approved for release, each
+  advance it recovered is settled in travel — unsettled to nothing, fully settled, *"recovered from the final settlement"*
+  as an internal note on its trip — with **no** travel posting (the settlement's journal is the posting). (Alternative:
+  list it only, and the desk records it by hand — but lane 3's refund verb would post a second time.)
+
+**As built — slice 9a, attendance (2026-10-03).**
+- *The migration (D-53).* `20261003212653_TravelClosureAttendanceLink`, scaffolded by the user and rewritten as guarded SQL:
+  `StaffDailyAttendances.StaffTravelRequestId` — nullable, indexed, a foreign key to the trip that sets itself null.
+  No data step (nothing ever wrote `OnDuty`). Down refuses while any day carries a trip's link — run as dynamic SQL, since
+  a batch naming the column does not compile where the column is gone (found by the proof's second Down) — then drops the
+  key, the index and the column. **Proven on a COPY_ONLY scratch copy of UAT, 28/28**: Up, Up again unchanged, Down
+  refused with a linked day (all kept), Down once unlinked (keys, indexes and the 54 rows exactly as before), Down again a
+  no-op, Up after Down the same shape; the SQL rendered from the migration itself (csc + the API's EF DLLs); the scratch
+  dropped. The model has the column with a navigation-free `HasOne<StaffTravelRequest>()` set-null key.
+- *The posting (D-54).* `StaffTravelAttendancePosting` (Core, scoped) on leave's model, rule for rule: a trip holds its
+  working days — Monday to Friday, not a public holiday on the tenant's calendar (`IHrWorkingDayCalculator`) — while
+  approved, under way, completed or closed, up to an early completion; the days carrying its id are exactly those. A day
+  with a punch, a note, leave's or another trip's link or any other status is skipped; an empty absence is taken over; a
+  given-up day is hard-deleted, or — punched since — kept, unlinked, with *"Staff travel TR-… no longer covers this day,
+  but attendance was recorded for it"*. Rows say *"On duty — staff travel TR-… to {city}"*, by `Travel`. Tenant-explicit;
+  best-effort after each caller's commit (logged, never thrown).
+- *When.* After the final approval, a cancel (*did not travel* and the driver cascade included), Request change and an
+  early completion; the sweep's own moves change no day. **Every sweep reconciles** (`ReconcileRecentAsync`, after its
+  moves): each trip that holds days and has not ended, or ended in the last 14 days (leave's window — older attendance is
+  not rewritten), and each trip — deleted ones too, read with `GetQueryableIncludingDeleted` since the repository's
+  `GetQueryable` hides them with its own filter — whose days it should no longer hold. The run result counts the days
+  added and removed (`AttendanceDaysAdded`, `…Removed`).
+- *The monthly summary (V2).* `RecalculateAsync` counts `OnDuty` as present, as the dashboard does.
+- *Screens.* The desk's trip page: **On attendance** — the days on duty (`AttendanceDaysRecorded`, the single read only). The
+  reminders page: an *Attendance* line under *What the sweep moves*; the toast counts the days. Frontend type-check (scoped)
+  and lint clean.
+- *Guide.* Chapter 5.1 (the trip's days on attendance), chapter 14 (the sweep's reconcile).
+- *Harness.* New suite **`run-final-touchpoints.mjs`** §1–§6 (approval with a taken-over and a punched day, the monthly
+  summary, Request change and re-approval, an early return, a cancel keeping a punched day, the sweep's repair both ways);
+  it sweeps, so `tools/run-all-9a.sh` runs it last with fleet. The shared teardown deletes a run's posted days and counts
+  them in its "nothing left".
+- *UAT's first reconcile (corrects V10):* 14 days back, so **only Kumasi's two days** — TR-2026-00001, TDC/00006, Monday 19 and
+  Tuesday 20 October — go on duty; Sebrepor's 17 September is older than the window and stays as it is.
+
+**Suites (9a).** On the user's go: a verified restore point (`ErpSystemDB_UAT_before_travell9.bak`, COPY_ONLY, checksum), the
+migration set-diff (112 against 111 — this one pending), the API's start applied it (history row, column, set-null key and
+index verified in SQL; the 54 attendance rows untouched). **The host's first sweep (22:04 UTC) put exactly Kumasi's two days
+on TDC/00006's attendance as on duty** — nothing else on the demo moved. `run-final-sweep-scheduled.mjs` **15/15** (419955;
+its back-dated candidate shows the reconcile both ways: one day posted at approval, two added and one given up once its
+dates moved). `run-final-reminders.mjs` **222/222** (123228). **New `run-final-touchpoints.mjs` 43:** 42/43 twice on the
+first pass (478610, 124997), failing only *"…saying which trip"* — the reason is stored right (U+2014, read in SQL) but
+sqlcmd prints the em dash as a hyphen in the console's code page; the check now compares in SQL — **43/43 twice** (216604,
+275851). **The regression, twice, all unchanged:** portal **177** (875543, 536718), compliance **96** (940714, 593222),
+bookings **148** (003605, 653279), money **288** (060609, 710205), policy **131** (143000, 789310), lifecycle **257** (195671,
+841905), truth **118** (292894, 940381), approvals **123** (336147, 983630), fleet **194** (400867, 048444). After every run: the
+demo's four trips as they were, 56 attendance rows of which the two on duty are Kumasi's, no fixture attendance row, summary,
+employee, login or mail setting left.
+
 ### Lane 10 — Docs, demo pack, harness, hand-offs
 
 - [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
@@ -2946,7 +3116,8 @@ reused number as an observation for lane 3, and shows the 409 mapping on the new
 two drafts claiming one version, which lane 4 ends by assigning the number on the server.
 
 Attendance posting needs no schema — it writes the same `StaffDailyAttendance` rows leave's posting
-does, with a reason. Vehicle and driver are never copied onto travel rows — they are read from the
+does, with a reason. *(Wrong, found at lane 9's source check — V1: leave owns its rows by a `LeaveRequestId` column and
+attendance has none for travel; D-53 proposes a lane-9 column.)* Vehicle and driver are never copied onto travel rows — they are read from the
 fleet trip.
 
 ---
@@ -3156,3 +3327,15 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   The user chose lane 6's refusal everywhere (**D-52**); fixed, and after the user's build: the scheduled run 15/15,
   reminders 222/222 (§6 now waits ten minutes for leave's HR digest), the regression unchanged twice with fleet 194/194.
   The API log's identity-reconciliation errors (not travel's) put to the user. Staged. Next: lane 9.
+- **2026-10-03, later** — The user committed slice 8c (`6de559255`): **lane 8 complete.** **Lane 9 source-checked** against
+  `6de559255`: attendance's posting and summary, leave's date paths, separation's clearance, approval and settlement, the
+  payroll offset, UAT's attendance and separations. Three premises fell (V1 no attendance column for travel — § 5's "no
+  schema" was wrong; V5 leave has no warning path; V6 the clearance never sees travel) and a money gap surfaced (V7 a
+  recovered advance stays out in travel). Split into 9a–9d; decisions D-53…D-58 proposed — **taken by the user the same
+  day, all six as recommended**. Slice 9a begun: the D-53 column in the model, for the user to scaffold.
+- **2026-10-03, later** — **Slice 9a built** — the trip's working days on the traveller's attendance (D-53, D-54): the user's
+  scaffold rewritten as guarded SQL and proven 28/28 on a scratch copy (its second Down caught a batch that could not
+  compile without the column — fixed), the posting service on leave's model, its hooks and the sweep's reconcile, the
+  monthly summary counting on duty as present. The build succeeded; on the user's go a restore point, the migration
+  applied to UAT, and the first sweep put Kumasi's two days on duty. Touchpoints 43/43 twice; the regression unchanged
+  twice. Staged. Next: 9b.

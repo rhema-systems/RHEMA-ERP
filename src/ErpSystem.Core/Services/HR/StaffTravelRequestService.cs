@@ -46,6 +46,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     private readonly UserManager<ApplicationUser> _userManager;
     // Lane 6 (FX-3, D2): the trip's cancel and its Request change cancel the fleet trips of its company-vehicle legs.
     private readonly IStaffTravelFleetService _fleet;
+    // Lane 9 (O-12, D-53, D-54): the trip's working days on the traveller's attendance, kept in line after each change.
+    private readonly StaffTravelAttendancePosting _attendance;
     private readonly ILogger<StaffTravelRequestService> _logger;
 
     public StaffTravelRequestService(
@@ -64,9 +66,11 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         IWorkflowService workflowService,
         UserManager<ApplicationUser> userManager,
         IStaffTravelFleetService fleet,
+        StaffTravelAttendancePosting attendance,
         ILogger<StaffTravelRequestService> logger)
     {
         _fleet = fleet;
+        _attendance = attendance;
         _requestRepository = requestRepository;
         _commentRepository = commentRepository;
         _attachmentRepository = attachmentRepository;
@@ -467,6 +471,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             dto.DriverForRequestId = driverFor.StaffTravelRequestId;
             dto.DriverForRequestNumber = driverFor.RequestNumber;
         }
+        // Lane 9 (D-54): how many of its days are on the traveller's attendance as on duty — as leave's request says.
+        dto.AttendanceDaysRecorded = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffDailyAttendance>()
+            .GetQueryable(d => d.TenantId == tenantId && d.StaffTravelRequestId == id && d.Status == StaffAttendanceStatus.OnDuty)
+            .CountAsync(cancellationToken);
         return dto;
     }
 
@@ -1429,6 +1437,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         {
             await TellTravellerAsync(entity, StaffTravelNotices.Approved, cancellationToken);
             await TellDeskAsync(entity, StaffTravelNotices.Approved, onlyWhenActorOutsideDesk: false, cancellationToken);
+            // Lane 9 (D-54): approved, its working days go on the traveller's attendance as on duty.
+            await _attendance.ReconcileAsync(entity, cancellationToken);
         }
 
         return true;
@@ -1559,6 +1569,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // booking and money to unwind.
         await TellTravellerAsync(entity, StaffTravelNotices.Cancelled, cancellationToken);
         await TellDeskAsync(entity, StaffTravelNotices.Cancelled, onlyWhenActorOutsideDesk: true, cancellationToken);
+        // Lane 9 (D-54): a cancelled trip — "did not travel" included — holds no days on the traveller's attendance.
+        await _attendance.ReconcileAsync(entity, cancellationToken);
 
         return true;
     }
@@ -1700,6 +1712,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         // Lane 8 (D-46): completion told nobody useful — the desk marks it — and the claim window is 8b's notice.
         _logger.LogInformation("Staff travel request completed: {RequestNumber}", entity.RequestNumber);
+        // Lane 9 (D-54): an early return keeps the days up to it; the rest leave the traveller's attendance.
+        await _attendance.ReconcileAsync(entity, cancellationToken);
 
         return true;
     }
@@ -1845,6 +1859,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _logger.LogInformation("Change requested on approved staff travel request: {RequestNumber}", entity.RequestNumber);
         await TellTravellerAsync(entity, StaffTravelNotices.ChangeRequested, cancellationToken);
         await TellDeskAsync(entity, StaffTravelNotices.ChangeRequested, onlyWhenActorOutsideDesk: true, cancellationToken);
+        // Lane 9 (D-54): sent back, the trip holds no days until it is approved again — perhaps on other dates.
+        await _attendance.ReconcileAsync(entity, cancellationToken);
         return true;
     }
 

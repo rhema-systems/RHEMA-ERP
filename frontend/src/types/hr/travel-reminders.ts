@@ -32,6 +32,10 @@ export interface StaffTravelReminderRunResult {
   tripsClosed: number;
   /** Group trips moved under way or completed. */
   groupsUpdated: number;
+  /** Working days put on travellers' attendance as on duty (lane 9, D-54). */
+  attendanceDaysAdded: number;
+  /** Attendance days given up — trips cancelled, sent back, shortened or deleted. */
+  attendanceDaysRemoved: number;
 }
 
 export interface StaffTravelReminderRun {

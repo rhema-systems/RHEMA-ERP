@@ -1361,7 +1361,10 @@ public class StaffMonthlyAttendanceSummaryService : IStaffMonthlyAttendanceSumma
         if (existing != null && existing.IsFinalized)
             throw new InvalidOperationException("A finalized monthly summary cannot be recalculated.");
 
-        var presentCount = days.Count(d => d.Status == StaffAttendanceStatus.Present);
+        // On duty — away on the organisation's business (staff travel posts it since travel closure lane 9, D-54) — is
+        // present, as the attendance dashboard already counts it; left out, a traveller's days were none of present,
+        // absent or leave.
+        var presentCount = days.Count(d => d.Status == StaffAttendanceStatus.Present || d.Status == StaffAttendanceStatus.OnDuty);
         var absentCount = days.Count(d => d.Status == StaffAttendanceStatus.Absent);
         var leaveDays = days.Count(d => d.Status == StaffAttendanceStatus.OnLeave);
         var totalOvertimeHours = days.Sum(d => d.OvertimeHours ?? 0);
