@@ -949,6 +949,24 @@ app.MapHealthChecks("/health/shutdown", new HealthCheckOptions
     ResponseWriter = HealthCheckResponseWriter.WriteAsync
 });
 
+// Caddy exposes /api/* to browsers and keeps /health* private to the VPS. These
+// aliases give authenticated application screens the same sanitized health
+// contract without exposing the private loopback routes through the gateway.
+app.MapHealthChecks("/api/health", new HealthCheckOptions
+{
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/api/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/api/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+
 // API Controllers
 app.MapControllers();
 

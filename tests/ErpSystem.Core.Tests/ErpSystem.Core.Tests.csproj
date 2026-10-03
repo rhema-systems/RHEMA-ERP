@@ -161,6 +161,7 @@
     <Compile Include="Services\Sales\SalesPropertyRegisterSourceTests.cs" />
     <Compile Include="Services\Sales\SalesOrderTaxSelectionTests.cs" />
     <Compile Include="Services\Security\**\*.cs" />
+    <Compile Include="Services\Settings\SettingsServiceTenantTests.cs" />
     <Compile Include="Services\Workflow\**\*.cs" />
     <Compile Include="Services\Inventory\InventoryItemIdentifierServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryTrackingControlServiceTests.cs" />

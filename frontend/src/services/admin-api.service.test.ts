@@ -71,7 +71,18 @@ describe('admin SMS settings API', () => {
 
     expect(api.request).toHaveBeenCalledWith('/settings/sms/test', {
       method: 'POST',
-      body: JSON.stringify({ phoneNumber: '+233241234567' }),
+      body: JSON.stringify({ phoneNumber: '+233241234567', isOtp: false }),
+    });
+  });
+
+  it('can test the same OTP delivery mode used by public property enquiries', async () => {
+    api.request.mockResolvedValue({ success: true, message: 'Test verification SMS sent successfully.' });
+
+    await adminApiService.sendTestSms('+233241234567', true);
+
+    expect(api.request).toHaveBeenCalledWith('/settings/sms/test', {
+      method: 'POST',
+      body: JSON.stringify({ phoneNumber: '+233241234567', isOtp: true }),
     });
   });
 });

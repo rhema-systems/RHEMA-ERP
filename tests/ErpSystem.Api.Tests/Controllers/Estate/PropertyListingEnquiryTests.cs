@@ -61,6 +61,7 @@ public sealed class PropertyListingEnquiryTests
         ICurrentUserService? currentUser = null)
         => new(db, currentUser ?? User().Object, null!, null!, null!, null!, null!, tickets.Object, Mock.Of<ICaptchaVerificationService>(),
             Mock.Of<ErpSystem.Api.Services.Otp.IOtpService>(), Mock.Of<ErpSystem.Api.Services.Sms.ITenantSmsSender>(),
+            Mock.Of<ITenantEmailSender>(),
             Microsoft.Extensions.Logging.Abstractions.NullLogger<EstateExternalDocumentsController>.Instance)
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
     private EstateManagedAsset Asset() => new()

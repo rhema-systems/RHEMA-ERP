@@ -58,13 +58,16 @@ public class SettingsService : ISettingsService
 
     public async Task<EmailSettings?> GetEmailSettingsAsync()
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return null;
+        }
+
         try
         {
-            // Retrieve email settings without tenant filter
-            // Using a simple query that gets the first non-deleted record
-            // This works even for anonymous requests where TenantId is not available
             var emailSettings = await _unitOfWork.Repository<EmailSettings>()
-                .FirstOrDefaultAsync(e => true); // Simple predicate to get first record
+                .FirstOrDefaultAsync(e => e.TenantId == tenantId && !e.IsDeleted);
 
             if (emailSettings != null && !string.IsNullOrEmpty(emailSettings.SmtpPassword))
             {

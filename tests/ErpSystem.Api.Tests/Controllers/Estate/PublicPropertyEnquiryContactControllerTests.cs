@@ -98,6 +98,48 @@ public sealed class PublicPropertyEnquiryContactControllerTests
             TimeSpan.FromMinutes(10),
             5,
             It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Email.Verify(service => service.SendAsync(
+            fixture.Tenant.Id,
+            "known@example.test",
+            "Property enquiry verification code",
+            It.Is<string>(body => body.Contains("123456")),
+            true,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EmailDeliveryFailureReturnsActionablePublicErrorAndRetiresChallenge()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Email.Setup(service => service.SendAsync(
+                fixture.Tenant.Id,
+                "visitor@example.test",
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                true,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("smtp-secret-detail"));
+
+        var result = await fixture.Controller.RequestPublicPropertyEnquiryContactChallenge(
+            new PublicPropertyEnquiryContactChallengeRequestDto
+            {
+                ListingId = fixture.Listing.Id,
+                Channel = "Email",
+                Contact = "visitor@example.test"
+            }, CancellationToken.None);
+
+        var unavailable = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status503ServiceUnavailable, unavailable.StatusCode);
+        var problem = Assert.IsType<ProblemDetails>(unavailable.Value);
+        Assert.Equal("PUBLIC_ENQUIRY_EMAIL_DELIVERY_FAILED", problem.Extensions["code"]);
+        Assert.Contains("tenant email settings", problem.Detail, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("smtp-secret-detail", JsonSerializer.Serialize(unavailable.Value), StringComparison.Ordinal);
+
+        var challenge = await fixture.Db.EhcPublicPropertyEnquiryVerifications
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .SingleAsync();
+        Assert.True(challenge.IsDeleted);
     }
 
     [Fact]
@@ -387,6 +429,15 @@ public sealed class PublicPropertyEnquiryContactControllerTests
                     It.IsAny<string>(),
                     It.IsAny<CancellationToken>()))
                 .Returns(Task.CompletedTask);
+            Email = new Mock<ITenantEmailSender>();
+            Email.Setup(service => service.SendAsync(
+                    tenant.Id,
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    true,
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             Otp.Setup(service => service.CreateOtpAsync(
                     tenant.Id,
                     OtpPurpose.PublicPropertyEnquiry,
@@ -423,6 +474,7 @@ public sealed class PublicPropertyEnquiryContactControllerTests
                 captcha.Object,
                 Otp.Object,
                 Sms.Object,
+                Email.Object,
                 NullLogger<EstateExternalDocumentsController>.Instance)
             {
                 ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
@@ -436,6 +488,7 @@ public sealed class PublicPropertyEnquiryContactControllerTests
         public EstateExternalDocumentsController Controller { get; }
         public Mock<IOtpService> Otp { get; }
         public Mock<ITenantSmsSender> Sms { get; }
+        public Mock<ITenantEmailSender> Email { get; }
         public Mock<IEhcTicketService> Tickets { get; }
 
         public static async Task<Fixture> CreateAsync()
