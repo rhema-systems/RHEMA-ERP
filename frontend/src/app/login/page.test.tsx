@@ -54,16 +54,17 @@ describe('login entry points and redirects', () => {
 
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it('keeps supplier applications and password/OTP controls, without a registration button or helper', async () => {
+  it('keeps supplier applications and password sign-in without alternate mode or remember-me controls', async () => {
     renderPage();
     expect(await screen.findByRole('link', { name: 'Apply as a supplier' })).toHaveAttribute('href', '/supplier-application');
     expect(screen.queryByText('Create Account')).not.toBeInTheDocument();
     expect(screen.queryByText(/Supplier applicants verify a contact/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Password' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'One-time code' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Remember me for 30 days')).not.toBeInTheDocument();
     expect(screen.getByLabelText('USER NAME OR EMAIL ADDRESS')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
     expect(screen.getByLabelText('PASSWORD')).toHaveAttribute('type', 'text');
-    fireEvent.click(screen.getByRole('button', { name: 'One-time code' }));
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeVisible();
   });
 
   it('continues to render required CAPTCHA verification', async () => {
