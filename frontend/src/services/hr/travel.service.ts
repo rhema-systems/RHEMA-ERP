@@ -11,6 +11,14 @@ import type {
 } from '@/types/hr/travel-compliance';
 import type { StaffTravelTravellerBookings, StaffTravelTravellerItinerary } from '@/types/hr/travel-bookings';
 import type {
+  CreateStaffTravelExpenseClaim,
+  CreateStaffTravelExpenseClaimLine,
+  StaffTravelExpenseClaim,
+  StaffTravelExpenseClaimLine,
+  StaffTravelFleetFuelOptions,
+  UpdateStaffTravelExpenseClaim,
+} from '@/types/hr/travel-finance';
+import type {
   StaffTravelRequest,
   StaffTravelRequestSummary,
   StaffTravelRequestStatus,
@@ -464,6 +472,51 @@ class TravelService {
   /** D-41: a reply to a note the desk shared (`parentCommentId`), or a question of your own. Never edited afterwards. */
   addMyComment(requestId: string, payload: { body: string; parentCommentId?: string | null }) {
     return apiService.post<StaffTravelRequestComment>(`${this.meUrl}/requests/${requestId}/comments`, payload);
+  }
+
+  // ── My expense claims (lane 7, slice 7d — D-38, D-43, D-44) ───────────────
+  //
+  // The traveller files and submits their own claim; review and payment are the desk's and have no route here. Lane 3's
+  // rules hold as on the desk's path. A claim, line or trip that is not the caller's is a 404.
+
+  getMyClaim(id: string) {
+    return apiService.get<StaffTravelExpenseClaim>(`${this.meUrl}/claims/${id}`);
+  }
+
+  /** On your own approved, under-way or completed trip. */
+  createMyClaim(payload: CreateStaffTravelExpenseClaim) {
+    return apiService.post<StaffTravelExpenseClaim>(`${this.meUrl}/claims`, payload);
+  }
+
+  updateMyClaim(payload: UpdateStaffTravelExpenseClaim) {
+    return apiService.put<StaffTravelExpenseClaim>(`${this.meUrl}/claims/${payload.id}`, payload);
+  }
+
+  /** D-44: a draft only — never submitted. */
+  deleteMyClaim(id: string) {
+    return apiService.delete<void>(`${this.meUrl}/claims/${id}`);
+  }
+
+  submitMyClaim(id: string) {
+    return apiService.post<void>(`${this.meUrl}/claims/${id}/submit`, {});
+  }
+
+  /** A policy limit sent here is ignored — it is not the traveller's to set. */
+  addMyClaimLine(claimId: string, payload: CreateStaffTravelExpenseClaimLine) {
+    return apiService.post<StaffTravelExpenseClaimLine>(`${this.meUrl}/claims/${claimId}/lines`, payload);
+  }
+
+  updateMyClaimLine(payload: CreateStaffTravelExpenseClaimLine & { id: string }) {
+    return apiService.put<StaffTravelExpenseClaimLine>(`${this.meUrl}/claim-lines/${payload.id}`, payload);
+  }
+
+  /** D-44: while the claim is a draft or returned to you. */
+  deleteMyClaimLine(lineId: string) {
+    return apiService.delete<void>(`${this.meUrl}/claim-lines/${lineId}`);
+  }
+
+  getMyClaimFleetFuel(claimId: string) {
+    return apiService.get<StaffTravelFleetFuelOptions>(`${this.meUrl}/claims/${claimId}/fleet-fuel`);
   }
 
   // ── My travel documents (lane 7, slice 7c1, E2) ────────────────────────────

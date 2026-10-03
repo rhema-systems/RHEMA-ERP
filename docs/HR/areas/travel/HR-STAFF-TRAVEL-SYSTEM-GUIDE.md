@@ -1926,6 +1926,10 @@ Then **Cancel** and **File the claim**, landing on the new claim at `Draft` with
 > ⚠ **Choosing the advance here is what links the recovery.** A claim filed without it is paid
 > in full and the advance stays outstanding — the recovery is not inferred from the trip. **T-57.**
 
+> *Since closure lane 7 (7d, D-38)* the traveller files their own claim from **My travel** (chapter 15) and
+> submits it; it arrives in this queue as any other, under their name. The desk's path here is unchanged — it
+> still files for a traveller who cannot.
+
 ---
 
 ### ⚠ Known gaps
@@ -2434,14 +2438,14 @@ Tables: `StaffTravelReminderRuns`, `StaffTravelReminderDispatchLogs`.
 
 ### 📍 Where you are
 
-**Portal:** Time, Leave & Pay → **My Travel** · `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `documents`) ·
+**Portal:** Time, Leave & Pay → **My Travel** · `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `documents`, `claims/[id]`) ·
 **as the `staff` persona**, in window B · **5 minutes**
 
 ### 📖 What it is
 
-> *"The traveller's own side. Five screens, no permissions, and two things only they can do."*
+> *"The traveller's own side. Six screens, no permissions, and the acts only they can do."*
 
-### 👁 The five screens
+### 👁 The six screens
 
 **`/me/travel` — My travel.** *"Trips you have requested, and where each one has got to."* Five
 columns: Number · Route · Dates · Estimated · Status. Plus the **destination-alerts panel** (below), and
@@ -2470,7 +2474,9 @@ and **Withdraw** as each applies:
   car's vehicle and driver), car rentals. **Not shown:** who asked for or authorised a policy exception on a
   booking, and why — the desk's decision, kept off the traveller's read as the request's policy exceptions are.
 - **Money** — the advances: asked, approved, paid, what the traveller still holds and by when it is settled;
-  the claims and where each has got to.
+  the claims and where each has got to, each opening on its own page. **File a claim** *(closure lane 7, slice 7d —
+  D-38)* on a trip that is approved, under way or completed: the type, and the advance it settles — one still out
+  with the traveller is offered first — then on to the claim.
 - **Messages** — the desk's shared notes (internal notes never reach this browser), threaded, with **Reply** on
   each thread and a **Write to the travel desk** box for a question of the traveller's own (D-41). A reply is
   saved as a *Response*, a new message as a *Query*; neither can be changed once sent — *"Messages are kept with
@@ -2490,6 +2496,19 @@ desk's Compliance tab now only reports it.
 takes the verification off; one primary per type. The list shows numbers to the last four; changing a
 document shows it in full. *Why it matters:* the primary passport decides which trips need a visa (chapter
 4) and is checked for expiry at submission.
+
+**`/me/travel/claims/[id]` — one of my claims** *(closure lane 7, slice 7d — D-38, T-54)*. The traveller's own
+expense claim, from the trip's *Money* tab. The claim card: claimed, approved, the advance deducted, **payable to
+you**, submitted, reviewed (by whom), paid (method and reference), and the desk's notes — a returned claim's in a
+banner: *"The travel desk returned this claim to you: … Change what they asked for, then send it again."* The
+expenses: date, category (*per diem* and a company vehicle's litres marked), what was spent and its value in the
+organisation's currency, the receipt, and the desk's decision — *Not yet reviewed*, or approved with the amount
+and why the rest was not. While the claim is a draft or returned: **Add an expense** (category, date,
+description, merchant, amount and the currency it was spent in, the receipt — one of the trip's files, or
+**Upload a receipt** there and then — the per-diem switch, and on a company-vehicle trip the fuel fields), change
+or remove one; **Send to the travel desk**. **Delete the claim** while it is a draft. The rules are the desk's
+own (chapter 9): expenses fixed once sent; a receipt above the policy's threshold (a per diem needs none, D-43);
+the claim window; nobody reviews or pays their own claim — there is no review or pay button here at all.
 
 **`/me/travel/[id]/edit`.** The self form. **Locked** once the request is Approved, Completed,
 Cancelled or Closed — with an explanation rather than a disabled form.
@@ -2562,12 +2581,14 @@ this may be empty)*.
 | Download a file | `GET …/me/attachments/{id}/download` | signed-in, 404 unless the file's trip is yours |
 | Remove a file | `DELETE …/me/attachments/{id}` | signed-in; **your upload, the trip a draft or returned** — 422 otherwise (D-40) |
 | Write to the desk | `POST …/me/requests/{id}/comments` — `{ body, parentCommentId? }` | signed-in, 404 if not yours or the note is not one you can see |
+| My claim | `GET`/`PUT`/`DELETE …/me/claims/{id}` · `POST …/me/claims` (201) · `POST …/me/claims/{id}/submit` | signed-in, 404 if not yours; delete only a draft (D-44) |
+| My claim's expenses | `POST …/me/claims/{id}/lines` · `PUT`/`DELETE …/me/claim-lines/{lineId}` · `GET …/me/claims/{id}/fleet-fuel` | signed-in, 404 if not yours; while a draft or returned; a policy limit sent is ignored |
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | *Lane 7, slice 7d (D-38): the traveller files and submits their own claim* |
+| **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | *Fixed in closure lane 7 (7d, D-38): File a claim on the trip's Money tab; the traveller adds expenses with their receipts and submits; the desk reviews and pays as before, and can still file for them* |
 | **T-55 · The traveller cannot see or acknowledge their risk assessment** — T-23's other half | *Fixed in closure lane 7 (7c1, E1): Before you go shows it, and I have read this records it; a Critical trip's ticket waits for it (D-37)* |
 | **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | *Documents fixed in closure lane 7 (7c2): the Files tab attaches through the scan gate, downloads, and removes the traveller's own before submission (D-40); receipts come with 7d's claims* |
 

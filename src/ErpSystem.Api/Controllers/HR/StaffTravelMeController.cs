@@ -51,6 +51,7 @@ public class StaffTravelMeController : HrControllerBase
     private readonly IStaffTravelItineraryService _itineraries;
     private readonly IStaffTravelBookingService _bookings;
     private readonly IHrControlledDocumentService _hrDocuments;
+    private readonly IStaffTravelFinanceService _finance;
     private readonly ILogger<StaffTravelMeController> _logger;
 
     public StaffTravelMeController(
@@ -59,6 +60,7 @@ public class StaffTravelMeController : HrControllerBase
         IStaffTravelItineraryService itineraries,
         IStaffTravelBookingService bookings,
         IHrControlledDocumentService hrDocuments,
+        IStaffTravelFinanceService finance,
         ILogger<StaffTravelMeController> logger,
         ICurrentUserService currentUser)
         : base(currentUser)
@@ -68,6 +70,7 @@ public class StaffTravelMeController : HrControllerBase
         _itineraries = itineraries;
         _bookings = bookings;
         _hrDocuments = hrDocuments;
+        _finance = finance;
         _logger = logger;
     }
 
@@ -456,6 +459,122 @@ public class StaffTravelMeController : HrControllerBase
         if (await GetOwnActiveRequestAsync(id, employeeId, ct) is null) return NotFound();
 
         return Ok(await _service.AddTravellerCommentAsync(id, dto.Body, dto.ParentCommentId, tenantId, userId, employeeId, ct));
+    }
+
+    // =========================================================================
+    // MY EXPENSE CLAIMS (lane 7, slice 7d — D-38, D-43, D-44, T-54)
+    // =========================================================================
+    //
+    // The traveller files and submits their own claim; the desk reviews and pays as before (D-2: never the claimant's own
+    // review or payment) and can still file for them. Every rule is lane 3's — the claimant is always the trip's traveller —
+    // so the service only establishes the claim is the caller's ("not found" otherwise) and keeps the policy limit off
+    // their payload. A claim's summary arrives on the request's own read; these are the claim itself and its acts. Review
+    // and payment have no route here at all.
+
+    /// <summary>One of your claims, with its lines and what the reviewer decided on each.</summary>
+    [HttpGet("claims/{id:guid}")]
+    public async Task<ActionResult<StaffTravelExpenseClaimDto>> GetMyClaim(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your expense claim") is { } error) return error;
+        return Ok(await _finance.GetTravellerClaimAsync(id, employeeId, ct));
+    }
+
+    /// <summary>
+    /// File a claim on your own trip once it is approved, under way or completed. Lines may come with it, or be added after.
+    /// </summary>
+    [HttpPost("claims")]
+    public async Task<ActionResult<StaffTravelExpenseClaimDto>> CreateMyClaim(
+        [FromBody] CreateStaffTravelExpenseClaimDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Filing an expense claim") is { } error) return error;
+
+        var created = await _finance.CreateTravellerClaimAsync(dto, tenantId, userId, employeeId, ct);
+        return CreatedAtAction(nameof(GetMyClaim), new { id = created.Id }, created);
+    }
+
+    /// <summary>Change the claim's type or the advance it settles — while it is a draft or returned to you.</summary>
+    [HttpPut("claims/{id:guid}")]
+    public async Task<ActionResult<StaffTravelExpenseClaimDto>> UpdateMyClaim(
+        Guid id, [FromBody] UpdateStaffTravelExpenseClaimDto dto, CancellationToken ct)
+    {
+        if (id != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Changing your expense claim") is { } error) return error;
+        return Ok(await _finance.UpdateTravellerClaimAsync(dto, userId, employeeId, ct));
+    }
+
+    /// <summary>Delete your claim while it is a draft — never submitted (D-44).</summary>
+    [HttpDelete("claims/{id:guid}")]
+    public async Task<IActionResult> DeleteMyClaim(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Deleting your expense claim") is { } error) return error;
+        await _finance.DeleteTravellerClaimAsync(id, employeeId, ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Send your claim to the travel desk: it needs an expense, a receipt for each above the policy's threshold (a per diem
+    /// excepted), and — the first time — to come within the policy's claim window after the trip.
+    /// </summary>
+    [HttpPost("claims/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitMyClaim(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Submitting your expense claim") is { } error) return error;
+        await _finance.SubmitTravellerClaimAsync(id, userId, employeeId, ct);
+        return Ok(new { message = "Expense claim submitted." });
+    }
+
+    /// <summary>
+    /// Add an expense. Its receipt is a file on your trip (attach it under Files first); a per diem needs none (D-43). Fuel on
+    /// a company-vehicle trip names its fleet trip (D-30) — see <see cref="GetMyClaimFleetFuel"/>.
+    /// </summary>
+    [HttpPost("claims/{id:guid}/lines")]
+    public async Task<ActionResult<StaffTravelExpenseClaimLineDto>> AddMyClaimLine(
+        Guid id, [FromBody] CreateStaffTravelExpenseClaimLineDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
+                "Adding an expense to your claim") is { } error) return error;
+
+        dto.StaffTravelExpenseClaimId = id;
+        return Ok(await _finance.AddTravellerClaimLineAsync(dto, tenantId, userId, employeeId, ct));
+    }
+
+    /// <summary>Change an expense while the claim is a draft or returned — a reviewed one goes back to be reviewed again.</summary>
+    [HttpPut("claim-lines/{lineId:guid}")]
+    public async Task<ActionResult<StaffTravelExpenseClaimLineDto>> UpdateMyClaimLine(
+        Guid lineId, [FromBody] UpdateStaffTravelExpenseClaimLineDto dto, CancellationToken ct)
+    {
+        if (lineId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Changing an expense on your claim") is { } error) return error;
+        return Ok(await _finance.UpdateTravellerClaimLineAsync(dto, userId, employeeId, ct));
+    }
+
+    /// <summary>Remove an expense while the claim is a draft or returned to you (D-44).</summary>
+    [HttpDelete("claim-lines/{lineId:guid}")]
+    public async Task<IActionResult> DeleteMyClaimLine(Guid lineId, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Removing an expense from your claim") is { } error) return error;
+        await _finance.DeleteTravellerClaimLineAsync(lineId, employeeId, ct);
+        return NoContent();
+    }
+
+    /// <summary>Your trip's company-vehicle trips and the fuel Fleet already logs on them — what a fuel expense names (D-30).</summary>
+    [HttpGet("claims/{id:guid}/fleet-fuel")]
+    public async Task<ActionResult<StaffTravelFleetFuelOptionsDto>> GetMyClaimFleetFuel(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Reading your trip's company-vehicle fuel") is { } error) return error;
+        return Ok(await _finance.GetTravellerClaimFleetFuelAsync(id, employeeId, ct));
     }
 
     // =========================================================================

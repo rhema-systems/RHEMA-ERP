@@ -54,6 +54,21 @@ public interface IStaffTravelFinanceService
     Task<bool> ReviewClaimLineAsync(ReviewStaffTravelExpenseClaimLineDto reviewDto, Guid reviewerEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> DeleteClaimLineAsync(Guid lineId, CancellationToken cancellationToken = default);
 
+    // The traveller's own claims on the portal (lane 7, slice 7d — D-38, D-43, D-44). Each refuses a claim, line or trip
+    // that is not the traveller's as "not found", then applies lane 3's rules exactly as the desk's path does.
+    Task<StaffTravelExpenseClaimDto> GetTravellerClaimAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>On the traveller's own trip; a line's policy limit is not theirs to set (Q2).</summary>
+    Task<StaffTravelExpenseClaimDto> CreateTravellerClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelExpenseClaimDto> UpdateTravellerClaimAsync(UpdateStaffTravelExpenseClaimDto updateDto, Guid updatedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>D-44: only a draft — a claim never submitted.</summary>
+    Task<bool> DeleteTravellerClaimAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> SubmitTravellerClaimAsync(Guid claimId, Guid submittedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelExpenseClaimLineDto> AddTravellerClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelExpenseClaimLineDto> UpdateTravellerClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>D-44: while the claim is a draft or returned to the traveller.</summary>
+    Task<bool> DeleteTravellerClaimLineAsync(Guid lineId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    Task<StaffTravelFleetFuelOptionsDto> GetTravellerClaimFleetFuelAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+
     // Advances
     Task<StaffTravelAdvanceDto> GetAdvanceByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<StaffTravelAdvanceDto?> GetAdvanceByNumberAsync(string advanceNumber, CancellationToken cancellationToken = default);

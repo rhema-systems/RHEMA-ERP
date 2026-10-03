@@ -79,10 +79,10 @@ baseline (D-13); lane 0 was built the same day.**
    `ErpSystemDB_UAT_before_travell7b.bak`) — committed `81bd93074`. **7c1** the traveller's reads and E1's
    acknowledgement (D-42; the itinerary in force, the bookings in full, what is in force over the trip, the traveller's
    own documents) — committed `584993d0a`. **7c2** the traveller's files and messages (D-40, D-41, P4 for every caller)
-   — no migration, `run-final-portal.mjs` 129/129 twice with the clamd stub — staged.
+   — committed `a922f5085`. **7d** the traveller's own claims (D-38, D-43, D-44) — no migration,
+   `run-final-portal.mjs` 177/177 twice with the clamd stub — staged; **lane 7 is complete once it is committed.**
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
-   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved). Next: **7d** the portal's claims
-   (D-38) — the last slice of lane 7.
+   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved).
 11. **Then** lanes **8 → 9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -145,6 +145,8 @@ lane's slice.
 | **D-40** | Whether a traveller removes a file they put on their own trip (lane 7, 7c) | **Their own uploads, before submission:** only a file the traveller uploaded, only while the trip is a draft or returned to them; after that the desk may be relying on it — they ask the desk. Lane 7, slice 7c2. |
 | **D-41** | What the traveller writes to the travel desk (E7) | **A reply, or a new message:** a reply to a note the desk shared with them, or a question of their own; both visible to the traveller; no edit or delete afterwards, so the desk's record stands. Lane 7, slice 7c2. |
 | **D-42** | Which itinerary the traveller sees (E7, D-25) | **The one in force only:** the version the desk finalised; while the desk is still drafting, the portal says the itinerary is being planned. Lane 7, slice 7c1. |
+| **D-43** | Whether the traveller marks an expense as a per diem (7d) — a per diem needs no receipt and its amount is checked against no rate | **Yes, as the desk can:** the same switch; the reviewer sees it marked and approves, cuts or rejects it like any line. Lane 7, slice 7d. |
+| **D-44** | What the traveller removes from their own claim (7d) | **Lines, and a draft claim:** a line while the claim is a draft or returned to them; the whole claim while it is a draft — never submitted. Lane 7, slice 7d. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -165,7 +167,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
-| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 staged 2026-10-03 (portal 129/129 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-42; next 7d |
+| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ◐ 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d staged 2026-10-03 — the last slice (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44; ✅ once 7d is committed |
 | **8** | Notifications and the sweep | batch 1 | `run-final-reminders.mjs` | ☐ |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
@@ -2061,15 +2063,14 @@ has no `EmailSettings` row; neither recurred on the other run. The API log other
 - [x] **O-16:** an international trip with no insurance spanning its dates gets a warning at submit and
   refused ticketing; a primary passport expiring within six months of the return gets a warning (both
   windows to be confirmed by TDC). *(7b)*
-- [ ] **Portal (D-5, E7, O-17):** `/me/claims` — create, lines, receipt upload through the controlled
+- [x] **Portal (D-5, E7, O-17):** `/me/claims` — create, lines, receipt upload through the controlled
   gate, submit, status; the traveller's advances, itinerary, bookings, visas and risk assessment;
   `/me` attachment upload and download; a reply to a desk comment. Upload precedent
   `MyProfileController.cs:138-173` (entitlement first — the traveller's own request or 404 through
   `GetOwnActiveRequestAsync` — then `HrAttachmentUpload.ExecuteAsync` with
   `ControlledFileUploadCategories.HrStaffTravelAttachments`); `StaffTravelMeController` gains
   `IHrControlledDocumentService` and a logger. `MyTravelAlertsPanel` stops pointing at a tab `/me`
-  does not have. *(Built in 7c1 — the reads and the alerts panel — and 7c2 — files and messages; `/me/claims` is 7d's,
-  so this stays open.)*
+  does not have. *(7c1 — the reads and the alerts panel; 7c2 — files and messages; 7d — `/me/claims`.)*
 
 Suites `run-final-compliance.mjs` and `run-final-portal.mjs` — every portal check runs as a plain
 employee (HR passes its own guards); the upload category requires a clean scan, so both need the
@@ -2352,6 +2353,71 @@ checks were corrected. **129/129 twice** (761419, 776311). Regression, twice eac
 lifecycle **257** (871958, 058937), truth **118** (925556, 110200), approvals **123** (930587, 115601), fleet **165**
 (953817, 138406). No slow request; no alert notice on a non-fixture trip; nothing of any run left live — comments and
 attachments included; every fixture login off; the demo Kumasi trip still Approved. The API log held only the known noise.
+
+**Source check for 7d (2026-10-03, HEAD `7e2d6f1bd`).** The finance controller's claim routes, `StaffTravelFinanceService`'s
+claim and line rules, the claim and line DTOs and the desk's two claim pages were re-read. D-38 needs no new rule — the
+claimant is always the trip's traveller, so lane 3's rules hold as they are: a claim only on an approved, under-way or
+completed trip; its advance this trip's and this traveller's; expenses fixed once submitted and the claimant's again when
+returned; at submission the policy's claim window and its receipt threshold (a per diem excepted); never reviewed or paid
+by the claimant (D-2). Four more:
+- **Q1 — a receipt is the trip's attachment.** A line names it by `ReceiptAttachmentId`, checked to be on the claim's trip;
+  7c2's upload is the traveller's way in.
+- **Q2 — a line's `PolicyLimit` is the payload's.** The desk's form only ever sends back what the line had; the traveller's
+  line takes none on create and keeps the line's on edit.
+- **Q3 — fuel on a company-vehicle trip names its fleet trip** (D-30) from `claims/{id}/fleet-fuel`, a desk read: the portal
+  needs its own. A traveller's reason for a fill Fleet already logs (D-32) is kept, as for the desk, as an internal note.
+- **Q4 — a per diem needs no receipt and no rate bounds it** — D-43.
+
+**Decisions (the user, 2026-10-03):** D-43 (the traveller marks a per diem as the desk can), D-44 (the traveller removes a
+line while the claim is a draft or returned, and a claim while it is a draft) — § 1.
+
+**As built — slice 7d (2026-10-03).** No migration. The traveller's claim methods sit in `StaffTravelFinanceService`
+(`GetTravellerClaimAsync`, `CreateTravellerClaimAsync`, `UpdateTravellerClaimAsync`, `DeleteTravellerClaimAsync`,
+`SubmitTravellerClaimAsync`, `AddTravellerClaimLineAsync`, `UpdateTravellerClaimLineAsync`, `DeleteTravellerClaimLineAsync`,
+`GetTravellerClaimFleetFuelAsync`). Each establishes the claim, line or trip is the caller's — "not found" otherwise — and
+calls the desk's own method, so **no lane 3 rule was copied or changed**.
+- *Routes.* `GET/PUT/DELETE /me/claims/{id}`, `POST /me/claims` (201), `POST /me/claims/{id}/submit`,
+  `POST /me/claims/{id}/lines`, `PUT/DELETE /me/claim-lines/{lineId}`, `GET /me/claims/{id}/fleet-fuel`. No review or pay
+  route: the finance controller's class-level Read refuses the traveller (403) and the service refuses the claimant
+  anyway (D-2).
+- *Q2.* A traveller's new line takes no policy limit; a changed one keeps the line's — whatever the payload says.
+- *Q3.* The fleet-fuel read through `/me`; a D-32 reason the traveller gives is kept, as the desk's is, as an internal note
+  authored by them.
+- *D-43, D-44* are the desk's own rules carried over: the per-diem switch; a line removed while the claim is a draft or
+  returned; a claim deleted while it is a draft (`DeleteClaimAsync` refuses anything else — a returned claim included).
+- *Screens.* The trip's *Money* tab: **File a claim** on a trip that is approved, under way or completed — the type and
+  the advance it settles (one still out with the traveller is offered first), then on to the claim. **`/me/travel/claims/[id]`**:
+  the claim's totals, advance deducted, payable, the desk's notes (a returned claim's in a banner) and the payment; the
+  expenses with their receipt and the desk's decision — the amount approved and why the rest was not; *Add an expense*
+  (category, date, description, merchant, amount and currency, the receipt from the trip's files or **uploaded there and
+  then** through `/me`, the per-diem switch, the fuel fields when the trip has company-vehicle trips); change and remove
+  while editable; **Send to the travel desk**; **Delete the claim** on a draft. ⚠ The desk is not told a claim was
+  submitted — lane 8's "claim submitted" topic.
+- *The guide.* Chapter 15 — six screens; the Money tab's *File a claim*; the claim page; the two route rows; T-54 fixed —
+  and chapter 9b says where a traveller's claim lands.
+
+**Suite** `run-final-portal.mjs` 129 → **177**. §9 a claim refused on a draft trip (422) and on someone else's (404);
+filed on the traveller's approved trip (201) — theirs, a draft, numbered; read by them, 404 to travB, as is its
+fleet-fuel read; a meal added with a policy limit of 99,999 — valued 120 by the server, no limit kept; a receipt uploaded
+through `/me` (201) linked to a taxi, another trip's file refused (404); a per diem kept as one (D-43); travB adds, changes
+and removes nothing (404); the desk sets the meal's limit at 150, the traveller's correction keeps it (Q2); the per diem
+removed on the draft; submitted — then no line added or removed (422) and the claim not deleted (422); the finance review
+route 403 to the traveller (D-2); the second officer returns it with a note the traveller reads; the meal removed on the
+returned claim, which is not deleted (422), and resubmitted; the second officer approves 60 of the taxi's 80 and the
+claim, the first officer pays (D-2); the traveller reads it paid — 60 payable, the reference, why 20 was cut; a second,
+empty claim not submitted (422), travB's delete 404, the traveller's 204, then gone. **177/177 twice** (231036, 247192;
+first in 191288). Regression, twice each, all unchanged: compliance **96** (264937, 479341), bookings **148** (285467,
+502316), money **288** (303694, 521738), policy **131** (343424, 559741), lifecycle **257** (357290, 573334), truth **118**
+(413815, 642882), approvals **123** (421904, 648339), fleet **165** (449117, 673846). No slow request; no alert notice on a
+non-fixture trip; nothing of any run left live — claims, lines, comments and attachments included; every fixture login
+off; the demo Kumasi trip still Approved. The API log held the known noise, and one pattern not seen before: the
+platform's notification clean-up timer (`UnifiedNotificationService.CleanupExpiredNotificationsAsync`, every ~30 s) failed
+3 of its 19 runs, each a 2–4 s bulk update of `Notifications` while the suites were writing notices — caught, logged,
+tried again the next time; no travel code runs in it.
+
+**Lane 7 — built 2026-10-03** (7a `7a22f177c`, 7b `81bd93074`, 7c1 `584993d0a`, 7c2 `a922f5085`, 7d staged): every E and O
+finding of the lane closed but E6's in-app half, which is lane 8's (a per-audience topic), as are the desk's notices of a
+traveller's message, file and claim.
 
 ### Lane 8 — Notifications and the sweep (D-4, D-6, F1, F2, E6, O-11, O-17)
 

@@ -1037,6 +1037,83 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         return true;
     }
 
+    // ---- The traveller's own claims on the portal (lane 7, slice 7d) --------
+    //
+    // D-38: the traveller files and submits their own claim; the desk reviews and pays as now, and can still file for
+    // them. The claimant is always the trip's traveller, so lane 3's rules need no change — these only establish that the
+    // claim (or line, or trip) is the caller's, as "not found" otherwise, and keep the policy limit off the traveller's
+    // payload (Q2). D-43 (a per diem marked as the desk can) needs nothing here; D-44's removals are the desk's own rules —
+    // a claim while a draft, a line while the claim is a draft or returned.
+
+    private async Task<StaffTravelExpenseClaim> GetTravellersClaimAsync(Guid claimId, Guid travellerEmployeeId)
+    {
+        var claim = await GetOwnedClaimAsync(claimId);
+        if (claim.EmployeeId != travellerEmployeeId)
+            throw new ArgumentException($"Expense claim with ID '{claimId}' not found.");
+        return claim;
+    }
+
+    public async Task<StaffTravelExpenseClaimDto> GetTravellerClaimAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(claimId, travellerEmployeeId);
+        return await GetClaimByIdAsync(claimId, cancellationToken);
+    }
+
+    public async Task<StaffTravelExpenseClaimDto> CreateTravellerClaimAsync(CreateStaffTravelExpenseClaimDto createDto, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        if (request.EmployeeId != travellerEmployeeId)
+            throw new ArgumentException($"Staff travel request with ID '{createDto.StaffTravelRequestId}' not found.");
+        foreach (var line in createDto.Lines) line.PolicyLimit = null;
+        return await CreateClaimAsync(createDto, tenantId, createdByUserId, travellerEmployeeId, cancellationToken);
+    }
+
+    public async Task<StaffTravelExpenseClaimDto> UpdateTravellerClaimAsync(UpdateStaffTravelExpenseClaimDto updateDto, Guid updatedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(updateDto.Id, travellerEmployeeId);
+        return await UpdateClaimAsync(updateDto, updatedByUserId, cancellationToken);
+    }
+
+    public async Task<bool> DeleteTravellerClaimAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(claimId, travellerEmployeeId);
+        return await DeleteClaimAsync(claimId, cancellationToken);
+    }
+
+    public async Task<bool> SubmitTravellerClaimAsync(Guid claimId, Guid submittedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(claimId, travellerEmployeeId);
+        return await SubmitClaimAsync(claimId, submittedByUserId, cancellationToken);
+    }
+
+    public async Task<StaffTravelExpenseClaimLineDto> AddTravellerClaimLineAsync(CreateStaffTravelExpenseClaimLineDto createDto, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(createDto.StaffTravelExpenseClaimId, travellerEmployeeId);
+        createDto.PolicyLimit = null;
+        return await AddClaimLineAsync(createDto, tenantId, createdByUserId, travellerEmployeeId, cancellationToken);
+    }
+
+    public async Task<StaffTravelExpenseClaimLineDto> UpdateTravellerClaimLineAsync(UpdateStaffTravelExpenseClaimLineDto updateDto, Guid updatedByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var line = await GetOwnedClaimLineAsync(updateDto.Id);
+        await GetTravellersClaimAsync(line.StaffTravelExpenseClaimId, travellerEmployeeId);
+        updateDto.PolicyLimit = line.PolicyLimit;
+        return await UpdateClaimLineAsync(updateDto, updatedByUserId, travellerEmployeeId, cancellationToken);
+    }
+
+    public async Task<bool> DeleteTravellerClaimLineAsync(Guid lineId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var line = await GetOwnedClaimLineAsync(lineId);
+        await GetTravellersClaimAsync(line.StaffTravelExpenseClaimId, travellerEmployeeId);
+        return await DeleteClaimLineAsync(lineId, cancellationToken);
+    }
+
+    public async Task<StaffTravelFleetFuelOptionsDto> GetTravellerClaimFleetFuelAsync(Guid claimId, Guid travellerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        await GetTravellersClaimAsync(claimId, travellerEmployeeId);
+        return await GetClaimFleetFuelAsync(claimId, cancellationToken);
+    }
+
     // ---- Claim rules (lane 3) ------------------------------------------------
 
     private static string Describe(TravelClaimStatus status) => status switch
