@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { Suspense, use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
@@ -32,6 +32,7 @@ import { TravelItineraryPanel } from '@/components/hr/travel/TravelItineraryPane
 import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
+import { useTabParam } from '@/components/hr/travel/useTabParam';
 import {
   ELEVATED_TRAVEL_RISK_LEVELS,
   TRAVEL_COMMENT_TYPE_LABELS,
@@ -82,9 +83,25 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  * **An approver without travel permission** reaches this page through the approvals queue or their
  * inbox: they see the trip, its comments and attachments and their decision; the desk's tabs and
  * controls are not drawn for them.
+ *
+ * Since lane 8 (slice 8a) the open tab is in `?tab=` — a traveller's message opens Comments, their file
+ * Attachments, an advance to approve Finance — so the page sits under a Suspense boundary.
  */
 export default function TravelRequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={null}>
+      <TravelRequestDetail params={params} />
+    </Suspense>
+  );
+}
+
+const DESK_TABS = ['overview', 'itinerary', 'bookings', 'finance', 'compliance', 'comments', 'attachments', 'workflow'] as const;
+/** What an approver without travel permission is shown (see above). */
+const APPROVER_TABS: readonly string[] = ['overview', 'comments', 'attachments', 'workflow'];
+
+function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const [tab, setTab] = useTabParam(DESK_TABS, 'overview');
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -394,7 +411,7 @@ export default function TravelRequestDetailPage({ params }: { params: Promise<{ 
         </p>
       )}
 
-      <Tabs defaultValue="overview">
+      <Tabs value={deskView || APPROVER_TABS.includes(tab) ? tab : 'overview'} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           {deskView && <TabsTrigger value="itinerary">Itinerary</TabsTrigger>}

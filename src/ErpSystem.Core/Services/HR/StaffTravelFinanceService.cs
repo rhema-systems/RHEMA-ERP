@@ -32,6 +32,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private readonly IHrFinancePostingAdapter _financePosting;
     private readonly IHrFinancePostingAdminService _postingRegister;
     private readonly IStaffTravelFleetService _fleet;
+    // Lane 8 (D-4): the traveller hears what happens to their advance and claim; the desk, what waits for it.
+    private readonly StaffTravelNotices _notices;
     private readonly ILogger<StaffTravelFinanceService> _logger;
 
     public StaffTravelFinanceService(
@@ -48,10 +50,12 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         IHrFinancePostingAdapter financePosting,
         IHrFinancePostingAdminService postingRegister,
         IStaffTravelFleetService fleet,
+        StaffTravelNotices notices,
         ILogger<StaffTravelFinanceService> logger)
     {
         _postingRegister = postingRegister;
         _fleet = fleet;
+        _notices = notices;
         _budgetRepository = budgetRepository;
         _claimRepository = claimRepository;
         _lineRepository = lineRepository;
@@ -78,6 +82,31 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     private Task GuardAdvanceNotPostedAsync(Guid advanceId, string action, CancellationToken cancellationToken)
         => _financePosting.EnsureNotPostedAsync(
             HrFinancePostingEventCatalog.SourceStaffTravelAdvance, advanceId, action, cancellationToken);
+
+    // ---- Lane 8 (D-4): who hears of an advance or a claim ----------------------
+    // Called after the act has committed — after RunAsync where the posting runner holds the save (U2).
+
+    private Task TellTravellerAsync(
+        StaffTravelRequest trip, string evt, string actionPath, Guid? actorEmployeeId,
+        Dictionary<string, object> data, CancellationToken cancellationToken)
+        => _notices.TellTravellerAsync(trip, evt, actionPath, _currentUserProvider.UserId, actorEmployeeId, data, cancellationToken);
+
+    private Task TellDeskAsync(
+        StaffTravelRequest trip, string evt, string actionPath, Dictionary<string, object> data, CancellationToken cancellationToken)
+        => _notices.TellDeskAsync(trip, evt, actionPath, _currentUserProvider.UserId, actorEmployeeId: null, data,
+            onlyWhenActorOutsideDesk: false, cancellationToken);
+
+    private static Dictionary<string, object> AdvanceTokens(StaffTravelAdvance advance, decimal amount) => new()
+    {
+        ["Number"] = advance.AdvanceNumber ?? string.Empty,
+        ["Amount"] = StaffTravelNotices.Money(advance.CurrencyCode, amount),
+    };
+
+    private static Dictionary<string, object> ClaimTokens(StaffTravelExpenseClaim claim, decimal amount) => new()
+    {
+        ["Number"] = claim.ClaimNumber,
+        ["Amount"] = StaffTravelNotices.Money(claim.CurrencyCode, amount),
+    };
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
     // TenantId auto-stamp are inert. Following the RHEMA convention, this service scopes every read and
@@ -565,6 +594,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Lane 8 (D-4): it waits for the desk — from the portal (7d) or filed by an officer, whom the notice leaves out.
+        await TellDeskAsync(request, StaffTravelNotices.ClaimSubmitted, StaffTravelNotices.DeskClaim(entity.Id),
+            ClaimTokens(entity, entity.TotalClaimed), cancellationToken);
         return true;
     }
 
@@ -646,6 +679,22 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation("Expense claim reviewed: {ClaimNumber}, NewStatus: {Status}", entity.ClaimNumber, entity.Status);
+
+        // Lane 8 (D-4): the claimant — always the trip's traveller — hears the outcome; "under review" is no news.
+        var told = outcome switch
+        {
+            TravelClaimStatus.Returned => StaffTravelNotices.ClaimReturned,
+            TravelClaimStatus.Rejected => StaffTravelNotices.ClaimRejected,
+            TravelClaimStatus.Approved or TravelClaimStatus.PartiallyApproved => StaffTravelNotices.ClaimApproved,
+            _ => null,
+        };
+        if (told is not null)
+        {
+            var data = ClaimTokens(entity, entity.TotalApproved);
+            data["Outcome"] = outcome == TravelClaimStatus.PartiallyApproved ? "partly approved" : "approved";
+            await TellTravellerAsync(await RequireOwnedRequestAsync(entity.StaffTravelRequestId), told,
+                StaffTravelNotices.TravellerClaim(entity.Id), reviewerEmployeeId, data, cancellationToken);
+        }
         return true;
     }
 
@@ -725,6 +774,15 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         _logger.LogInformation(
             "Expense claim paid: {ClaimNumber}, net {NetPayable}, advance deducted {AdvanceDeducted}",
             entity.ClaimNumber, entity.NetPayable, entity.AdvanceDeducted);
+
+        // Lane 8 (D-4): what reached the traveller, net of the advance the claim settled.
+        var paid = ClaimTokens(entity, entity.NetPayable);
+        paid["Settlement"] = entity.NetPayable > 0m
+            ? $"{paid["Amount"]} was paid to you" +
+              (entity.AdvanceDeducted > 0m ? $", after {StaffTravelNotices.Money(entity.CurrencyCode, entity.AdvanceDeducted)} the advance you held covered." : ".")
+            : $"the advance you held covered all of it ({StaffTravelNotices.Money(entity.CurrencyCode, entity.AdvanceDeducted)}), so nothing more was paid.";
+        await TellTravellerAsync(request, StaffTravelNotices.ClaimPaid, StaffTravelNotices.TravellerClaim(entity.Id),
+            payerEmployeeId, paid, cancellationToken);
         return true;
     }
 
@@ -1356,6 +1414,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Travel advance created: {AdvanceNumber}", entity.AdvanceNumber);
+        // Lane 8 (D-4): it waits for another officer's approval (D-2) — the one who recorded it is left out.
+        await TellDeskAsync(request, StaffTravelNotices.AdvanceRequested, StaffTravelNotices.DeskTrip(request.Id, "finance"),
+            AdvanceTokens(entity, entity.RequestedAmount), cancellationToken);
         var reloaded = await _advanceRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
     }
@@ -1431,6 +1492,8 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Travel advance approved: {AdvanceNumber}", entity.AdvanceNumber);
+        await TellTravellerAsync(request, StaffTravelNotices.AdvanceApproved, StaffTravelNotices.TravellerTrip(request.Id, "money"),
+            approverEmployeeId, AdvanceTokens(entity, approveDto.ApprovedAmount), cancellationToken);
         return true;
     }
 
@@ -1458,6 +1521,9 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         await _advanceRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Travel advance rejected: {AdvanceNumber}", entity.AdvanceNumber);
+        var trip = await RequireOwnedRequestAsync(entity.StaffTravelRequestId);
+        await TellTravellerAsync(trip, StaffTravelNotices.AdvanceRejected, StaffTravelNotices.TravellerTrip(trip.Id, "money"),
+            rejecterEmployeeId, AdvanceTokens(entity, entity.RequestedAmount), cancellationToken);
         return true;
     }
 
@@ -1527,6 +1593,10 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
         }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation("Travel advance disbursed: {AdvanceNumber}", entity.AdvanceNumber);
+        var disbursed = AdvanceTokens(entity, entity.ApprovedAmount ?? 0m);
+        disbursed["Deadline"] = StaffTravelNotices.Date(deadline);
+        await TellTravellerAsync(request, StaffTravelNotices.AdvanceDisbursed, StaffTravelNotices.TravellerTrip(request.Id, "money"),
+            disburserEmployeeId, disbursed, cancellationToken);
         return true;
     }
 

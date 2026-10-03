@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useState } from 'react';
+import { Suspense, use, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { Loader2, Send, Ban, Globe, Pencil, Undo2, FilePenLine } from 'lucide-react';
@@ -28,6 +28,7 @@ import { MyTripPlan } from '@/components/hr/travel/MyTripPlan';
 import { TravelLifecycleNotes } from '@/components/hr/travel/TravelLifecycleNotes';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { TravelReasonDialog } from '@/components/hr/travel/TravelReasonDialog';
+import { useTabParam } from '@/components/hr/travel/useTabParam';
 import {
   TRAVEL_PRIORITY_LABELS,
   TRAVEL_PURPOSE_LABELS,
@@ -69,9 +70,23 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
  *
  * ⚠ A 404 means the request is not yours. The surface answers the same way for a request that does
  * not exist, so it cannot be used to enumerate ids.
+ *
+ * Since lane 8 (slice 8a) the open tab is in `?tab=` — a notice about an advance opens Money, an alert or
+ * a briefing Before you go, a desk note Messages — so the page sits under a Suspense boundary.
  */
 export default function MyTravelRequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  return (
+    <Suspense fallback={null}>
+      <MyTravelRequestDetail params={params} />
+    </Suspense>
+  );
+}
+
+const MY_TRIP_TABS = ['trip', 'before', 'plan', 'money', 'messages', 'files'] as const;
+
+function MyTravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const [tab, setTab] = useTabParam(MY_TRIP_TABS, 'trip');
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -225,7 +240,7 @@ export default function MyTravelRequestDetailPage({ params }: { params: Promise<
         </p>
       )}
 
-      <Tabs defaultValue="trip">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="trip">The trip</TabsTrigger>
           <TabsTrigger value="before">Before you go</TabsTrigger>

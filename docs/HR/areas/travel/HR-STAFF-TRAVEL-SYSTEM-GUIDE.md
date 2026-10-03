@@ -2128,7 +2128,7 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
 | Gap | |
 |---|---|
-| **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | *Fixed in closure lane 7 (7a, E6): an alert raised active goes at once to the traveller of every approved or under-way trip to its country (and city) in its window; raised inactive, it goes to nobody. The traveller's bell is lane 8's* |
+| **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | *Fixed in closure lane 7 (7a, E6): an alert raised active goes at once to the traveller of every approved or under-way trip to its country (and city) in its window; raised inactive, it goes to nobody. Since lane 8 (8a) the traveller is told in the app as well as by email, on the trip's* Before you go *tab, and the desk in the app but whoever sent it* |
 | **T-45 · An alert does not block or flag a booking** to the destination it warns about, at any severity — including `Emergency` | *Flagged since closure lane 5: a Critical or Emergency alert in force over the trip shows as a warning on the request page — for the approver and the desk. Blocking is TDC's question* |
 | **T-46 · `TravelRiskLevel.Prohibited` exists and prohibits nothing** | |
 
@@ -2491,6 +2491,17 @@ slice 7c1 nobody could: the desk route needs `HR.Travel.Write`, which the `Emplo
 service accepts only the traveller. A Critical trip's flight is not ticketed until it is recorded (D-37). The
 desk's Compliance tab now only reports it.
 
+**What tells the traveller** *(closure lane 8, slice 8a — D-4, D-45)*. The bell and an email, each opening
+the trip on the tab where they act (`/me/travel/[id]?tab=…`, or the claim's own page): submitted for them
+by the desk, approved, rejected, returned for changes, sent back for a change or cancelled by someone else;
+an advance approved, paid out (with the date to account for it by) or rejected; a claim returned, approved
+(in full or in part), rejected or paid (saying when the advance covered it); a destination alert; a risk
+briefing to acknowledge (again if its level rises); a note the desk shares. **Nothing about their own
+acts**, and no reason or note text — the link opens it. A traveller with no login is emailed at the address
+on their employee record; with no address either, the desk is told to tell them. *Before lane 8 the
+traveller heard only an alert's email and the workflow engine's notices to whoever pressed Submit, which
+opened the desk's page they cannot see.*
+
 **`/me/travel/documents` — My travel documents.** The traveller's passport and other travel documents:
 **Add a document**, change one, remove one **while it is unverified**. The travel desk verifies; a change
 takes the verification off; one primary per type. The list shows numbers to the last four; changing a
@@ -2596,7 +2607,7 @@ this may be empty)*.
 
 ## 16. Where staff travel shows up outside its own menu
 
-Six places. Two are worth a minute of the demo; the rest are for the questions.
+Seven places. Two are worth a minute of the demo; the rest are for the questions.
 
 | Where | What it shows | Worth showing? |
 |---|---|---|
@@ -2605,6 +2616,7 @@ Six places. Two are worth a minute of the demo; the rest are for the questions.
 | **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9), and since 6c a driver kept away overnight travels on a request of their own and Fleet's incidents show on the Compliance tab. UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
 | **The employee's position → staff level** | The policy guard resolves the applicable policy from the traveller's **staff level, which lives on their position**, not on the employee. A traveller with no position falls back to the organisation-wide policy | Worth one sentence in chapter 13 |
 | **Workflow inbox** (`/workflow/inbox`) | A submitted travel request appears in the assignee's inbox alongside every other approval in the ERP | **Yes** — 30 seconds, and it is the same point as every other module: a manager lives in one inbox |
+| **The bell, and email** *(closure lane 8, slice 8a)* | One topic per event and audience, `StaffTravel.{Event}.Traveller` (in the app and by email) and `.Desk` (in the app, to the HR role's holders but whoever did it), editable on **Administration → Notification Topics**. The desk hears what it must act on: a trip approved (book it), cancelled or sent back for a change by someone outside the desk, an advance to approve, a claim to review, a destination alert sent, and the traveller's messages and files. The approvers keep the workflow engine's own *Approval required*. The old HR-role topics and the engine's three notices to the submitter are switched off — ⚠ a workflow-topic seed switches those three back on until the next travel notice | Only if asked who is told what |
 | **General Ledger** | ⚠ **Nothing.** No travel transaction posts to GL. Advances, claims and payments are recorded in travel's own tables and the Finance hand-off is an open backlog item (D-4) | Say it plainly if a finance director asks — see **T-58** |
 
 ---
@@ -2862,7 +2874,7 @@ you out in a demonstration; **five** are the ones to fix before it is called fin
 | T-40 | visa requirements | Nothing expires a requirement, on a page whose own subtitle says a wrong entry is worse than a missing one |
 | T-41 | visa requirements | No reverse view — you cannot ask where a given passport travels freely |
 | T-43 | alerts | *(closed)* The compliance strip showed alerts with no body for months, because the per-country read returned a summary DTO and the client typed it as the full record |
-| T-44 | alerts | **Raising an alert notifies nobody automatically** — notifications are created one at a time by an endpoint no screen calls |
+| T-44 | alerts | *(closed — closure lanes 7a and 8a)* **Raising an alert notified nobody automatically** — notifications were created one at a time by an endpoint no screen calls. An active alert now reaches every approved or under-way trip in its window, the traveller in the app and by email |
 | T-45 | alerts | An alert does not flag or block a booking to the destination it warns about, at any severity |
 | T-46 | requests | `TravelRiskLevel.Prohibited` prohibits nothing |
 | T-47 | dashboard | No date range — it is always "now" |

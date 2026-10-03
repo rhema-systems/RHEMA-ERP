@@ -833,6 +833,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
         services.AddScoped<StaffTravelBudgetRollup>();
+        // Who hears what about a trip — one topic per event and audience (travel final closure, lane 8).
+        services.AddScoped<StaffTravelNotices>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();

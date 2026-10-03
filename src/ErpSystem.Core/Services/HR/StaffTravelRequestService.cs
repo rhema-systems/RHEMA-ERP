@@ -7,7 +7,6 @@ using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
-using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using ErpSystem.Application.HR.Extensions;
@@ -35,7 +34,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     // below cannot be asked of the user id. Same pairing JobInterviewService uses.
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IAppEventBus _appEventBus;
+    // Lane 8 (D-4): who hears each act — the traveller, the desk.
+    private readonly StaffTravelNotices _notices;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly HrCurrencyBridge _currency;
@@ -56,7 +56,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         ICurrentUserProvider currentUserProvider,
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
-        IAppEventBus appEventBus,
+        StaffTravelNotices notices,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         HrCurrencyBridge currency,
@@ -74,7 +74,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _currentUserProvider = currentUserProvider;
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
-        _appEventBus = appEventBus;
+        _notices = notices;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currency = currency;
@@ -427,144 +427,26 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _ => $"A request that is {status} cannot be edited.",
     };
 
-    // ---- Lifecycle notifications -------------------------------------------
+    // ---- Lifecycle notices (lane 8, slice 8a; D-4, D-45, D-46) -------------
+    //
+    // Who hears each act is StaffTravelNotices' table; each verb calls these after its own save — the publisher saves on
+    // this unit of work (U2). The five HR-role topics that lived here, which told the desk of every act and the traveller
+    // of none, are switched off by StaffTravelNotices.
 
-    private const string TopicEntityType = "StaffTravelRequest";
-    private const string TopicAudience = "Internal";
+    /// <summary>Tells the traveller, on their portal page — unless they did it themselves.</summary>
+    private Task TellTravellerAsync(
+        StaffTravelRequest trip, string evt, CancellationToken cancellationToken, string? tab = null,
+        IReadOnlyDictionary<string, object>? data = null)
+        => _notices.TellTravellerAsync(trip, evt, StaffTravelNotices.TravellerTrip(trip.Id, tab),
+            _currentUserProvider.UserId, _currentUserService.EmployeeId, data, cancellationToken);
 
-    private sealed record TopicSeed(string Activity, string Name, string Description,
-        string TitleTemplate, string BodyTemplate);
-
-    /// <remarks>
-    /// The templates carry the request number, route and dates — never the purpose. A travel
-    /// notification reaches more people than the request does, and the purpose is often the
-    /// commercially sensitive part ("client meeting, Acme, renegotiation"). Whoever is entitled to
-    /// the detail can open the record.
-    /// </remarks>
-    private static readonly TopicSeed[] TopicSeeds =
-    {
-        new("Submitted", "Travel: Submitted for approval",
-            "System-seeded — a travel request has been submitted and is awaiting approval.",
-            "Travel request {{Reference}} submitted",
-            "{{Traveller}} — {{Route}}, {{Dates}}. Awaiting approval."),
-        new("Approved", "Travel: Approved",
-            "System-seeded — a travel request has been approved.",
-            "Travel request {{Reference}} approved",
-            "{{Traveller}} — {{Route}}, {{Dates}}. Approved."),
-        new("Rejected", "Travel: Rejected",
-            "System-seeded — a travel request has been rejected.",
-            "Travel request {{Reference}} rejected",
-            "{{Traveller}} — {{Route}}, {{Dates}}. Rejected."),
-        new("Cancelled", "Travel: Cancelled",
-            "System-seeded — a travel request has been withdrawn or cancelled.",
-            "Travel request {{Reference}} cancelled",
-            "{{Traveller}} — {{Route}}, {{Dates}}. Cancelled."),
-        new("Completed", "Travel: Completed",
-            "System-seeded — travel has been marked completed; expense claims may now be settled.",
-            "Travel request {{Reference}} completed",
-            "{{Traveller}} — {{Route}}, {{Dates}}. Completed."),
-    };
-
-    /// <summary>
-    /// Creates this area's notification topics for a tenant if they do not exist yet.
-    /// </summary>
-    /// <remarks>
-    /// Publishing to a topic that was never seeded delivers to nobody while every table says the
-    /// event fired — which is exactly the defect recorded as F-09 for travel alerts. Seed first,
-    /// then publish.
-    /// </remarks>
-    private async Task EnsureTopicsAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
-        var keys = TopicSeeds.Select(s => $"{TopicEntityType}.{s.Activity}.{TopicAudience}").ToArray();
-
-        var existing = await topicRepo
-            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && keys.Contains(t.Key))
-            .Select(t => t.Key)
-            .ToListAsync(cancellationToken);
-        var existingSet = new HashSet<string>(existing, StringComparer.OrdinalIgnoreCase);
-        if (existingSet.Count == TopicSeeds.Length) return;
-
-        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
-        foreach (var seed in TopicSeeds)
-        {
-            var key = $"{TopicEntityType}.{seed.Activity}.{TopicAudience}";
-            if (existingSet.Contains(key)) continue;
-
-            var topic = new NotificationTopic
-            {
-                TenantId = tenantId,
-                Key = key,
-                Name = seed.Name,
-                Description = seed.Description,
-                EntityType = TopicEntityType,
-                IsSystem = true,
-                IsActive = true,
-                EnableInApp = true,
-                EnableEmail = false,
-                EnableSms = false,
-                InAppTitleTemplate = seed.TitleTemplate,
-                InAppBodyTemplate = seed.BodyTemplate,
-                ActionUrlTemplate = "{{ActionPath}}",
-                CreatedBy = "System",
-            };
-            await topicRepo.AddAsync(topic);
-
-            await recipientRepo.AddAsync(new NotificationTopicRecipient
-            {
-                TenantId = tenantId,
-                TopicId = topic.Id,
-                RecipientKind = "Role",
-                RecipientValue = Constants.Roles.Hr,
-                IsSystem = true,
-                SendInApp = true,
-                CreatedBy = "System",
-            });
-        }
-
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Announces a lifecycle transition. Call only AFTER the transition has committed — an event
-    /// published for a save that then fails is a notification about something that did not happen.
-    /// </summary>
-    private async Task PublishLifecycleAsync(
-        StaffTravelRequest entity, string activity, CancellationToken cancellationToken)
-    {
-        await EnsureTopicsAsync(entity.TenantId, cancellationToken);
-
-        // The transitions reach here holding an entity loaded by GetOwnedRequestAsync, which
-        // applies no includes — so Employee is null and the traveller's name would be blank. That
-        // is F-13 by another route, and a notification reading "Traveller: " is worse than most
-        // blank fields because nobody sees the record it came from. Resolve the name here.
-        var traveller = entity.Employee is not null
-            ? $"{entity.Employee.FirstName} {entity.Employee.LastName}".Trim()
-            : await _requestRepository.GetQueryable()
-                .Where(r => r.Id == entity.Id)
-                .Select(r => (r.Employee.FirstName + " " + r.Employee.LastName).Trim())
-                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
-
-        await _appEventBus.PublishAsync(new EntityActivityEvent
-        {
-            TenantId = entity.TenantId,
-            EntityType = TopicEntityType,
-            Activity = activity,
-            Audience = TopicAudience,
-            EntityId = entity.Id,
-            TriggeredByUserId = _currentUserProvider.UserId,
-            Data = new Dictionary<string, object>
-            {
-                ["Reference"] = entity.RequestNumber ?? string.Empty,
-                ["Traveller"] = traveller,
-                ["Route"] = $"{entity.OriginCity} to {entity.DestinationCity}",
-                ["Dates"] = $"{entity.TravelStartDate:yyyy-MM-dd} to {entity.TravelEndDate:yyyy-MM-dd}",
-                // Area 25 slice 7: /hr/travel/requests/{id} never existed as a route — the desk
-                // detail (these topics' recipients are the HR role) lives at /hr/travel/{id}.
-                ["ActionPath"] = $"/hr/travel/{entity.Id}",
-            },
-        }, cancellationToken);
-    }
+    /// <summary>Tells the desk, on its page — everyone in it but whoever did it; with <paramref name="onlyWhenActorOutsideDesk"/>,
+    /// only when someone outside the desk did it (D-46).</summary>
+    private Task TellDeskAsync(
+        StaffTravelRequest trip, string evt, bool onlyWhenActorOutsideDesk, CancellationToken cancellationToken,
+        string? tab = null, IReadOnlyDictionary<string, object>? data = null)
+        => _notices.TellDeskAsync(trip, evt, StaffTravelNotices.DeskTrip(trip.Id, tab),
+            _currentUserProvider.UserId, _currentUserService.EmployeeId, data, onlyWhenActorOutsideDesk, cancellationToken);
 
     // ---- Queries -----------------------------------------------------------
 
@@ -1452,10 +1334,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         // Announce what actually happened, not what was asked for: a single-step definition
         // approves on submission, and a notification saying "awaiting approval" about a request
-        // that is already approved is worse than none.
-        await PublishLifecycleAsync(entity,
-            entity.Status == StaffTravelRequestStatus.Approved ? "Approved" : "Submitted",
-            cancellationToken);
+        // that is already approved is worse than none. Lane 8 (D-45, D-46): the traveller hears of a
+        // submission made for them (the engine asks the approvers); an approval is the desk's cue to book.
+        if (entity.Status == StaffTravelRequestStatus.Approved)
+        {
+            await TellTravellerAsync(entity, StaffTravelNotices.Approved, cancellationToken);
+            await TellDeskAsync(entity, StaffTravelNotices.Approved, onlyWhenActorOutsideDesk: false, cancellationToken);
+        }
+        else
+            await TellTravellerAsync(entity, StaffTravelNotices.Submitted, cancellationToken);
 
         return new StaffTravelSubmitResultDto
         {
@@ -1539,7 +1426,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // A multi-step definition leaves the request Submitted after an intermediate approval, so
         // only announce approval when the engine says it is approved.
         if (entity.Status == StaffTravelRequestStatus.Approved)
-            await PublishLifecycleAsync(entity, "Approved", cancellationToken);
+        {
+            await TellTravellerAsync(entity, StaffTravelNotices.Approved, cancellationToken);
+            await TellDeskAsync(entity, StaffTravelNotices.Approved, onlyWhenActorOutsideDesk: false, cancellationToken);
+        }
 
         return true;
     }
@@ -1574,7 +1464,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _logger.LogInformation("Staff travel request rejected: {RequestNumber}", entity.RequestNumber);
 
         if (entity.Status == StaffTravelRequestStatus.Rejected)
-            await PublishLifecycleAsync(entity, "Rejected", cancellationToken);
+            await TellTravellerAsync(entity, StaffTravelNotices.Rejected, cancellationToken);
 
         return true;
     }
@@ -1649,7 +1539,10 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         _logger.LogInformation("Staff travel request cancelled: {RequestNumber} ({Held} held bookings cancelled with it)",
             entity.RequestNumber, heldCancelled);
 
-        await PublishLifecycleAsync(entity, "Cancelled", cancellationToken);
+        // Lane 8 (D-46): the traveller, when someone else cancelled it; the desk, when someone outside it did — there is
+        // booking and money to unwind.
+        await TellTravellerAsync(entity, StaffTravelNotices.Cancelled, cancellationToken);
+        await TellDeskAsync(entity, StaffTravelNotices.Cancelled, onlyWhenActorOutsideDesk: true, cancellationToken);
 
         return true;
     }
@@ -1760,9 +1653,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // Lane 8 (D-46): completion told nobody useful — the desk marks it — and the claim window is 8b's notice.
         _logger.LogInformation("Staff travel request completed: {RequestNumber}", entity.RequestNumber);
-
-        await PublishLifecycleAsync(entity, "Completed", cancellationToken);
 
         return true;
     }
@@ -1771,8 +1663,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     //
     // Travel final closure, lane 1 (decisions D-6 and D-9, finding A12). ReturnedForRevision and
     // Closed were statuses nothing wrote, a trip could not be changed after approval, and the request
-    // had no recall of its own — "use all four or none" (HrWorkflowFallbackAuthority) had three. Who
-    // hears about each is lane 8's (D-4); none of these publishes yet.
+    // had no recall of its own — "use all four or none" (HrWorkflowFallbackAuthority) had three. Since
+    // lane 8 (D-4, D-46) a return and a change request tell the traveller, and a change asked from outside
+    // the desk tells the desk; a recall and a close are the actor's own business.
 
     /// <summary>Cancels the request's live approval instance, if it has one; a refusal stops the caller.</summary>
     /// <remarks>
@@ -1847,6 +1740,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Staff travel request returned for revision: {RequestNumber}", entity.RequestNumber);
+        await TellTravellerAsync(entity, StaffTravelNotices.Returned, cancellationToken);
         return true;
     }
 
@@ -1904,6 +1798,8 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Change requested on approved staff travel request: {RequestNumber}", entity.RequestNumber);
+        await TellTravellerAsync(entity, StaffTravelNotices.ChangeRequested, cancellationToken);
+        await TellDeskAsync(entity, StaffTravelNotices.ChangeRequested, onlyWhenActorOutsideDesk: true, cancellationToken);
         return true;
     }
 
@@ -2018,7 +1914,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         // The parent request was never checked, so a comment could be hung off any request id at
         // all — including another tenant's. GetOwnedRequestAsync raises "not found" for both.
-        await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
+        var request = await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
 
         // Lane 7 (7c2, P4): nor was a reply's parent — a reply could hang off another trip's comment. It answers a comment
         // on the same trip, or it is "not found".
@@ -2039,6 +1935,27 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         var reloaded = await _commentRepository.GetWithAuthorAsync(tenantId, entity.Id);
+
+        // Lane 8 (D-4, O-17): the traveller's message — from the portal (D-41) — tells the desk; a note the traveller can
+        // see, from anyone else, tells the traveller. Neither carries the text: the link opens it.
+        if (entity.AuthorId == request.EmployeeId)
+            await TellDeskAsync(request, StaffTravelNotices.TravellerMessage, onlyWhenActorOutsideDesk: false, cancellationToken,
+                tab: "comments", data: new Dictionary<string, object>
+                {
+                    ["Kind"] = entity.CommentType switch
+                    {
+                        TravelRequestCommentType.Query => "question",
+                        TravelRequestCommentType.Response => "reply",
+                        _ => "note",
+                    },
+                });
+        else if (entity.IsVisibleToTraveller)
+            await TellTravellerAsync(request, StaffTravelNotices.NoteShared, cancellationToken, tab: "messages",
+                data: new Dictionary<string, object>
+                {
+                    ["By"] = reloaded?.Author is { } author ? $"{author.FirstName} {author.LastName}".Trim() : "The travel desk",
+                });
+
         return (reloaded ?? entity).ToDto();
     }
 
@@ -2098,7 +2015,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     {
         tenantId = RequireCurrentTenant(tenantId);
 
-        await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
+        var request = await GetOwnedRequestAsync(createDto.StaffTravelRequestId);
 
         var entity = createDto.ToEntity(tenantId, createdByUserId);
 
@@ -2107,6 +2024,15 @@ public class StaffTravelRequestService : IStaffTravelRequestService
 
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Lane 8 (D-4): a file the traveller adds — on the portal (7c2) — tells the desk.
+        if (uploaderEmployeeId == request.EmployeeId)
+            await TellDeskAsync(request, StaffTravelNotices.TravellerFile, onlyWhenActorOutsideDesk: false, cancellationToken,
+                tab: "attachments", data: new Dictionary<string, object>
+                {
+                    ["FileType"] = System.Text.RegularExpressions.Regex.Replace(entity.AttachmentType.ToString(), "(?<=[a-z])(?=[A-Z])", " "),
+                    ["FileName"] = entity.FileName,
+                });
 
         var reloaded = await _attachmentRepository.GetWithUploaderAsync(tenantId, entity.Id);
         return (reloaded ?? entity).ToDto();

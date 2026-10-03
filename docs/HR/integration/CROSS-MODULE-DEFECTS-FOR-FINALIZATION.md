@@ -2123,6 +2123,41 @@ the book a subledger posts to is Finance's decision.
 (`l3c/d17/scratch-book.sql`); travel's posted path then ran 70/70 twice (`dev-harness/hr-travel/run-final-posting.mjs`)
 and the copy was dropped.
 
+## 36. Platform — the notification dispatcher writes back whole rows, undoing a soft delete made while its batch runs (2026-10-03)
+
+**Owner:** Platform (notifications — `UnifiedNotificationService.ProcessPendingNotificationsAsync`, run by
+`NotificationDispatcherBackgroundService`). **Severity:** low for users (a notification someone deleted can come back to
+their list), but it makes any clean-up of `Notifications` unreliable while the dispatcher is working. **Found:** HR's
+travel closure, lane 8, reading why notices of deleted harness trips were still live on UAT.
+
+### What is broken
+
+The dispatcher claims each due notification, loads it **tracked** (`_dbContext.Notifications.FirstOrDefaultAsync(n =>
+n.Id == id && !n.IsDeleted)`), sends it, sets its status, and calls `Repository<Notification>().UpdateAsync(notification)`
+— which marks every column modified — then saves the whole batch with one `SaveChangesAsync` at the end of the loop. A
+row soft-deleted by anyone else between its load and that save is written back with `IsDeleted = 0` and `DeletedAt =
+NULL`. The window is the batch's processing time, which on a database with no mail server is wide: each email fails
+after several seconds (see #33 — 200 claimed every 31 s, each failing at once for want of SMTP settings).
+
+### What was proven
+
+On UAT, 2026-10-03: two trips of a harness run (TR-2026-03111 and -03112, policy suite run 343424) were soft-deleted at
+02:09:14.867 with their notices; 45 of those notices were live again, each stamped `SentAt` between 02:09:14.967 and
+02:09:15.0 — written by the dispatcher a tenth of a second after the delete. The other 21 notices of one trip, not in that
+batch, stayed deleted. (The harness now deletes a run's notices again one dispatcher cycle later; the 45 were removed by
+hand.)
+
+### What it blocks
+
+Nothing outright. Any module that removes notifications in bulk — a user clearing their list, a record's deletion
+cascading to its notices, a test teardown — can be partly undone.
+
+### What a fix needs
+
+Save only what the dispatcher changed: set the status, attempt count and sent time on the tracked entity and let change
+tracking write those columns (no `Update` on an already-tracked entity), or use one `ExecuteUpdateAsync … WHERE Id = @id
+AND IsDeleted = 0` per outcome; and save per notification, not once per batch.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

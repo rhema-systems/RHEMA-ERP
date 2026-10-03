@@ -4,7 +4,6 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using ErpSystem.Shared;
-using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Application.HR.Extensions;
@@ -34,7 +33,8 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     private readonly HrCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
-    private readonly IAppEventBus _appEventBus;
+    // Lane 8 (E6, D-4): an alert and a risk briefing reach the traveller in the app and by email.
+    private readonly StaffTravelNotices _notices;
     private readonly ILogger<StaffTravelComplianceService> _logger;
 
     public StaffTravelComplianceService(
@@ -51,7 +51,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         HrCurrencyBridge currency,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        IAppEventBus appEventBus,
+        StaffTravelNotices notices,
         ILogger<StaffTravelComplianceService> logger)
     {
         _documentRepository = documentRepository;
@@ -67,7 +67,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         _currency = currency;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
-        _appEventBus = appEventBus;
+        _notices = notices;
         _logger = logger;
     }
 
@@ -527,11 +527,12 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelRiskAssessmentDto> CreateRiskAssessmentAsync(CreateStaffTravelRiskAssessmentDto createDto, Guid tenantId, Guid createdByUserId, Guid? assessorEmployeeId = null, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
+        var request = await RequireOwnedRequestAsync(createDto.StaffTravelRequestId);
         createDto.AssessedById = assessorEmployeeId;
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _riskAssessmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await AskForAcknowledgementAsync(request, entity, assessorEmployeeId, cancellationToken);
         var reloaded = await _riskAssessmentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
     }
@@ -550,8 +551,27 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         }
         await _riskAssessmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (entity.RiskLevel > before)
+            await AskForAcknowledgementAsync(
+                await RequireOwnedRequestAsync(entity.StaffTravelRequestId), entity, actorEmployeeId: null, cancellationToken);
         var reloaded = await _riskAssessmentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
+    }
+
+    /// <summary>
+    /// Lane 8 (D-4): the traveller is asked to read and acknowledge a risk assessment — a new one, or one whose level rose
+    /// (which cleared any acknowledgement, E5) — while the trip is still to happen or under way. D-37 holds a Critical
+    /// trip's ticket until they do; 8b's sweep chases one still unacknowledged near departure.
+    /// </summary>
+    private Task AskForAcknowledgementAsync(
+        StaffTravelRequest request, StaffTravelRiskAssessment assessment, Guid? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        if (request.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected
+            or StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Closed)
+            return Task.CompletedTask;
+        return _notices.TellTravellerAsync(request, StaffTravelNotices.BriefingToAcknowledge,
+            StaffTravelNotices.TravellerTrip(request.Id, "before"), _currentUserProvider.UserId, actorEmployeeId,
+            new Dictionary<string, object> { ["RiskLevel"] = assessment.RiskLevel.ToString() }, cancellationToken);
     }
 
     /// <summary>
@@ -751,13 +771,18 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     }
 
     /// <summary>
-    /// Publishes the alert to the travel desk and the traveller, then records that it was sent.
+    /// Sends the alert to the trip's traveller and to the travel desk, then records that it was sent.
     /// </summary>
     /// <remarks>
-    /// The stamp is written only after <c>PublishAsync</c> returns. If publishing throws, the row
-    /// keeps a null <c>NotificationSentAt</c> and reads as undelivered — which is the truth, and is
-    /// the whole point of the change. An unsent alert that admits it is unsent can be retried; one
-    /// that claims delivery cannot.
+    /// <para>The stamp is written only after the notices are published. A notice that cannot be published is logged by
+    /// <see cref="StaffTravelNotices"/>, never thrown — and the platform's bus swallows its handlers' failures anyway (lane
+    /// 8, U2) — so <c>NotificationSentAt</c> records that the send was made; that it was delivered is read from the
+    /// notifications written.</para>
+    ///
+    /// <para><b>Lane 8 (E6).</b> The traveller was told by email only (an <c>EmailFromData</c> rule on the employee's
+    /// address) and the desk in the app. Now the traveller is told in the app and by email, on the trip's Before you go
+    /// tab — or by email alone with no login, or through the desk with neither — and the desk in the app, less whoever
+    /// sent it. The old <c>StaffTravelAlert.Issued.Internal</c> topic is switched off.</para>
     /// </remarks>
     private async Task SendAlertAsync(
         StaffTravelAlertNotification notification,
@@ -765,98 +790,26 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         StaffTravelRequest request,
         CancellationToken cancellationToken)
     {
-        await EnsureAlertTopicAsync(notification.TenantId, cancellationToken);
-
-        var employee = await _employeeRepository.GetByIdAsync(notification.EmployeeId);
         var country = await _alertRepository.GetQueryable()
             .Where(a => a.Id == alert.Id)
             .Select(a => a.Country.Name)
             .FirstOrDefaultAsync(cancellationToken);
-
-        await _appEventBus.PublishAsync(new EntityActivityEvent
+        var data = new Dictionary<string, object>
         {
-            TenantId = notification.TenantId,
-            EntityType = AlertTopicEntityType,
-            Activity = "Issued",
-            Audience = AlertTopicAudience,
-            EntityId = alert.Id,
-            TriggeredByUserId = _currentUserProvider.UserId,
-            Data = new Dictionary<string, object>
-            {
-                ["AlertTitle"] = alert.Title ?? string.Empty,
-                ["Severity"] = alert.Severity.ToString(),
-                ["Country"] = country ?? string.Empty,
-                ["Reference"] = request.RequestNumber ?? string.Empty,
-                ["Route"] = $"{request.OriginCity} to {request.DestinationCity}",
-                ["Dates"] = $"{request.TravelStartDate:yyyy-MM-dd} to {request.TravelEndDate:yyyy-MM-dd}",
-                ["TravellerEmail"] = employee?.EmailAddress ?? string.Empty,
-                // Area 25 slice 7: /hr/travel/requests/{id} never existed — the desk detail is /hr/travel/{id}.
-                ["ActionPath"] = $"/hr/travel/{request.Id}",
-            },
-        }, cancellationToken);
+            ["AlertTitle"] = alert.Title ?? string.Empty,
+            ["Severity"] = alert.Severity.ToString(),
+            ["Country"] = country ?? string.Empty,
+        };
+
+        await _notices.TellTravellerAsync(request, StaffTravelNotices.AlertIssued,
+            StaffTravelNotices.TravellerTrip(request.Id, "before"), _currentUserProvider.UserId, actorEmployeeId: null,
+            data, cancellationToken);
+        await _notices.TellDeskAsync(request, StaffTravelNotices.AlertIssued,
+            StaffTravelNotices.DeskTrip(request.Id, "compliance"), _currentUserProvider.UserId, actorEmployeeId: null,
+            data, onlyWhenActorOutsideDesk: false, cancellationToken);
 
         notification.NotificationSentAt = DateTime.UtcNow;
         await _notificationRepository.UpdateAsync(notification);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-    }
-
-    // ---- Travel alerts that actually reach somebody ---------------------------
-
-    private const string AlertTopicEntityType = "StaffTravelAlert";
-    private const string AlertTopicAudience = "Internal";
-    private const string AlertTopicKey = "StaffTravelAlert.Issued.Internal";
-
-    /// <summary>
-    /// Creates the travel-alert notification topic for a tenant if it does not exist.
-    /// </summary>
-    /// <remarks>
-    /// Two recipients, deliberately. <b>Role HR</b> is the travel desk, who may have to act — move
-    /// a booking, cancel a leg. <b>EmailFromData</b> reaches the traveller directly, because an
-    /// alert about the country you are flying to next week is useless if it only ever lands in
-    /// somebody's queue. The platform has no "employee" recipient kind, so the traveller's address
-    /// travels in the event data and the rule points at that key.
-    /// </remarks>
-    private async Task EnsureAlertTopicAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var topicRepo = _unitOfWork.Repository<NotificationTopic>();
-        var existing = await topicRepo
-            .GetQueryable(t => t.TenantId == tenantId && !t.IsDeleted && t.Key == AlertTopicKey)
-            .FirstOrDefaultAsync(cancellationToken);
-        if (existing != null) return;
-
-        var topic = new NotificationTopic
-        {
-            TenantId = tenantId,
-            Key = AlertTopicKey,
-            Name = "Travel: Destination alert",
-            Description = "System-seeded — a security, health or disruption alert affects a trip already booked.",
-            EntityType = AlertTopicEntityType,
-            IsSystem = true,
-            IsActive = true,
-            EnableInApp = true,
-            EnableEmail = true,
-            EnableSms = false,
-            InAppTitleTemplate = "{{Severity}} travel alert: {{Country}}",
-            InAppBodyTemplate = "{{AlertTitle}} — affects {{Reference}} ({{Route}}, {{Dates}}).",
-            ActionUrlTemplate = "{{ActionPath}}",
-            CreatedBy = "System",
-        };
-        await topicRepo.AddAsync(topic);
-
-        var recipientRepo = _unitOfWork.Repository<NotificationTopicRecipient>();
-        await recipientRepo.AddAsync(new NotificationTopicRecipient
-        {
-            TenantId = tenantId, TopicId = topic.Id,
-            RecipientKind = "Role", RecipientValue = Constants.Roles.Hr,
-            IsSystem = true, SendInApp = true, CreatedBy = "System",
-        });
-        await recipientRepo.AddAsync(new NotificationTopicRecipient
-        {
-            TenantId = tenantId, TopicId = topic.Id,
-            RecipientKind = "EmailFromData", RecipientValue = "TravellerEmail",
-            IsSystem = true, SendEmail = true, CreatedBy = "System",
-        });
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
     }
 

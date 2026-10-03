@@ -84,7 +84,10 @@ baseline (D-13); lane 0 was built the same day.**
    ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
    a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved).
 11. **Lane 8** (notifications and the sweep) — **SOURCE-CHECKED 2026-10-03** against `8f6df4f08` (lane 8's *Source
-   check*: U1–U9; slices 8a–8c; decisions D-45…D-50 proposed, **awaiting the user** — nothing built yet).
+   check*: U1–U9; slices 8a–8c; decisions D-45…D-50 taken by the user, all as recommended). **8a** the event notices
+   (D-4, D-45, D-46, E6's in-app half, O-17's notice half; no migration) — `run-final-reminders.mjs` 110/110 twice, the
+   regression unchanged twice — staged. Next: **8b**, the sweep's kinds. ⚠ Cross-module defect #36 (the notification
+   dispatcher undoes soft deletes) — the shared teardown now deletes a run's notices again 35 s later.
 12. **Then** lanes **9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
 
@@ -149,6 +152,12 @@ lane's slice.
 | **D-42** | Which itinerary the traveller sees (E7, D-25) | **The one in force only:** the version the desk finalised; while the desk is still drafting, the portal says the itinerary is being planned. Lane 7, slice 7c1. |
 | **D-43** | Whether the traveller marks an expense as a per diem (7d) — a per diem needs no receipt and its amount is checked against no rate | **Yes, as the desk can:** the same switch; the reviewer sees it marked and approves, cuts or rejects it like any line. Lane 7, slice 7d. |
 | **D-44** | What the traveller removes from their own claim (7d) | **Lines, and a draft claim:** a line while the claim is a draft or returned to them; the whole claim while it is a draft — never submitted. Lane 7, slice 7d. |
+| **D-45** | The workflow engine's own notices reach whoever pressed Submit — the traveller only on a self-service submission — and link the desk's page, which the traveller cannot open (lane 8, U1) | **Travel's own notices replace them for the traveller:** they always reach the traveller and link the portal; `StaffTravelRequest.WorkflowSubmitted`, `.WorkflowCompleted` and `.WorkflowRejected` are switched off. The engine's approval request and step assignment stay — they reach the approvers, and their link opens. Lane 8, slice 8a. |
+| **D-46** | What the desk (the HR role) hears of the lifecycle — today every submission, approval, rejection, cancellation and completion | **What it must act on:** a trip approved (book it), and a trip cancelled or sent back for a change by someone outside the desk (unwind bookings, advances and vehicles). Submitted, rejected and completed to HR retire; the engine asks HR when it is HR's stage. Lane 8, slice 8a. |
+| **D-47** | Nothing moves a trip under way to completed, so a trip nobody marks completed never closes (U4) | **The sweep completes an under-way trip the day after its end date;** the desk's verb stays for an early return. Lane 8, slice 8c. |
+| **D-48** | Once the date moves a trip under way it cannot be cancelled, though it may not have happened (U4) | **A "did not travel" cancel:** the desk may cancel an under-way trip with a reason, kept as an internal note, until its end date and only while nothing was spent on it — no claim, no advance cash out, no booking confirmed or ticketed. Lane 8, slice 8c. |
+| **D-49** | The claim window binds a draft's first submission, so a chase after it can only say it is too late (U5) | **Before, not after:** the traveller is told seven days before the window's last day, on a completed trip whose policy has a window and that has no submitted claim (a draft counts as not submitted); once it has passed with a draft or returned claim, or cash still out, the desk is told once — that trip cannot close. A trip with no claim and nothing out is not chased. Replaces "claim overdue, no claim". Lane 8, slice 8b. |
+| **D-50** | The sweep's windows | **Constants in one place, each a TDC question in § 6:** approval waiting 5 days; HR escalation 3 days before departure; visa missing 14 days before; briefing unacknowledged 7 days before; passport rungs 90, 30 and 7 days; the claim reminder 7 days before the window closes. No settings screen. Lane 8, slice 8b. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -170,7 +179,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
-| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ◐ source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 proposed, awaiting the user |
+| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ◐ source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); 8b, 8c to come |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
@@ -2432,10 +2441,15 @@ traveller's message, file and claim.
   waiting with nobody else to ask, fleet incident (lane 6). Traveller and approver topics send email.
   *Since lane 7 (7c2) the traveller writes (a Query or a Response, D-41) and attaches files from the portal — the
   "traveller comment" topic covers the first; a "traveller attached a file" topic joins it. Nothing tells the desk yet.*
+  *8a built every event-driven topic here (and the traveller's advance and claim rejected, D-46's desk set); "request
+  waiting" at submission is the engine's own approval request. The sweep's — document, visa, departing, approval waiting,
+  settlement overdue — are 8b's; the fleet incident is 8c's.*
 - [ ] **Legacy topics** deactivated as `LeaveReminderService.cs:468-499` does — a `LegacyTopicKeys`
   array; `IsActive = false` and a replacement description on `IsSystem` rows nothing publishes to any
   more: `StaffTravelReminder.DueSoon.Internal`, `StaffTravelReminder.Overdue.Internal`, and the five
-  `StaffTravelRequest.{Activity}.Internal` keys unless the HR-desk audience keeps them.
+  `StaffTravelRequest.{Activity}.Internal` keys unless the HR-desk audience keeps them. *8a switched off the five
+  lifecycle keys (D-46), the engine's three initiator topics (D-45) and `StaffTravelAlert.Issued.Internal`; the two
+  `StaffTravelReminder.*.Internal` keys are 8b's.*
 - [ ] **Sweep kinds added:** visa missing (an approved trip within 14 days that requires a visa and has
   none approved); claim overdue (`ExpenseSubmissionDays` passed, no claim); approval waiting (a
   Submitted trip waiting more than N days, escalating to HR when departure is three days away or
@@ -2549,7 +2563,83 @@ own fixtures: that is the only way to prove the sweep with nobody signed in (run
 the regression then runs with no scheduled sweep for a day (U8). Before the first scheduled run on UAT, the preview
 (`asOf` today) lists what it would reach, for the user's go.
 
-**Proposed decisions (awaiting the user):**
+**Decisions (the user, 2026-10-03 — all six as recommended; the alternatives are kept below as the record):** D-45…D-50,
+now in § 1.
+
+**As built — slice 8a, the event notices (2026-10-03).** No migration.
+- *One table of who hears what.* `StaffTravelNotices` (Core, scoped): 25 topics `StaffTravel.{Event}.{Traveller|Desk}`
+  seeded per tenant on first use — 16 for the traveller (in the app and by email: `UserFromEmployeeIdData` on the
+  traveller's employee id, plus `EmailFromData` on an address the service supplies only when they have no login), 9 for
+  the desk (in the app: `UsersFromData` — the HR role's active holders, resolved in the service so that whoever did it is
+  left out; the publisher can neither exclude nor dedupe). A traveller with neither a login nor an address on file → the
+  desk is told to tell them (`TravellerNotReachable`, to every holder, the actor included). Nobody is told of their own
+  act. The words carry the number, route and dates — never the purpose, a reason or a note's text; each link opens the
+  reader's page and tab. A notice that cannot be sent is logged, never thrown — every caller has committed — and every
+  caller publishes after its own save (U2). Tenant-explicit, so 8b's sweep uses it unchanged. Every notice's entity is
+  the trip (U9), whatever it is about.
+- *The lifecycle (D-45, D-46).* The traveller: submitted for them (not their own submission), approved (after the last
+  stage, or outright), rejected, returned, sent back for a change and cancelled by someone else. The desk: approved (all
+  but the approver), and cancelled or sent back for a change by someone outside it. Completed, recalled and closed tell
+  nobody. The request service's five HR-role topics are gone; `StaffTravelRequest.{Submitted,Approved,Rejected,Cancelled,
+  Completed}.Internal`, the engine's `StaffTravelRequest.Workflow{Submitted,Completed,Rejected}.Internal` and
+  `StaffTravelAlert.Issued.Internal` are switched off whenever the topics are ensured. ⚠ **The engine's topic seeders
+  (`seed-db`, and the Notification Topics screen's "seed workflow topics") switch its three back on** — they reactivate any
+  inactive `Workflow*` topic and restore its recipient — **and the engine sends its submitter notice during the
+  submission, before travel's notice switches it off**, so the first submission after a deploy or such a seed still sends
+  one. Not fixed here: the alternatives were to ensure the topics before the engine call (inside the submission's unit
+  of work) or to change the platform's seeders.
+- *Money.* An advance requested → the desk but the requester; approved, paid out (with the date to account for it by)
+  and rejected → the traveller, on the trip's Money tab. A claim submitted → the desk but the submitter (the whole desk
+  when the traveller submits on the portal), on the desk's claim page; returned, approved (`{{Outcome}}`: approved or
+  partly approved), rejected and paid (net of the advance — *"the advance you held covered all of it"* when it did) → the
+  claimant, on the portal's claim page. Review and payment publish after the posting runner returns.
+- *Compliance (E6's in-app half).* The alert send goes through `StaffTravelNotices` — the traveller in the app and by
+  email on *Before you go*, the desk but the sender; `NotificationSentAt` still stamped after the send. A risk assessment
+  recorded, or its level raised, on a trip still to happen or under way asks the traveller to acknowledge it.
+- *Messages and files (O-17's notice half).* A note the traveller can see, by anyone but them → the traveller (who wrote
+  it, not what); the traveller's question or reply → the whole desk, on the Comments tab; a file the traveller adds →
+  the whole desk, with its type and name, on the Attachments tab. The desk's own internal notes and files tell nobody.
+- *Screens.* The portal's trip page and the desk's open the tab named in `?tab=` (new `useTabParam`, the employee
+  profile's pattern: the URL drives the tab, a click replaces it; both pages under a Suspense boundary). An approver
+  shown fewer tabs falls back to Overview.
+- *Email.* Topic emails carry the notice's title as subject and its text as body — no link (the publisher builds no URL);
+  the words say where to go.
+- *Guide.* Chapter 15 (what tells the traveller), chapter 16 (the bell and email), T-44 closed in chapter 11 and § 19.
+- *Found on the way.* **Cross-module defect #36**: the notification dispatcher writes back whole rows, so a soft delete
+  made while its batch runs is undone — 45 notices of two deleted policy-suite trips were live again on UAT, stamped
+  *Sent* 0.1 s after the teardown deleted them. The shared teardown now deletes a run's notices again one dispatcher
+  cycle (35 s) later, until a pass finds none. And lane 7's compliance runs had left 50 alert notices live (the old alert
+  topic's entity was the alert, which no teardown swept) — removed by hand on UAT (count-checked); the compliance and
+  portal suites now sweep notices by alert id too.
+
+**Suite** `run-final-reminders.mjs` (new, **110**), on `buildApprovalsFixture`: every notice counted in `Notifications`
+by topic key and recipient. §1 the lifecycle (a warm-up note first — see the ⚠ above): a desk submission tells travC in
+the app and by email at their login's address, no engine submitter notice and no old HR one; the approval tells travC
+(their words, the portal link) and the desk but the approver, no engine "approval completed"; 25 topics with their
+rules, the eight retired ones off, the engine's approver notices on; travC's own submission tells them nothing; a
+rejection (no engine initiator notice) and a return (no reason in the text) tell travC; travC's cancel and change
+request tell the whole desk ("The traveller cancelled …") and not them; the desk's tell travC and not the desk. §2 an
+advance requested (the desk but the requester), approved (the amount; the Money tab), paid out (the date to account for
+it by), rejected; a portal claim submitted (the whole desk; the desk's claim page), returned (the portal's claim page),
+partly approved, paid with the advance covering it, and a second rejected. §3 a risk briefing (*as Medium*), nothing on an
+update at the same level, again at High; an active alert to travC in the app and by email (the *Before you go* link) and
+the desk but the sender, nothing on the old alert topic. §4 a shared note (by whom, not what), an internal note (nobody),
+travC's question and reply (the Comments link), travC's file (type and name), the desk's file (nobody). §5 the no-login
+employee emailed at their address and in nobody's app; with the address cleared, the whole desk told *"Tell …"*, no
+email. §6 a local SMTP sink and a temporary `EmailSettings` row: the shared note's email arrives at travC's address with
+its subject and *Messages tab*, its row *Sent*; the row removed. **110/110 twice** (493816, 612261). The first run
+(211847) failed four checks, all the harness's: sqlcmd's 256-character display width cut notice bodies (the suite now
+reads with `-y 0`), the fixture's `userIds.hr2` is empty (that login is `hrb`), and an email row reads *Sent* only when the
+dispatcher saves its batch (now polled); a second run (405447) stopped on an sqlcmd error the suite did not report — its
+query now retries a deadlock or timeout and reports what SQL Server said. Regression, twice each, all unchanged: portal
+**177** (708904, 236064), compliance **96** (763599, 288420), bookings **148** (819378, 343631), money **288** (871158,
+396508), policy **131** (943511, 467020), lifecycle **257** (992314, 516322), truth **118** (076553, 599300), approvals
+**123** (116937, 639877), fleet **165** (175153, 697809). No slow request; the teardowns' second pass found nothing to
+re-delete; no notice live on a deleted trip, none on the old alert topic, no alert notice on a trip not the fixture's;
+no fixture trip and no mail settings left; the demo's four trips as they were. The scheduled sweep ran during the
+regression (07:51, *Scheduled*, completed, nothing queued) — this API's start was 07:39 and the three reminders runs took
+nine minutes, not eleven: 8b's suite must wait for that run, not assume it. The API log held only the known noise
+(payroll's profile defect #23, one per fixture employee).
 - **D-45 — the engine's notices to the initiator.** Travel's own traveller topics carry the traveller's news, linking the
   portal; `StaffTravelRequest.WorkflowSubmitted`, `.WorkflowCompleted` and `.WorkflowRejected` are switched off — left on,
   a self-submitting traveller hears twice, through a link that does not open, and a desk-submitted trip's traveller still
@@ -2852,3 +2942,9 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   a self-service submission and through a link they cannot open (U1), that publishing never fails (U2), that the sweep
   cannot call the lifecycle verbs with nobody signed in (U3), and that moving a trip under way by date leaves a trip that
   did not happen with no way out (U4). Split into 8a, 8b, 8c; decisions D-45…D-50 proposed. Nothing built.
+- **2026-10-03, later** — The user committed the source check (`59ea1bc6a`) and took D-45…D-50, all as recommended.
+  **Slice 8a built** — the event notices: one table of who hears what (`StaffTravelNotices`, 25 topics), the lifecycle,
+  money, compliance, messages and files wired to it, the retired topics switched off, `?tab=` links on both trip pages.
+  The build succeeded; no migration. `run-final-reminders.mjs` 110/110 twice (after four harness fixes on its first
+  run); the regression unchanged twice. Found on the way: cross-module defect #36 (the notification dispatcher undoes soft
+  deletes), 95 leaked harness notices removed from UAT by hand, the shared teardown hardened. Staged. Next: slice 8b.
