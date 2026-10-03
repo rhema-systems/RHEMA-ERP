@@ -88,9 +88,12 @@ baseline (D-13); lane 0 was built the same day.**
    (D-4, D-45, D-46, E6's in-app half, O-17's notice half; no migration) — `run-final-reminders.mjs` 110/110 twice, the
    regression unchanged twice — committed `707207602`. **8b** the sweep's kinds (D-49, D-50, F2, O-11; no migration) —
    the scheduled run proven with nobody signed in (`run-final-sweep-scheduled.mjs` 10/10), `run-final-reminders.mjs`
-   172/172 twice, the regression unchanged twice — staged. Next: **8c**, the transitions and Fleet's signals. ⚠ The harness
-   has left 2,398 fixture employees, 592 units and 2,113 positions active on UAT since lane 0 (8b's *Found on the way*) —
-   put to the user. ⚠ Cross-module defect #36 (the notification
+   172/172 twice, the regression unchanged twice — committed `b5808d29b`. **8c** the transitions and Fleet's signals
+   (D-6, D-29, D-47, D-48, D-51 kept as built, **D-52** found by the regression; no migration) — the scheduled run
+   15/15, `run-final-reminders.mjs` 222/222, the regression unchanged twice with fleet 194 — **staged 2026-10-03**. Its
+   first sweep on UAT (the user's go) completed the demo's Sebrepor trip, as measured. **Lane 8 is then complete.** The harness's fixture employees, units and positions left on UAT since lane 0 were **retired on UAT** on the
+   user's go (restore point `ErpSystemDB_UAT_before_fixretire.bak`), and every teardown now retires its own (8b's *Found on
+   the way*). ⚠ Cross-module defect #36 (the notification
    dispatcher undoes soft deletes) — the shared teardown deletes a run's notices again 35 s later.
 12. **Then** lanes **9 → 10** in that order (§ 2). Source-check each lane against this
    document before building it — line numbers are as of HEAD `bad482a8d`.
@@ -162,6 +165,8 @@ lane's slice.
 | **D-48** | Once the date moves a trip under way it cannot be cancelled, though it may not have happened (U4) | **A "did not travel" cancel:** the desk may cancel an under-way trip with a reason, kept as an internal note, until its end date and only while nothing was spent on it — no claim, no advance cash out, no booking confirmed or ticketed. Lane 8, slice 8c. |
 | **D-49** | The claim window binds a draft's first submission, so a chase after it can only say it is too late (U5) | **Before, not after:** the traveller is told seven days before the window's last day, on a completed trip whose policy has a window and that has no submitted claim (a draft counts as not submitted); once it has passed with a draft or returned claim, or cash still out, the desk is told once — that trip cannot close. A trip with no claim and nothing out is not chased. Replaces "claim overdue, no claim". Lane 8, slice 8b. |
 | **D-50** | The sweep's windows | **Constants in one place, each a TDC question in § 6:** approval waiting 5 days; HR escalation 3 days before departure; visa missing 14 days before; briefing unacknowledged 7 days before; passport rungs 90, 30 and 7 days; the claim reminder 7 days before the window closes. No settings screen. Lane 8, slice 8b. |
+| **D-51** | When the sweep closes a completed trip (D-6). "When settled" alone closes a trip with no claim yet the day after it is completed — and a closed trip takes no claim, so the traveller loses the window | **Once its claim window has passed and nothing is open:** the approved policy's window, or lane 3's 30 days when it has none (the settlement deadline's own default); the settled test the Close verb's own (`StaffTravelLifecycleRules.OpenItemAsync`). The desk's Close keeps lane 1's rule alone. Lane 8, slice 8c. *Proposed with the build and **taken by the user, 2026-10-03, as built** — with the 30 days a TDC question in § 6.* (Alternatives, kept as the record: close on settled alone — a trip with no claim yet would close the night after it completes, and a closed trip takes no claim; or never close by the sweep, only by the desk's verb.) |
+| **D-52** | 8c's first build let the desk's cancel of a trip take an **under-way** driver's request with it as "did not travel" (D-48 passed down the cascade) — while the leg's cancel, delete and new driver and Request change still refused it (D-35, G3), so the answer hung on which button the desk pressed. Found by lane 6's fleet suite (§13) in 8c's regression | **Lane 6's refusal everywhere:** a driver's request under way never goes with the trip or its leg, whoever cancels. The refusal tells the desk to cancel the driver's request on its own page first — as not travelled if the driver did not go either (D-48) — or mark it completed. The driver is someone else, who may have set off (collecting the vehicle the day before); "under way" now only means the date came. Lane 8, slice 8c. *The user, 2026-10-03, as recommended.* (Alternative, kept as the record: every desk path takes it when nothing was spent on it — one click.) |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -183,7 +188,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
-| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ◐ source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); 8c to come |
+| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ◐ source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
 | **9** | Cross-module touchpoints | none | `run-final-touchpoints.mjs` | ☐ |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
@@ -2454,7 +2459,7 @@ traveller's message, file and claim.
   `StaffTravelRequest.{Activity}.Internal` keys unless the HR-desk audience keeps them. *8a switched off the five
   lifecycle keys (D-46), the engine's three initiator topics (D-45) and `StaffTravelAlert.Issued.Internal`; the two
   `StaffTravelReminder.*.Internal` keys are 8b's.*
-- [ ] **Sweep kinds added:** visa missing (an approved trip within 14 days that requires a visa and has
+- [x] **Sweep kinds added:** visa missing (an approved trip within 14 days that requires a visa and has
   none approved); claim overdue (`ExpenseSubmissionDays` passed, no claim); approval waiting (a
   Submitted trip waiting more than N days, escalating to HR when departure is three days away or
   past); briefing unacknowledged;
@@ -2463,16 +2468,18 @@ traveller's message, file and claim.
   by lane 1, slice 1c:* a group's **InProgress** and **Completed** are still written by nothing — the
   sweep derives them from its travellers' trips (in progress once any is under way; completed once every
   place is completed or closed). *8b built every sweep kind here — "claim overdue" as D-49's two halves — and advance →
-  Overdue stands from lane 3; the D-6 transitions and the groups are 8c's.*
+  Overdue stands from lane 3; the D-6 transitions and the groups are 8c's.* *8c built them — and Completed → Closed waits
+  for the claim window too (D-51).*
 - [x] A dispatch row records `PublishedAt` only when the bus call returned without throwing — the bus
   swallows handler errors, so delivery is proved by counting the notification rows written per
   audience, never by reading the log.
 - [x] The reminders page reads for HR (D-3); the nav description says what the sweep chases.
-- [ ] **From lane 6 (D-29):** the sweep's fleet signals — Fleet's dispatch of a trip's outbound leg moves an Approved
+- [x] **From lane 6 (D-29):** the sweep's fleet signals — Fleet's dispatch of a trip's outbound leg moves an Approved
   trip to InProgress ahead of the date rule; Fleet's completion of the return leg tells the desk to mark the trip
   completed; a fleet incident on an open trip's fleet trip tells the travel desk and the traveller's line authority
   once per incident (the incidents are already read by `IStaffTravelFleetService.GetIncidentsAsync`, slice 6c). A
-  driver's own request (D-33) is a trip like any other here.
+  driver's own request (D-33) is a trip like any other here. *8c built all three — Fleet's completion of every company
+  vehicle of a trip still under way tells the desk.*
 
 Suite `run-final-reminders.mjs` (the SMTP-sink pattern; assert the rows written per audience) and
 re-run `run-slice5a.mjs`.
@@ -2692,6 +2699,24 @@ nine minutes, not eleven: 8b's suite must wait for that run, not assume it. The 
   2,042 of them to fixtures, and its HR summaries to the demo's HR officers count them. Not lane 8's — put to the user as
   a separate piece of work: the teardown retiring each run's people, units and positions, and a one-time clean-up of
   UAT proven on a scratch copy first.
+  **Done the same day, on the user's word, before 8c.** One SQL in the harness (`final-setup.mjs` `retireFixturesSql`)
+  soft-deletes the fixture's employees, units and positions (and makes them inactive) with what hangs off them — probation
+  periods, payroll profiles, contract details, position and unit histories, identity-reconciliation states, leave's
+  dispatch rows, notices to fixture logins and emails to fixture addresses — marked `DeletedBy = 'travel-harness-retire'`,
+  found by the fixture's names alone (no real row pointed at any). **Identity-reconciliation items are kept**: an
+  append-only audit trail, guarded by a trigger that refuses any update (found on the scratch copy, where the first run
+  rolled back whole); once the employee is deleted the reconciliation no longer takes it as a candidate, so no new item
+  is added about it. Proven on a COPY_ONLY scratch of UAT (`tools/retire-fixtures.mjs` — every table lost exactly the
+  fixture's rows, a second run changed nothing; the API on the copy answered 18 screens — register, head counts, units,
+  positions, probations, payroll profiles, identity reconciliation, travel — with no fixture and no error), then **applied
+  to UAT** after a verified restore point (`ErpSystemDB_UAT_before_fixretire.bak`): employees 7,030 → 4,380, units 1,082 →
+  451, positions 2,308 → 1,677, probation periods 6,904 → 4,254, nothing else changed. **Every teardown now retires its
+  run's fixture** (`teardownRun` → `retireRunFixtures`, by stamp): truth 118/118 (its 3 employees) and approvals 123/123
+  (12 employees, 3 units, 3 positions) retired theirs, and no travel fixture is live on UAT. The screens answered the
+  same 18 checks on UAT. ⚠ **What remains is not travel's:** the other HR harnesses' fixtures — about 4,220 employees
+  (`E2EInt…`, `E2ELc…`, `E2ECl…`) and 135,000 dead emails to `@e2e.local` — so UAT still lists 4,380 employees, of which
+  about 160 are real (some 131 seeded TDC staff and 29 other modules' demo staff since the 29 Sep rebuild); fixtures are
+  given `TDC/` numbers, so a count of `TDC/` employees is not a count of staff. Offered to the user.
 
 **Suites.** **`run-final-sweep-scheduled.mjs`** (new, **10**) — run first after the API's start: an approved trip departing
 in 6 days, then the host's own run at 10:53 UTC (Trigger *Scheduled*, nobody signed in) completed, claimed it under that
@@ -2709,6 +2734,95 @@ on a deleted trip, no fixture document, policy or trip left, no mail settings; t
 notices are the demo passport's; the demo's four trips as they were. The API log held the known noise — payroll's
 profile defect #23 and, louder now that travellers and approvers are emailed, *"Email service returned failure"* for
 want of a mail server.
+
+**As built — slice 8c, the transitions and Fleet's signals (2026-10-03).** No migration (the group statuses, `ClosedAt`
+and `ClosedById` exist since batch 1).
+- *The moves (D-6, D-47, D-51; U3, U4).* Each run of the sweep first plans its moves, then makes them and logs each in
+  the same save — so no move is made without its row — then finds the reminders, which read the trips as they now stand.
+  Approved → **InProgress** on the departure date, or before it once Fleet has dispatched (or completed) one of the
+  trip's fleet trips; InProgress → **Completed** the day after the end date (D-47), `CompletedAt` stamped; an approved
+  trip already past its end takes both steps in one run. Completed → **Closed** once the claim window has passed **and**
+  nothing is open (**D-51**, proposed with this build, taken by the user as built — § 1): the window is `StaffTravelLifecycleRules.ClaimWindowLastDayAsync`
+  — the approved policy's `ExpenseSubmissionDays`, else lane 3's 30 days — and the settled test is the one the desk's
+  Close now shares, `StaffTravelLifecycleRules.OpenItemAsync` (lane 1's rule, moved out of `CloseAsync` unchanged);
+  `ClosedById` stays null — no employee closed it. A **group** is under way once any place (a traveller's trip not
+  cancelled or rejected) is under way, completed or closed, and completed once every place is completed or closed; it only
+  moves forward. Every write is stamped `UpdatedBy = 'staff-travel-sweep'`; all of it is tenant-explicit (U3).
+- *The record.* Five new kinds in the dispatch log — `TripStarted`, `TripCompleted`, `TripClosed` (keyed by the trip),
+  `GroupStarted`, `GroupCompleted` (by the group) — published as soon as made; the run result counts trips started,
+  completed and closed and groups moved (no column: the run row keeps *Queued* as before). The preview lists the moves a
+  run would make, read-only (nothing tracked), each with whom it tells.
+- *Who is told (8a's rule: completed and closed tell nobody — D-46 — kept for the desk's verbs).* Only the sweep's
+  **completion** tells anyone: the traveller (`StaffTravel.TripCompleted.Traveller`, in the app and by email), with the last
+  day to file a claim, linking the trip's Money tab — and only while that day is still ahead. A completion whose notice did
+  not go out (a run stopped between) is sent by the next run from its logged row. A start tells nobody (the traveller was
+  told it is departing); a close tells nobody.
+- *Fleet's signals (D-29; lane 6's seam, Fleet's code unchanged).* `IStaffTravelFleetService.GetSweepSignalsAsync` —
+  tenant-explicit, the sweep has nobody signed in — reads each open trip's fleet trips (status, dispatched, back) and the
+  incidents on them since the backlog floor. **Dispatch** starts the trip (above). **Every vehicle back** while the trip is
+  still under way tells the desk once (`FleetReturned.Desk`, in the app: mark it completed if the traveller is back too —
+  the sweep does so the day after it ends). **An incident** on a trip not yet closed tells the desk once
+  (`FleetIncident.Desk`, in the app, with Fleet's title, linking the Compliance tab) and the traveller's **nearest line
+  authority with a login** (`HrLineAuthority`, the new `FleetIncident.Manager` topic — a fourth audience, `UsersFromData`
+  on `ManagerUserIds`, in the app and by email; **without Fleet's free text**, as 8a's rule keeps free text out of email;
+  linking the approver's door, which a line authority opens since lane 2). 42 topics in all.
+- *Did not travel (D-48, U4).* The desk's cancel of an **under-way** trip, through the desk's door only
+  (`callerIsTravelDesk`; the portal's cancel answers *"ask the travel desk"*): until its end date, and only while nothing
+  was spent on it (`StaffTravelLifecycleRules.SpentOnAsync` — a claim filed, advance cash out, a booking committed by its
+  supplier or a fleet trip approved or dispatched, a booking used or a no-show, a fleet trip completed). The reason is kept
+  as *"Did not travel: …"*, an internal note records it, and the traveller is told as for any cancel. A driver's own
+  request goes with it unless it too is under way — then the cancel is refused until the desk has decided the driver's
+  request on its own page (**D-52**, below). The desk's trip page shows **Did not travel** on an under-way trip before its
+  end date.
+- *Found on the way.* The departure, visa-missing and briefing finders read only *Approved* trips: once the sweep moves a
+  trip under way on its departure day — or earlier on Fleet's dispatch — they would have dropped it. They read under-way
+  trips not yet departed too.
+- *Found by the regression — D-52.* The first build passed D-48's desk right down the driver cascade, so the desk's cancel
+  of a trip took an under-way driver's request with it, while every other path that cancels a driver's request (the leg's
+  cancel, delete and new driver, Request change) still refused — lane 6's fleet suite §13 failed 5 checks, the same on both
+  passes (601628, 179667). Put to the user, who chose lane 6's refusal everywhere (§ 1, D-52):
+  `RequireDriverCancellableAsync` refuses an under-way driver's request outright, naming the way out, and no cascade
+  carries the desk flag. The fleet suite's §13 gains the desk's path — refused, the driver's request cancelled on its own
+  as not travelled, then the trip.
+- *Screens.* The reminders page: the twelve kinds (Fleet returned, Fleet incident), a *What the sweep moves* card, the
+  preview counting moves apart from reminders, *Line Manager* among the audiences, the toast counting the moves. The desk's
+  trip page: *Did not travel*. Frontend type-check (scoped) and lint clean.
+- *Guide.* § 1.3 (the statuses' writers), chapter 5's header and dialog, § 2.1 (the sweep completes Sebrepor), chapter 14
+  (the kinds, the moves, the cards), T-7 closed.
+- *Harness.* `run-final-reminders.mjs` gains §14 (the moves, the preview, D-51, §12's settled trip closed), §15 (did not
+  travel) and §16 (a group); its topic count is 42. `run-final-fleet.mjs` gains §15 (dispatch, an incident to the desk and
+  the line manager, the vehicle back, *did not travel* refused while the vehicle is out and once it is back, nothing twice).
+  `run-final-sweep-scheduled.mjs` gains a second candidate — an approved trip that ended yesterday — so the moves are
+  proven with nobody signed in. The shared teardown also removes a run's group dispatch rows. `tools/run-all-8c.sh` keeps
+  the fleet suite last in each pass: it runs the sweep itself, and no other suite may see a sweep move its trips (U8).
+- *UAT's first sweep under 8c (measured read-only, 2026-10-03):* UAT holds two approved trips and no trip under way or
+  completed. **Sebrepor (TR-2026-00004, TDC/00017, 17 Sep, a submitted claim, no policy) is moved under way and completed
+  in that run**, and its traveller told *"claims by 17 Oct 2026"* (in the app; the email dead-letters); it does not close —
+  its claim is open and so is its window. Kumasi (TR-2026-00001, 19–20 Oct, its advance paid out) is untouched until 19 Oct.
+  The *Lagos Free Zone study tour* group stays Planning — its one place is still submitted. No Fleet data on UAT.
+
+**Suites (8c).** Run on UAT on the user's go, after D-51 was kept as built. **`run-final-sweep-scheduled.mjs` 10 → 15:** the
+host's own run at 19:05 UTC, nobody signed in, moved the second candidate under way and completed it, logged both under
+that run and told its traveller the last day to claim (1 Nov — 30 days, no policy) — **15/15** (699547), and again after
+D-52 (798951, the run at 20:14). **That first 8c sweep did on the demo exactly what was measured:** Sebrepor (TR-2026-00004)
+under way and completed by `staff-travel-sweep`, its traveller told in the app (the email dead-lettered — no mail
+server); nothing else moved. **`run-final-reminders.mjs` 172 → 222:** 222/222 twice on the first build (949747, 588576)
+and **222/222 on the final code** (226369; D-52 touches no path it walks). Two runs (437397, 500025) failed §6's guard
+alone: leave's HR digest to the demo's two HR officers, queued about 17 minutes after every API start, had not
+dead-lettered within the six minutes §6 waited — it now waits up to ten. **The regression, twice, on the final code:**
+portal **177** (010548, 604457), compliance **96** (066879, 661416), bookings **148** (125572, 721555), money **288**
+(181993, 778872), policy **131** (269633, 861794), lifecycle **257** (324826, 912178), truth **118** (419804, 012710), approvals
+**123** (463563, 057279) — all unchanged — and fleet **165 → 194** (529766, 120040: §15 and §13's D-52 path). On the first
+build the regression was unchanged twice except fleet, **181/186 twice** (601628, 179667) — §13's G3 check, which gave
+D-52. After every run: the demo's four trips as stated (Kumasi Approved, the two Submitted, Sebrepor Completed), the
+only live new dispatch rows Sebrepor's two moves, no fixture employee, active fixture login, vehicle, policy, mail
+setting or notice on a deleted trip left. *Seen in the API log, not travel's:* payroll's profile defect #23 on every fixture
+employee; *"Email service returned failure"* (no mail server); and **`HR/Identity reconciliation failed … Sequence
+contains more than one element`** (`HrIdentityReconciliationService.ResolveEligibleUserForEmployeeAsync`, a
+`SingleOrDefault` over a user–employee join) — 95 times during 8c's runs, against 2 in 8b's regression that morning,
+each on a suite's freshly minted fixture logins while its fixture was built; it was already logged on earlier days
+(87 on 30 Sep, 28 on 2 Oct). No assertion depends on it; no affected employee has more than one login afterwards. Put to
+the user as a separate item.
 - **D-45 — the engine's notices to the initiator.** Travel's own traveller topics carry the traveller's news, linking the
   portal; `StaffTravelRequest.WorkflowSubmitted`, `.WorkflowCompleted` and `.WorkflowRejected` are switched off — left on,
   a self-submitting traveller hears twice, through a link that does not open, and a desk-submitted trip's traveller still
@@ -2853,7 +2967,7 @@ fleet trip.
 | Paying claims through payroll (O-6) | Payroll is another developer's module — D-10 hides the option until it can receive them |
 | Column encryption of passport and visa numbers (O-7) | No encryption mechanism exists in the model; masking ships in lane 7 |
 | Concurrency tokens on travel entities | A platform item |
-| **TDC questions:** reminder windows (D-50: documents and visas 90/30/7 days, departing 14, visa missing 14, approval waiting 5, escalation 3 before departure, briefing 7, claim window warning 7, backlog 90); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a pending or on-hold booking counts as committed spend (lane 5, Q6); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
+| **TDC questions:** reminder windows (D-50: documents and visas 90/30/7 days, departing 14, visa missing 14, approval waiting 5, escalation 3 before departure, briefing 7, claim window warning 7, backlog 90); the claim window of a trip with no approved policy, which the sweep waits out before closing it (D-51: 30 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a pending or on-hold booking counts as committed spend (lane 5, Q6); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
 
 ---
 
@@ -3025,3 +3139,20 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   proven with nobody signed in (10/10); `run-final-reminders.mjs` 172/172 twice; the regression unchanged twice. Found:
   the harness's fixture employees, units and positions have stayed on UAT since lane 0 (2,398 / 592 / 2,113) — put to
   the user. Staged. Next: slice 8c.
+- **2026-10-03, later** — The user committed slice 8b (`b5808d29b`) and chose to clear the fixtures before 8c. The
+  retirement written, proven on a scratch copy of UAT (where the identity-reconciliation items' append-only trigger was
+  found and those items kept), applied to UAT after a verified restore point — 2,650 fixture employees, 631 units, 631
+  positions and what hung off them retired, nothing else changed — and built into every teardown (truth 118/118 and
+  approvals 123/123 retired their own). The other harnesses' fixtures (about 4,220 employees) remain, offered to the user.
+- **2026-10-03, later** — **Slice 8c built** — the sweep's moves: approved → under way on the date or Fleet's dispatch,
+  completed the day after the end (D-47) with the traveller told the last day to claim, closed once the claim window has
+  passed and nothing is open (**D-51**, proposed with the build), the groups; Fleet's vehicle back and incidents (D-29), the
+  incident to the traveller's line manager too; the desk's *did not travel* cancel (D-48). No migration. UAT's first sweep
+  measured read-only: it completes the demo's Sebrepor trip. The build succeeded; the user kept D-51 as built (the
+  30-day fallback a TDC question) and gave the go for that sweep.
+- **2026-10-03, later** — 8c run on UAT: the scheduled run (15/15) moved only Sebrepor, to Completed, its traveller told in
+  the app; reminders 222/222 twice (one earlier run refused §6 while leave's HR digest was queued); the regression unchanged
+  twice but for lane 6's fleet §13 (181/186 ×2) — 8c had let the desk's trip cancel take an under-way driver's request.
+  The user chose lane 6's refusal everywhere (**D-52**); fixed, and after the user's build: the scheduled run 15/15,
+  reminders 222/222 (§6 now waits ten minutes for leave's HR digest), the regression unchanged twice with fleet 194/194.
+  The API log's identity-reconciliation errors (not travel's) put to the user. Staged. Next: lane 9.

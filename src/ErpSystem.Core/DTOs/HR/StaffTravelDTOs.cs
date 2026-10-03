@@ -3715,6 +3715,18 @@ public class StaffTravelReminderRunResultDto
 
     /// <summary>Advances this sweep marked Overdue — cash out past its settlement deadline (lane 3).</summary>
     public int AdvancesMarkedOverdue { get; set; }
+
+    /// <summary>Approved trips this sweep moved under way — the departure date, or Fleet's dispatch (lane 8, slice 8c, D-6).</summary>
+    public int TripsStarted { get; set; }
+
+    /// <summary>Trips under way this sweep marked completed, the day after they ended (D-47).</summary>
+    public int TripsCompleted { get; set; }
+
+    /// <summary>Completed trips this sweep closed — the claim window passed and nothing left to settle (D-6, D-51).</summary>
+    public int TripsClosed { get; set; }
+
+    /// <summary>Group trips this sweep moved under way or completed, from their travellers' trips.</summary>
+    public int GroupsUpdated { get; set; }
 }
 
 /// <summary>

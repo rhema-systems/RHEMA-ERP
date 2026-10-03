@@ -301,6 +301,9 @@ function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
   const notStarted = r.travelStartDate.slice(0, 10) > todayUtc();
   // Lane 1 (O-11): a trip under way is completed, not cancelled.
   const isLive = !['Cancelled', 'Rejected', 'Completed', 'Closed', 'InProgress'].includes(r.status);
+  // Lane 8 (D-48): since the sweep moves a trip under way on its date, one that did not happen is cancelled as not
+  // travelled — until its end date; the server refuses it once anything was spent on the trip.
+  const mayCallOff = r.status === 'InProgress' && r.travelEndDate.slice(0, 10) >= todayUtc();
   // Lane 2: deciding is the server's answer for this caller at this stage — the line rule included.
   const mayDecide = r.status === 'Submitted' && viewer?.canDecide === true;
   // An approver with no travel permission sees the trip and their decision, not the desk's tabs.
@@ -365,6 +368,11 @@ function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
             {isLive && access.canWrite && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
                 <Ban className="mr-2 h-4 w-4" /> Cancel
+              </Button>
+            )}
+            {mayCallOff && access.canWrite && (
+              <Button variant="outline" onClick={() => setCancelOpen(true)}>
+                <Ban className="mr-2 h-4 w-4" /> Did not travel
               </Button>
             )}
           </div>
@@ -707,9 +715,11 @@ function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
       <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Cancel this travel request</DialogTitle>
+            <DialogTitle>{mayCallOff ? 'Cancel as not travelled' : 'Cancel this travel request'}</DialogTitle>
             <DialogDescription>
-              A cancelled request cannot be revived. The reason is kept on the record.
+              {mayCallOff
+                ? 'For a trip moved under way on its date that did not happen. Refused once anything was spent on it — a claim, an advance paid out, a booking confirmed or used, a company vehicle dispatched; mark that one completed instead. The reason is kept on the record, with an internal note.'
+                : 'A cancelled request cannot be revived. The reason is kept on the record.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -719,7 +729,7 @@ function TravelRequestDetail({ params }: { params: Promise<{ id: string }> }) {
               value={cancelReason}
               onChange={(e) => setCancelReason(e.target.value)}
               rows={3}
-              placeholder="Why is the trip not going ahead?"
+              placeholder={mayCallOff ? 'Why did the trip not happen?' : 'Why is the trip not going ahead?'}
             />
           </div>
           <DialogFooter>

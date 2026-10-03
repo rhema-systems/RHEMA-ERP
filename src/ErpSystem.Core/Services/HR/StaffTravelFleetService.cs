@@ -511,6 +511,49 @@ public class StaffTravelFleetService : IStaffTravelFleetService
             .ToListAsync(cancellationToken);
     }
 
+    // ---- Lane 8, slice 8c: the sweep's signals (D-29) — tenant-explicit ---------------------------------------------
+
+    public async Task<StaffTravelFleetSignals> GetSweepSignalsAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> requestIds, DateTime incidentsSince, CancellationToken cancellationToken = default)
+    {
+        if (requestIds.Count == 0)
+            return new StaffTravelFleetSignals(Array.Empty<StaffTravelFleetTripSignal>(), Array.Empty<StaffTravelFleetIncidentSignal>());
+        var ids = requestIds.Distinct().ToList();
+        var legs = await _unitOfWork.Repository<StaffTravelGroundTransport>()
+            .GetQueryable(g => g.TenantId == tenantId && ids.Contains(g.StaffTravelRequestId) && !g.IsDeleted && g.FleetTripId != null
+                            && g.Status != TravelBookingStatus.Cancelled)
+            .Select(g => new { g.StaffTravelRequestId, FleetTripId = g.FleetTripId!.Value })
+            .ToListAsync(cancellationToken);
+        if (legs.Count == 0)
+            return new StaffTravelFleetSignals(Array.Empty<StaffTravelFleetTripSignal>(), Array.Empty<StaffTravelFleetIncidentSignal>());
+        var fleetIds = legs.Select(l => l.FleetTripId).Distinct().ToList();
+        var trips = await _unitOfWork.Repository<FleetTrip>()
+            .GetQueryable(t => t.TenantId == tenantId && fleetIds.Contains(t.Id))
+            .Select(t => new { t.Id, t.Status, t.DispatchedAt, t.ActualStartAt, t.CompletedAt, t.ActualEndAt })
+            .ToListAsync(cancellationToken);
+        var incidents = await _unitOfWork.Repository<FleetIncident>()
+            .GetQueryable(i => i.TenantId == tenantId && !i.IsDeleted && i.FleetTripId != null && fleetIds.Contains(i.FleetTripId.Value)
+                            && i.OccurredAtUtc >= incidentsSince)
+            .Select(i => new
+            {
+                i.Id, FleetTripId = i.FleetTripId!.Value, i.OccurredAtUtc, i.IncidentType, i.Title, i.Severity,
+                Vehicle = i.VehicleAsset.Name, Plate = i.VehicleAsset.LicensePlate,
+            })
+            .ToListAsync(cancellationToken);
+
+        var tripSignals = legs
+            .Join(trips, l => l.FleetTripId, t => t.Id, (l, t) => new StaffTravelFleetTripSignal(
+                l.StaffTravelRequestId, t.Id, t.Status, t.DispatchedAt ?? t.ActualStartAt, t.CompletedAt ?? t.ActualEndAt))
+            .ToList();
+        var incidentSignals = legs
+            .Join(incidents, l => l.FleetTripId, i => i.FleetTripId, (l, i) => new StaffTravelFleetIncidentSignal(
+                l.StaffTravelRequestId, i.Id, i.OccurredAtUtc, i.IncidentType, i.Title, i.Severity,
+                string.IsNullOrWhiteSpace(i.Plate) ? i.Vehicle : $"{i.Vehicle} ({i.Plate})"))
+            .GroupBy(s => s.IncidentId).Select(g => g.First())
+            .ToList();
+        return new StaffTravelFleetSignals(tripSignals, incidentSignals);
+    }
+
     // ---- Slice 6b: fuel on claims (FX-6, D-30, D-31, D-32) ----------------------------------------------------------
 
     private sealed record FuelTrip(

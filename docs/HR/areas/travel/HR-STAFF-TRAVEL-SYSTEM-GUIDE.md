@@ -381,10 +381,10 @@ Nine enum families. Three matter; the rest are look-ups.
 | `ReturnedForRevision` | sent back to the requester | **Return for revision** (the approver) or **Request change** (an approved trip) — since closure lane 1, 2026-10-02; nothing wrote it before |
 | `Approved` | authorised to travel | the engine |
 | `Rejected` | refused | the engine |
-| `InProgress` | the trip is happening | *(nothing sets it yet — T-7; the closure's lane 8 sweep will)* |
-| `Completed` | the trip has happened | **Mark completed** (not before the trip starts, since lane 1) |
-| `Closed` | finalised | **Close trip** — once every claim is paid or rejected and every advance settled (since lane 1; the lane 8 sweep will close too) |
-| `Cancelled` | called off, with a reason | **Cancel** (not once under way, since lane 1) |
+| `InProgress` | under way | **the nightly sweep**, on the departure date — or before it, once Fleet dispatches one of the trip's company vehicles (since closure lane 8, slice 8c; nothing set it before — T-7) |
+| `Completed` | the trip has happened | **Mark completed** (not before the trip starts, since lane 1); **the nightly sweep** the day after it ends (lane 8, D-47), telling the traveller the last day to claim |
+| `Closed` | finalised | **Close trip** — once every claim is paid or rejected and every advance settled (since lane 1); **the nightly sweep** too, once the claim window has also passed (lane 8, D-51 — the policy's window, or 30 days with none) |
+| `Cancelled` | called off, with a reason | **Cancel** (not once under way, since lane 1) — except the desk's **Did not travel**: an under-way trip that did not happen, until its end date and while nothing was spent on it (lane 8, D-48) |
 
 **Claim status** — eight: Draft · Submitted · UnderReview · Approved · **PartiallyApproved** ·
 Rejected · **Paid** · Returned. *PartiallyApproved* is the one people ask about: it means some lines
@@ -542,6 +542,13 @@ may mint a fifth:
 | 2 | **Lagos** — Free Zone housing scheme study tour | `gm.ops` | **Submitted** *(pending)* | the **depth** story: group travel, a 3-leg itinerary with activities, insurance, a medium-risk assessment, a live alert. *(Its flight and hotel left the pack in closure lane 5 — a submitted trip takes no booking, D-23)* |
 | 3 | **London** — CIPD Africa HR Summit | `hr.head` | **Approved** *(since closure lane 5, D-26; `hr.officer` gives HR's approval — hr.head travels)* | the **compliance** story: a visa application, a policy exception, an over-cap hotel, a car rental, a flight **refused its ticket until the visa is approved** (T-24), priority Emergency |
 | 4 | **Sebrepor** — site handover with the contractor | `staff` | **Approved** | the **claim** story: an expense claim with 3 lines and a real receipt, submitted and awaiting review |
+
+⚠ **Since closure lane 8 (slice 8c) the nightly sweep moves these by their dates.** A trip whose departure date has come
+goes **under way**; one that has ended is **completed** the day after, and its traveller is told the last day to claim.
+So on any database whose dates have passed — UAT's Sebrepor ran on 17 Sep — **Sebrepor reads Completed** from the
+first sweep after the deploy (11 minutes after the API starts), with its claim still Submitted; it closes only once that
+claim is paid or rejected and its claim window (30 days, no approved policy) has passed. Kumasi goes under way on its
+departure date. Say *"the sweep moved it"*, not *"the seed is wrong"*.
 
 **And around them:**
 
@@ -950,10 +957,17 @@ Title `TR-2026-00002`, subtitle `Kwabena Osei · Tema → Lagos, 18 Oct 2026`, b
 | **Edit** | status is `Draft` or `ReturnedForRevision` |
 | **Workflow approval actions** *(Submit / Approve / Reject / Recall)* | driven by the engine — Submit on Draft or ReturnedForRevision, Approve/Reject on Submitted |
 | **Mark completed** | status is `Approved` or `InProgress` |
-| **Cancel** | status is **not** Cancelled, Rejected, Completed or Closed |
+| **Cancel** | status is **not** Cancelled, Rejected, Completed, Closed or InProgress |
+| **Did not travel** *(closure lane 8, D-48)* | status is `InProgress` and the trip has not ended |
 
 **Cancel's dialog:** *"A cancelled request cannot be revived. The reason is kept on the record."* —
-a **reason is required**.
+a **reason is required**. **Did not travel** opens it as *Cancel as not travelled*, for a trip the nightly sweep moved
+under way on its date that did not happen: the server refuses it once anything was spent on the trip — a claim filed,
+advance cash out, a booking confirmed, ticketed or used, a company vehicle dispatched or back — and says to mark it
+completed instead. The reason is kept as *"Did not travel: …"*, with an internal note. A company vehicle's driver kept away
+overnight travels on a request of their own, which goes with the trip — unless it too is under way: then the cancel is
+refused until the desk has cancelled the driver's request on its own page (as not travelled, if the driver did not go
+either) or marked it completed (closure lane 8, D-52).
 
 **Eight tabs:** Overview · Itinerary · Bookings · Finance · Compliance · Comments · Attachments ·
 **Workflow**.
@@ -1521,7 +1535,8 @@ to **Approved** and *Approved* fills on the Overview.
 ⚠ **The definition does not prevent initiator approval** — `hr.head` can approve what `hr.head`
 raised. Say it rather than hoping nobody notices.
 
-**3 — 🔴 LIVE WRITE 7 *(optional)* — press *Mark completed*** on the Kumasi or Sebrepor trip.
+**3 — 🔴 LIVE WRITE 7 *(optional)* — press *Mark completed*** on the Kumasi trip once it is under way. *(Sebrepor,
+whose date has passed, the nightly sweep completes on its own since closure lane 8 — § 2.1.)*
 
 > *"And when the trip has happened, it is closed off — which is what opens the door to the expense
 > claim being the last word on it."*
@@ -1544,7 +1559,7 @@ raised. Say it rather than hoping nobody notices.
 
 | Gap | |
 |---|---|
-| **T-7 · `InProgress` and `Closed` are unreachable.** Nothing moves a trip into progress when it departs, and nothing closes it after the claim is paid — so the lifecycle's last two states never occur | |
+| **T-7 · `InProgress` and `Closed` are unreachable.** Nothing moves a trip into progress when it departs, and nothing closes it after the claim is paid — so the lifecycle's last two states never occur | *Fixed: Close trip since closure lane 1; the nightly sweep moves trips under way, completed and closed since lane 8 (slice 8c) — chapter 14* |
 | **T-10 · `approvedBudget` is never sent on approval** — see § 1.6 | |
 | **T-27 · An internal comment cannot be posted from the screen** | *Fixed in closure lane 0: the composer's internal-note switch* |
 | **T-28 · Cancelling has no status guard on the server** — a completed trip can be cancelled, and the screen's own `isLive` check is the only thing stopping it | |
@@ -2387,10 +2402,26 @@ document got one notice at 90 days and the next once it had lapsed. Now:
 | Briefing unacknowledged | once per assessment, 7 days or less before departure | the traveller |
 | Claim window closing | once, 7 days before a completed trip's claim window closes, no claim submitted | the traveller |
 | Claim window passed | once, closed with a claim not submitted or advance cash still out | the desk |
+| Fleet returned *(8c)* | once, when every company vehicle of a trip still under way is back in Fleet | the desk — to mark it completed if the traveller is back too |
+| Fleet incident *(8c, D-29)* | once per incident Fleet records on the vehicle of a trip not yet closed | the desk (in the app, with Fleet's title), and the traveller's nearest line authority with a login (in the app and by email, without it) |
 
 The windows are constants, each a question for TDC (closure plan § 6). Each reminder is sent once; a sweep that stopped
 between recording and sending one leaves it for the next. The words and recipients of each are on **Administration →
 Notification Topics**, under `StaffTravel.`.
+
+*Closure lane 8 (slice 8c — D-6, D-47, D-48, D-51; T-7).* The sweep also **moves trips**, first thing in each run, so
+its reminders read them as they now stand:
+
+| Move | When | Who is told |
+|---|---|---|
+| Approved → **under way** | on the departure date — or before it, once Fleet dispatches one of the trip's company vehicles | nobody (the traveller was told it is departing) |
+| Under way → **completed** | the day after the trip ends (the desk's *Mark completed* stays for an early return) | the traveller, with the last day to file a claim — while that day is still ahead |
+| Completed → **closed** | once the claim window has passed (the approved policy's, or 30 days with none) **and** every claim is paid or rejected and every advance settled — the *Close trip* verb's own test | nobody |
+| A group trip → **under way**, **completed** | once any traveller's trip is under way; once every traveller's trip is completed or closed | nobody |
+
+An approved trip already past its end takes several steps in one run. Each move is logged beside the reminders (kinds
+*Trip started*, *Trip completed*, *Trip closed*, *Group started*, *Group completed*) and listed in the preview before
+it is made. A trip moved under way that did not happen is the desk's **Did not travel** (chapter 5).
 
 ### **This whole screen is Admin-gated, reads included.** Before closure lane 4, `hr.head` got a 403
 on the page itself. Since D-3 the HR desk opens it, because the desk that renews an expiring
@@ -2399,20 +2430,25 @@ travellers and approvers by email too, since lane 8 — each only once, so treat
 
 ### 👁 On the page
 
-**Header:** *Travel reminders* — *"Expiring passports and visas, overdue advances, and departures
-coming up."*, with a **Run the sweep now** button.
+**Header:** *Travel reminders* — *"Expiring passports and visas, overdue advances, departures, waiting approvals,
+closing claim windows and Fleet's word — each to the people who act on it; and trips moved under way, completed and
+closed."*, with a **Run a sweep now** button. Its toast says how many were sent and, since 8c, how many trips and groups
+it moved.
 
-**Card 1 — What the sweep chases** — the ten kinds, their windows and who each reaches *(the table above)*.
+**Card 1 — What the sweep chases** — the twelve kinds, their windows and who each reaches *(the table above)*.
 
-**Card 2 — Due now** — a preview, with an **as-of date** override and a **clear** button. Six
+**Card 2 — What the sweep moves** *(8c)* — the moves *(the second table above)*, and a line on *Did not travel*.
+
+**Card 3 — What would fire** — a preview, with an **as-of date** override and a **clear** button. Six
 columns: **Kind** · **Record** · **Due** · **Days** · **Tier** *(how urgent)* · **Sent to** *(Traveller, Desk,
-Approvers — lane 8)*. Empty state: *"Nothing due."*
+Approvers — lane 8; Line Manager — 8c; empty for a silent move)*. Its count line says how many would be sent and how many
+trip or group moves would be made. Empty state: *"Nothing due."*
 
-**Card 3 — Sweeps** — the run history: Started · Finished · Trigger · Queued. Empty state:
+**Card 4 — Recent sweeps** — the run history: Started · Finished · Trigger · Queued. Empty state:
 *"No sweeps yet — nothing has run for this tenant."*
 
-**Card 4 — Sent in the last 14 days** — the dispatch log, with **Sent** — when the sweep sent it, or *Not yet — next
-sweep* for one recorded and not sent (lane 8).
+**Card 5 — Sent and moved in the last 14 days** — the dispatch log, the moves among the reminders, with **Sent** — when
+the sweep sent it (or made the move), or *Not yet — next sweep* for one recorded and not sent (lane 8).
 
 ### ▶ Walk it *(read-only, from an admin window, or skip)*
 
@@ -2457,6 +2493,7 @@ the `StaffTravel.*` topics.
 | **T-52 · The reads are Admin-gated along with the writes.** The travel desk — the people who would act on an expiring passport — cannot see the queue at all. An open TDC question: should the desk see the reminder log? | *Fixed in closure lane 4 (D-3): the HR role holds `HR.Travel.Admin`* |
 | **T-53 · Nothing runs the sweep on a schedule.** There is no hosted service; the only trigger is the button on this screen | *Wrong when written: the sweep has run daily on a hosted service since 2026-08-17 (first 11 minutes after the API starts). Closure lane 8 proves the scheduled run — nobody signed in — on its own (`run-final-sweep-scheduled.mjs`)* |
 | **F2 · Every reminder went to the HR role, in the app only; a document got one notice before it lapsed; no visa-missing, claim or approval chase** | *Fixed in closure lane 8 (slice 8b) — the table above* |
+| **T-7 · Nothing moved a trip under way, and the sweep closed nothing** | *Fixed in closure lane 8 (slice 8c) — the moves above* |
 
 ---
 
@@ -2866,7 +2903,7 @@ you out in a demonstration; **five** are the ones to fix before it is called fin
 
 | # | Area | Finding |
 |---|---|---|
-| T-7 | requests | `InProgress` and `Closed` are unreachable — nothing moves a trip into progress on departure or closes it after payment |
+| T-7 | requests | `InProgress` and `Closed` are unreachable — nothing moves a trip into progress on departure or closes it after payment *(fixed: lane 1's Close trip, lane 8's sweep — chapter 14)* |
 | T-8 | bookings | **No vendor field on any booking form**; Procurement's `SuppliersController` answers 400, so *preferred vendor mandatory* checks nothing |
 | T-9 | policies | **The hotel cap has no currency** — a bare decimal compared against a booking's rate. Sound only while both are in the same currency |
 | T-10 | requests | `approvedBudget` is never sent on approval, so the Overview's *Approved budget* reads an em dash on approved trips |

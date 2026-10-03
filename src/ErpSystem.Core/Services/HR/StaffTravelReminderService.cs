@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -50,6 +51,7 @@ public class StaffTravelReminderService : IStaffTravelReminderService
 {
     private readonly IUnitOfWork _unitOfWork;
     private readonly StaffTravelNotices _notices;
+    private readonly IStaffTravelFleetService _fleet;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<StaffTravelReminderService> _logger;
@@ -57,16 +59,21 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     public StaffTravelReminderService(
         IUnitOfWork unitOfWork,
         StaffTravelNotices notices,
+        IStaffTravelFleetService fleet,
         UserManager<ApplicationUser> userManager,
         ICurrentUserProvider currentUserProvider,
         ILogger<StaffTravelReminderService> logger)
     {
         _unitOfWork = unitOfWork;
         _notices = notices;
+        _fleet = fleet;
         _userManager = userManager;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
+
+    /// <summary>Who the sweep's own writes are stamped by — the advances it marks overdue, the trips and groups it moves.</summary>
+    private const string SweepActor = "staff-travel-sweep";
 
     // ---- the windows (D-50) --------------------------------------------------
     //
@@ -116,11 +123,24 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     private const string KindBriefing = "BriefingUnacknowledged";
     private const string KindClaimWindowClosing = "ClaimWindowClosing";
     private const string KindClaimWindowPassed = "ClaimWindowPassed";
+    private const string KindFleetReturned = "FleetReturned";
+    private const string KindFleetIncident = "FleetIncident";
+
+    // The sweep's moves (slice 8c), logged beside the reminders so the page shows what it did and when.
+    private const string KindTripStarted = "TripStarted";
+    private const string KindTripCompleted = "TripCompleted";
+    private const string KindTripClosed = "TripClosed";
+    private const string KindGroupStarted = "GroupStarted";
+    private const string KindGroupCompleted = "GroupCompleted";
+
+    private static readonly string[] TransitionKinds =
+        { KindTripStarted, KindTripCompleted, KindTripClosed, KindGroupStarted, KindGroupCompleted };
 
     // Who a reminder reaches, as the preview reports it.
     private const string AudienceTraveller = "Traveller";
     private const string AudienceDesk = "Desk";
     private const string AudienceApprovers = "Approvers";
+    private const string AudienceLineManager = "LineManager";
 
     // ---- the sweep ---------------------------------------------------------
 
@@ -144,7 +164,11 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         // them, which its own seeders switch back on — are off again by the next morning.
         await _notices.EnsureTopicsAsync(tenantId, cancellationToken);
 
-        var candidates = (await FindCandidatesAsync(tenantId, now, cancellationToken)).ToList();
+        // Slice 8c (D-6, D-47, D-51): the trips and groups move first, so the reminders below read them as they now stand.
+        var plan = await PlanTransitionsAsync(tenantId, now, cancellationToken);
+        await ApplyTransitionsAsync(tenantId, run.Id, now, plan, cancellationToken);
+
+        var candidates = (await FindCandidatesAsync(tenantId, now, plan, cancellationToken)).ToList();
 
         var keys = candidates.Select(c => c.DedupeKey).ToList();
         var logged = await _unitOfWork.Repository<StaffTravelReminderDispatchLog>()
@@ -175,7 +199,11 @@ public class StaffTravelReminderService : IStaffTravelReminderService
             rows[c.DedupeKey] = row;
         }
 
-        run.RemindersQueued = fresh.Count;
+        // The moves were claimed with the moves themselves (above), so here they are all "retry": their notices go out below.
+        var reminders = candidates.Where(c => !c.Transition).ToList();
+        var queued = fresh.Count(c => !c.Transition);
+        var retried = retry.Count(c => !c.Transition);
+        run.RemindersQueued = queued;
 
         try
         {
@@ -202,8 +230,10 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Travel reminder sweep for tenant {TenantId} sent {Count} reminder(s) and {Retried} left unsent before ({Trigger}); {Skipped} already sent",
-            tenantId, fresh.Count, retry.Count, trigger, candidates.Count - fresh.Count - retry.Count);
+            "Travel reminder sweep for tenant {TenantId} sent {Count} reminder(s) and {Retried} left unsent before ({Trigger}); {Skipped} already sent; " +
+            "trips started {Started}, completed {Completed}, closed {Closed}; groups moved {Groups}",
+            tenantId, queued, retried, trigger, reminders.Count - queued - retried,
+            plan.Started.Count, plan.Completed.Count, plan.Closed.Count, plan.Groups.Count);
 
         return new StaffTravelReminderRunResultDto
         {
@@ -211,10 +241,14 @@ public class StaffTravelReminderService : IStaffTravelReminderService
             StartedAt = run.StartedAt,
             CompletedAt = run.CompletedAt,
             Trigger = run.Trigger,
-            RemindersQueued = fresh.Count,
-            Retried = retry.Count,
-            AlreadySent = candidates.Count - fresh.Count - retry.Count,
+            RemindersQueued = queued,
+            Retried = retried,
+            AlreadySent = reminders.Count - queued - retried,
             AdvancesMarkedOverdue = markedOverdue,
+            TripsStarted = plan.Started.Count,
+            TripsCompleted = plan.Completed.Count,
+            TripsClosed = plan.Closed.Count,
+            GroupsUpdated = plan.Groups.Count,
         };
     }
 
@@ -239,12 +273,226 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         {
             advance.Status = TravelAdvanceStatus.Overdue;
             advance.UpdatedAt = at;
-            advance.UpdatedBy = "staff-travel-sweep";
+            advance.UpdatedBy = SweepActor;
         }
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Travel reminder sweep marked {Count} advance(s) overdue for tenant {TenantId}", due.Count, tenantId);
         return due.Count;
+    }
+
+    // ---- the moves (slice 8c — D-6, D-47, D-51; the groups are lane 1's slice 1c) -----------------------------------
+
+    /// <summary>What a run moves, decided before anything is: each open trip's status once moved, and Fleet's word on them.</summary>
+    private sealed class TransitionPlan
+    {
+        public List<(StaffTravelRequest Trip, string Why)> Started { get; } = new();
+        public List<StaffTravelRequest> Completed { get; } = new();
+        public List<StaffTravelRequest> Closed { get; } = new();
+        public List<(StaffGroupTravel Group, GroupTravelStatus To)> Groups { get; } = new();
+
+        /// <summary>Every approved, under-way and completed trip, by id.</summary>
+        public Dictionary<Guid, StaffTravelRequest> Trips { get; } = new();
+
+        /// <summary>Each of <see cref="Trips"/>' status once the moves are made — a preview's trips still hold the old one.</summary>
+        public Dictionary<Guid, StaffTravelRequestStatus> Projected { get; } = new();
+
+        /// <summary>The claim window's last day of each trip that is completed once moved.</summary>
+        public Dictionary<Guid, DateOnly> LastDays { get; } = new();
+
+        public StaffTravelFleetSignals Fleet { get; set; } =
+            new(Array.Empty<StaffTravelFleetTripSignal>(), Array.Empty<StaffTravelFleetIncidentSignal>());
+    }
+
+    /// <summary>
+    /// Decides the moves (D-6). An approved trip goes under way on its departure date, or before it when Fleet dispatches one
+    /// of its company vehicles (D-29); a trip under way is completed the day after it ends (D-47) — an approved one already
+    /// past its end takes both steps at once; a completed trip is closed once its claim window has passed and nothing is
+    /// left to settle (D-51 — the window, so a trip is never closed under a traveller still entitled to claim; the settled
+    /// test is the Close verb's own, <see cref="StaffTravelLifecycleRules.OpenItemAsync"/>). A group trip is under way once
+    /// any of its places is, completed once every place is completed or closed. Nothing is written here.
+    /// </summary>
+    private async Task<TransitionPlan> PlanTransitionsAsync(
+        Guid tenantId, DateTime at, CancellationToken cancellationToken, bool track = true)
+    {
+        var today = DateOnly.FromDateTime(at);
+        var plan = new TransitionPlan();
+
+        var query = _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
+                            && (r.Status == StaffTravelRequestStatus.Approved
+                                || r.Status == StaffTravelRequestStatus.InProgress
+                                || r.Status == StaffTravelRequestStatus.Completed));
+        var trips = await (track ? query : query.AsNoTracking())
+            .OrderBy(r => r.RequestNumber)
+            .ToListAsync(cancellationToken);
+        foreach (var trip in trips)
+        {
+            plan.Trips[trip.Id] = trip;
+            plan.Projected[trip.Id] = trip.Status;
+        }
+        if (trips.Count > 0)
+            plan.Fleet = await _fleet.GetSweepSignalsAsync(
+                tenantId, trips.Select(t => t.Id).ToList(),
+                today.AddDays(-BacklogHorizonDays).ToDateTime(TimeOnly.MinValue), cancellationToken);
+        var dispatched = plan.Fleet.Trips
+            .Where(s => s.Status is FleetTripStatuses.Dispatched or FleetTripStatuses.Completed)
+            .GroupBy(s => s.RequestId)
+            .ToDictionary(g => g.Key, g => g.OrderBy(s => s.DispatchedAt ?? DateTime.MaxValue).First());
+
+        foreach (var trip in trips)
+        {
+            if (plan.Projected[trip.Id] == StaffTravelRequestStatus.Approved)
+            {
+                if (trip.TravelStartDate <= today)
+                    plan.Started.Add((trip, $"its departure date, {StaffTravelNotices.Date(trip.TravelStartDate)}"));
+                else if (dispatched.TryGetValue(trip.Id, out var fleetTrip))
+                    plan.Started.Add((trip, "Fleet dispatched its company vehicle" +
+                        (fleetTrip.DispatchedAt is DateTime d ? $" on {StaffTravelNotices.Date(DateOnly.FromDateTime(d))}" : string.Empty)));
+                else
+                    continue;
+                plan.Projected[trip.Id] = StaffTravelRequestStatus.InProgress;
+            }
+
+            if (plan.Projected[trip.Id] == StaffTravelRequestStatus.InProgress && today > trip.TravelEndDate)
+            {
+                plan.Completed.Add(trip);
+                plan.Projected[trip.Id] = StaffTravelRequestStatus.Completed;
+            }
+
+            if (plan.Projected[trip.Id] == StaffTravelRequestStatus.Completed)
+            {
+                var lastDay = await StaffTravelLifecycleRules.ClaimWindowLastDayAsync(_unitOfWork, trip, cancellationToken);
+                plan.LastDays[trip.Id] = lastDay;
+                if (lastDay < today && await StaffTravelLifecycleRules.OpenItemAsync(_unitOfWork, trip, cancellationToken) is null)
+                {
+                    plan.Closed.Add(trip);
+                    plan.Projected[trip.Id] = StaffTravelRequestStatus.Closed;
+                }
+            }
+        }
+
+        await PlanGroupsAsync(tenantId, plan, track, cancellationToken);
+        return plan;
+    }
+
+    /// <summary>
+    /// A group's under way and completed had no writer (lane 1, slice 1c): they are read off its places — the travellers'
+    /// trips not cancelled or rejected — as they stand once moved. A group only moves forward; one called off stays so.
+    /// </summary>
+    private async Task PlanGroupsAsync(Guid tenantId, TransitionPlan plan, bool track, CancellationToken cancellationToken)
+    {
+        var query = _unitOfWork.Repository<StaffGroupTravel>()
+            .GetQueryable(g => g.TenantId == tenantId && !g.IsDeleted
+                            && (g.Status == GroupTravelStatus.Planning || g.Status == GroupTravelStatus.Open
+                                || g.Status == GroupTravelStatus.Closed || g.Status == GroupTravelStatus.InProgress));
+        var groups = await (track ? query : query.AsNoTracking()).ToListAsync(cancellationToken);
+        if (groups.Count == 0) return;
+
+        var groupIds = groups.Select(g => g.Id).ToList();
+        var places = await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
+                            && r.GroupTravelId != null && groupIds.Contains(r.GroupTravelId.Value)
+                            && r.Status != StaffTravelRequestStatus.Cancelled && r.Status != StaffTravelRequestStatus.Rejected)
+            .Select(r => new { r.Id, GroupId = r.GroupTravelId!.Value, r.Status })
+            .ToListAsync(cancellationToken);
+
+        foreach (var group in groups.OrderBy(g => g.GroupName))
+        {
+            var statuses = places
+                .Where(p => p.GroupId == group.Id)
+                .Select(p => plan.Projected.TryGetValue(p.Id, out var moved) ? moved : p.Status)
+                .ToList();
+            if (statuses.Count == 0) continue;
+
+            GroupTravelStatus? to =
+                statuses.All(s => s is StaffTravelRequestStatus.Completed or StaffTravelRequestStatus.Closed)
+                    ? GroupTravelStatus.Completed
+                : statuses.Any(s => s is StaffTravelRequestStatus.InProgress or StaffTravelRequestStatus.Completed
+                                        or StaffTravelRequestStatus.Closed)
+                    ? GroupTravelStatus.InProgress
+                : (GroupTravelStatus?)null;
+            if (to is { } target && target != group.Status)
+                plan.Groups.Add((group, target));
+        }
+    }
+
+    /// <summary>
+    /// Makes the moves and logs each in the same save — so no move is made without its row, and the notice a completion
+    /// owes the traveller goes out with this run or, if it stops first, with the next (<see cref="UnpublishedTransitionsAsync"/>).
+    /// </summary>
+    private async Task ApplyTransitionsAsync(
+        Guid tenantId, Guid runId, DateTime at, TransitionPlan plan, CancellationToken cancellationToken)
+    {
+        if (plan.Started.Count + plan.Completed.Count + plan.Closed.Count + plan.Groups.Count == 0) return;
+
+        foreach (var (trip, why) in plan.Started)
+        {
+            trip.Status = StaffTravelRequestStatus.InProgress;
+            Stamp(trip, at);
+            _logger.LogInformation("Travel sweep moved {Reference} under way: {Why}", trip.RequestNumber, why);
+        }
+        foreach (var trip in plan.Completed)
+        {
+            trip.Status = StaffTravelRequestStatus.Completed;
+            trip.CompletedAt = at;
+            Stamp(trip, at);
+        }
+        foreach (var trip in plan.Closed)
+        {
+            trip.Status = StaffTravelRequestStatus.Closed;
+            trip.ClosedAt = at;
+            trip.ClosedById = null; // the sweep closed it: no employee did
+            Stamp(trip, at);
+        }
+        foreach (var (group, to) in plan.Groups)
+        {
+            group.Status = to;
+            group.UpdatedAt = at;
+            group.UpdatedBy = SweepActor;
+        }
+
+        var moves = TransitionCandidates(plan, DateOnly.FromDateTime(at));
+        var keys = moves.Select(m => m.DedupeKey).ToList();
+        var logged = new HashSet<string>(await _unitOfWork.Repository<StaffTravelReminderDispatchLog>()
+            .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && keys.Contains(l.DedupeKey))
+            .Select(l => l.DedupeKey)
+            .ToListAsync(cancellationToken), StringComparer.Ordinal);
+        foreach (var m in moves.Where(m => !logged.Contains(m.DedupeKey)))
+            await _unitOfWork.Repository<StaffTravelReminderDispatchLog>().AddAsync(new StaffTravelReminderDispatchLog
+            {
+                TenantId = tenantId,
+                RunId = runId,
+                Kind = m.Kind,
+                ItemType = m.ItemType,
+                EntityId = m.EntityId,
+                Reference = Clip(m.Reference, 250),
+                DueDate = m.DueDate,
+                DaysRemaining = m.DaysRemaining,
+                EscalationTier = m.EscalationTier,
+                DedupeKey = m.DedupeKey,
+            });
+
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            _logger.LogWarning(ex, "Travel reminder sweep lost a dedupe race moving trips for tenant {TenantId}", tenantId);
+            throw new InvalidOperationException(
+                "Another travel reminder sweep is running for this tenant. Try again in a moment.");
+        }
+
+        _logger.LogInformation(
+            "Travel sweep for tenant {TenantId}: {Started} trip(s) under way, {Completed} completed, {Closed} closed, {Groups} group(s) moved",
+            tenantId, plan.Started.Count, plan.Completed.Count, plan.Closed.Count, plan.Groups.Count);
+    }
+
+    private static void Stamp(StaffTravelRequest trip, DateTime at)
+    {
+        trip.UpdatedAt = at;
+        trip.UpdatedBy = SweepActor;
     }
 
     public async Task<IEnumerable<StaffTravelReminderPreviewItemDto>> PreviewSweepAsync(
@@ -253,7 +501,9 @@ public class StaffTravelReminderService : IStaffTravelReminderService
         var tenantId = RequireTenant();
         var at = asOf ?? DateTime.UtcNow;
 
-        var candidates = (await FindCandidatesAsync(tenantId, at, cancellationToken)).ToList();
+        // The moves a run would make are listed too (slice 8c) — read only, nothing tracked.
+        var plan = await PlanTransitionsAsync(tenantId, at, cancellationToken, track: false);
+        var candidates = (await FindCandidatesAsync(tenantId, at, plan, cancellationToken)).ToList();
         var keys = candidates.Select(c => c.DedupeKey).ToList();
         // Sent means published: a key claimed and never published goes out with the next run.
         var sent = new HashSet<string>(await _unitOfWork.Repository<StaffTravelReminderDispatchLog>()
@@ -307,10 +557,13 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     // ---- candidates --------------------------------------------------------
 
     /// <summary>One reminder: what the log records, whom the preview says it reaches, and how it is sent.</summary>
+    /// <param name="Transition">One of the sweep's moves (slice 8c), logged when it is made; its notice, if any, follows.</param>
     private sealed record Candidate(
         string Kind, string ItemType, Guid EntityId, string Reference,
         DateTime? DueDate, int DaysRemaining, int EscalationTier, string DedupeKey,
-        IReadOnlyList<string> SentTo, Func<CancellationToken, Task> Send);
+        IReadOnlyList<string> SentTo, Func<CancellationToken, Task> Send, bool Transition = false);
+
+    private static readonly Func<CancellationToken, Task> Nothing = _ => Task.CompletedTask;
 
     /// <summary>
     /// Escalation ladder shared by every kind: due-soon is tier 0, then 1/2/3 as an overdue item
@@ -348,12 +601,15 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     private static string Clip(string text, int max) => text.Length > max ? text[..max] : text;
 
     private async Task<IEnumerable<Candidate>> FindCandidatesAsync(
-        Guid tenantId, DateTime at, CancellationToken cancellationToken)
+        Guid tenantId, DateTime at, TransitionPlan plan, CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(at);
         var backlogFloor = today.AddDays(-BacklogHorizonDays);
         var results = new List<Candidate>();
 
+        results.AddRange(TransitionCandidates(plan, today));
+        await UnpublishedTransitionsAsync(tenantId, today, backlogFloor, results, cancellationToken);
+        await FleetAsync(tenantId, plan, today, backlogFloor, results, cancellationToken);
         await DocumentsAsync(tenantId, today, backlogFloor, results, cancellationToken);
         await VisasAsync(tenantId, today, backlogFloor, results, cancellationToken);
         await AdvancesAsync(tenantId, today, backlogFloor, results, cancellationToken);
@@ -384,6 +640,72 @@ public class StaffTravelReminderService : IStaffTravelReminderService
 
     private static Func<CancellationToken, Task> Both(params Func<CancellationToken, Task>[] sends)
         => async ct => { foreach (var send in sends) await send(ct); };
+
+    // 0. The sweep's own moves (slice 8c), as the log records them. Only a completion tells anyone: the traveller, with
+    //    the last day to claim while it is still ahead (D-47). Starting tells nobody — the traveller was told it is
+    //    departing — and nor does closing (D-46).
+    private List<Candidate> TransitionCandidates(TransitionPlan plan, DateOnly today)
+    {
+        var results = new List<Candidate>();
+        foreach (var (trip, _) in plan.Started)
+            results.Add(TripMove(KindTripStarted, trip, trip.TravelStartDate, today, Array.Empty<string>(), Nothing));
+        foreach (var trip in plan.Completed)
+            results.Add(CompletedMove(trip, plan.LastDays[trip.Id], today));
+        foreach (var trip in plan.Closed)
+            results.Add(TripMove(KindTripClosed, trip, plan.LastDays[trip.Id], today, Array.Empty<string>(), Nothing));
+        foreach (var (group, to) in plan.Groups)
+        {
+            var kind = to == GroupTravelStatus.Completed ? KindGroupCompleted : KindGroupStarted;
+            var on = to == GroupTravelStatus.Completed ? group.TravelEndDate : group.TravelStartDate;
+            results.Add(new Candidate(
+                kind, "Group trip", group.Id, group.GroupName, on.ToDateTime(TimeOnly.MinValue), on.DayNumber - today.DayNumber, 0,
+                $"{kind}:{group.Id}", Array.Empty<string>(), Nothing, Transition: true));
+        }
+        return results;
+    }
+
+    private static Candidate TripMove(
+        string kind, StaffTravelRequest trip, DateOnly on, DateOnly today, IReadOnlyList<string> sentTo, Func<CancellationToken, Task> send)
+        => new(kind, "Travel request", trip.Id, trip.RequestNumber ?? string.Empty, on.ToDateTime(TimeOnly.MinValue),
+               on.DayNumber - today.DayNumber, 0, $"{kind}:{trip.Id}", sentTo, send, Transition: true);
+
+    private Candidate CompletedMove(StaffTravelRequest trip, DateOnly lastDay, DateOnly today)
+        => lastDay >= today
+            ? TripMove(KindTripCompleted, trip, trip.TravelEndDate, today, new[] { AudienceTraveller },
+                ToTraveller(trip, StaffTravelNotices.TripCompleted, "money",
+                    new Dictionary<string, object> { ["LastDay"] = StaffTravelNotices.Date(lastDay) }))
+            : TripMove(KindTripCompleted, trip, trip.TravelEndDate, today, Array.Empty<string>(), Nothing);
+
+    /// <summary>
+    /// A move logged by a run that stopped before its notice went out. Only a completion has one, owed while the trip is
+    /// still completed and its claim window open; the row is stamped published with this run either way.
+    /// </summary>
+    private async Task UnpublishedTransitionsAsync(
+        Guid tenantId, DateOnly today, DateOnly backlogFloor, List<Candidate> results, CancellationToken cancellationToken)
+    {
+        var floor = backlogFloor.ToDateTime(TimeOnly.MinValue);
+        var have = new HashSet<string>(results.Select(r => r.DedupeKey), StringComparer.Ordinal);
+        var rows = (await _unitOfWork.Repository<StaffTravelReminderDispatchLog>()
+                .GetQueryable(l => l.TenantId == tenantId && !l.IsDeleted && l.PublishedAt == null && l.CreatedAt >= floor
+                                && TransitionKinds.Contains(l.Kind))
+                .AsNoTracking()
+                .ToListAsync(cancellationToken))
+            .Where(r => !have.Contains(r.DedupeKey))
+            .ToList();
+        if (rows.Count == 0) return;
+
+        var trips = await TripsAsync(tenantId, rows.Where(r => r.Kind == KindTripCompleted).Select(r => r.EntityId), cancellationToken);
+        foreach (var row in rows)
+        {
+            if (row.Kind == KindTripCompleted && trips.TryGetValue(row.EntityId, out var trip)
+                && trip.Status == StaffTravelRequestStatus.Completed)
+                results.Add(CompletedMove(trip, await StaffTravelLifecycleRules.ClaimWindowLastDayAsync(_unitOfWork, trip, cancellationToken), today));
+            else
+                results.Add(new Candidate(
+                    row.Kind, row.ItemType, row.EntityId, row.Reference, row.DueDate, row.DaysRemaining, row.EscalationTier,
+                    row.DedupeKey, Array.Empty<string>(), Nothing, Transition: true));
+        }
+    }
 
     // 1. Travel documents — passports and the rest — at 90, 30 and 7 days, and once lapsed. The owner is told
     //    (slice 8b); the desk only when nobody can tell them. An employee who has left is not chased.
@@ -478,13 +800,14 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     }
 
     // 4 and 5. Approved trips about to depart: the traveller is told once; one that needs a visa and has none approved
-    //    (the ticket's own rule — Approved or Not required) is chased with the traveller and the desk.
+    //    (the ticket's own rule — Approved or Not required) is chased with the traveller and the desk. Since slice 8c a trip
+    //    is moved under way on its departure day, or before it on Fleet's dispatch, so an under-way one counts too.
     private async Task DeparturesAsync(Guid tenantId, DateOnly today, List<Candidate> results, CancellationToken cancellationToken)
     {
         var horizon = today.AddDays(Math.Max(DepartureHorizonDays, VisaMissingHorizonDays));
         var trips = await _unitOfWork.Repository<StaffTravelRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
-                            && r.Status == StaffTravelRequestStatus.Approved
+                            && (r.Status == StaffTravelRequestStatus.Approved || r.Status == StaffTravelRequestStatus.InProgress)
                             && r.TravelStartDate >= today && r.TravelStartDate <= horizon)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
@@ -585,13 +908,13 @@ public class StaffTravelReminderService : IStaffTravelReminderService
     }
 
     // 7. A trip about to depart whose risk assessment — the latest still valid at departure, as the ticket reads it
-    //    (D-37) — the traveller has not acknowledged: they are chased once per assessment.
+    //    (D-37) — the traveller has not acknowledged: they are chased once per assessment. Under way counts too (8c).
     private async Task BriefingsAsync(Guid tenantId, DateOnly today, List<Candidate> results, CancellationToken cancellationToken)
     {
         var horizon = today.AddDays(BriefingHorizonDays);
         var trips = await _unitOfWork.Repository<StaffTravelRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
-                            && r.Status == StaffTravelRequestStatus.Approved
+                            && (r.Status == StaffTravelRequestStatus.Approved || r.Status == StaffTravelRequestStatus.InProgress)
                             && r.TravelStartDate >= today && r.TravelStartDate <= horizon)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
@@ -685,6 +1008,67 @@ public class StaffTravelReminderService : IStaffTravelReminderService
                 $"{KindClaimWindowPassed}:{trip.Id}:{lastDay:yyyy-MM-dd}",
                 new[] { AudienceDesk },
                 ToDesk(trip, StaffTravelNotices.ClaimWindowPassed, StaffTravelNotices.DeskTrip(trip.Id, "finance"), data)));
+        }
+    }
+
+    // 10 and 11. Fleet's word on a trip's company vehicles (D-29), read through travel's seam — Fleet's code unchanged.
+    //    Every vehicle back while the trip is still under way: the desk is told once, to mark it completed if the traveller
+    //    is back too (the sweep does so the day after it ends). An incident Fleet records on the vehicle of a trip not yet
+    //    closed: the desk, and the traveller's nearest line authority with a login, once per incident.
+    private async Task FleetAsync(
+        Guid tenantId, TransitionPlan plan, DateOnly today, DateOnly backlogFloor, List<Candidate> results, CancellationToken cancellationToken)
+    {
+        foreach (var signals in plan.Fleet.Trips.GroupBy(s => s.RequestId))
+        {
+            if (!plan.Trips.TryGetValue(signals.Key, out var trip)
+                || plan.Projected[trip.Id] != StaffTravelRequestStatus.InProgress)
+                continue;
+            var live = signals.Where(s => s.Status is not (FleetTripStatuses.Cancelled or FleetTripStatuses.Rejected)).ToList();
+            if (live.Count == 0 || live.Any(s => s.Status != FleetTripStatuses.Completed)) continue;
+            var last = live.OrderBy(s => s.ReturnedAt ?? DateTime.MinValue).ThenBy(s => s.FleetTripId).Last();
+            results.Add(new Candidate(
+                KindFleetReturned, "Travel request", trip.Id, trip.RequestNumber ?? string.Empty,
+                trip.TravelEndDate.ToDateTime(TimeOnly.MinValue), trip.TravelEndDate.DayNumber - today.DayNumber, 0,
+                $"{KindFleetReturned}:{trip.Id}:{last.FleetTripId}",
+                new[] { AudienceDesk },
+                ToDesk(trip, StaffTravelNotices.FleetReturned, StaffTravelNotices.DeskTrip(trip.Id), new Dictionary<string, object>
+                {
+                    ["ReturnedOn"] = last.ReturnedAt is DateTime back
+                        ? StaffTravelNotices.Date(DateOnly.FromDateTime(back))
+                        : "a date Fleet does not record",
+                    ["EndDate"] = StaffTravelNotices.Date(trip.TravelEndDate),
+                })));
+        }
+
+        var floor = backlogFloor.ToDateTime(TimeOnly.MinValue);
+        foreach (var incident in plan.Fleet.Incidents.Where(i => i.OccurredAtUtc >= floor).OrderBy(i => i.OccurredAtUtc))
+        {
+            if (!plan.Trips.TryGetValue(incident.RequestId, out var trip)
+                || plan.Projected[trip.Id] is not (StaffTravelRequestStatus.Approved or StaffTravelRequestStatus.InProgress
+                    or StaffTravelRequestStatus.Completed))
+                continue;
+            var occurred = DateOnly.FromDateTime(incident.OccurredAtUtc);
+            var data = new Dictionary<string, object>
+            {
+                ["Severity"] = incident.Severity,
+                ["IncidentType"] = Spaced(incident.IncidentType).ToLowerInvariant(),
+                ["OccurredOn"] = StaffTravelNotices.Date(occurred),
+                ["Vehicle"] = incident.Vehicle,
+                ["Title"] = incident.Title,
+            };
+            var send = ToDesk(trip, StaffTravelNotices.FleetIncident, StaffTravelNotices.DeskTrip(trip.Id, "compliance"), data);
+            var sentTo = new[] { AudienceDesk };
+            if ((await HrLineAuthority.GetLineApproversAsync(
+                    _unitOfWork, _userManager.Users, tenantId, trip.EmployeeId, 1, cancellationToken)).FirstOrDefault() is { } manager)
+            {
+                send = Both(send, ct => _notices.TellLineManagerAsync(
+                    trip, manager.UserId, StaffTravelNotices.FleetIncident, StaffTravelNotices.DeskTrip(trip.Id), data, ct));
+                sentTo = new[] { AudienceDesk, AudienceLineManager };
+            }
+            results.Add(new Candidate(
+                KindFleetIncident, "Travel request", trip.Id, trip.RequestNumber ?? string.Empty,
+                incident.OccurredAtUtc, occurred.DayNumber - today.DayNumber, 0,
+                $"{KindFleetIncident}:{incident.IncidentId}", sentTo, send));
         }
     }
 

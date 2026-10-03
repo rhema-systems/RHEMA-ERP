@@ -211,7 +211,8 @@ public class StaffTravelRequestsController : HrControllerBase
 
         dto.RequestId = id;
         dto.CancelledById = employeeId;
-        await _service.CancelAsync(dto, userId);
+        // Lane 8 (D-48): this is the desk's door, so a trip under way may be cancelled here as not travelled.
+        await _service.CancelAsync(dto, userId, HttpContext.RequestAborted, callerIsTravelDesk: true);
         return Ok(new { message = "Travel request cancelled." });
     }
 

@@ -1482,14 +1482,16 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     /// such booking is cancelled first, with the fee the supplier charges; the pending and on-hold ones are cancelled
     /// with the trip. (A company vehicle's Fleet trip is lane 6's.)</para>
     /// </remarks>
-    public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default)
+    public async Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default, bool callerIsTravelDesk = false)
     {
         var entity = await GetOwnedRequestAsync(cancelDto.RequestId);
-        await RequireCancellableAsync(entity, cancellationToken);
+        await RequireCancellableAsync(entity, callerIsTravelDesk, cancellationToken);
 
-        var reason = cancelDto.CancellationReason.Trim();
+        // Lane 8 (D-48): an under-way trip is cancelled only as one that did not happen — the record says so.
+        var didNotTravel = entity.Status == StaffTravelRequestStatus.InProgress;
+        var reason = didNotTravel ? $"Did not travel: {cancelDto.CancellationReason.Trim()}" : cancelDto.CancellationReason.Trim();
         // Lane 6 (D-35): the drivers' own requests go with the trip — each checked BEFORE anything moves, since Fleet's
-        // cancel below saves at once (G3).
+        // cancel below saves at once (G3). One under way never goes with it, whoever cancels (lane 8, D-52).
         var drivers = await LiveDriverRequestsAsync(entity, cancellationToken);
         foreach (var driver in drivers)
             await RequireDriverCancellableAsync(driver, entity.RequestNumber, cancellationToken);
@@ -1532,6 +1534,20 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         // ...and the plan of a trip that will not happen is marked so (D-24's itinerary half, D-25).
         await StaffTravelItineraryRules.CancelWithTripAsync(
             _unitOfWork, entity.TenantId, entity.Id, cancelledByUserId.ToString(), cancellationToken);
+        // Lane 8 (D-48): the desk's own record of why a trip under way was called off — added last, as Fleet's cancel above
+        // saves at once, so a note added earlier would stand beside a cancel that failed.
+        if (didNotTravel && cancelDto.CancelledById is Guid noter)
+            await _commentRepository.AddAsync(new StaffTravelRequestComment
+            {
+                TenantId = entity.TenantId,
+                StaffTravelRequestId = entity.Id,
+                AuthorId = noter,
+                CommentType = TravelRequestCommentType.InternalNote,
+                Body = Clip($"Cancelled as not travelled on {DateOnly.FromDateTime(DateTime.UtcNow):dd MMM yyyy}, after the departure " +
+                            $"date of {entity.TravelStartDate:dd MMM yyyy}, with nothing spent on it. {reason}", 2000),
+                IsVisibleToTraveller = false,
+                CreatedBy = cancelledByUserId.ToString(),
+            });
 
         await _requestRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1547,15 +1563,33 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return true;
     }
 
-    /// <summary>What refuses a cancel (lanes 1 and 5) — checked before anything moves.</summary>
-    private async Task RequireCancellableAsync(StaffTravelRequest entity, CancellationToken cancellationToken)
+    /// <summary>What refuses a cancel (lanes 1, 5 and 8) — checked before anything moves.</summary>
+    /// <remarks>
+    /// Lane 8 (D-48): once the nightly sweep moves a trip under way on its departure date, "under way" no longer means the
+    /// traveller left (U4). The travel desk may cancel one as not travelled — until its end date, and only while nothing
+    /// was spent on it (<see cref="StaffTravelLifecycleRules.SpentOnAsync"/>). Anyone else, and anything spent, gets lane
+    /// 1's answer: it happened, so it is completed.
+    /// </remarks>
+    private async Task RequireCancellableAsync(StaffTravelRequest entity, bool callerIsTravelDesk, CancellationToken cancellationToken)
     {
         if (entity.Status is StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Completed
             or StaffTravelRequestStatus.Closed or StaffTravelRequestStatus.Rejected)
             throw new InvalidOperationException($"A request that is {entity.Status} cannot be cancelled.");
         if (entity.Status == StaffTravelRequestStatus.InProgress)
-            throw new InvalidOperationException(
-                "A trip that is under way cannot be cancelled. If it ended early, mark it completed.");
+        {
+            if (!callerIsTravelDesk)
+                throw new InvalidOperationException(
+                    "A trip that is under way cannot be cancelled. If it ended early, mark it completed; if it did not happen, " +
+                    "ask the travel desk.");
+            if (DateOnly.FromDateTime(DateTime.UtcNow) > entity.TravelEndDate)
+                throw new InvalidOperationException(
+                    $"Travel request {entity.RequestNumber} ended on {entity.TravelEndDate:dd MMM yyyy}, so it is not cancelled as " +
+                    "not travelled — mark it completed.");
+            if (await StaffTravelLifecycleRules.SpentOnAsync(_unitOfWork, entity, cancellationToken) is { } spent)
+                throw new InvalidOperationException(
+                    $"Travel request {entity.RequestNumber} is under way and {spent}, so it is not cancelled as not travelled — " +
+                    "mark it completed and settle it as usual.");
+        }
         if (entity.Status == StaffTravelRequestStatus.Approved)
             await RequireNoAdvanceCashOutAsync(entity, "cancelling the trip", cancellationToken);
         // Lane 5, D-24: a booking a supplier has confirmed or ticketed is the organisation's commitment, cancelled on its
@@ -1589,11 +1623,22 @@ public class StaffTravelRequestService : IStaffTravelRequestService
     }
 
     /// <summary>A driver's request goes with its leg (D-35) — so whatever would refuse its cancel refuses the leg's.</summary>
+    /// <remarks>
+    /// Lane 8 (D-52): a driver's request under way never goes with it, whoever cancels — the leg's cancel, delete or new
+    /// driver, Request change or the trip's own cancel, the desk's included. Since the nightly sweep moves a trip under way
+    /// on its date, "under way" no longer proves the driver set off, but the driver is someone else, who may have — so the
+    /// desk decides it on the driver's own request (cancelled there as not travelled, D-48) before the trip goes.
+    /// </remarks>
     private async Task RequireDriverCancellableAsync(StaffTravelRequest driver, string tripNumber, CancellationToken cancellationToken)
     {
+        if (driver.Status == StaffTravelRequestStatus.InProgress)
+            throw new InvalidOperationException(
+                $"The driver's own request {driver.RequestNumber}, raised for {tripNumber}'s company vehicle, goes with it but " +
+                "cannot be cancelled: it is under way, and the driver may have set off. If the driver did not travel either, " +
+                $"the travel desk cancels {driver.RequestNumber} as not travelled on its own page first; if they did, mark it completed.");
         try
         {
-            await RequireCancellableAsync(driver, cancellationToken);
+            await RequireCancellableAsync(driver, callerIsTravelDesk: false, cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
@@ -1865,32 +1910,9 @@ public class StaffTravelRequestService : IStaffTravelRequestService
                 ? "This trip is already closed."
                 : "Only a completed trip can be closed. Mark it completed first.");
 
-        var openClaim = await _unitOfWork.Repository<StaffTravelExpenseClaim>().GetQueryable()
-            .Where(c => c.TenantId == entity.TenantId
-                     && c.StaffTravelRequestId == entity.Id
-                     && c.Status != TravelClaimStatus.Paid
-                     && c.Status != TravelClaimStatus.Rejected)
-            .OrderBy(c => c.ClaimNumber)
-            .Select(c => new { c.ClaimNumber, c.Status })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (openClaim is not null)
-            throw new InvalidOperationException(
-                $"Expense claim {openClaim.ClaimNumber} is {openClaim.Status}. A trip closes once every claim on it is paid or rejected.");
-
-        var openAdvance = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
-            .Where(a => a.TenantId == entity.TenantId
-                     && a.StaffTravelRequestId == entity.Id
-                     && a.Status != TravelAdvanceStatus.FullySettled
-                     && a.Status != TravelAdvanceStatus.WrittenOff
-                     && a.Status != TravelAdvanceStatus.Rejected
-                     && a.Status != TravelAdvanceStatus.Cancelled)
-            .OrderBy(a => a.AdvanceNumber)
-            .Select(a => new { a.AdvanceNumber, a.Status })
-            .FirstOrDefaultAsync(cancellationToken);
-        if (openAdvance is not null)
-            throw new InvalidOperationException(
-                $"Advance {openAdvance.AdvanceNumber} is {openAdvance.Status}. A trip closes once every advance on it is " +
-                "settled, written off, rejected or cancelled.");
+        // Lane 8 (8c): the one rule the nightly sweep's close asks too.
+        if (await StaffTravelLifecycleRules.OpenItemAsync(_unitOfWork, entity, cancellationToken) is { } open)
+            throw new InvalidOperationException(open);
 
         var userId = RequireUserId();
         entity.Status = StaffTravelRequestStatus.Closed;

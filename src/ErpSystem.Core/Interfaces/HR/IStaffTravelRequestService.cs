@@ -60,7 +60,9 @@ public interface IStaffTravelRequestService
     /// Employee FK on the entity); <paramref name="cancelledByUserId"/> is the platform user, for
     /// the audit trail. Different identifiers — the DTO field used to serve both.
     /// </summary>
-    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default);
+    /// <param name="callerIsTravelDesk">The desk's route (HR.Travel.Write): only it may cancel a trip under way, as not
+    /// travelled (lane 8, D-48).</param>
+    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default, bool callerIsTravelDesk = false);
 
     /// <summary>
     /// Lane 6 (D-35): refuses — naming why — when a leg's driver's own request is live and could not be cancelled (under

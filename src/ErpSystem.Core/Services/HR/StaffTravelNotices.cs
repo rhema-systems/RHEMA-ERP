@@ -76,6 +76,7 @@ public sealed class StaffTravelNotices
     public const string ToTraveller = "Traveller";
     public const string ToDesk = "Desk";
     public const string ToApprover = "Approver";
+    public const string ToManager = "Manager";
 
     // ---- the events (the middle of the topic key) ----------------------------
     public const string Submitted = "Submitted";
@@ -109,6 +110,10 @@ public sealed class StaffTravelNotices
     public const string ClaimWindowPassed = "ClaimWindowPassed";
     public const string SettlementOverdue = "SettlementOverdue";
     public const string ApprovalWaiting = "ApprovalWaiting";
+    // The sweep's transitions and Fleet's signals (lane 8, slice 8c).
+    public const string TripCompleted = "TripCompleted";
+    public const string FleetReturned = "FleetReturned";
+    public const string FleetIncident = "FleetIncident";
 
     /// <summary>The traveller's own documents page on the portal.</summary>
     public const string TravellerDocuments = "/me/travel/documents";
@@ -268,6 +273,28 @@ public sealed class StaffTravelNotices
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Travel notice {Event} to the approvers of {Reference} could not be sent", evt, trip.RequestNumber);
+        }
+    }
+
+    /// <summary>
+    /// Tells the traveller's nearest line authority who can sign in (slice 8c: a Fleet incident on their trip) — in the app
+    /// and by email. The caller resolves them (<see cref="HrLineAuthority"/>, the nearest with a login).
+    /// </summary>
+    public async Task TellLineManagerAsync(
+        StaffTravelRequest trip, Guid managerUserId, string evt, string actionPath,
+        IReadOnlyDictionary<string, object>? data = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await EnsureTopicsAsync(trip.TenantId, cancellationToken);
+            var traveller = await TravellerAsync(trip, cancellationToken);
+            var tokens = TripTokens(trip, traveller.Name, actionPath, data);
+            tokens["ManagerUserIds"] = new List<Guid> { managerUserId };
+            await PublishAsync(trip, evt, ToManager, null, tokens, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Travel notice {Event} to the line manager of {Reference} could not be sent", evt, trip.RequestNumber);
         }
     }
 
@@ -484,11 +511,23 @@ public sealed class StaffTravelNotices
             "{{Amount}} of advance {{Number}} for {{Reference}} was to be accounted for by {{Deadline}}. File your expense claim, or hand back what you did not spend, on the trip's Money tab under My travel.",
             "Their travel advance {{Number}} ({{Amount}}) was to be accounted for by {{Deadline}}"),
 
+        new(TripCompleted, ToTraveller, "Travel: your trip is marked completed (traveller)",
+            "Sent by the nightly sweep when it marks an under-way trip completed, the day after it ends — with the last day to file a claim.",
+            "Your trip {{Reference}} is marked completed",
+            "{{Reference}} — {{Route}}, {{Dates}} — is marked completed. If you have expenses to claim, file them on the trip's Money tab under My travel by {{LastDay}}.",
+            "Their trip {{Reference}} is marked completed; claims are due by {{LastDay}}"),
+
         // ---- the sweep's, to the approvers (slice 8b): in the app and by email ----
         new(ApprovalWaiting, ToApprover, "Travel: a request waits for your decision (approver)",
             "Sent by the nightly sweep to the people the request's current approval stage is asking — never the traveller — once it has waited 5 days, then after a week and a month.",
             "Travel request waiting for your decision: {{Reference}}",
             "{{Traveller}}'s request {{Reference}} — {{Route}}, {{Dates}} — has waited {{Waited}} day(s) for a decision. Open it to approve, return or reject it."),
+
+        // ---- the sweep's, to the traveller's line manager (slice 8c, D-29): in the app and by email ----
+        new(FleetIncident, ToManager, "Travel: a Fleet incident on your report's trip (line manager)",
+            "Sent once per incident by the nightly sweep to the traveller's nearest line authority with a login, when Fleet records one on their trip's company vehicle.",
+            "Fleet incident on {{Traveller}}'s trip {{Reference}}",
+            "{{Severity}} {{IncidentType}} recorded by Fleet on {{OccurredOn}} — {{Vehicle}}, on {{Traveller}}'s trip {{Reference}} ({{Route}}, {{Dates}}). The travel desk has the details."),
 
         // ---- the travel desk: in the app ----
         new(Approved, ToDesk, "Travel: approved, ready to book (desk)",
@@ -545,6 +584,14 @@ public sealed class StaffTravelNotices
             "Sent by the nightly sweep when a travel advance passes its settlement deadline, and again after a week and a month.",
             "Advance overdue: {{Number}}",
             "{{Traveller}} still holds {{Amount}} of advance {{Number}} for {{Reference}}, due to be accounted for by {{Deadline}}."),
+        new(FleetReturned, ToDesk, "Travel: a company vehicle is back (desk)",
+            "Sent once by the nightly sweep when every company vehicle of a trip still under way is back in Fleet — mark the trip completed if the traveller is back too.",
+            "Company vehicle back: {{Reference}}",
+            "Fleet records the company vehicle for {{Traveller}}'s trip {{Reference}} ({{Route}}, {{Dates}}) back on {{ReturnedOn}}. If the traveller is back too, mark the trip completed — the sweep does so the day after {{EndDate}}."),
+        new(FleetIncident, ToDesk, "Travel: a Fleet incident on a trip (desk)",
+            "Sent once per incident by the nightly sweep when Fleet records one on an open trip's company vehicle.",
+            "Fleet incident on {{Reference}}: {{Title}}",
+            "{{Severity}} {{IncidentType}} recorded by Fleet on {{OccurredOn}} — {{Vehicle}}, on {{Traveller}}'s trip {{Reference}} ({{Route}}, {{Dates}}). The trip's Compliance tab lists it."),
         new(ClaimWindowPassed, ToDesk, "Travel: claim window closed with money open (desk)",
             "Sent once by the nightly sweep when a completed trip's claim window has closed with a claim not submitted or advance cash still out — the trip cannot close.",
             "Claim window closed: {{Reference}}",
@@ -620,11 +667,12 @@ public sealed class StaffTravelNotices
 
             var toTraveller = seed.Audience == ToTraveller;
             var toApprover = seed.Audience == ToApprover;
+            var toManager = seed.Audience == ToManager;
             var topic = new NotificationTopic
             {
                 TenantId = tenantId, Key = key, Name = seed.Name, Description = seed.Description,
                 EntityType = TopicEntityType, IsSystem = true, IsActive = true,
-                EnableInApp = true, EnableEmail = toTraveller || toApprover, EnableSms = false,
+                EnableInApp = true, EnableEmail = toTraveller || toApprover || toManager, EnableSms = false,
                 InAppTitleTemplate = seed.Title,
                 InAppBodyTemplate = seed.Body,
                 ActionUrlTemplate = "{{ActionPath}}",
@@ -648,12 +696,12 @@ public sealed class StaffTravelNotices
                     IsSystem = true, SendInApp = false, SendEmail = true, CreatedBy = "System",
                 });
             }
-            else if (toApprover)
+            else if (toApprover || toManager)
             {
                 await recipientRepo.AddAsync(new NotificationTopicRecipient
                 {
                     TenantId = tenantId, TopicId = topic.Id,
-                    RecipientKind = "UsersFromData", RecipientValue = "ApproverUserIds",
+                    RecipientKind = "UsersFromData", RecipientValue = toApprover ? "ApproverUserIds" : "ManagerUserIds",
                     IsSystem = true, SendInApp = true, SendEmail = true, CreatedBy = "System",
                 });
             }

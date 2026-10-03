@@ -13,6 +13,16 @@ public sealed record StaffTravelFleetReservation(
     Guid? VehicleAssetId, Guid? DriverEmployeeId, DateTime Start, DateTime End,
     string? Origin, string? Destination, Guid? DestinationId, string? Purpose, string? Notes);
 
+/// <summary>A trip's fleet trip as the nightly sweep reads it (lane 8, slice 8c): Fleet's status, when it left, when it came back.</summary>
+public sealed record StaffTravelFleetTripSignal(Guid RequestId, Guid FleetTripId, string Status, DateTime? DispatchedAt, DateTime? ReturnedAt);
+
+/// <summary>An incident Fleet records on one of a trip's fleet trips (lane 8, slice 8c).</summary>
+public sealed record StaffTravelFleetIncidentSignal(
+    Guid RequestId, Guid IncidentId, DateTime OccurredAtUtc, string IncidentType, string Title, string Severity, string Vehicle);
+
+public sealed record StaffTravelFleetSignals(
+    IReadOnlyList<StaffTravelFleetTripSignal> Trips, IReadOnlyList<StaffTravelFleetIncidentSignal> Incidents);
+
 public interface IStaffTravelFleetService
 {
     /// <summary>The vehicles, drivers and destinations a trip's leg chooses from, each saying why it is not available.</summary>
@@ -71,4 +81,14 @@ public interface IStaffTravelFleetService
 
     /// <summary>The incidents Fleet records on a trip's fleet trips, newest first — read-only (D-29, FX-8's read half).</summary>
     Task<IReadOnlyList<StaffTravelFleetIncidentDto>> GetIncidentsAsync(Guid requestId, CancellationToken cancellationToken = default);
+
+    // ---- Lane 8, slice 8c ----
+
+    /// <summary>
+    /// Fleet's word on a set of trips' company vehicles, for the nightly sweep (D-29): each fleet trip's status, dispatch and
+    /// return, and the incidents on them since <paramref name="incidentsSince"/>. <b>Tenant-explicit</b> — the sweep has
+    /// nobody signed in, and every other read here takes the tenant from the current user (U3).
+    /// </summary>
+    Task<StaffTravelFleetSignals> GetSweepSignalsAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> requestIds, DateTime incidentsSince, CancellationToken cancellationToken = default);
 }

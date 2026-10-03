@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { useToast } from '@/hooks/use-toast';
 import { travelRemindersService } from '@/services/hr/travel-reminders.service';
+import { SWEEP_MOVES } from '@/types/hr/travel-reminders';
 
 const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
@@ -65,6 +66,37 @@ const HORIZONS = [
     kind: 'Claim window passed',
     detail: 'once, when it has closed with a claim not submitted or advance cash still out — to the desk',
   },
+  {
+    kind: 'Fleet returned',
+    detail: 'once, when every company vehicle of a trip still under way is back in Fleet — to the desk, to mark it completed',
+  },
+  {
+    kind: 'Fleet incident',
+    detail: 'once per incident Fleet records on the vehicle of a trip not yet closed — to the desk and the traveller\'s line manager',
+  },
+];
+
+/**
+ * What the sweep moves (lane 8, slice 8c — D-6, D-47, D-51), worded from `PlanTransitionsAsync`. Each move is logged
+ * below beside the reminders; only a completion tells anyone.
+ */
+const MOVES = [
+  {
+    kind: 'Under way',
+    detail: 'an approved trip, on its departure date — or before it, once Fleet dispatches one of its company vehicles',
+  },
+  {
+    kind: 'Completed',
+    detail: 'a trip under way, the day after it ends — the traveller is told the last day to claim',
+  },
+  {
+    kind: 'Closed',
+    detail: 'a completed trip, once its claim window has passed (30 days with no policy) and every claim is paid or rejected and every advance settled',
+  },
+  {
+    kind: 'Group trips',
+    detail: 'under way once any traveller\'s trip is, completed once every one is completed or closed',
+  },
 ];
 
 /**
@@ -104,7 +136,14 @@ export default function TravelRemindersPage() {
   const run = useMutation({
     mutationFn: () => travelRemindersService.run(),
     onSuccess: async (result) => {
+      const moved = [
+        result.tripsStarted > 0 ? `${result.tripsStarted} under way` : '',
+        result.tripsCompleted > 0 ? `${result.tripsCompleted} completed` : '',
+        result.tripsClosed > 0 ? `${result.tripsClosed} closed` : '',
+      ].filter(Boolean);
       const notes = [
+        moved.length ? `Trips moved: ${moved.join(', ')}.` : '',
+        result.groupsUpdated > 0 ? `${result.groupsUpdated} group trip(s) moved.` : '',
         result.retried > 0 ? `${result.retried} left unsent by an earlier sweep were sent now.` : '',
         result.alreadySent > 0 ? `${result.alreadySent} were already sent and were not repeated.` : '',
       ].filter(Boolean);
@@ -121,13 +160,15 @@ export default function TravelRemindersPage() {
   });
 
   const items = preview ?? [];
-  const wouldFire = items.filter((i) => !i.alreadySent);
+  const wouldFire = items.filter((i) => !i.alreadySent && !SWEEP_MOVES.has(i.kind));
+  const wouldMove = items.filter((i) => !i.alreadySent && SWEEP_MOVES.has(i.kind));
+  const skipped = items.filter((i) => i.alreadySent);
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Travel reminders"
-        description="Expiring passports and visas, overdue advances, departures, waiting approvals and closing claim windows — each to the people who act on it."
+        description="Expiring passports and visas, overdue advances, departures, waiting approvals, closing claim windows and Fleet's word — each to the people who act on it; and trips moved under way, completed and closed."
         backHref="/administration/hr"
         actions={
           <Button onClick={() => run.mutate()} disabled={run.isPending}>
@@ -164,6 +205,25 @@ export default function TravelRemindersPage() {
             A traveller with no login is emailed at the address on their employee record; with neither, the desk is
             told to tell them. Each reminder is sent once — a run that stopped before sending one leaves it for the next.
             The words and recipients of each are on Administration → Notification Topics, under StaffTravel.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Lane 8, slice 8c (D-6, D-47, D-51): the statuses nothing wrote — the sweep writes them, nightly. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">What the sweep moves</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-2 md:grid-cols-2">
+          {MOVES.map((m) => (
+            <p key={m.kind} className="text-sm">
+              <span className="font-medium">{m.kind}</span>
+              <span className="text-muted-foreground"> — {m.detail}</span>
+            </p>
+          ))}
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            The desk can still mark a trip completed early, and close one once settled. A trip moved under way that did not
+            happen is cancelled by the desk as not travelled — until its end date, and while nothing was spent on it.
           </p>
         </CardContent>
       </Card>
@@ -217,9 +277,14 @@ export default function TravelRemindersPage() {
             <>
               <p className="text-sm">
                 <span className="font-medium">{wouldFire.length}</span> would be sent
-                {items.length !== wouldFire.length && (
+                {wouldMove.length > 0 && (
+                  <>
+                    {' '}· <span className="font-medium">{wouldMove.length}</span> trip or group move(s) would be made
+                  </>
+                )}
+                {skipped.length > 0 && (
                   <span className="text-muted-foreground">
-                    {' '}· {items.length - wouldFire.length} already sent and would be skipped
+                    {' '}· {skipped.length} already sent and would be skipped
                   </span>
                 )}
               </p>
@@ -243,7 +308,7 @@ export default function TravelRemindersPage() {
                       <TableCell className="whitespace-nowrap">{fmtDate(i.dueDate)}</TableCell>
                       <TableCell>{i.daysRemaining}</TableCell>
                       <TableCell>{i.escalationTier}</TableCell>
-                      <TableCell>{(i.sentTo ?? []).join(', ') || '—'}</TableCell>
+                      <TableCell>{(i.sentTo ?? []).map(humanize).join(', ') || '—'}</TableCell>
                       <TableCell>
                         {i.alreadySent && <Badge variant="outline">Already sent</Badge>}
                       </TableCell>
@@ -297,7 +362,7 @@ export default function TravelRemindersPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Sent in the last 14 days</CardTitle>
+          <CardTitle className="text-base">Sent and moved in the last 14 days</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {logFailed && !log ? (
