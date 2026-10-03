@@ -13518,6 +13518,12 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
@@ -14354,6 +14360,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<decimal>("AllocatedAmount")
                         .HasColumnType("decimal(18,2)");
@@ -17585,6 +17597,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("AccountingBookId")
                         .HasColumnType("uniqueidentifier");
 
@@ -18120,6 +18135,59 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.ToTable("FinancePurchaseOrderReceiptItems", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", b =>
+                {
+                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
+                    b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
+                    b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
+                    b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
+                    b.Property<string>("CurrencyCode").IsRequired().HasMaxLength(3).HasColumnType("nvarchar(3)");
+                    b.Property<int>("DecimalPlaces").HasColumnType("int");
+                    b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
+                    b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
+                    b.Property<decimal>("DeltaAmount").HasColumnType("decimal(20,6)");
+                    b.Property<int>("Eligibility").HasColumnType("int");
+                    b.Property<decimal>("ExchangeRate").HasColumnType("decimal(18,10)");
+                    b.Property<DateTime?>("ExchangeRateDate").HasColumnType("datetime2");
+                    b.Property<Guid?>("ExchangeRateId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("ExchangeRateSource").HasMaxLength(100).HasColumnType("nvarchar(100)");
+                    b.Property<int>("FunctionalDecimalPlaces").HasColumnType("int");
+                    b.Property<decimal>("FunctionalDeltaAmount").HasColumnType("decimal(20,6)");
+                    b.Property<string>("FunctionalCurrencyCode").IsRequired().HasMaxLength(3).HasColumnType("nvarchar(3)");
+                    b.Property<Guid>("GainAccountId").HasColumnType("uniqueidentifier");
+                    b.Property<decimal>("Increment").HasColumnType("decimal(18,6)");
+                    b.Property<bool>("IsDeleted").HasColumnType("bit");
+                    b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
+                    b.Property<Guid>("LossAccountId").HasColumnType("uniqueidentifier");
+                    b.Property<int>("Method").HasColumnType("int");
+                    b.Property<decimal>("OriginalAmount").HasColumnType("decimal(20,6)");
+                    b.Property<decimal>("OriginalFunctionalAmount").HasColumnType("decimal(20,6)");
+                    b.Property<string>("PostingAction").IsRequired().HasMaxLength(50).HasColumnType("nvarchar(50)");
+                    b.Property<string>("PostingIdempotencyKey").IsRequired().HasMaxLength(450).HasColumnType("nvarchar(450)");
+                    b.Property<decimal>("RoundedAmount").HasColumnType("decimal(20,6)");
+                    b.Property<decimal>("RoundedFunctionalAmount").HasColumnType("decimal(20,6)");
+                    b.Property<Guid>("SourceDocumentId").HasColumnType("uniqueidentifier");
+                    b.Property<string>("SourceDocumentType").IsRequired().HasMaxLength(100).HasColumnType("nvarchar(100)");
+                    b.Property<string>("SourceModule").IsRequired().HasMaxLength(50).HasColumnType("nvarchar(50)");
+                    b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
+                    b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
+                    b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+                    b.HasAlternateKey("TenantId", "Id");
+                    b.HasIndex("ExchangeRateId");
+                    b.HasIndex("TenantId", "GainAccountId");
+                    b.HasIndex("TenantId", "LossAccountId");
+                    b.HasIndex("TenantId", "PostingIdempotencyKey").IsUnique().HasFilter("[IsDeleted] = 0");
+                    b.HasIndex("TenantId", "SourceModule", "SourceDocumentType", "SourceDocumentId", "PostingAction");
+                    b.ToTable("FinanceRoundingEvidence", t =>
+                        {
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Amounts", "[OriginalAmount] > 0 AND [RoundedAmount] > 0 AND [DeltaAmount] = [RoundedAmount] - [OriginalAmount]");
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Increment", "[Increment] > 0");
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Places", "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettings", b =>
@@ -24307,6 +24375,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<bool>("ApprovalRequired")
                         .HasColumnType("bit")
@@ -31061,6 +31135,12 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<int?>("AcceptedSupplyKind")
                         .HasColumnType("int");
 
@@ -32587,6 +32667,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<string>("AccountingBookCode")
                         .HasMaxLength(20)

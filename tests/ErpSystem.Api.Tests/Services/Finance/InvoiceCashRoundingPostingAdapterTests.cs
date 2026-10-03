@@ -95,6 +95,114 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
     }
 
     [Theory]
+    [InlineData("AR", "CustomerPayment", "AR-Bank", true, 10.03, 0.02)]
+    [InlineData("AR", "CustomerPayment", "AR-Bank", true, 10.02, -0.02)]
+    [InlineData("AP", "VendorPayment", "AP-Bank", false, 10.03, 0.02)]
+    [InlineData("AP", "VendorPayment", "AP-Bank", false, 10.02, -0.02)]
+    public async Task Cash_tender_rounding_preserves_allocation_without_creating_false_advance(
+        string module, string documentType, string tag, bool debit, decimal amount, decimal delta)
+    {
+        await using var fixture = await Fixture.CreateAsync("GHS", 2, 0.05m);
+        var request = fixture.Request(module, documentType, tag, amount, debit);
+        if (module == "AR")
+            (await fixture.Context.Set<CustomerPayment>().SingleAsync(x => x.Id == request.SourceDocumentId))
+                .AllocatedAmount = amount;
+        else
+            (await fixture.Context.Set<VendorPayment>().SingleAsync(x => x.Id == request.SourceDocumentId))
+                .AllocatedAmount = amount;
+
+        await fixture.ApplyAsync(request);
+
+        if (module == "AR")
+        {
+            var source = await fixture.Context.Set<CustomerPayment>().SingleAsync(x => x.Id == request.SourceDocumentId);
+            source.RoundingAdjustmentAmount.Should().Be(delta);
+            source.UnallocatedAmount.Should().Be(0m);
+            source.FinanceRoundingEvidenceId.Should().NotBeNull();
+        }
+        else
+        {
+            var source = await fixture.Context.Set<VendorPayment>().SingleAsync(x => x.Id == request.SourceDocumentId);
+            source.RoundingAdjustmentAmount.Should().Be(delta);
+            source.UnallocatedAmount.Should().Be(0m);
+            source.FinanceRoundingEvidenceId.Should().NotBeNull();
+        }
+    }
+
+    [Fact]
+    public async Task Bank_receipt_is_not_cash_rounding_eligible()
+    {
+        await using var fixture = await Fixture.CreateAsync("GHS", 2, 0.05m);
+        var request = fixture.Request("AR", "CustomerPayment", "AR-Bank", 10.03m, true);
+        var source = await fixture.Context.Set<CustomerPayment>()
+            .Include(x => x.ConfiguredPaymentMethod).SingleAsync(x => x.Id == request.SourceDocumentId);
+        source.ConfiguredPaymentMethod!.Type = PaymentMethodType.BankTransfer;
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.ApplyAsync(request);
+
+        request.FinanceRoundingEvidenceId.Should().BeNull();
+        request.Lines.Should().NotContain(x => x.TransactionTag is
+            InvoiceCashRoundingPostingAdapter.GainTag or InvoiceCashRoundingPostingAdapter.LossTag);
+        source.TotalAmount.Should().Be(10.03m);
+    }
+
+    [Fact]
+    public async Task Replay_reuses_frozen_decision_after_settings_change()
+    {
+        await using var fixture = await Fixture.CreateAsync("GHS", 2, 0.05m);
+        var first = fixture.Request("AR", "CustomerInvoice", "AR-Control", 10.03m, true);
+        await fixture.ApplyAsync(first);
+        await fixture.Context.SaveChangesAsync();
+        var evidenceId = first.FinanceRoundingEvidenceId;
+        fixture.Settings.InvoiceRoundingIncrement = 1m;
+        fixture.Settings.InvoiceRoundingMethod = GovernedRoundingMethod.Down;
+        await fixture.Context.SaveChangesAsync();
+        var replay = fixture.Replay(first, 10.03m, true, "AR-Control");
+
+        await fixture.ApplyAsync(replay);
+
+        replay.FinanceRoundingEvidenceId.Should().Be(evidenceId);
+        replay.Lines.Single(x => x.TransactionTag is
+            InvoiceCashRoundingPostingAdapter.GainTag or InvoiceCashRoundingPostingAdapter.LossTag)
+            .TransactionCreditAmount.Should().Be(0.02m);
+        (await fixture.Context.FinanceRoundingEvidence.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Foreign_invoice_freezes_fx_and_reconciles_source_base_total_to_gl_control()
+    {
+        await using var fixture = await Fixture.CreateAsync("USD", 2, 0.05m);
+        fixture.Context.Add(new Currency { TenantId = fixture.TenantId, CurrencyCode = "GHS",
+            NumericCode = "936", CurrencyName = "Ghana Cedi", DecimalPlaces = 2,
+            RoundingPrecision = 0.01m, IsActive = true });
+        var request = fixture.Request("AR", "CustomerInvoice", "AR-Control", 10.03m, true);
+        var invoice = await fixture.Context.Invoices.SingleAsync(x => x.Id == request.SourceDocumentId);
+        invoice.ExchangeRate = 12m;
+        invoice.BaseCurrencyAmount = 120.36m;
+        foreach (var line in request.Lines)
+        {
+            line.DebitAmount *= 12m;
+            line.CreditAmount *= 12m;
+            line.ExchangeRate = 12m;
+            line.ExchangeRateSource = "TEST-FROZEN";
+            line.ExchangeRateDate = new DateTime(2026, 10, 2);
+        }
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.ApplyAsync(request, "GHS", 2);
+
+        invoice.TotalAmount.Should().Be(10.05m);
+        invoice.BaseCurrencyAmount.Should().Be(120.60m);
+        invoice.RoundingAdjustmentAmount.Should().Be(0.02m);
+        request.Lines.Single(x => x.TransactionTag == "AR-Control").DebitAmount.Should().Be(120.60m);
+        var evidence = await fixture.Context.FinanceRoundingEvidence.SingleAsync();
+        evidence.ExchangeRate.Should().Be(12m);
+        evidence.FunctionalDeltaAmount.Should().Be(0.24m);
+        evidence.ExchangeRateSource.Should().Be("TEST-FROZEN");
+    }
+
+    [Theory]
     [InlineData("missing")]
     [InlineData("inactive")]
     [InlineData("indirect")]
@@ -167,6 +275,7 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
         public FinancePostingRequestV2Dto Request(string module, string documentType,
             string anchorTag, decimal amount, bool debit)
         {
+            var sourceId = Guid.NewGuid();
             var anchor = new FinancePostingLineDto
             {
                 AccountId = Guid.NewGuid(),
@@ -178,13 +287,16 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
                 TransactionTag = anchorTag,
                 LineNumber = 1
             };
+            AddSource(module, documentType, sourceId, amount);
+            Context.SaveChanges();
             return new FinancePostingRequestV2Dto
             {
                 SourceModule = module,
                 SourceDocumentType = documentType,
-                SourceDocumentId = Guid.NewGuid(),
+                SourceDocumentId = sourceId,
                 SourceDocumentReference = "ROUND-1",
                 PostingAction = "Post",
+                IdempotencyKey = $"{module}:{documentType}:{TenantId:N}:{sourceId:N}:Post",
                 FunctionalCurrencyCode = CurrencyCode,
                 Lines = new[]
                 {
@@ -204,9 +316,83 @@ public sealed class InvoiceCashRoundingPostingAdapterTests
             };
         }
 
+        private void AddSource(string module, string documentType, Guid sourceId, decimal amount)
+        {
+            if (module == "AR" && documentType == "CustomerInvoice")
+                Context.Add(new Invoice { Id = sourceId, TenantId = TenantId, InvoiceNumber = "ROUND-1",
+                    TotalAmount = amount, BaseCurrencyAmount = amount, CurrencyCode = CurrencyCode,
+                    ExchangeRate = 1m, BusinessPartnerId = Guid.NewGuid() });
+            else if (module == "AP" && documentType == "VendorInvoice")
+                Context.Add(new VendorInvoice { Id = sourceId, TenantId = TenantId, InvoiceNumber = "ROUND-1",
+                    TotalAmount = amount, BaseCurrencyAmount = amount, CurrencyCode = CurrencyCode,
+                    ExchangeRate = 1m, BusinessPartnerId = Guid.NewGuid() });
+            else if (module == "AR" && documentType == "CustomerPayment")
+            {
+                var method = new PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
+                    Name = "Cash", Type = PaymentMethodType.Cash };
+                var till = new LiquidityAccount { Id = Guid.NewGuid(), TenantId = TenantId,
+                    Code = "TILL", Name = "Till", AccountType = LiquidityAccountType.CashTill,
+                    Currency = CurrencyCode, GLAccountId = Guid.NewGuid() };
+                Context.AddRange(method, till, new CustomerPayment { Id = sourceId, TenantId = TenantId,
+                    PaymentNumber = "ROUND-1", TotalAmount = amount, CurrencyCode = CurrencyCode,
+                    ExchangeRate = 1m, BusinessPartnerId = Guid.NewGuid(), PaymentMethodId = method.Id,
+                    LiquidityAccountId = till.Id });
+            }
+            else if (module == "AP" && documentType == "VendorPayment")
+                Context.Add(new VendorPayment { Id = sourceId, TenantId = TenantId, PaymentNumber = "ROUND-1",
+                    TotalAmount = amount, CurrencyCode = CurrencyCode, ExchangeRate = 1m,
+                    BusinessPartnerId = Guid.NewGuid(), PaymentMethod = VendorPaymentMethod.Cash });
+            else if (module == "CASHBANK")
+            {
+                var method = new PaymentMethod { Id = Guid.NewGuid(), TenantId = TenantId,
+                    Name = "Cash", Type = PaymentMethodType.Cash };
+                Context.AddRange(method, new CashTransaction { Id = sourceId, TenantId = TenantId,
+                    TransactionNumber = "ROUND-1", TransactionType = documentType.Contains("Receipt")
+                        ? CashTransactionType.Receipt : CashTransactionType.Payment,
+                    Amount = amount, BaseAmount = amount, Currency = CurrencyCode,
+                    BankAccountId = Guid.NewGuid(), PaymentMethodId = method.Id });
+            }
+        }
+
         public Task ApplyAsync(FinancePostingRequestV2Dto request) =>
             InvoiceCashRoundingPostingAdapter.ApplyAsync(
                 Context, TenantId, request, CurrencyCode, DecimalPlaces, CancellationToken.None);
+
+        public Task ApplyAsync(FinancePostingRequestV2Dto request,
+            string functionalCurrency, int functionalPlaces) =>
+            InvoiceCashRoundingPostingAdapter.ApplyAsync(
+                Context, TenantId, request, functionalCurrency, functionalPlaces, CancellationToken.None);
+
+        public FinancePostingRequestV2Dto Replay(FinancePostingRequestV2Dto original,
+            decimal amount, bool debit, string anchorTag) => new()
+        {
+            SourceModule = original.SourceModule,
+            SourceDocumentType = original.SourceDocumentType,
+            SourceDocumentId = original.SourceDocumentId,
+            SourceDocumentReference = original.SourceDocumentReference,
+            PostingAction = original.PostingAction,
+            IdempotencyKey = original.IdempotencyKey,
+            FunctionalCurrencyCode = original.FunctionalCurrencyCode,
+            Lines = new[]
+            {
+                new FinancePostingLineDto
+                {
+                    AccountId = Guid.NewGuid(), DebitAmount = debit ? amount : 0m,
+                    CreditAmount = debit ? 0m : amount, TransactionCurrency = CurrencyCode,
+                    TransactionDebitAmount = debit ? amount : 0m,
+                    TransactionCreditAmount = debit ? 0m : amount,
+                    TransactionTag = anchorTag, LineNumber = 1
+                },
+                new FinancePostingLineDto
+                {
+                    AccountId = Guid.NewGuid(), DebitAmount = debit ? 0m : amount,
+                    CreditAmount = debit ? amount : 0m, TransactionCurrency = CurrencyCode,
+                    TransactionDebitAmount = debit ? 0m : amount,
+                    TransactionCreditAmount = debit ? amount : 0m,
+                    TransactionTag = "Offset", LineNumber = 2
+                }
+            }
+        };
 
         private Account Account(string code, AccountType type) => new()
         {

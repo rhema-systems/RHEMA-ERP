@@ -7,6 +7,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
@@ -1005,6 +1006,90 @@ public sealed class FinancePostingEngineTests
         duplicate.JournalEntryId.Should().Be(reversal.JournalEntryId);
         (await db.JournalEntries.CountAsync()).Should().Be(2);
         (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
+    }
+
+    [Fact]
+    [Trait("Category", "FinanceRounding")]
+    public async Task Rounded_invoice_replay_and_exact_reversal_preserve_one_frozen_evidence_record()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var ar = SeedAccount(db, tenantId, "1200", AccountType.Asset);
+        var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var gain = SeedAccount(db, tenantId, "4099", AccountType.Revenue);
+        var loss = SeedAccount(db, tenantId, "6099", AccountType.Expense);
+        var sourceId = Guid.NewGuid();
+        db.Invoices.Add(new Invoice
+        {
+            Id = sourceId, TenantId = tenantId, InvoiceNumber = "ROUND-ENGINE-1",
+            CustomerName = "Rounding customer", BusinessPartnerId = Guid.NewGuid(),
+            CurrencyCode = "GHS", ExchangeRate = 1m, TotalAmount = 10.03m,
+            BaseCurrencyAmount = 10.03m, InvoiceDate = new DateTime(2026, 7, 4)
+        });
+        var settings = db.FinanceSettings.Local.Single(x => x.TenantId == tenantId);
+        settings.InvoiceRoundingEnabled = true;
+        settings.InvoiceRoundingIncrement = 0.05m;
+        settings.InvoiceRoundingMethod = GovernedRoundingMethod.Nearest;
+        settings.InvoiceRoundingGainAccountId = gain.Id;
+        settings.InvoiceRoundingLossAccountId = loss.Id;
+        await db.SaveChangesAsync();
+        FinancePostingRequestV2Dto Request() => new()
+        {
+            SourceModule = "AR", SourceDocumentType = "CustomerInvoice", SourceDocumentId = sourceId,
+            SourceDocumentTenantId = tenantId, PostingAction = "Post", SourceDocumentReference = "ROUND-ENGINE-1",
+            Description = "Rounded invoice", PostingDate = new DateTime(2026, 7, 4), JournalType = "AR Invoice",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"AR:CustomerInvoice:{tenantId:N}:{sourceId:N}:Post", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = ar.Id, DebitAmount = 10.03m,
+                    TransactionCurrency = "GHS", TransactionDebitAmount = 10.03m,
+                    TransactionTag = "AR-Control", LineNumber = 1 },
+                new FinancePostingLineDto { AccountId = revenue.Id, CreditAmount = 10.03m,
+                    TransactionCurrency = "GHS", TransactionCreditAmount = 10.03m,
+                    TransactionTag = "AR-Revenue", LineNumber = 2 }
+            ]
+        };
+        var engine = CreateService(db, tenantId);
+        var producer = new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+
+        var original = await engine.PostAsync(Request(), producer);
+        var originalEvent = await db.FinancePostingEvents.SingleAsync(x => x.Id == original.PostingEventId);
+        var evidenceId = originalEvent.FinanceRoundingEvidenceId;
+        evidenceId.Should().NotBeNull();
+        settings.InvoiceRoundingIncrement = 1m;
+        settings.InvoiceRoundingMethod = GovernedRoundingMethod.Down;
+        await db.SaveChangesAsync();
+
+        var replay = await engine.PostAsync(Request(), producer);
+        replay.WasDuplicate.Should().BeTrue();
+        replay.JournalEntryId.Should().Be(original.JournalEntryId);
+        (await db.FinanceRoundingEvidence.CountAsync()).Should().Be(1);
+        (await db.Invoices.SingleAsync(x => x.Id == sourceId)).TotalAmount.Should().Be(10.05m);
+
+        var reversal = await engine.ReverseAsync(original.PostingEventId,
+            "Reverse frozen rounded invoice", new DateTime(2026, 7, 5));
+        var duplicateReversal = await engine.ReverseAsync(original.PostingEventId,
+            "Reverse frozen rounded invoice", new DateTime(2026, 7, 5));
+        duplicateReversal.WasDuplicate.Should().BeTrue();
+        duplicateReversal.JournalEntryId.Should().Be(reversal.JournalEntryId);
+        var events = await db.FinancePostingEvents.OrderBy(x => x.PostingAction).ToListAsync();
+        events.Should().HaveCount(2).And.OnlyContain(x => x.FinanceRoundingEvidenceId == evidenceId);
+        var originalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == original.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        var reversalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == reversal.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        reversalLines.Should().HaveSameCount(originalLines);
+        for (var index = 0; index < originalLines.Count; index++)
+        {
+            reversalLines[index].AccountId.Should().Be(originalLines[index].AccountId);
+            reversalLines[index].DebitAmount.Should().Be(originalLines[index].CreditAmount);
+            reversalLines[index].CreditAmount.Should().Be(originalLines[index].DebitAmount);
+            reversalLines[index].TransactionDebitAmount.Should().Be(originalLines[index].TransactionCreditAmount);
+            reversalLines[index].TransactionCreditAmount.Should().Be(originalLines[index].TransactionDebitAmount);
+        }
     }
 
     [Fact]

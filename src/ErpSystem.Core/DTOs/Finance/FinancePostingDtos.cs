@@ -26,6 +26,12 @@ public abstract class FinancePostingCommandDto
     public bool ReturnExistingOnDuplicate { get; set; } = true;
 
     /// <summary>
+    /// Server-owned immutable invoice/cash rounding decision. Producers cannot manufacture this
+    /// value; the governed source adapter freezes it before the posting engine normalizes lines.
+    /// </summary>
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
+    /// <summary>
     /// Optional document-level deviation from the configured rate-selection policy.
     /// Any override is applied consistently to every foreign-currency line.
     /// </summary>

@@ -24,6 +24,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal DiscountAmount { get; set; }
         public string? DiscountReason { get; set; }
         public decimal TotalAmount { get; set; }
+        public decimal RoundingAdjustmentAmount { get; set; }
+        public Guid? FinanceRoundingEvidenceId { get; set; }
         public decimal PaidAmount { get; set; }
         public decimal BalanceAmount { get; set; }
         public string Status { get; set; } = "Draft";

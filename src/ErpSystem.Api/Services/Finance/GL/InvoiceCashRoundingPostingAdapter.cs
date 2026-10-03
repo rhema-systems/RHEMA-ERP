@@ -1,5 +1,6 @@
 using System.Globalization;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Data;
@@ -21,9 +22,40 @@ internal static class InvoiceCashRoundingPostingAdapter
             return;
         var anchor = FindAnchor(request);
         if (anchor is null) return;
+        if (string.IsNullOrWhiteSpace(request.IdempotencyKey))
+            throw new InvalidOperationException("Invoice/cash rounding requires a posting idempotency key.");
+
+        var evidence = await db.FinanceRoundingEvidence.SingleOrDefaultAsync(x =>
+            x.TenantId == tenantId && !x.IsDeleted &&
+            x.PostingIdempotencyKey == request.IdempotencyKey, cancellationToken);
+        if (evidence is null)
+        {
+            var source = await ResolveSourceAsync(db, tenantId, request, anchor,
+                functionalCurrency, cancellationToken);
+            if (source is null) return;
+            evidence = await CreateEvidenceAsync(db, tenantId, request, anchor, source.Value,
+                functionalCurrency, functionalPlaces, cancellationToken);
+            if (evidence is null) return;
+            db.FinanceRoundingEvidence.Add(evidence);
+        }
+        else
+        {
+            EnsureEvidenceMatchesRequest(evidence, request);
+        }
+
+        request.FinanceRoundingEvidenceId = evidence.Id;
+        await ApplySourceAsync(db, tenantId, request, evidence, cancellationToken);
+        ApplyFrozenDecision(request, anchor, evidence, functionalCurrency);
+    }
+
+    private static async Task<FinanceRoundingEvidence?> CreateEvidenceAsync(
+        ApplicationDbContext db, Guid tenantId, FinancePostingCommandDto request,
+        FinancePostingLineDto anchor, RoundingSource source, string functionalCurrency,
+        int functionalPlaces, CancellationToken cancellationToken)
+    {
         var settings = await db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(x => x.TenantId == tenantId && !x.IsDeleted, cancellationToken);
-        if (settings is not { InvoiceRoundingEnabled: true }) return;
+        if (settings is not { InvoiceRoundingEnabled: true }) return null;
         var increment = settings.InvoiceRoundingIncrement
             ?? throw new InvalidOperationException("Invoice/cash rounding is enabled without an increment.");
         var gainId = settings.InvoiceRoundingGainAccountId
@@ -33,32 +65,214 @@ internal static class InvoiceCashRoundingPostingAdapter
         await RequireAccountAsync(db, tenantId, gainId, AccountType.Revenue, "gain", cancellationToken);
         await RequireAccountAsync(db, tenantId, lossId, AccountType.Expense, "loss", cancellationToken);
 
-        var currency = NormalizeCurrency(anchor.TransactionCurrency, functionalCurrency);
+        var currency = source.Currency;
         var places = await ResolvePlacesAsync(db, tenantId, currency, cancellationToken);
         var minorUnit = CurrencyMinorUnitPolicy.MinorUnit(places);
         if (increment < minorUnit || increment % minorUnit != 0m)
             throw new InvalidOperationException(
                 $"Invoice/cash rounding increment {increment.ToString(CultureInfo.InvariantCulture)} must be a whole multiple of the {currency} minor unit {minorUnit.ToString(CultureInfo.InvariantCulture)}.");
-        var anchorDebit = IsDebit(anchor);
-        var original = TransactionAmount(anchor, anchorDebit, currency, functionalCurrency);
+        var original = source.OriginalAmount;
         var rounded = CurrencyMinorUnitPolicy.Round(
             PrecisionRoundingPolicy.RoundToIncrement(original, increment, settings.InvoiceRoundingMethod), places);
         var delta = CurrencyMinorUnitPolicy.Round(rounded - original, places);
-        if (delta == 0m) return;
         if (rounded <= 0m)
             throw new InvalidOperationException("Invoice/cash rounding cannot reduce the posting anchor to zero or below.");
-        var rate = currency == functionalCurrency ? 1m : anchor.ExchangeRate
+        var rate = currency == functionalCurrency ? 1m : source.ExchangeRate
             ?? throw new InvalidOperationException("Foreign-currency rounding requires immutable exchange-rate evidence.");
-        var functionalDelta = CurrencyMinorUnitPolicy.Round(decimal.Abs(delta) * rate, functionalPlaces);
-        if (functionalDelta == 0m)
+        var originalFunctional = CurrencyMinorUnitPolicy.Round(original * rate, functionalPlaces);
+        var roundedFunctional = CurrencyMinorUnitPolicy.Round(rounded * rate, functionalPlaces);
+        var functionalDelta = roundedFunctional - originalFunctional;
+        if (delta != 0m && functionalDelta == 0m)
             throw new InvalidOperationException("The rounding delta is below the functional-currency minor unit.");
-
-        ApplyAnchor(anchor, anchorDebit, delta, functionalDelta, rounded, currency == functionalCurrency);
-        var gain = anchorDebit ? delta > 0m : delta < 0m;
-        request.Lines = request.Lines.Concat(new[] { BuildLine(request, anchor,
-            gain ? gainId : lossId, gain, anchorDebit, delta, functionalDelta, original,
-            rounded, increment, settings.InvoiceRoundingMethod, currency, functionalCurrency, rate) }).ToArray();
+        return new FinanceRoundingEvidence
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            PostingIdempotencyKey = request.IdempotencyKey!,
+            SourceModule = request.SourceModule, SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId, PostingAction = request.PostingAction,
+            Eligibility = source.Eligibility, CurrencyCode = currency, DecimalPlaces = places,
+            OriginalAmount = original, RoundedAmount = rounded, DeltaAmount = delta,
+            Increment = increment, Method = settings.InvoiceRoundingMethod,
+            FunctionalCurrencyCode = functionalCurrency, FunctionalDecimalPlaces = functionalPlaces,
+            OriginalFunctionalAmount = originalFunctional, RoundedFunctionalAmount = roundedFunctional,
+            FunctionalDeltaAmount = functionalDelta, ExchangeRateId = source.ExchangeRateId,
+            ExchangeRate = rate, ExchangeRateSource = source.ExchangeRateSource,
+            ExchangeRateDate = source.ExchangeRateDate, GainAccountId = gainId, LossAccountId = lossId
+        };
     }
+
+    private static void ApplyFrozenDecision(FinancePostingCommandDto request,
+        FinancePostingLineDto anchor, FinanceRoundingEvidence evidence, string functionalCurrency)
+    {
+        if (evidence.DeltaAmount == 0m) return;
+        var anchorDebit = IsDebit(anchor);
+        ApplyAnchor(anchor, anchorDebit, evidence.DeltaAmount,
+            decimal.Abs(evidence.FunctionalDeltaAmount), evidence.RoundedAmount,
+            evidence.CurrencyCode == functionalCurrency);
+        var gain = anchorDebit ? evidence.DeltaAmount > 0m : evidence.DeltaAmount < 0m;
+        request.Lines = request.Lines.Concat(new[] { BuildLine(request, anchor,
+            gain ? evidence.GainAccountId : evidence.LossAccountId, gain, anchorDebit,
+            evidence.DeltaAmount, decimal.Abs(evidence.FunctionalDeltaAmount), evidence.OriginalAmount,
+            evidence.RoundedAmount, evidence.Increment, evidence.Method, evidence.CurrencyCode,
+            functionalCurrency, evidence.ExchangeRate, evidence.Id) }).ToArray();
+    }
+
+    private static async Task<RoundingSource?> ResolveSourceAsync(
+        ApplicationDbContext db, Guid tenantId, FinancePostingCommandDto request,
+        FinancePostingLineDto anchor, string functionalCurrency, CancellationToken cancellationToken)
+    {
+        var key = (request.SourceModule.ToUpperInvariant(), request.SourceDocumentType);
+        if (key == ("AR", "CustomerInvoice"))
+        {
+            var source = await db.Invoices.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.TenantId == tenantId && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("Customer invoice rounding source was not found.");
+            return Source(FinanceRoundingEligibility.Invoice, source.CurrencyCode, source.TotalAmount,
+                source.ExchangeRateId, source.ExchangeRate, anchor);
+        }
+        if (key == ("AP", "VendorInvoice"))
+        {
+            var source = await db.VendorInvoices.AsNoTracking().SingleOrDefaultAsync(x =>
+                x.TenantId == tenantId && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("Vendor invoice rounding source was not found.");
+            return Source(FinanceRoundingEligibility.Invoice, source.CurrencyCode, source.TotalAmount,
+                source.ExchangeRateId, source.ExchangeRate, anchor);
+        }
+        if (key == ("AR", "CustomerPayment"))
+        {
+            var source = await db.Set<CustomerPayment>().AsNoTracking()
+                .Include(x => x.ConfiguredPaymentMethod).Include(x => x.LiquidityAccount)
+                .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == request.SourceDocumentId && !x.IsDeleted,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("Customer receipt rounding source was not found.");
+            if (source.ConfiguredPaymentMethod?.Type != PaymentMethodType.Cash
+                || source.LiquidityAccount?.AccountType != LiquidityAccountType.CashTill)
+                return null;
+            return Source(FinanceRoundingEligibility.CashTillTender, source.CurrencyCode,
+                source.TotalAmount, source.ExchangeRateId, source.ExchangeRate, anchor);
+        }
+        if (key == ("AP", "VendorPayment"))
+        {
+            var source = await db.Set<VendorPayment>().AsNoTracking().SingleOrDefaultAsync(x =>
+                x.TenantId == tenantId && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("Vendor payment rounding source was not found.");
+            if (source.PaymentMethod != VendorPaymentMethod.Cash) return null;
+            return Source(FinanceRoundingEligibility.CashTillTender, source.CurrencyCode,
+                source.TotalAmount, source.ExchangeRateId, source.ExchangeRate, anchor);
+        }
+        if (key.Item1 == "CASHBANK")
+        {
+            var source = await db.Set<CashTransaction>().AsNoTracking().Include(x => x.PaymentMethod)
+                .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == request.SourceDocumentId && !x.IsDeleted,
+                    cancellationToken)
+                ?? throw new InvalidOperationException("Cash/bank rounding source was not found.");
+            if (source.TransactionType == CashTransactionType.Transfer
+                || source.PaymentMethod?.Type != PaymentMethodType.Cash)
+                return null;
+            return Source(FinanceRoundingEligibility.CashTillTender, source.Currency,
+                source.Amount, source.ExchangeRateId, source.ExchangeRate, anchor);
+        }
+        return null;
+
+        RoundingSource Source(FinanceRoundingEligibility eligibility, string? currency,
+            decimal amount, Guid? exchangeRateId, decimal? exchangeRate, FinancePostingLineDto line) =>
+            new(eligibility, NormalizeCurrency(currency, functionalCurrency), amount,
+                exchangeRateId ?? line.ExchangeRateId, exchangeRate ?? line.ExchangeRate,
+                line.ExchangeRateSource, line.ExchangeRateDate);
+    }
+
+    private static async Task ApplySourceAsync(ApplicationDbContext db, Guid tenantId,
+        FinancePostingCommandDto request, FinanceRoundingEvidence evidence,
+        CancellationToken cancellationToken)
+    {
+        var key = (request.SourceModule.ToUpperInvariant(), request.SourceDocumentType);
+        if (key == ("AR", "CustomerInvoice"))
+        {
+            var source = await db.Invoices.SingleAsync(x => x.TenantId == tenantId
+                && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken);
+            var changed = Apply(source.TotalAmount, evidence, out var rounded);
+            source.TotalAmount = rounded;
+            source.BaseCurrencyAmount = evidence.RoundedFunctionalAmount;
+            source.RoundingAdjustmentAmount = evidence.DeltaAmount;
+            source.FinanceRoundingEvidenceId = evidence.Id;
+            var partner = await db.Set<ErpSystem.Core.Entities.Procurement.BusinessPartner>()
+                .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == source.BusinessPartnerId && !x.IsDeleted,
+                    cancellationToken);
+            if (changed && partner is not null)
+                partner.OutstandingBalance = (partner.OutstandingBalance ?? 0m) + evidence.FunctionalDeltaAmount;
+            return;
+        }
+        if (key == ("AP", "VendorInvoice"))
+        {
+            var source = await db.VendorInvoices.SingleAsync(x => x.TenantId == tenantId
+                && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken);
+            Apply(source.TotalAmount, evidence, out var rounded);
+            source.TotalAmount = rounded;
+            source.BaseCurrencyAmount = evidence.RoundedFunctionalAmount;
+            source.RoundingAdjustmentAmount = evidence.DeltaAmount;
+            source.FinanceRoundingEvidenceId = evidence.Id;
+            return;
+        }
+        if (key == ("AR", "CustomerPayment"))
+        {
+            var source = await db.Set<CustomerPayment>().SingleAsync(x => x.TenantId == tenantId
+                && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken);
+            if (Apply(source.TotalAmount, evidence, out var rounded)) source.TotalAmount = rounded;
+            source.RoundingAdjustmentAmount = evidence.DeltaAmount;
+            source.FinanceRoundingEvidenceId = evidence.Id;
+            return;
+        }
+        if (key == ("AP", "VendorPayment"))
+        {
+            var source = await db.Set<VendorPayment>().SingleAsync(x => x.TenantId == tenantId
+                && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken);
+            if (Apply(source.TotalAmount, evidence, out var rounded)) source.TotalAmount = rounded;
+            source.RoundingAdjustmentAmount = evidence.DeltaAmount;
+            source.FinanceRoundingEvidenceId = evidence.Id;
+            return;
+        }
+        if (key.Item1 == "CASHBANK")
+        {
+            var source = await db.Set<CashTransaction>().SingleAsync(x => x.TenantId == tenantId
+                && x.Id == request.SourceDocumentId && !x.IsDeleted, cancellationToken);
+            if (Apply(source.Amount, evidence, out var rounded))
+            {
+                source.Amount = rounded;
+                source.BaseAmount = evidence.RoundedFunctionalAmount;
+            }
+            source.RoundingAdjustmentAmount = evidence.DeltaAmount;
+            source.FinanceRoundingEvidenceId = evidence.Id;
+        }
+
+        static bool Apply(decimal sourceAmount, FinanceRoundingEvidence frozen, out decimal rounded)
+        {
+            rounded = sourceAmount;
+            if (sourceAmount == frozen.RoundedAmount) return false;
+            if (sourceAmount != frozen.OriginalAmount)
+                throw new InvalidOperationException("The source amount no longer matches its frozen rounding evidence.");
+            rounded = frozen.RoundedAmount;
+            return true;
+        }
+    }
+
+    private static void EnsureEvidenceMatchesRequest(FinanceRoundingEvidence evidence,
+        FinancePostingCommandDto request)
+    {
+        if (!string.Equals(evidence.SourceModule, request.SourceModule, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(evidence.SourceDocumentType, request.SourceDocumentType, StringComparison.Ordinal)
+            || evidence.SourceDocumentId != request.SourceDocumentId
+            || !string.Equals(evidence.PostingAction, request.PostingAction, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The posting idempotency key belongs to different rounding evidence.");
+    }
+
+    private readonly record struct RoundingSource(
+        FinanceRoundingEligibility Eligibility,
+        string Currency,
+        decimal OriginalAmount,
+        Guid? ExchangeRateId,
+        decimal? ExchangeRate,
+        string? ExchangeRateSource,
+        DateTime? ExchangeRateDate);
 
     private static FinancePostingLineDto? FindAnchor(FinancePostingCommandDto request)
     {
@@ -115,7 +329,7 @@ internal static class InvoiceCashRoundingPostingAdapter
         FinancePostingLineDto anchor, Guid accountId, bool gain, bool anchorDebit,
         decimal delta, decimal functionalDelta, decimal original, decimal rounded,
         decimal increment, GovernedRoundingMethod method, string currency,
-        string functionalCurrency, decimal rate)
+        string functionalCurrency, decimal rate, Guid evidenceId)
     {
         var debit = anchorDebit ? delta < 0m : delta > 0m;
         var amount = decimal.Abs(delta);
@@ -138,7 +352,7 @@ internal static class InvoiceCashRoundingPostingAdapter
             LineNumber = request.Lines.Select(x => x.LineNumber ?? 0).DefaultIfEmpty().Max() + 1,
             Dimensions = anchor.Dimensions,
             Notes = FormattableString.Invariant(
-                $"FinanceRounding:v1;Original={original};Rounded={rounded};Delta={delta};Increment={increment};Method={method};Currency={currency};Anchor={anchor.TransactionTag}"),
+                $"FinanceRounding:v2;Evidence={evidenceId:N};Original={original};Rounded={rounded};Delta={delta};Increment={increment};Method={method};Currency={currency};Anchor={anchor.TransactionTag}"),
             TransactionTag = gain ? GainTag : LossTag
         };
     }

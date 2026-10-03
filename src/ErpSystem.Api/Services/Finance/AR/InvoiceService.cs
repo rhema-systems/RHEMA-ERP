@@ -2889,6 +2889,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 DiscountAmount = invoice.DiscountAmount,
                 DiscountReason = invoice.DiscountReason,
                 TotalAmount = invoice.TotalAmount,
+                RoundingAdjustmentAmount = invoice.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = invoice.FinanceRoundingEvidenceId,
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,
                 Status = invoice.Status.ToString(),

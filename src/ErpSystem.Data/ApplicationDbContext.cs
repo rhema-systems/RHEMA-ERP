@@ -205,6 +205,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<RecurringJournalTemplateLine> RecurringJournalTemplateLines { get; set; }
     public DbSet<RecurringJournalOccurrence> RecurringJournalOccurrences { get; set; }
     public DbSet<FinancePostingEvent> FinancePostingEvents { get; set; }
+    public DbSet<FinanceRoundingEvidence> FinanceRoundingEvidence { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountBalance> AccountBalances { get; set; }
     public DbSet<AccountCurrencyExposure> AccountCurrencyExposures { get; set; }
@@ -1687,6 +1688,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.PaidAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.CreditedAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.EarlyPaymentDiscountPercentage).HasColumnType("decimal(18,4)");
             entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(20,4)");
             entity.Ignore(e => e.BalanceAmount);
@@ -1733,6 +1739,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CustomerPayment>(entity =>
         {
             entity.ToTable("CustomerPayment");
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => e.FinanceRoundingEvidenceId);
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.BusinessPartnerId);
             entity.HasIndex(e => e.BusinessPartnerRoleId);
             entity.HasIndex(e => e.BusinessPartnerArProfileVersionId);
@@ -2323,6 +2334,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoice>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => e.FinanceRoundingEvidenceId);
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasAlternateKey(invoice => new { invoice.TenantId, invoice.Id });
             entity.HasIndex(invoice => new { invoice.TenantId, invoice.LeaseScheduleLineId })
                 .IsUnique().HasFilter("[LeaseScheduleLineId] IS NOT NULL AND [IsDeleted] = 0 AND [Status] <> 7");
@@ -2920,6 +2936,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new VendorPaymentEvidenceLinkConfiguration());
         builder.Entity<VendorPayment>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => e.FinanceRoundingEvidenceId);
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("VendorPayment", table =>
             {
@@ -4109,6 +4130,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PrimaryExchangeRateId);
+            entity.HasIndex(e => e.FinanceRoundingEvidenceId);
             entity.HasIndex(e => new { e.TenantId, e.HasForeignCurrencyLines });
             entity.Property(e => e.PrimaryExchangeRate).HasColumnType("decimal(18,6)");
             entity.Property(e => e.RequestFingerprintVersion).HasMaxLength(40);
@@ -4127,9 +4149,54 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.PrimaryExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinanceRoundingEvidence>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceRoundingEvidence>(entity =>
+        {
+            entity.ToTable("FinanceRoundingEvidence");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
+            entity.HasIndex(e => new { e.TenantId, e.PostingIdempotencyKey })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.SourceModule,
+                e.SourceDocumentType,
+                e.SourceDocumentId,
+                e.PostingAction
+            });
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Amounts",
+                "[OriginalAmount] > 0 AND [RoundedAmount] > 0 AND [DeltaAmount] = [RoundedAmount] - [OriginalAmount]");
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Increment", "[Increment] > 0");
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Places",
+                "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
+            entity.HasOne<Tenant>()
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.GainAccountId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.LossAccountId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ExchangeRate>()
+                .WithMany()
+                .HasForeignKey(e => e.ExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -5734,6 +5801,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<CashTransaction>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => e.FinanceRoundingEvidenceId);
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.BankAccountId, e.TransactionDate });
             entity.HasIndex(e => new { e.TenantId, e.TransactionNumber }).IsUnique();

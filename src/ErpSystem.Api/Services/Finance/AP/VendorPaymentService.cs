@@ -369,7 +369,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PaymentDate = payment.PaymentDate,
                     TotalAmount = payment.TotalAmount,
                     AllocatedAmount = payment.AllocatedAmount,
-                    AvailableAmount = payment.TotalAmount - payment.AllocatedAmount,
+                    AvailableAmount = payment.UnallocatedAmount,
                     CurrencyCode = payment.CurrencyCode,
                     Status = payment.Status,
                     JournalEntryId = payment.JournalEntryId!.Value
@@ -7037,6 +7037,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
+                RoundingAdjustmentAmount = payment.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = payment.FinanceRoundingEvidenceId,
                 PaymentMethod = payment.PaymentMethod,
                 PaymentMethodId = payment.PaymentMethodId,
                 PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,

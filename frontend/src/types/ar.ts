@@ -89,6 +89,8 @@ export interface Invoice {
     subTotal?: number;
     taxAmount?: number;
     totalAmount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     paidAmount: number;
     balanceAmount: number;
     status: 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'ReadyToPost' | 'Sent' | 'Posted' | 'PartiallyPaid' | 'Paid' | 'Void' | 'Cancelled' | 'Overdue';
@@ -164,6 +166,8 @@ export interface CustomerPayment {
     totalAmount: number;
     allocatedAmount: number;
     unallocatedAmount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     paymentMethod: string;
     paymentMethodId?: string;
     paymentMethodName?: string;

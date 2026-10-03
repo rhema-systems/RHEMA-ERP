@@ -5106,6 +5106,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TaxAmount = invoice.TaxAmount,
                 DiscountAmount = invoice.DiscountAmount,
                 TotalAmount = invoice.TotalAmount,
+                RoundingAdjustmentAmount = invoice.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = invoice.FinanceRoundingEvidenceId,
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,
                 CurrencyCode = invoice.CurrencyCode,

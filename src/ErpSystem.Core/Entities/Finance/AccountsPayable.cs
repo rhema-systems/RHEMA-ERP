@@ -201,6 +201,10 @@ public class VendorInvoice : TenantEntity
     [Column(TypeName = "decimal(20,4)")]
     public decimal TotalAmount { get; set; }
 
+    [Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
     [Column(TypeName = "decimal(20,4)")]
     public decimal PaidAmount { get; set; }
 
@@ -583,6 +587,10 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    [Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
     /// <summary>
     /// True only when the original posted payment was recorded to the configured supplier-advance
     /// account. Later allocations must reclassify that advance through the Finance posting engine.
@@ -603,7 +611,7 @@ public class VendorPayment : TenantEntity
     public string? OpeningSourceReference { get; set; }
 
     [NotMapped]
-    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
+    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount - RoundingAdjustmentAmount;
 
     // ── Payment Method ──────────────────────────────────────────────────
 

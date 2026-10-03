@@ -4809,6 +4809,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
+                RoundingAdjustmentAmount = payment.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = payment.FinanceRoundingEvidenceId,
                 PaymentMethod = payment.PaymentMethod,
                 PaymentMethodId = payment.PaymentMethodId,
                 PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,

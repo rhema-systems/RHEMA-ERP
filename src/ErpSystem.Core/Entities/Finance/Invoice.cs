@@ -64,6 +64,11 @@ namespace ErpSystem.Core.Entities.Finance
         
         [Column(TypeName = "decimal(20,4)")]
         public decimal TotalAmount { get; set; }
+
+        /// <summary>Frozen governed difference between commercial line total and posted invoice total.</summary>
+        [Column(TypeName = "decimal(20,6)")]
+        public decimal RoundingAdjustmentAmount { get; set; }
+        public Guid? FinanceRoundingEvidenceId { get; set; }
         
         [Column(TypeName = "decimal(20,4)")]
         public decimal PaidAmount { get; set; }
