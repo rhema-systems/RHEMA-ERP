@@ -264,6 +264,7 @@ class TravelComplianceService {
     return apiService.put<StaffTravelAlert>(`${this.baseUrl}/alerts/${payload.id}`, payload);
   }
 
+  /** Refused once the alert has reached a trip (lane 7, O-15) — deactivate it instead (`isActive: false`). */
   deleteAlert(id: string) {
     return apiService.delete<void>(`${this.baseUrl}/alerts/${id}`);
   }

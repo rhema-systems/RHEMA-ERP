@@ -1329,7 +1329,9 @@ public class StaffTravelDocument : TenantEntity
 
     [Required]
     [MaxLength(100)]
-    public string DocumentNumber { get; set; } = null!; // encrypted at rest
+    // Lane 7 (O-7): plain text — this said "encrypted at rest" and nothing encrypts it. Reads mask it to the last four
+    // everywhere but the document's own detail; column encryption is a platform item (plan § 6).
+    public string DocumentNumber { get; set; } = null!;
 
     public Guid IssuingCountryId { get; set; }                      // FK -> Country
 
@@ -1405,7 +1407,8 @@ public class StaffTravelVisaApplication : TenantEntity
     public DateOnly? ExpiryDate { get; set; }
 
     [MaxLength(100)]
-    public string? VisaNumber { get; set; }        // encrypted
+    // Lane 7 (O-7): plain text, not encrypted as this said; the summary masks it to the last four (lane 0).
+    public string? VisaNumber { get; set; }
 
     [Column(TypeName = "decimal(14,2)")]
     public decimal? ProcessingFee { get; set; }

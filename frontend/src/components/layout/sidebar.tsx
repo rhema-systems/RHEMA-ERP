@@ -1363,6 +1363,8 @@ export const navigationItems: NavItem[] = [
               // The visa register had a client and no screen, so eleven fields on its DTOs
               // were unreachable. Reference data rather than day-to-day work, so it sits last.
               { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2, permissions: ['HR.Travel.Read'] },
+              // Travel final closure, lane 7 (E2): the passports the visa lookup and the passport checks read had no screen.
+              { title: 'Travel Documents', href: '/hr/travel/documents', icon: IdCard, permissions: ['HR.Travel.Read'] },
               // Moved out of Administration → HR alongside the visa register it reads like: an
               // advisory is raised against a destination, expires and is re-issued as conditions
               // change, on the same cadence as the trips it warns about. The policies it used to

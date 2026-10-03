@@ -2923,7 +2923,12 @@ public class StaffTravelDocumentDto : BaseDto
     public string EmployeeName { get; set; } = string.Empty;
     public TravelDocumentType DocumentType { get; set; }
     public string DocumentTypeName => DocumentType.ToString();
+    /// <summary>
+    /// Lane 7 (O-7): masked to its last four in every list and on the request's screens — <see cref="NumberMasked"/>
+    /// says so; the full number only on the document's own read (<c>documents/{id}</c>).
+    /// </summary>
     public string DocumentNumber { get; set; } = string.Empty;
+    public bool NumberMasked { get; set; }
     public Guid IssuingCountryId { get; set; }
     public string? IssuingCountryName { get; set; }
     public DateOnly? IssueDate { get; set; }

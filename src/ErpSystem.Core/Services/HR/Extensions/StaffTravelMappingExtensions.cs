@@ -1937,7 +1937,7 @@ public static class StaffTravelMappingExtensions
     /// "••••••1234": every character but the last four replaced; a value of four or fewer is masked
     /// whole. Null or blank stays null. Same shape as the bank-account mask on profile changes.
     /// </summary>
-    private static string? MaskAllButLastFour(string? value)
+    internal static string? MaskAllButLastFour(string? value)
         => string.IsNullOrWhiteSpace(value)
             ? null
             : value.Length <= 4
@@ -2052,7 +2052,7 @@ public static class StaffTravelMappingExtensions
         entity.MitigationRequired = dto.MitigationRequired;
         entity.MitigationNotes = dto.MitigationNotes;
         entity.DutyOfCareBriefingSent = dto.DutyOfCareBriefingSent;
-        entity.AssessedById = dto.AssessedById;
+        // Lane 7 (E5): the assessor is who made the assessment — set on create from the caller, never from a payload.
         entity.ValidUntil = dto.ValidUntil;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

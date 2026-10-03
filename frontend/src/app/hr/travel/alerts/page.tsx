@@ -306,7 +306,9 @@ export default function TravelAlertsPage() {
             <DialogTitle>{editingId ? 'Edit alert' : 'Raise a destination alert'}</DialogTitle>
             <DialogDescription>
               The travel desk sees it on every trip to this destination while it is in force.
-              Travellers see it once it is sent to them from a trip&apos;s Compliance tab.
+              {editingId
+                ? ' Once it has reached a trip it is not deleted — untick Active to stand it down.'
+                : ' Raised active, it goes at once to the traveller of every approved or under-way trip to the destination in its dates (the city, when one is named); later trips are sent it from their Compliance tab.'}
             </DialogDescription>
           </DialogHeader>
 

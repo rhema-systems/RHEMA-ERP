@@ -37,7 +37,9 @@ public interface IStaffTravelDocumentRepository : IGenericRepository<StaffTravel
 public interface IStaffTravelVisaRequirementRepository : IGenericRepository<StaffTravelVisaRequirement>
 {
     /// <summary>Returns the visa requirement for a passport country travelling to a destination country.</summary>
-    Task<StaffTravelVisaRequirement?> GetRequirementAsync(Guid passportCountryId, Guid destinationCountryId);
+    /// <summary>Lane 7 (E4): scoped to the tenant — the pair was matched across tenants, so the duplicate guard and the
+    /// read-back could pick another tenant's row.</summary>
+    Task<StaffTravelVisaRequirement?> GetRequirementAsync(Guid tenantId, Guid passportCountryId, Guid destinationCountryId);
 
     /// <summary>Returns all visa requirements defined for a destination country.</summary>
     Task<IEnumerable<StaffTravelVisaRequirement>> GetByDestinationAsync(Guid destinationCountryId);

@@ -39,12 +39,16 @@ export interface StaffTravelDocument extends AuditFields {
   employeeName: string;
   documentType: TravelDocumentType;
   documentTypeName: string;
+  /** Lane 7 (O-7): masked to its last four in every list (`numberMasked`); in full only on `documents/{id}`. */
   documentNumber: string;
+  numberMasked?: boolean;
   issuingCountryId: string;
   issuingCountryName?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  /** One primary per type per employee — a new primary stands the old one down (lane 7, E2). */
   isPrimary: boolean;
+  /** An edit takes the verification off; a verified document is not deleted (lane 7, E2, O-15). */
   isVerified: boolean;
   verifiedById?: string | null;
   verifiedByName?: string | null;

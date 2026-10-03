@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Send, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
+import { Loader2, Pencil, Plus, Send, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -245,28 +245,61 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   const refused = (title: string) => (e: Error) =>
     toast({ variant: 'destructive', title, description: e.message });
 
+  // Lane 7 (E3): a visa application was frozen at creation — the edit had no caller. The same dialog now changes one.
+  const [editingVisaId, setEditingVisaId] = useState<string | null>(null);
+  const openNewVisa = () => {
+    setEditingVisaId(null);
+    visaForm.reset({ status: 'NotStarted', currencyCode: request.currencyCode });
+    setDialog('visa');
+  };
+  // The list shows the number masked; the edit reads the application's own detail, which is in full.
+  const openVisaEdit = async (id: string) => {
+    try {
+      const full = await travelComplianceService.getVisaApplication(id);
+      visaForm.reset({
+        visaType: full.visaType ?? '',
+        status: full.status,
+        submittedDate: full.submittedDate?.slice(0, 10) ?? '',
+        approvedDate: full.approvedDate?.slice(0, 10) ?? '',
+        expiryDate: full.expiryDate?.slice(0, 10) ?? '',
+        visaNumber: full.visaNumber ?? '',
+        processingFee: full.processingFee ?? undefined,
+        currencyCode: full.currencyCode ?? request.currencyCode,
+        notes: full.notes ?? '',
+      });
+      setEditingVisaId(id);
+      setDialog('visa');
+    } catch (e) {
+      refused('Could not open the visa application')(e as Error);
+    }
+  };
+
   const addVisa = useMutation({
     mutationFn: (values: z.input<typeof visaSchema>) => {
       const v = visaSchema.parse(values);
-      return travelComplianceService.createVisaApplication({
+      const payload = {
         ...v,
-        staffTravelRequestId: requestId,
-        employeeId: request.employeeId,
         destinationCountryId: request.destinationCountryId,
         submittedDate: orNull(v.submittedDate),
         approvedDate: orNull(v.approvedDate),
         expiryDate: orNull(v.expiryDate),
         // A currency is only meaningful with a fee, and a present one must be real to Finance.
         currencyCode: v.processingFee ? v.currencyCode || null : null,
-      });
+      };
+      return editingVisaId
+        ? travelComplianceService.updateVisaApplication({ ...payload, id: editingVisaId })
+        : travelComplianceService.createVisaApplication({
+          ...payload, staffTravelRequestId: requestId, employeeId: request.employeeId,
+        });
     },
     onSuccess: async () => {
-      toast({ title: 'Visa application recorded' });
+      toast({ title: editingVisaId ? 'Visa application changed' : 'Visa application recorded' });
       setDialog(null);
+      setEditingVisaId(null);
       visaForm.reset();
       await queryClient.invalidateQueries({ queryKey: ['travel-visas', requestId] });
     },
-    onError: refused('Could not record the visa application'),
+    onError: refused(editingVisaId ? 'Could not change the visa application' : 'Could not record the visa application'),
   });
 
   const addRisk = useMutation({
@@ -514,7 +547,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             <Stamp className="h-4 w-4" />
             Visas
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setDialog('visa')}>
+          <Button variant="outline" size="sm" onClick={openNewVisa}>
             <Plus className="mr-2 h-4 w-4" /> Record a visa
           </Button>
         </CardHeader>
@@ -532,8 +565,8 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             ) : !passport ? (
               <p className="text-sm text-muted-foreground">
                 No passport is on file for this traveller, so the visa requirement cannot be looked
-                up — it is keyed on the country that issued the passport. No screen records travel
-                documents yet.
+                up — it is keyed on the country that issued the passport. Record it under{' '}
+                <Link href="/hr/travel/documents" className="text-primary hover:underline">travel documents</Link>.
               </p>
             ) : requirementLoading ? (
               <p className="text-sm text-muted-foreground">
@@ -637,6 +670,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                   <TableHead>Expires</TableHead>
                   <TableHead className="text-right">Fee</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -650,6 +684,12 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                       {fmtMoney(v.processingFee, v.currencyCode)}
                     </TableCell>
                     <TableCell><StatusBadge status={humanize(v.statusName)} /></TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" aria-label="Change this visa application"
+                        onClick={() => openVisaEdit(v.id)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -762,10 +802,10 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         </DialogContent>
       </Dialog>
 
-      <Dialog open={dialog === 'visa'} onOpenChange={(v) => setDialog(v ? 'visa' : null)}>
+      <Dialog open={dialog === 'visa'} onOpenChange={(v) => { setDialog(v ? 'visa' : null); if (!v) setEditingVisaId(null); }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Record a visa application</DialogTitle>
+            <DialogTitle>{editingVisaId ? 'Change the visa application' : 'Record a visa application'}</DialogTitle>
             <DialogDescription>
               For {request.employeeName} travelling to {request.destinationCountryName}.
             </DialogDescription>
@@ -810,7 +850,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
             <Button type="submit" form="visa-form" disabled={addVisa.isPending}>
               {addVisa.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Record
+              {editingVisaId ? 'Save' : 'Record'}
             </Button>
           </DialogFooter>
         </DialogContent>

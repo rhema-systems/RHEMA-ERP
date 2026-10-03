@@ -81,12 +81,12 @@ public class StaffTravelVisaRequirementRepository : GenericRepository<StaffTrave
 {
     public StaffTravelVisaRequirementRepository(ApplicationDbContext context) : base(context) { }
 
-    public async Task<StaffTravelVisaRequirement?> GetRequirementAsync(Guid passportCountryId, Guid destinationCountryId)
+    public async Task<StaffTravelVisaRequirement?> GetRequirementAsync(Guid tenantId, Guid passportCountryId, Guid destinationCountryId)
     {
         return await _dbSet
             .Include(r => r.PassportCountry)
             .Include(r => r.DestinationCountry)
-            .FirstOrDefaultAsync(r => r.PassportCountryId == passportCountryId
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.PassportCountryId == passportCountryId
                                    && r.DestinationCountryId == destinationCountryId && !r.IsDeleted);
     }
 

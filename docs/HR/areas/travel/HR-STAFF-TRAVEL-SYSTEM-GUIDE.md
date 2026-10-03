@@ -1929,6 +1929,13 @@ as **hr.head** · **4 minutes**
 > once, read by every trip — which is why the page says an entry that is wrong is worse than one
 > that is missing."*
 
+> ⚠ **Added by closure lane 7, slice 7a (2026-10-03): the passports it is keyed on now have a screen** —
+> *Staff Travel → **Travel Documents*** (`/hr/travel/documents`). The desk records, changes, verifies and removes a
+> traveller's documents; a change takes the verification off; one primary document per type (a new primary stands the
+> old one down); a verified document is not deleted. Numbers show to their last four in every list and in full only
+> when a document is opened. The trip's Compliance tab reads the primary passport to look up its requirement here; its
+> visa list now has a change button.
+
 ### 👁 On the page
 
 **Header:** *Visa requirements* — **"What each passport needs to enter a destination. The travel
@@ -2014,6 +2021,14 @@ as **hr.head** · **4 minutes**
 > *"Security, health and disruption advisories against a destination, time-boxed so they expire on
 > their own. A trip to a country with a live alert shows it on the compliance tab; a trip to one
 > without shows nothing."*
+
+> ⚠ **Changed by closure lane 7, slice 7a (2026-10-03).** An alert raised **active** goes at once to the traveller of
+> every approved or under-way trip to the country (to the city, when it names one) whose dates meet the alert's — each
+> recorded on the trip and shown on the traveller's portal, the HR role told in the app, the traveller by email (the
+> traveller's bell is lane 8's). Raised inactive, it goes to nobody until the desk sends it from a trip. **Once it has
+> reached a trip it is not deleted** — untick *Active* to stand it down. ⚠ On the demo database this means a
+> country-wide alert for Ghana reaches the demo's own Kumasi trip: raise demo alerts for a city no demo trip visits,
+> or raise them inactive.
 
 ### 👁 On the page
 

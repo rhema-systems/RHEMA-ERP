@@ -163,12 +163,21 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         return entity.ToDto();
     }
 
+    /// <summary>Lane 7 (O-7): a list read shows a document's number to its last four only.</summary>
+    private static StaffTravelDocumentDto Masked(StaffTravelDocument entity)
+    {
+        var dto = entity.ToDto();
+        dto.DocumentNumber = StaffTravelMappingExtensions.MaskAllButLastFour(dto.DocumentNumber) ?? string.Empty;
+        dto.NumberMasked = true;
+        return dto;
+    }
+
     public async Task<IEnumerable<StaffTravelDocumentDto>> GetAllDocumentsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         return (await _documentRepository.GetAllWithDetailsAsync())
             .Where(d => d.TenantId == tenantId)
-            .Select(d => d.ToDto())
+            .Select(Masked)
             .ToList();
     }
 
@@ -177,7 +186,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         var tenantId = GetTenantId();
         return (await _documentRepository.GetByEmployeeIdAsync(employeeId))
             .Where(d => d.TenantId == tenantId)
-            .Select(d => d.ToDto())
+            .Select(Masked)
             .ToList();
     }
 
@@ -186,8 +195,27 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         var tenantId = GetTenantId();
         return (await _documentRepository.GetExpiringDocumentsAsync(daysAhead))
             .Where(d => d.TenantId == tenantId)
-            .Select(d => d.ToDto())
+            .Select(Masked)
             .ToList();
+    }
+
+    /// <summary>
+    /// Lane 7 (E2): one primary document per type per employee — the one the visa lookup and the passport checks read.
+    /// A new primary stands the old one down; the caller saves.
+    /// </summary>
+    private async Task StandDownOtherPrimariesAsync(StaffTravelDocument primary, CancellationToken cancellationToken)
+    {
+        if (!primary.IsPrimary) return;
+        var others = await _unitOfWork.Repository<StaffTravelDocument>()
+            .GetQueryable(d => d.TenantId == primary.TenantId && d.EmployeeId == primary.EmployeeId && !d.IsDeleted
+                            && d.DocumentType == primary.DocumentType && d.IsPrimary && d.Id != primary.Id)
+            .ToListAsync(cancellationToken);
+        foreach (var other in others)
+        {
+            other.IsPrimary = false;
+            other.UpdatedAt = DateTime.UtcNow;
+            other.UpdatedBy = _currentUserProvider.UserId.ToString();
+        }
     }
 
     public async Task<StaffTravelDocumentDto> CreateDocumentAsync(CreateStaffTravelDocumentDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
@@ -195,20 +223,39 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         tenantId = RequireCurrentTenant(tenantId);
         await RequireOwnedEmployeeAsync(createDto.EmployeeId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        RequireDocumentDates(entity);
+        await StandDownOtherPrimariesAsync(entity, cancellationToken);
         await _documentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _documentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
     }
 
+    /// <summary>
+    /// Lane 7 (E2): an edit un-verifies the document — the verification was of what it said before; another officer
+    /// verifies it again. Saved by change tracking.
+    /// </summary>
     public async Task<StaffTravelDocumentDto> UpdateDocumentAsync(UpdateStaffTravelDocumentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDocumentAsync(updateDto.Id);
         entity.UpdateEntity(updateDto, updatedByUserId);
-        await _documentRepository.UpdateAsync(entity);
+        RequireDocumentDates(entity);
+        entity.IsVerified = false;
+        entity.VerifiedById = null;
+        entity.VerifiedAt = null;
+        await StandDownOtherPrimariesAsync(entity, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _documentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
+    }
+
+    private static void RequireDocumentDates(StaffTravelDocument document)
+    {
+        if (document.IssueDate is DateOnly issued && document.ExpiryDate is DateOnly expires && expires <= issued)
+            throw new InvalidOperationException("A document expires after it is issued.");
+        if (string.IsNullOrWhiteSpace(document.DocumentNumber))
+            throw new InvalidOperationException("Give the document's number.");
+        document.DocumentNumber = document.DocumentNumber.Trim();
     }
 
     public async Task<bool> VerifyDocumentAsync(VerifyStaffTravelDocumentDto verifyDto, Guid verifierEmployeeId, CancellationToken cancellationToken = default)
@@ -231,6 +278,11 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<bool> DeleteDocumentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedDocumentAsync(id);
+        // Lane 7 (O-15): a verified document is the record that someone checked it — corrected by an edit (which
+        // un-verifies it) or replaced by a new one, not deleted.
+        if (entity.IsVerified)
+            throw new InvalidOperationException(
+                "A verified document is not deleted — edit it (which takes the verification off) or record its replacement.");
         await _documentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -241,7 +293,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<StaffTravelVisaRequirementDto?> GetVisaRequirementAsync(Guid passportCountryId, Guid destinationCountryId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _visaRequirementRepository.GetRequirementAsync(passportCountryId, destinationCountryId);
+        var entity = await _visaRequirementRepository.GetRequirementAsync(tenantId, passportCountryId, destinationCountryId);
         if (entity == null || entity.TenantId != tenantId)
             return null;
         return entity.ToDto();
@@ -269,7 +321,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     /// </remarks>
     private async Task<StaffTravelVisaRequirementDto> ReadBackVisaRequirementAsync(StaffTravelVisaRequirement entity)
     {
-        var saved = await _visaRequirementRepository.GetRequirementAsync(
+        var saved = await _visaRequirementRepository.GetRequirementAsync(entity.TenantId,
             entity.PassportCountryId, entity.DestinationCountryId);
         return (saved ?? entity).ToDto();
     }
@@ -293,7 +345,7 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     /// </remarks>
     private async Task RequireUnclaimedCountryPairAsync(Guid passportCountryId, Guid destinationCountryId)
     {
-        var existing = await _visaRequirementRepository.GetRequirementAsync(passportCountryId, destinationCountryId);
+        var existing = await _visaRequirementRepository.GetRequirementAsync(GetTenantId(), passportCountryId, destinationCountryId);
         if (existing == null || existing.TenantId != GetTenantId()) return;
 
         throw new InvalidOperationException(
@@ -405,9 +457,14 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         return (reloaded ?? entity).ToDto();
     }
 
+    /// <remarks>Lane 7 (E3): the edit had no caller; now that it does, it takes the create's checks — a present currency
+    /// is one Finance holds, the status one the enum has.</remarks>
     public async Task<StaffTravelVisaApplicationDto> UpdateVisaApplicationAsync(UpdateStaffTravelVisaApplicationDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedVisaApplicationAsync(updateDto.Id);
+        await _currency.RequireKnownCurrencyAsync(updateDto.CurrencyCode, cancellationToken, optional: true);
+        if (!Enum.IsDefined(updateDto.Status))
+            throw new InvalidOperationException($"{(int)updateDto.Status} is not a visa application status.");
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _visaApplicationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -479,10 +536,18 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         return (reloaded ?? entity).ToDto();
     }
 
+    /// <remarks>Lane 7 (E5): the assessor stays who made it (the mapper no longer takes it from the payload), and an
+    /// acknowledgement is of the risk as it stood — a higher level asks the traveller to acknowledge again.</remarks>
     public async Task<StaffTravelRiskAssessmentDto> UpdateRiskAssessmentAsync(UpdateStaffTravelRiskAssessmentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRiskAssessmentAsync(updateDto.Id);
+        var before = entity.RiskLevel;
         entity.UpdateEntity(updateDto, updatedByUserId);
+        if (entity.RiskLevel > before && entity.EmployeeAcknowledged)
+        {
+            entity.EmployeeAcknowledged = false;
+            entity.AcknowledgedAt = null;
+        }
         await _riskAssessmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         var reloaded = await _riskAssessmentRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
@@ -527,6 +592,10 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<bool> DeleteRiskAssessmentAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedRiskAssessmentAsync(id);
+        // Lane 7 (O-15): an acknowledged assessment is the duty-of-care record that the traveller was told.
+        if (entity.EmployeeAcknowledged)
+            throw new InvalidOperationException(
+                "The traveller has acknowledged this risk assessment, so it is kept — record a new assessment instead.");
         await _riskAssessmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
@@ -589,9 +658,44 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         await _alertRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Lane 7 (E6, T-44): an alert reaches the people already going — the traveller of every approved or under-way
+        // trip to the country (to the alert's city, when it names one) whose dates meet the alert's window — through the
+        // same path as the desk's Send, so each is recorded and reaches them in the app and by email.
+        if (entity.IsActive)
+        {
+            var from = DateOnly.FromDateTime(entity.EffectiveFrom);
+            var to = entity.EffectiveTo is DateTime until ? DateOnly.FromDateTime(until) : DateOnly.MaxValue;
+            var trips = await _unitOfWork.Repository<StaffTravelRequest>()
+                .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted && r.DestinationCountryId == entity.CountryId
+                                && (r.Status == StaffTravelRequestStatus.Approved || r.Status == StaffTravelRequestStatus.InProgress)
+                                && r.TravelStartDate <= to && r.TravelEndDate >= from)
+                .ToListAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(entity.City))
+                trips = trips.Where(r => string.Equals(r.DestinationCity?.Trim(), entity.City.Trim(), StringComparison.OrdinalIgnoreCase))
+                             .ToList();
+            foreach (var trip in trips)
+            {
+                var notification = new StaffTravelAlertNotification
+                {
+                    TenantId = tenantId,
+                    TravelAlertId = entity.Id,
+                    StaffTravelRequestId = trip.Id,
+                    EmployeeId = trip.EmployeeId,
+                    NotificationSentAt = null,   // stamped by SendAlertAsync once published
+                    CreatedBy = createdByUserId.ToString(),
+                };
+                await _notificationRepository.AddAsync(notification);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await SendAlertAsync(notification, entity, trip, cancellationToken);
+            }
+            _logger.LogInformation("Travel alert {AlertId} sent to {Count} trip(s) already approved or under way", entity.Id, trips.Count);
+        }
+
         var reloaded = await _alertRepository.GetWithDetailsAsync(entity.TenantId, entity.Id);
         return (reloaded ?? entity).ToDto();
     }
+
 
     public async Task<StaffTravelAlertDto> UpdateAlertAsync(UpdateStaffTravelAlertDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
@@ -606,6 +710,13 @@ public class StaffTravelComplianceService : IStaffTravelComplianceService
     public async Task<bool> DeleteAlertAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAlertAsync(id);
+        // Lane 7 (O-15): once sent, the alert is part of the trips it reached — deactivate it instead.
+        var sent = await _unitOfWork.Repository<StaffTravelAlertNotification>()
+            .GetQueryable(n => n.TenantId == entity.TenantId && n.TravelAlertId == entity.Id && !n.IsDeleted)
+            .CountAsync(cancellationToken);
+        if (sent > 0)
+            throw new InvalidOperationException(
+                $"The alert '{entity.Title}' has reached {sent} trip(s), so it is not deleted — deactivate it instead (untick Active).");
         await _alertRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
