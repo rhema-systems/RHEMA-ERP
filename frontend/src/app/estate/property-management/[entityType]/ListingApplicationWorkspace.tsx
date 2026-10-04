@@ -66,6 +66,10 @@ import {
   type CentralDocumentGenerationTemplate,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
+import {
+  isLegalAgreementReviewSigned,
+  propertyListingCompletionRequirements,
+} from './property-workspace-utils';
 
 const ENTITY_TYPE = 'EstatePropertyManagementListingApplication';
 const REQUESTS_PER_PAGE = 10;
@@ -972,9 +976,9 @@ export function ListingApplicationWorkspace() {
     }
     if (
       stageName === 'legal agreement review' &&
-      !caseFieldValue(selectedCase, 'legalAgreementReviewStatus')
-        .toLowerCase()
-        .includes('approved')
+      !isLegalAgreementReviewSigned(
+        caseFieldValue(selectedCase, 'legalAgreementReviewStatus')
+      )
     ) {
       setError(
         'Legal must approve the generated agreement before the customer can sign.'
@@ -1562,6 +1566,9 @@ export function ListingApplicationWorkspace() {
   const approvedDecision = selectedCase
     ? isApprovedDecision(caseFieldValue(selectedCase, 'decisionStatus'))
     : false;
+  const completionRequirements = propertyListingCompletionRequirements(
+    selectedCase?.currentStageName
+  );
   const rentalApplication = selectedCase
     ? isRentalApplication(selectedCase)
     : false;
@@ -1572,12 +1579,14 @@ export function ListingApplicationWorkspace() {
     selectedCase &&
       approvedDecision &&
       rentalApplication &&
+      completionRequirements.requiresApprovedRentTerms &&
       !caseFieldValue(selectedCase, 'moveInDate')
   );
   const missingApprovedRentTerm = Boolean(
     selectedCase &&
       approvedDecision &&
       rentalApplication &&
+      completionRequirements.requiresApprovedRentTerms &&
       !caseFieldValue(selectedCase, 'requestedLeaseTerm')
   );
   const premiumChargeRequired = Boolean(
@@ -1620,6 +1629,7 @@ export function ListingApplicationWorkspace() {
   const missingApprovedAgreement = Boolean(
     selectedCase &&
       approvedDecision &&
+      completionRequirements.requiresGeneratedAgreement &&
       !caseFieldValue(selectedCase, 'generatedAgreementReference')
   );
   const agreementAlreadyGenerated = Boolean(
@@ -1644,15 +1654,17 @@ export function ListingApplicationWorkspace() {
   const legalAgreementReviewSubmitting =
     pendingLegalMatterType === 'agreementReview';
   const legalAgreementSignedByHeadOfLegal =
-    legalAgreementReviewStatus.toLowerCase().includes('head of legal') &&
-    legalAgreementReviewStatus.toLowerCase().includes('signed');
+    isLegalAgreementReviewSigned(legalAgreementReviewStatus);
   const customerAgreementAccepted = Boolean(
     selectedCase &&
       caseFieldValue(selectedCase, 'customerAcceptanceStatus').toLowerCase() ===
         'accepted'
   );
   const missingLegalAgreementReview = Boolean(
-    selectedCase && approvedDecision && !legalAgreementSignedByHeadOfLegal
+    selectedCase &&
+      approvedDecision &&
+      completionRequirements.requiresLegalAgreementReview &&
+      !legalAgreementSignedByHeadOfLegal
   );
   const fullyExecuted = Boolean(
     selectedCase &&
@@ -3133,6 +3145,11 @@ export function ListingApplicationWorkspace() {
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       Submit the generated agreement to Legal and wait for the
                       Head of Legal signature before routing this stage forward.
+                    </p>
+                  ) : null}
+                  {missingApprovedAgreement ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Generate the agreement before routing this stage forward.
                     </p>
                   ) : null}
                   {missingApprovedRentTerm ? (

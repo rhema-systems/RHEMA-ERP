@@ -909,7 +909,10 @@ public sealed class PropertyListingEnquiryTests
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Property enquiry", Stage = "Qualification", Amount = 1250000m, Currency = "GHS" };
         db.AddRange(asset, partner, opportunity); await db.SaveChangesAsync();
         var procedures = new Mock<IProcedureCaseService>();
-        var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            procedures.Object,
+            Mock.Of<INotificationService>());
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(tenantId,
             new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1250000m,
@@ -940,7 +943,7 @@ public sealed class PropertyListingEnquiryTests
             .UseSqlite(connection).Options);
         // This focused fixture exercises reservation persistence, not unrelated master-data FKs.
         await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
-        var tables = new[] { typeof(EstateManagedAsset), typeof(BusinessPartner), typeof(Opportunity),
+        var tables = new[] { typeof(EstateManagedAsset), typeof(BusinessPartner), typeof(BusinessPartnerUser), typeof(Opportunity),
             typeof(ProcedureCase), typeof(ProcedureCaseField) }
             .Select(type => db.Model.FindEntityType(type)!.GetTableName()!).ToArray();
         foreach (var statement in db.Database.GenerateCreateScript().Split(';', StringSplitOptions.RemoveEmptyEntries)
@@ -959,7 +962,17 @@ public sealed class PropertyListingEnquiryTests
         asset.Status = EstateManagedAssetStatus.Available;
         asset.IsPublishedToExternalPortal = true;
         asset.ExternalListingStatus = "Published";
-        var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-ESTATE", PartnerName = "Estate Customer", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
+        var partner = new BusinessPartner
+        {
+            TenantId = tenantId,
+            PartnerCode = "CUS-ESTATE",
+            PartnerName = "Estate Customer",
+            PartnerType = "Customer",
+            CustomerAccountNumber = "CUS-ESTATE",
+            UserId = Guid.NewGuid(),
+            IsActive = true,
+            ApprovalStatus = "Approved"
+        };
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Property enquiry", Stage = "Closed Won", Amount = 1250000m, Currency = "GHS", ActualCloseDate = DateTime.UtcNow };
         db.AddRange(asset, partner, opportunity); await db.SaveChangesAsync();
 
@@ -973,7 +986,10 @@ public sealed class PropertyListingEnquiryTests
                 "Accepted", "Open", 0, "Estate review", "Estate Manager", "Estate Manager", true, null, true,
                 Array.Empty<string>(), Array.Empty<ProcedureCaseFieldDto>(), Array.Empty<ProcedureCaseChecklistItemDto>(),
                 Array.Empty<ProcedureCaseDocumentDto>(), Array.Empty<ProcedureCaseActivityDto>()));
-        var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            procedures.Object,
+            Mock.Of<INotificationService>());
 
         var result = await service.CreateAsync(tenantId,
             new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1200000m,
