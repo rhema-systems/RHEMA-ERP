@@ -254,6 +254,7 @@ namespace ErpSystem.Tests.Services.Finance
             _mockUnitTypeRepository
                 .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitType, bool>>>()))
                 .ReturnsAsync(unitType);
+            SetupAccountQueryable(new List<UnitAccount>());
             _mockUnitTypeRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitType>())).Returns(Task.CompletedTask);
             _mockUnitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
 
@@ -266,6 +267,30 @@ namespace ErpSystem.Tests.Services.Finance
             result.DecimalPlaces.Should().Be(0);
 
             _mockUnitTypeRepository.Verify(r => r.UpdateAsync(It.IsAny<UnitType>()), Times.Once);
+        }
+
+        [Fact]
+        public async Task UpdateAsync_ExplicitNullClearsIncrement_WhileOmissionPreservesIt()
+        {
+            var unitType = CreateUnitType("HRS", "Hours");
+            unitType.DecimalPlaces = 3;
+            unitType.RoundingIncrement = 0.125m;
+            _mockUnitTypeRepository
+                .Setup(r => r.FirstOrDefaultAsync(It.IsAny<Expression<Func<UnitType, bool>>>()))
+                .ReturnsAsync(unitType);
+            SetupAccountQueryable(new List<UnitAccount>());
+            _mockUnitTypeRepository.Setup(r => r.UpdateAsync(It.IsAny<UnitType>())).Returns(Task.CompletedTask);
+
+            var omitted = await _service.UpdateAsync(unitType.Id, new UpdateUnitTypeDto { Name = "Labour hours" });
+            omitted.RoundingIncrement.Should().Be(0.125m);
+
+            var clear = System.Text.Json.JsonSerializer.Deserialize<UpdateUnitTypeDto>(
+                "{\"roundingIncrement\":null}",
+                new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+            clear.RoundingIncrementSpecified.Should().BeTrue();
+            var cleared = await _service.UpdateAsync(unitType.Id, clear);
+
+            cleared.RoundingIncrement.Should().BeNull();
         }
 
         [Fact]

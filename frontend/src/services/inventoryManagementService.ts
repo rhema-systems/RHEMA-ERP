@@ -25,6 +25,8 @@ export interface UnitOfMeasureDto {
   isBaseUnit: boolean;
   isActive: boolean;
   sortOrder: number;
+  decimalPlaces: number;
+  roundingIncrement?: number | null;
 }
 
 export interface CreateUnitOfMeasureDto {
@@ -34,6 +36,8 @@ export interface CreateUnitOfMeasureDto {
   category?: string;
   isBaseUnit: boolean;
   sortOrder: number;
+  decimalPlaces: number;
+  roundingIncrement?: number | null;
 }
 
 export interface UpdateUnitOfMeasureDto {
@@ -43,6 +47,8 @@ export interface UpdateUnitOfMeasureDto {
   isBaseUnit: boolean;
   isActive: boolean;
   sortOrder: number;
+  decimalPlaces: number;
+  roundingIncrement?: number | null;
 }
 
 export interface UnitOfMeasureConversionDto {

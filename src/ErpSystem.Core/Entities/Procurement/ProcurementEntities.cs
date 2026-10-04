@@ -448,7 +448,7 @@ public class PurchaseOrder : TenantEntity
 /// <summary>
 /// Individual items on a purchase order
 /// </summary>
-public class PurchaseOrderItem : TenantEntity
+public class PurchaseOrderItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     /// <summary>Controls fulfilment independently of whether a catalogue record has been selected.</summary>
     public ItemType LineType { get; set; } = ItemType.StockItem;
@@ -479,6 +479,10 @@ public class PurchaseOrderItem : TenantEntity
     [Required]
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     /// <summary>
     /// Reference to the specific UOM from the item's UOM schedule (optional)
@@ -617,7 +621,7 @@ public class PurchaseOrderReceipt : TenantEntity
 /// <summary>
 /// Items received in a specific receipt
 /// </summary>
-public class PurchaseOrderReceiptItem : TenantEntity
+public class PurchaseOrderReceiptItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     /// <summary>Kilograms per stock base unit captured for this receipt, never read from the live master for allocation.</summary>
     [Column(TypeName = "decimal(22,6)")]
@@ -660,6 +664,10 @@ public class PurchaseOrderReceiptItem : TenantEntity
     /// </summary>
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     /// <summary>
     /// Snapshot of the PO line's ItemUnitOfMeasureId at the time of receipt (optional).
@@ -903,7 +911,7 @@ public class PurchaseRequisition : TenantEntity
 /// <summary>
 /// Items in a purchase requisition
 /// </summary>
-public class PurchaseRequisitionItem : TenantEntity
+public class PurchaseRequisitionItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid RequisitionId { get; set; }
@@ -926,6 +934,10 @@ public class PurchaseRequisitionItem : TenantEntity
 
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal EstimatedUnitPrice { get; set; } = 0;

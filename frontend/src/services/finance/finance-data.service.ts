@@ -1482,7 +1482,7 @@ class FinanceDataService {
   async updateFinanceSettings(
     dto: UpdateFinanceSettingsDto
   ): Promise<FinanceSettings> {
-    return apiService.put<FinanceSettings>('/finance/settings', dto);
+    return apiService.patch<FinanceSettings>('/finance/settings', dto);
   }
 
   // ===== FINANCIAL STATEMENTS =====

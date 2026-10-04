@@ -63,7 +63,7 @@ public sealed class InventoryIssueVoucher : TenantEntity
 }
 
 [Table("InventoryIssueVoucherLines")]
-public sealed class InventoryIssueVoucherLine : TenantEntity
+public sealed class InventoryIssueVoucherLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid InventoryIssueVoucherId { get; set; }
     public Guid InventoryRequisitionItemId { get; set; }
@@ -74,6 +74,10 @@ public sealed class InventoryIssueVoucherLine : TenantEntity
     [Column(TypeName = "decimal(18,4)")] public decimal UnitCost { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal TotalValue { get; set; }
     [MaxLength(20)] public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     [MaxLength(100)] public string? LotNumber { get; set; }
     [MaxLength(100)] public string? BatchNumber { get; set; }
     [MaxLength(100)] public string? SerialNumber { get; set; }

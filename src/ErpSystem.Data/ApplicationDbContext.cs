@@ -18,6 +18,8 @@ using ErpSystem.Core.Entities.Reference;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Inventory;
 using ErpSystem.Data.Configuration;
 using ErpSystem.Data.Configuration.Finance;
 using ErpSystem.Core.Entities.HR.StaffLeave;
@@ -203,6 +205,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<RecurringJournalTemplateLine> RecurringJournalTemplateLines { get; set; }
     public DbSet<RecurringJournalOccurrence> RecurringJournalOccurrences { get; set; }
     public DbSet<FinancePostingEvent> FinancePostingEvents { get; set; }
+    public DbSet<FinanceRoundingEvidence> FinanceRoundingEvidence { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountBalance> AccountBalances { get; set; }
     public DbSet<AccountCurrencyExposure> AccountCurrencyExposures { get; set; }
@@ -296,6 +299,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<OpportunityStageHistory> OpportunityStageHistories { get; set; }
     public DbSet<Quote> Quotes { get; set; }
     public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
+    public DbSet<SalesForecast> SalesForecasts { get; set; }
+    public DbSet<SalesForecastLine> SalesForecastLines { get; set; }
     public DbSet<Activity> CrmActivities { get; set; }
     public DbSet<Campaign> Campaigns { get; set; }
     public DbSet<CampaignMember> CampaignMembers { get; set; }
@@ -1716,15 +1721,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Reference).HasMaxLength(100);
             entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.PaidAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.CreditedAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.PaidAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.CreditedAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.Property(e => e.EarlyPaymentDiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.EarlyPaymentDiscountAmount).HasColumnType("decimal(20,4)");
             entity.Ignore(e => e.BalanceAmount);
             entity.HasIndex(e => e.BusinessPartnerId);
             entity.HasIndex(e => e.BusinessPartnerRoleId);
@@ -1769,6 +1779,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<CustomerPayment>(entity =>
         {
             entity.ToTable("CustomerPayment");
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.BusinessPartnerId);
             entity.HasIndex(e => e.BusinessPartnerRoleId);
             entity.HasIndex(e => e.BusinessPartnerArProfileVersionId);
@@ -1878,14 +1893,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("InvoiceLineItem", table => table.HasTrigger("TR_InvoiceLineItem_DisposalEconomics"));
             entity.Property(e => e.Description).HasMaxLength(200).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(20,6)");
             entity.Property(e => e.UnitCost).HasColumnType("decimal(18,2)");
             entity.Property(e => e.CostTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.TaxTreatment).HasDefaultValue(TaxTreatment.Standard);
             entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
             entity.Ignore(e => e.LineTotal);
             entity.HasOne(e => e.Invoice)
                 .WithMany(i => i.LineItems)
@@ -2359,6 +2374,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoice>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasAlternateKey(invoice => new { invoice.TenantId, invoice.Id });
             entity.HasIndex(invoice => new { invoice.TenantId, invoice.LeaseScheduleLineId })
                 .IsUnique().HasFilter("[LeaseScheduleLineId] IS NOT NULL AND [IsDeleted] = 0 AND [Status] <> 7");
@@ -2758,11 +2778,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.ApprovalSource).HasMaxLength(40).IsRequired();
             entity.Property(e => e.CurrencyCode).HasMaxLength(3).IsRequired();
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
-            entity.Property(e => e.SubTotal).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TotalAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.SubTotal).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.BaseCurrencyAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.ReversalReason).HasMaxLength(1000);
             entity.Property(e => e.RowVersion).IsRowVersion();
             entity.HasOne(e => e.Vendor)
@@ -2824,12 +2844,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Description).HasMaxLength(500).IsRequired();
             entity.Property(e => e.LineItemType).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Quantity).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.UnitPrice).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.UnitPrice).HasColumnType("decimal(20,6)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
             entity.Property(e => e.DiscountPercentage).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.LineTotal).HasColumnType("decimal(18,2)");
+            entity.Property(e => e.DiscountAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.LineTotal).HasColumnType("decimal(20,4)");
             entity.HasOne(e => e.SupplierDebitNote)
                 .WithMany(d => d.LineItems)
                 .HasForeignKey(e => e.SupplierDebitNoteId)
@@ -2865,11 +2885,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<SupplierDebitNoteTaxComponent>(entity =>
         {
-            entity.ToTable("SupplierDebitNoteTaxComponents");
-            entity.Property(e => e.BaseAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxableAmount).HasColumnType("decimal(18,2)");
-            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,4)");
-            entity.Property(e => e.TaxAmount).HasColumnType("decimal(18,2)");
+            entity.ToTable("SupplierDebitNoteTaxComponents", table =>
+                table.HasCheckConstraint(
+                    "CK_SupplierDebitNoteTaxComponents_PrecisionEvidence",
+                    "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)"));
+            entity.Property(e => e.BaseAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.TaxableAmount).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.TaxRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.TaxAmount).HasColumnType("decimal(20,4)");
+            entity.Property(e => e.RawTaxAmount).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.RoundingAdjustment).HasColumnType("decimal(20,10)");
+            entity.Property(e => e.TaxRoundingIncrement).HasColumnType("decimal(20,4)");
             entity.HasOne(e => e.SupplierDebitNoteLineItem)
                 .WithMany(line => line.TaxComponents)
                 .HasForeignKey(e => e.SupplierDebitNoteLineItemId)
@@ -2950,6 +2976,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new VendorPaymentEvidenceLinkConfiguration());
         builder.Entity<VendorPayment>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("VendorPayment", table =>
             {
@@ -4139,6 +4170,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PrimaryExchangeRateId);
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
             entity.HasIndex(e => new { e.TenantId, e.HasForeignCurrencyLines });
             entity.Property(e => e.PrimaryExchangeRate).HasColumnType("decimal(18,6)");
             entity.Property(e => e.RequestFingerprintVersion).HasMaxLength(40);
@@ -4157,9 +4189,55 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.PrimaryExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinanceRoundingEvidence>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceRoundingEvidence>(entity =>
+        {
+            entity.ToTable("FinanceRoundingEvidence");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
+            entity.HasIndex(e => new { e.TenantId, e.PostingIdempotencyKey })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new
+            {
+                e.TenantId,
+                e.SourceModule,
+                e.SourceDocumentType,
+                e.SourceDocumentId,
+                e.PostingAction
+            });
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Amounts",
+                "[OriginalAmount] > 0 AND [RoundedAmount] > 0 AND [DeltaAmount] = [RoundedAmount] - [OriginalAmount]");
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Increment", "[Increment] > 0");
+            entity.HasCheckConstraint("CK_FinanceRoundingEvidence_Places",
+                "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.GainAccountId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.LossAccountId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ExchangeRate>()
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.ExchangeRateId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -4435,6 +4513,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<TaxCalculation>(entity =>
         {
+            entity.ToTable("TaxCalculations", table =>
+            {
+                table.HasCheckConstraint(
+                    "CK_TaxCalculations_PrecisionEvidence",
+                    "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)");
+            });
             entity.HasIndex(e => new
             {
                 e.TenantId,
@@ -5758,6 +5842,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<CashTransaction>(entity =>
         {
+            entity.Property(e => e.RoundingAdjustmentAmount).HasColumnType("decimal(20,6)");
+            entity.HasIndex(e => new { e.TenantId, e.FinanceRoundingEvidenceId });
+            entity.HasOne<FinanceRoundingEvidence>().WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.FinanceRoundingEvidenceId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.BankAccountId, e.TransactionDate });
             entity.HasIndex(e => new { e.TenantId, e.TransactionNumber }).IsUnique();
@@ -7000,12 +7089,111 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<UnitType>()
             .Property(unitType => unitType.RoundingIncrement)
             .HasColumnType("decimal(18,6)");
+        ConfigureFinancePrecisionStorage(builder);
 
         // Apply global query filters for soft delete and multitenancy
         ApplyGlobalFilters(builder);
 
         // Seed initial data
         SeedData(builder);
+    }
+
+    private static void ConfigureFinancePrecisionStorage(ModelBuilder builder)
+    {
+        // ConfigureDecimalPrecision is a legacy, name-based convention which intentionally runs
+        // after most entity configuration. Re-apply the governed Finance storage contract last so
+        // it cannot silently narrow ISO 0-4 minor-unit values, unit prices, tax evidence, or
+        // immutable rounding evidence back to two decimals at runtime.
+        var overrides = new (Type EntityType, string PropertyName, string ColumnType)[]
+        {
+            (typeof(Invoice), nameof(Invoice.SubTotal), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.TaxAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.DiscountAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.TotalAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.PaidAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.CreditedAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.EarlyPaymentDiscountAmount), "decimal(20,4)"),
+            (typeof(Invoice), nameof(Invoice.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(InvoiceLineItem), nameof(InvoiceLineItem.DiscountAmount), "decimal(20,4)"),
+
+            (typeof(VendorInvoice), nameof(VendorInvoice.SubTotal), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.TaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.DiscountAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.TotalAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.PaidAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.EarlyPaymentDiscountAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.WithholdingTaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoice), nameof(VendorInvoice.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(VendorInvoiceLineItem), nameof(VendorInvoiceLineItem.DiscountAmount), "decimal(20,4)"),
+
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.DirectInvoiceAppliedAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.SubTotal), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.DiscountAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.TotalAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNote), nameof(SupplierDebitNote.BaseCurrencyAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.UnitPrice), "decimal(20,6)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.TaxRate), "decimal(18,6)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.DiscountAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteLineItem), nameof(SupplierDebitNoteLineItem.LineTotal), "decimal(20,4)"),
+
+            (typeof(Tax), nameof(Tax.Rate), "decimal(18,6)"),
+            (typeof(TaxRateHistory), nameof(TaxRateHistory.Rate), "decimal(18,6)"),
+            (typeof(TaxConfigurationVersion), nameof(TaxConfigurationVersion.Rate), "decimal(18,6)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.BaseAmount), "decimal(20,4)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxableAmount), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxRate), "decimal(18,6)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxAmount), "decimal(20,4)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.RawTaxAmount), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.RoundingAdjustment), "decimal(20,10)"),
+            (typeof(TaxCalculation), nameof(TaxCalculation.TaxRoundingIncrement), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.BaseAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxableAmount), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxRate), "decimal(18,6)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxAmount), "decimal(20,4)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.RawTaxAmount), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.RoundingAdjustment), "decimal(20,10)"),
+            (typeof(SupplierDebitNoteTaxComponent), nameof(SupplierDebitNoteTaxComponent.TaxRoundingIncrement), "decimal(20,4)"),
+
+            (typeof(CustomerPayment), nameof(CustomerPayment.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(VendorPayment), nameof(VendorPayment.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(CashTransaction), nameof(CashTransaction.RoundingAdjustmentAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.OriginalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.RoundedAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.DeltaAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.Increment), "decimal(18,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.OriginalFunctionalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.RoundedFunctionalAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.FunctionalDeltaAmount), "decimal(20,6)"),
+            (typeof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence), nameof(ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence.ExchangeRate), "decimal(18,10)")
+        };
+
+        foreach (var (entityType, propertyName, columnType) in overrides)
+            builder.Entity(entityType).Property(propertyName).HasColumnType(columnType);
+
+        // Commercial quantity evidence is persisted at six decimals by the authored UOM
+        // migrations. Keep the legacy name-based decimal convention from narrowing those
+        // immutable snapshots back to four decimals in the runtime model.
+        foreach (var entityType in builder.Model.GetEntityTypes()
+                     .Where(entity => typeof(ICommercialQuantityEvidenceLine).IsAssignableFrom(entity.ClrType)))
+        {
+            builder.Entity(entityType.ClrType)
+                .Property(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureRoundingIncrementSnapshot))
+                .HasColumnType("decimal(18,6)");
+        }
+
+        builder.Entity<AccountTransaction>()
+            .Property(entity => entity.CommercialQuantityRoundingIncrement)
+            .HasColumnType("decimal(18,6)");
     }
 
     private static void ConfigurePayrollEntities(ModelBuilder builder)
@@ -11063,6 +11251,29 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("LandAcquisitionChecklistResponses");
             entity.Property(item => item.Procedure).HasConversion<string>().HasMaxLength(80);
         });
+
+        builder.Entity<InventoryItem>()
+            .HasOne<UnitOfMeasure>()
+            .WithMany()
+            .HasForeignKey(item => item.UnitOfMeasureId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        foreach (var entityType in builder.Model.GetEntityTypes()
+                     .Where(entityType => typeof(ICommercialQuantityEvidenceLine).IsAssignableFrom(entityType.ClrType)))
+        {
+            builder.Entity(entityType.ClrType)
+                .Property(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureRoundingIncrementSnapshot))
+                .HasColumnType("decimal(18,6)");
+            builder.Entity(entityType.ClrType)
+                .HasOne(typeof(UnitOfMeasure), navigationName: null)
+                .WithMany()
+                .HasForeignKey(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureId))
+                .OnDelete(DeleteBehavior.Restrict);
+        }
+
+        builder.Entity<AccountTransaction>()
+            .Property(item => item.CommercialQuantityRoundingIncrement)
+            .HasColumnType("decimal(18,6)");
     }
 
     private static void ConfigureProcedureCaseEntities(ModelBuilder builder)
@@ -11148,6 +11359,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
     {
+        await GovernCommercialQuantityEvidenceAsync(cancellationToken);
         await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
         // HR, round 4 lane O: before the audit pass, so the holders it moves are stamped too.
         await ApplyTechnicianRoleRuleAsync(true, cancellationToken);
@@ -11175,6 +11387,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     private int SaveWithInventoryCostProjection(bool acceptAllChanges)
     {
+        GovernCommercialQuantityEvidenceAsync(CancellationToken.None).GetAwaiter().GetResult();
         SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         // HR, round 4 lane O — see the async path.
         ApplyTechnicianRoleRuleAsync(false, CancellationToken.None).GetAwaiter().GetResult();
@@ -11183,6 +11396,174 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
         return base.SaveChanges(acceptAllChanges);
     }
+
+    private async Task GovernCommercialQuantityEvidenceAsync(CancellationToken cancellationToken)
+    {
+        var entries = ChangeTracker.Entries()
+            .Where(entry => entry.State is EntityState.Added or EntityState.Modified &&
+                            entry.Entity is ICommercialQuantityEvidenceLine)
+            .ToList();
+
+        foreach (var entry in entries)
+        {
+            var line = (ICommercialQuantityEvidenceLine)entry.Entity;
+            var quantities = CommercialQuantities(entry.Entity);
+            if (entry.Entity is InvoiceLineItem or VendorInvoiceLineItem &&
+                line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(LegacyUnitCode(entry.Entity)) &&
+                InventoryItemId(entry.Entity) is null)
+                continue;
+            if (entry.Entity is InvoiceLineItem or VendorInvoiceLineItem &&
+                line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(LegacyUnitCode(entry.Entity)) &&
+                InventoryItemId(entry.Entity) is null)
+                continue;
+            var allowsNegative = entry.Entity is StockMovement or PhysicalCountItem;
+            if (!allowsNegative && quantities.Any(value => value.Value < 0m))
+                throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} quantities cannot be negative.");
+
+            if (line.UnitOfMeasureId.HasValue && line.UnitOfMeasureDecimalPlacesSnapshot.HasValue &&
+                !string.IsNullOrWhiteSpace(line.UnitOfMeasureCodeSnapshot))
+            {
+                foreach (var quantity in quantities)
+                    CommercialQuantityPolicy.Validate(quantity.Value, line.UnitOfMeasureDecimalPlacesSnapshot.Value,
+                        line.UnitOfMeasureRoundingIncrementSnapshot);
+                continue;
+            }
+
+            var legacyCode = LegacyUnitCode(entry.Entity);
+            if (line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(legacyCode))
+            {
+                var itemId = InventoryItemId(entry.Entity);
+                if (itemId.HasValue)
+                {
+                    var currentTenantId = entry.Metadata.FindProperty(nameof(TenantEntity.TenantId)) is null
+                        ? _tenantId
+                        : (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+                    var item = await Set<InventoryItem>().AsNoTracking()
+                        .Where(value => value.TenantId == currentTenantId && value.Id == itemId.Value)
+                        .Select(value => new { value.UnitOfMeasureId, value.UnitOfMeasure })
+                        .SingleOrDefaultAsync(cancellationToken);
+                    line.UnitOfMeasureId = item?.UnitOfMeasureId;
+                    legacyCode = item?.UnitOfMeasure;
+                }
+            }
+
+            if (entry.Entity is ProcurementReceiptInspectionLine inspection && line.UnitOfMeasureId is null && string.IsNullOrWhiteSpace(legacyCode))
+            {
+                var receiptEvidence = await Set<PurchaseOrderReceiptItem>().AsNoTracking()
+                    .Where(value => value.Id == inspection.PurchaseOrderReceiptItemId && value.TenantId == inspection.TenantId)
+                    .Select(value => new { value.UnitOfMeasureId, value.UnitOfMeasure, value.UnitOfMeasureCodeSnapshot })
+                    .SingleOrDefaultAsync(cancellationToken);
+                line.UnitOfMeasureId = receiptEvidence?.UnitOfMeasureId;
+                legacyCode = receiptEvidence?.UnitOfMeasureCodeSnapshot ?? receiptEvidence?.UnitOfMeasure;
+            }
+
+            var tenantId = entry.Metadata.FindProperty(nameof(TenantEntity.TenantId)) is null
+                ? _tenantId
+                : (Guid)entry.Property(nameof(TenantEntity.TenantId)).CurrentValue!;
+            var normalizedCode = legacyCode?.Trim().ToUpperInvariant();
+            var candidates = line.UnitOfMeasureId.HasValue
+                ? await Set<UnitOfMeasure>().AsNoTracking().Where(value => value.TenantId == tenantId &&
+                    value.Id == line.UnitOfMeasureId.Value && value.IsActive && !value.IsDeleted).Take(2).ToListAsync(cancellationToken)
+                : await Set<UnitOfMeasure>().AsNoTracking().Where(value => value.TenantId == tenantId &&
+                    value.Code.ToUpper() == normalizedCode && value.IsActive && !value.IsDeleted).Take(2).ToListAsync(cancellationToken);
+            if (candidates.Count != 1)
+                throw new InvalidOperationException(candidates.Count == 0
+                    ? $"{entry.Metadata.ClrType.Name} cannot resolve an active Inventory UOM."
+                    : $"{entry.Metadata.ClrType.Name} legacy UOM code '{normalizedCode}' is ambiguous; a stable UOM ID is required.");
+
+            var unit = candidates[0];
+            if (line.UnitOfMeasureId.HasValue && !string.IsNullOrWhiteSpace(normalizedCode) &&
+                !string.Equals(unit.Code, normalizedCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"{entry.Metadata.ClrType.Name} UOM ID/code identity does not match.");
+
+            foreach (var quantity in quantities)
+                CommercialQuantityPolicy.Validate(quantity.Value, unit.DecimalPlaces, unit.RoundingIncrement);
+            line.UnitOfMeasureId = unit.Id;
+            line.UnitOfMeasureCodeSnapshot = unit.Code;
+            line.UnitOfMeasureDecimalPlacesSnapshot = unit.DecimalPlaces;
+            line.UnitOfMeasureRoundingIncrementSnapshot = unit.RoundingIncrement;
+        }
+    }
+
+    private static IReadOnlyList<(string Name, decimal Value)> CommercialQuantities(object entity) => entity switch
+    {
+        StockMovement value => [(nameof(value.Quantity), value.Quantity)],
+        GoodsReceiptNoteItem value => [(nameof(value.OrderedQuantity), value.OrderedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity)],
+        InventoryTransferItem value => [(nameof(value.RequestedQuantity), value.RequestedQuantity), (nameof(value.ShippedQuantity), value.ShippedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.DamagedQuantity), value.DamagedQuantity), (nameof(value.ShortageQuantity), value.ShortageQuantity)],
+        PhysicalCountItem value => [(nameof(value.SystemQuantity), value.SystemQuantity), (nameof(value.CountedQuantity), value.CountedQuantity), (nameof(value.DefectiveQuantity), value.DefectiveQuantity), (nameof(value.VarianceQuantity), value.VarianceQuantity)],
+        InventoryRequisitionItem value => [(nameof(value.RequestedQuantity), value.RequestedQuantity), (nameof(value.ApprovedQuantity), value.ApprovedQuantity), (nameof(value.IssuedQuantity), value.IssuedQuantity)],
+        InventoryDisposalLine value => [(nameof(value.Quantity), value.Quantity)],
+        InventoryIssueVoucherLine value => [(nameof(value.Quantity), value.Quantity)],
+        PurchaseOrderItem value => [(nameof(value.OrderedQuantity), value.OrderedQuantity), (nameof(value.ReceivedQuantity), value.ReceivedQuantity)],
+        PurchaseOrderReceiptItem value => [(nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity)],
+        ProcurementReceiptInspectionLine value => [(nameof(value.ReceivedQuantity), value.ReceivedQuantity), (nameof(value.AcceptedQuantity), value.AcceptedQuantity), (nameof(value.RejectedQuantity), value.RejectedQuantity), (nameof(value.PendingQuantity), value.PendingQuantity)],
+        ProcurementPlanItem value => [(nameof(value.EstimatedQuantity), value.EstimatedQuantity)],
+        PurchaseRequisitionItem value => [(nameof(value.Quantity), value.Quantity)],
+        RequestForQuotationItem value => [(nameof(value.Quantity), value.Quantity)],
+        TenderItem value => [(nameof(value.Quantity), value.Quantity)],
+        TenderNegotiationItem value => [(nameof(value.Quantity), value.Quantity)],
+        ProcurementFrameworkPriceListLine value => value.MaximumQuantity.HasValue
+            ? [(nameof(value.MinimumQuantity), value.MinimumQuantity), (nameof(value.MaximumQuantity), value.MaximumQuantity.Value)]
+            : [(nameof(value.MinimumQuantity), value.MinimumQuantity)],
+        ProcurementFrameworkCallOffLine value => [(nameof(value.Quantity), value.Quantity), (nameof(value.SourceDemandQuantity), value.SourceDemandQuantity)],
+        InvoiceLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        VendorInvoiceLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        SalesOrderLine value => [(nameof(value.Quantity), value.Quantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.InvoicedQuantity), value.InvoicedQuantity)],
+        DeliveryNoteLine value => [(nameof(value.DispatchedQuantity), value.DispatchedQuantity), (nameof(value.DeliveredQuantity), value.DeliveredQuantity), (nameof(value.DamagedQuantity), value.DamagedQuantity)],
+        ReturnOrderLine value => [(nameof(value.QuantityReturned), value.QuantityReturned)],
+        QuoteLineItem value => [(nameof(value.Quantity), value.Quantity)],
+        SalesForecastLine value => [(nameof(value.ForecastQuantity), value.ForecastQuantity)],
+        SalesAgreementLine value => [(nameof(value.MinimumQuantity), value.MinimumQuantity), (nameof(value.MaximumQuantity), value.MaximumQuantity), (nameof(value.UtilizedQuantity), value.UtilizedQuantity)],
+        _ => []
+    };
+
+    private static string? LegacyUnitCode(object entity) => entity switch
+    {
+        GoodsReceiptNoteItem value => value.UnitOfMeasure,
+        InventoryTransferItem value => value.UnitOfMeasure,
+        PhysicalCountItem value => value.UnitOfMeasure,
+        InventoryRequisitionItem value => value.UnitOfMeasure,
+        PurchaseOrderItem value => value.UnitOfMeasure,
+        PurchaseOrderReceiptItem value => value.UnitOfMeasure,
+        InventoryIssueVoucherLine value => value.UnitOfMeasure,
+        ProcurementPlanItem value => value.UnitOfMeasure,
+        PurchaseRequisitionItem value => value.UnitOfMeasure,
+        RequestForQuotationItem value => value.UnitOfMeasure,
+        TenderItem value => value.UnitOfMeasure,
+        TenderNegotiationItem value => value.UnitOfMeasure,
+        ProcurementFrameworkPriceListLine value => value.UnitOfMeasure,
+        ProcurementFrameworkCallOffLine value => value.UnitOfMeasure,
+        InvoiceLineItem value => value.Unit,
+        VendorInvoiceLineItem value => value.Unit,
+        SalesOrderLine value => value.Unit,
+        DeliveryNoteLine value => value.Unit,
+        QuoteLineItem value => value.Unit,
+        SalesForecastLine value => value.Unit,
+        SalesAgreementLine value => value.Unit,
+        _ => null
+    };
+
+    private static Guid? InventoryItemId(object entity) => entity switch
+    {
+        StockMovement value => value.InventoryItemId,
+        GoodsReceiptNoteItem value => value.InventoryItemId,
+        InventoryTransferItem value => value.InventoryItemId,
+        PhysicalCountItem value => value.InventoryItemId,
+        InventoryRequisitionItem value => value.InventoryItemId,
+        InventoryDisposalLine value => value.InventoryItemId,
+        InventoryIssueVoucherLine value => value.InventoryItemId,
+        PurchaseOrderItem value => value.InventoryItemId,
+        ProcurementPlanItem value => value.InventoryItemId,
+        PurchaseRequisitionItem value => value.InventoryItemId,
+        RequestForQuotationItem value => value.InventoryItemId,
+        ProcurementFrameworkPriceListLine value => value.InventoryItemId,
+        ProcurementFrameworkCallOffLine value => value.InventoryItemId,
+        InvoiceLineItem value => value.InventoryItemId,
+        VendorInvoiceLineItem value => value.InventoryItemId,
+        SalesOrderLine value => value.InventoryItemId,
+        DeliveryNoteLine value => value.InventoryItemId,
+        _ => null
+    };
 
     private void NormalizeProcurementAwardReadinessAuditEnvelopes()
     {
@@ -13496,7 +13877,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[WhtStatutoryYearStartMonth] BETWEEN 1 AND 12 AND [WhtStatutoryYearStartDay] BETWEEN 1 AND DAY(EOMONTH(DATEFROMPARTS(2001, [WhtStatutoryYearStartMonth], 1)))");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_PrecisionGovernance",
-                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
+                    "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] IN (0, 1, 2) AND [InvoiceRoundingMethod] IN (0, 1, 2)");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_RoundingIncrements",
                     "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
@@ -13505,7 +13886,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     "[SettlementToleranceAmount] >= 0 AND [SettlementTolerancePercentage] BETWEEN 0 AND 100");
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_InvoiceRoundingReadiness",
-                    "[InvoiceRoundingEnabled] = 0");
+                    "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] IS NOT NULL AND [InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
                 if (isSqlServer)
                     table.HasCheckConstraint(
                         "CK_FinanceSettings_BaseCurrencyCanonical_C3",

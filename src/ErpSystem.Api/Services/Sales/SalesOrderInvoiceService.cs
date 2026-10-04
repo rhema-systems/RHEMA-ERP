@@ -16,6 +16,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Services.Sales;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -23,7 +24,8 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Api.Services.Sales;
 
 internal sealed class SalesOrderInvoiceService(ApplicationDbContext db, ICurrentUserProvider actor,
-    IInvoiceService invoices, IInventoryTrackingControlService? tracking = null,
+    IInvoiceService invoices, ICommercialQuantityPolicyValidator commercialQuantityValidator,
+    IInventoryTrackingControlService? tracking = null,
     IPropertyEnquiryDepositApplicationService? prospectDeposits = null) : ISalesOrderInvoiceService
 {
     public async Task<SalesOrderInvoiceDetailDto> GenerateAsync(Guid orderId, GenerateSalesOrderInvoiceRequest request, CancellationToken cancellationToken = default)
@@ -59,6 +61,13 @@ IF @r<0 THROW 51000, 'The Sales order is busy. Retry the same invoice request.',
             var lines = new List<InvoiceLineItemCreateDto>();
             foreach (var line in sourceLines)
             {
+                await SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+                    commercialQuantityValidator,
+                    line,
+                    line.Unit,
+                    line.Quantity,
+                    $"Sales invoice generation line {line.LineNumber}",
+                    cancellationToken);
                 var input = request.Lines.SingleOrDefault(x => x.SalesOrderLineId == line.Id)
                     ?? throw new InvalidOperationException("An invoice selection does not belong to this order.");
                 var item = line.InventoryItemId.HasValue ? await db.InventoryItems.AsNoTracking().SingleOrDefaultAsync(x =>

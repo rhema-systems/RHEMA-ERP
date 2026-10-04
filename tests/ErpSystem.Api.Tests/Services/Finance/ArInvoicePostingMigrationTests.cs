@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -31,6 +32,95 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed partial class ArInvoicePostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinancePrecisionRelational")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task InvoiceStorageAndPosting_RoundTripsZeroThreeAndFourDecimalCurrencies()
+    {
+        var databaseName = $"ArPrecision_{Guid.NewGuid():N}";
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer($"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;ConnectRetryCount=0")
+            .Options);
+        db.Database.SetCommandTimeout(TimeSpan.FromMinutes(3));
+        try
+        {
+            await db.Database.EnsureCreatedAsync();
+            var cases = new[]
+            {
+                new { Code = "JPY", Places = 0, UnitPrice = 123.5m, Expected = 124m },
+                new { Code = "KWD", Places = 3, UnitPrice = 123.4565m, Expected = 123.457m },
+                new { Code = "CLF", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
+            };
+
+            foreach (var item in cases)
+            {
+                var tenantId = Guid.NewGuid();
+                var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+                {
+                    invoice.CurrencyCode = item.Code;
+                    invoice.LineItems.Single().UnitPrice = item.UnitPrice;
+                    invoice.SubTotal = item.Expected;
+                    invoice.TotalAmount = item.Expected;
+                    invoice.BaseCurrencyAmount = item.Expected;
+                });
+                var tenant = await db.Tenants.SingleAsync(value => value.Id == tenantId);
+                tenant.BaseCurrency = item.Code;
+                tenant.CurrencyDecimalPlaces = item.Places;
+                (await db.AccountingBooks.SingleAsync(value => value.TenantId == tenantId)).FunctionalCurrencyCode = item.Code;
+                (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).BaseCurrency = item.Code;
+                foreach (var account in await db.Accounts.Where(value => value.TenantId == tenantId).ToListAsync())
+                    account.CurrencyCode = item.Code;
+                var currency = await db.Currencies.SingleAsync(value => value.TenantId == tenantId);
+                currency.CurrencyCode = item.Code;
+                currency.NumericCode = item.Code;
+                currency.CurrencyName = item.Code;
+                currency.CurrencySymbol = item.Code;
+                currency.DecimalPlaces = item.Places;
+                await db.SaveChangesAsync();
+
+                db.ChangeTracker.Clear();
+                var stored = await db.Invoices.Include(value => value.LineItems)
+                    .SingleAsync(value => value.Id == fixture.Invoice.Id);
+                stored.TotalAmount.Should().Be(item.Expected);
+                stored.LineItems.Single().UnitPrice.Should().Be(item.UnitPrice);
+
+                var currentUser = CreateCurrentUser(tenantId);
+                var sourceBookAuthority = new FinanceSourceBookAuthorityService(db, currentUser.Object);
+                await using (var authorityTransaction =
+                    await db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable))
+                {
+                    var authority = await sourceBookAuthority.FreezeInitialPrimaryAsync(
+                        new FinanceSourceBookAuthorityFreezeRequest
+                        {
+                            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                            SourceDocumentType = "CustomerInvoice",
+                            SourceDocumentId = stored.Id,
+                            PostingAction = "Post",
+                            EffectiveDate = stored.InvoiceDate.Date,
+                            TransactionCurrencyCode = stored.CurrencyCode,
+                            FreezeStage = FinanceSourceBookAuthorityFreezeStages.Authorized,
+                            SourceWorkflowEntityType = "Invoice"
+                        });
+                    stored.SourceBookAuthorityId = authority.AuthorityId;
+                    await db.SaveChangesAsync();
+                    await authorityTransaction.CommitAsync();
+                }
+                var (service, _) = CreateService(db, tenantId, sourceBookAuthority: sourceBookAuthority);
+                var posted = await service.PostAsync(stored.Id);
+                var journal = await db.JournalEntries.Include(value => value.Transactions)
+                    .SingleAsync(value => value.Id == posted.JournalEntryId);
+                journal.Transactions.Sum(value => value.DebitAmount).Should().Be(item.Expected);
+                journal.Transactions.Sum(value => value.CreditAmount).Should().Be(item.Expected);
+                journal.Transactions.Should().OnlyContain(value =>
+                    value.TransactionDebitAmount + value.TransactionCreditAmount == item.Expected);
+            }
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     [Fact]
     public async Task Distribution_preview_does_not_post_or_mutate_invoice_customer_or_audit()
     {
@@ -158,15 +248,30 @@ public sealed partial class ArInvoicePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedSentArInvoiceAsync(db, tenantId);
-        TaxCalculationRequestDto? capturedTaxRequest = null;
+        TaxDocumentCalculationRequestDto? capturedTaxRequest = null;
         var taxEngine = new Mock<ITaxCalculationEngine>();
-        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
-                It.IsAny<TaxCalculationRequestDto>(),
+        taxEngine.Setup(engine => engine.CalculateDocumentTaxesAsync(
+                It.IsAny<TaxDocumentCalculationRequestDto>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
-            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            .Callback<TaxDocumentCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxDocumentCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
             {
-                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+                CurrencyCode = request.CurrencyCode,
+                CurrencyDecimalPlaces = 2,
+                TotalTaxAmount = 12m,
+                TaxBreakdowns = request.Lines.Select((line, index) => new TaxBreakdownDto
+                {
+                    DocumentLineId = line.DocumentLineId,
+                    TaxId = Guid.NewGuid(),
+                    TaxCode = "VAT",
+                    TaxName = "VAT",
+                    TaxRate = 15m,
+                    TaxableAmount = line.BaseAmount,
+                    TaxAmount = index == 0 ? 6.01m : 5.99m,
+                    RawTaxAmount = 6m,
+                    RoundingAdjustment = index == 0 ? 0.01m : -0.01m,
+                    AllocationSequence = index + 1
+                }).ToList()
             });
         var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
 
@@ -185,7 +290,18 @@ public sealed partial class ArInvoicePostingMigrationTests
                     GLAccountId = fixture.RevenueAccount.Id,
                     Description = "Discounted service",
                     Quantity = 1m,
-                    UnitPrice = 100m,
+                    UnitPrice = 50m,
+                    DiscountPercentage = 10m,
+                    TaxGroupId = Guid.NewGuid(),
+                    TaxTreatment = TaxTreatment.Standard
+                },
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Second discounted service",
+                    Quantity = 1m,
+                    UnitPrice = 50m,
                     DiscountPercentage = 10m,
                     TaxGroupId = Guid.NewGuid(),
                     TaxTreatment = TaxTreatment.Standard
@@ -194,7 +310,13 @@ public sealed partial class ArInvoicePostingMigrationTests
         });
 
         capturedTaxRequest.Should().NotBeNull();
-        capturedTaxRequest!.BaseAmount.Should().Be(80m);
+        capturedTaxRequest!.CurrencyCode.Should().Be("GHS");
+        capturedTaxRequest.Lines.Should().HaveCount(2);
+        capturedTaxRequest.Lines.Should().OnlyContain(line => line.BaseAmount == 40m);
+        taxEngine.Verify(engine => engine.CalculateDocumentTaxesAsync(
+            It.IsAny<TaxDocumentCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        taxEngine.Verify(engine => engine.CalculateTaxesAsync(
+            It.IsAny<TaxCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
         created.SubTotal.Should().Be(90m);
         created.DiscountAmount.Should().Be(10m);
         created.TaxAmount.Should().Be(12m);
@@ -935,7 +1057,8 @@ public sealed partial class ArInvoicePostingMigrationTests
         ITaxCalculationEngine? taxEngine = null,
         IInventoryValuationService? valuation = null,
         IInventoryTrackingControlService? tracking = null,
-        IFinanceSourceDimensionService? dimensions = null)
+        IFinanceSourceDimensionService? dimensions = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -973,7 +1096,8 @@ public sealed partial class ArInvoicePostingMigrationTests
             auditService,
             sourceDimensions: dimensions,
             workflowIntegration: (workflow ?? DirectWorkflow()).Object,
-            inventoryTracking: tracking);
+            inventoryTracking: tracking,
+            sourceBookAuthority: sourceBookAuthority);
 
         return (service, subledgerPostingMock);
     }
@@ -1186,7 +1310,7 @@ public sealed partial class ArInvoicePostingMigrationTests
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
     {
-        var userId = Guid.NewGuid().ToString();
+        var userId = tenantId.ToString();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
@@ -1289,7 +1413,7 @@ public sealed partial class ArInvoicePostingMigrationTests
         {
             Id = tenantId,
             Name = $"Tenant {code}",
-            Code = code,
+            Code = code == "TEN" ? $"TEN-{tenantId:N}" : code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
@@ -1300,6 +1424,27 @@ public sealed partial class ArInvoicePostingMigrationTests
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
         });
+        db.Currencies.Add(new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "GHS", NumericCode = "936",
+            CurrencyName = "Ghanaian Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
+            IsBaseCurrency = true, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
+        });
+        if (!db.Users.Local.Any(user => user.Id == tenantId))
+        {
+            db.Users.Add(new ApplicationUser
+            {
+                Id = tenantId,
+                TenantId = tenantId,
+                UserName = $"ar.invoice.poster.{tenantId:N}",
+                NormalizedUserName = $"AR.INVOICE.POSTER.{tenantId:N}",
+                Email = $"ar.invoice.poster.{tenantId:N}@example.test",
+                NormalizedEmail = $"AR.INVOICE.POSTER.{tenantId:N}@EXAMPLE.TEST",
+                FirstName = "AR",
+                LastName = "Poster",
+                IsActive = true
+            });
+        }
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1308,11 +1453,25 @@ public sealed partial class ArInvoicePostingMigrationTests
         bool isOpen = true,
         bool isClosed = false)
     {
+        var fiscalYear = db.FiscalYears.Local.SingleOrDefault(year =>
+            year.TenantId == tenantId && year.Year == 2026);
+        if (fiscalYear is null)
+        {
+            fiscalYear = new FiscalYear
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                FiscalYearName = "Fiscal Year 2026", FiscalYearCode = "2026",
+                Year = 2026, FiscalYearType = "Calendar",
+                StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+                TotalDays = 365, NumberOfPeriods = 12, Status = "Open", IsActive = true
+            };
+            db.FiscalYears.Add(fiscalYear);
+        }
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -1423,6 +1582,7 @@ public sealed partial class ArInvoicePostingMigrationTests
             PartnerCode = $"CUS-{tenantId.ToString("N")[..6]}",
             PartnerName = "Test Customer",
             PartnerType = "Customer",
+            ApprovalStatus = "Approved",
             RegistrationStatus = "Approved",
             IsActive = true,
             IsBlacklisted = false,

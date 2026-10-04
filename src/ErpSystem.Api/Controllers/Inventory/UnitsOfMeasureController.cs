@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Inventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -55,6 +56,10 @@ public class UnitsOfMeasureController : ControllerBase
             var dtos = units.Select(MapToDto).ToList();
             return Ok(dtos);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving units of measure");
@@ -75,6 +80,10 @@ public class UnitsOfMeasureController : ControllerBase
                 return NotFound($"Unit of measure with ID {id} not found");
 
             return Ok(MapToDto(unit));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -151,15 +160,22 @@ public class UnitsOfMeasureController : ControllerBase
                 IsBaseUnit = dto.IsBaseUnit,
                 IsActive = true,
                 SortOrder = dto.SortOrder,
+                DecimalPlaces = dto.DecimalPlaces,
+                RoundingIncrement = dto.RoundingIncrement,
                 TenantId = tenantId,
                 CreatedById = _currentUserProvider.UserId
             };
 
+            CommercialQuantityPolicy.ValidateConfiguration(unit.DecimalPlaces, unit.RoundingIncrement);
             await _uomRepository.AddAsync(unit);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Created unit of measure {Code} for tenant {TenantId}", unit.Code, tenantId);
             return CreatedAtAction(nameof(GetById), new { id = unit.Id }, MapToDto(unit));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -188,12 +204,19 @@ public class UnitsOfMeasureController : ControllerBase
             unit.IsBaseUnit = dto.IsBaseUnit;
             unit.IsActive = dto.IsActive;
             unit.SortOrder = dto.SortOrder;
+            unit.DecimalPlaces = dto.DecimalPlaces;
+            unit.RoundingIncrement = dto.RoundingIncrement;
+            CommercialQuantityPolicy.ValidateConfiguration(unit.DecimalPlaces, unit.RoundingIncrement);
 
             await _uomRepository.UpdateAsync(unit);
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Updated unit of measure {Id}", id);
             return Ok(MapToDto(unit));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
         }
         catch (Exception ex)
         {
@@ -352,7 +375,9 @@ public class UnitsOfMeasureController : ControllerBase
         Category = unit.Category,
         IsBaseUnit = unit.IsBaseUnit,
         IsActive = unit.IsActive,
-        SortOrder = unit.SortOrder
+        SortOrder = unit.SortOrder,
+        DecimalPlaces = unit.DecimalPlaces,
+        RoundingIncrement = unit.RoundingIncrement
     };
 }
 

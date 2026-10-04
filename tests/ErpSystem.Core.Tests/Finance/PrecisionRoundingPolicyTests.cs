@@ -67,6 +67,40 @@ public class PrecisionRoundingPolicyTests
         invalid.Should().Throw<InvalidOperationException>().WithMessage("*UOM rounding increment*");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1.125)]
+    [InlineData(-1.125)]
+    public void QuantityIncrement_AllowsZeroAndSignedExactMultiples(decimal quantity)
+    {
+        var act = () => PrecisionRoundingPolicy.ValidateQuantity(quantity, 3, 0.125m);
+
+        act.Should().NotThrow();
+    }
+
+    [Theory]
+    [InlineData(1.126)]
+    [InlineData(-1.126)]
+    [InlineData(0.0001)]
+    public void QuantityIncrement_RejectsSignedAndNearZeroNonMultiples(decimal quantity)
+    {
+        var act = () => PrecisionRoundingPolicy.ValidateQuantity(quantity, 3, 0.125m);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*whole multiple*0.125*");
+    }
+
+    [Fact]
+    public void QuantityIncrement_RejectsZeroNegativeAndFinerThanPrecisionConfiguration()
+    {
+        FluentActions.Invoking(() => PrecisionRoundingPolicy.ValidateQuantity(0m, 3, 0m))
+            .Should().Throw<InvalidOperationException>().WithMessage("*greater than zero*");
+        FluentActions.Invoking(() => PrecisionRoundingPolicy.ValidateQuantity(0m, 3, -0.125m))
+            .Should().Throw<InvalidOperationException>().WithMessage("*greater than zero*");
+        FluentActions.Invoking(() => PrecisionRoundingPolicy.ValidateQuantity(0m, 2, 0.001m))
+            .Should().Throw<InvalidOperationException>().WithMessage("*cannot be finer*");
+    }
+
     [Fact]
     public void ExchangeRate_RetainsHighPrecisionIndependentOfCurrency()
     {

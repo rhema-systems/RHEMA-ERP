@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -39,6 +40,7 @@ public class ReturnOrderService : IReturnOrderService
     private readonly IFinanceProducerApprovedExecutionService? _financeProducerExecution;
     private readonly IFinanceProducerReversalPreparationService? _financeProducerReversals;
     private readonly IFinanceProducerReplayVerificationService? _financeProducerReplayVerifier;
+    private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
     public ReturnOrderService(
         IGenericRepository<ReturnOrder> returnRepo,
@@ -56,7 +58,8 @@ public class ReturnOrderService : IReturnOrderService
         IFinanceProducerIntentService? financeProducerIntents = null,
         IFinanceProducerApprovedExecutionService? financeProducerExecution = null,
         IFinanceProducerReversalPreparationService? financeProducerReversals = null,
-        IFinanceProducerReplayVerificationService? financeProducerReplayVerifier = null)
+        IFinanceProducerReplayVerificationService? financeProducerReplayVerifier = null,
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
     {
         _returnRepo = returnRepo;
         _returnLineRepo = returnLineRepo;
@@ -74,6 +77,7 @@ public class ReturnOrderService : IReturnOrderService
         _financeProducerExecution = financeProducerExecution;
         _financeProducerReversals = financeProducerReversals;
         _financeProducerReplayVerifier = financeProducerReplayVerifier;
+        _commercialQuantityValidator = commercialQuantityValidator;
     }
 
     // ═════════════════════════════════════
@@ -129,6 +133,19 @@ public class ReturnOrderService : IReturnOrderService
         decimal total = 0;
         foreach (var lineDto in dto.Lines)
         {
+            SalesOrderLine? sourceLine = null;
+            if (lineDto.SalesOrderLineId.HasValue)
+            {
+                sourceLine = await _unitOfWork.Repository<SalesOrderLine>()
+                    .GetQueryable(line => line.Id == lineDto.SalesOrderLineId.Value &&
+                        line.SalesOrderId == salesOrder.Id && line.TenantId == tenantId && !line.IsDeleted)
+                    .SingleOrDefaultAsync()
+                    ?? throw new InvalidOperationException("Return order source line was not found on the selected Sales order.");
+                if (lineDto.UnitOfMeasureId.HasValue && sourceLine.UnitOfMeasureId.HasValue &&
+                    lineDto.UnitOfMeasureId != sourceLine.UnitOfMeasureId)
+                    throw new InvalidOperationException("Return order UOM must match its source Sales order line.");
+            }
+
             var line = new ReturnOrderLine
             {
                 ReturnOrderId = ro.Id,
@@ -136,12 +153,17 @@ public class ReturnOrderService : IReturnOrderService
                 Description = lineDto.Description,
                 ProductCode = lineDto.ProductCode,
                 QuantityReturned = lineDto.QuantityReturned,
+                UnitOfMeasureId = sourceLine?.UnitOfMeasureId ?? lineDto.UnitOfMeasureId,
+                UnitOfMeasureCodeSnapshot = sourceLine?.UnitOfMeasureCodeSnapshot,
+                UnitOfMeasureDecimalPlacesSnapshot = sourceLine?.UnitOfMeasureDecimalPlacesSnapshot,
+                UnitOfMeasureRoundingIncrementSnapshot = sourceLine?.UnitOfMeasureRoundingIncrementSnapshot,
                 UnitPrice = lineDto.UnitPrice,
                 ReasonCode = lineDto.ReasonCode,
                 Condition = lineDto.Condition,
                 IsRestockable = lineDto.IsRestockable,
                 TenantId = tenantId
             };
+            await ValidateLineQuantityAsync(line, sourceLine?.Unit ?? lineDto.Unit, "Sales return create");
             total += lineDto.QuantityReturned * lineDto.UnitPrice;
             await _returnLineRepo.AddAsync(line);
         }
@@ -212,9 +234,11 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<ReturnOrderDetailDto> ApproveReturnOrderAsync(Guid id)
     {
-        var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        var ro = await _returnRepo.GetByIdAsync(id, order => order.Lines) ?? throw new InvalidOperationException($"Return Order {id} not found");
         if (ro.ReturnStatus != ReturnOrderStatus.Requested)
             throw new InvalidOperationException("Only requested return orders can be approved");
+
+        await ValidateReturnQuantitiesAsync(ro, "Sales return approve");
 
         var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync("ReturnOrder", id, _currentUserProvider.UserId, "Approve");
         if (!workflowResult.ExecutionResult.Success)
@@ -239,9 +263,10 @@ public class ReturnOrderService : IReturnOrderService
 
     public async Task<ReturnOrderDetailDto> ReceiveReturnOrderAsync(Guid id)
     {
-        var ro = await _returnRepo.GetByIdAsync(id) ?? throw new InvalidOperationException($"Return Order {id} not found");
+        var ro = await _returnRepo.GetByIdAsync(id, order => order.Lines) ?? throw new InvalidOperationException($"Return Order {id} not found");
         if (ro.ReturnStatus != ReturnOrderStatus.Approved)
             throw new InvalidOperationException("Only approved return orders can be received");
+        await ValidateReturnQuantitiesAsync(ro, "Sales return receive");
         ro.ReturnStatus = ReturnOrderStatus.Received;
         ro.ReceivedDate = DateTime.UtcNow;
         await _returnRepo.UpdateAsync(ro);
@@ -1907,6 +1932,10 @@ public class ReturnOrderService : IReturnOrderService
             Description = l.Description,
             ProductCode = l.ProductCode,
             QuantityReturned = l.QuantityReturned,
+            UnitOfMeasureId = l.UnitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = l.UnitOfMeasureCodeSnapshot,
+            UnitOfMeasureDecimalPlacesSnapshot = l.UnitOfMeasureDecimalPlacesSnapshot,
+            UnitOfMeasureRoundingIncrementSnapshot = l.UnitOfMeasureRoundingIncrementSnapshot,
             UnitPrice = l.UnitPrice,
             LineTotal = l.QuantityReturned * l.UnitPrice,
             ReasonCode = l.ReasonCode,
@@ -1914,6 +1943,20 @@ public class ReturnOrderService : IReturnOrderService
             IsRestockable = l.IsRestockable
         }).ToList() ?? new()
     };
+
+    private async Task ValidateReturnQuantitiesAsync(ReturnOrder order, string boundary)
+    {
+        foreach (var line in order.Lines.Where(line => !line.IsDeleted))
+            await ValidateLineQuantityAsync(line, line.UnitOfMeasureCodeSnapshot, boundary);
+    }
+
+    private Task ValidateLineQuantityAsync(ReturnOrderLine line, string? legacyUnitCode, string boundary)
+    {
+        var validator = _commercialQuantityValidator
+            ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales returns.");
+        return SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, legacyUnitCode, line.QuantityReturned, $"{boundary} line {line.Id}");
+    }
 
     private static CreditNoteSummaryDto MapCreditNoteSummaryDto(CreditNote c) => new()
     {

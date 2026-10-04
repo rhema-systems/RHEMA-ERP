@@ -38,6 +38,11 @@ namespace ErpSystem.Core.DTOs.Sales
         public string? ProductName { get; set; }
         public string? SalesRepName { get; set; }
         public decimal ForecastQuantity { get; set; }
+        public string? Unit { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
+        public string? UnitOfMeasureCodeSnapshot { get; set; }
+        public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+        public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
         public decimal ForecastAmount { get; set; }
         public decimal ActualQuantity { get; set; }
         public decimal ActualAmount { get; set; }
@@ -65,6 +70,8 @@ namespace ErpSystem.Core.DTOs.Sales
         public string? SalesRepName { get; set; }
         public string? SalesRepId { get; set; }
         public decimal ForecastQuantity { get; set; }
+        public string? Unit { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
         public decimal ForecastAmount { get; set; }
         public string? Notes { get; set; }
     }

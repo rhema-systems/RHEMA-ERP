@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import type { Account } from '@/types/finance';
 import {
   newEditableRecurringJournalLine,
+  formatRecurringJournalAmount,
   summarizeRecurringJournalLines,
   type EditableRecurringJournalLine,
 } from './recurring-journal-lines';
@@ -22,9 +23,7 @@ interface Props {
 
 export function RecurringJournalLineGrid({ accounts, currencyCode, lines, onChange }: Props) {
   const summary = summarizeRecurringJournalLines(lines);
-  const money = (value: number) => new Intl.NumberFormat('en-GH', {
-    style: 'currency', currency: currencyCode,
-  }).format(value);
+  const money = (value: number) => formatRecurringJournalAmount(value, currencyCode);
   const update = (key: string, patch: Partial<EditableRecurringJournalLine>) =>
     onChange(lines.map(line => line.key === key ? { ...line, ...patch } : line));
 

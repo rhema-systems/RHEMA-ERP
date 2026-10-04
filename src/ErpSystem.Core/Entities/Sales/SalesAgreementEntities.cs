@@ -156,7 +156,7 @@ public class SalesAgreement : DocumentEntity
 /// Product/property-level terms within an agreement.
 /// Defines agreed pricing, volume commitments, and discount tiers.
 /// </summary>
-public class SalesAgreementLine : BaseEntity
+public class SalesAgreementLine : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid SalesAgreementId { get; set; }
@@ -192,6 +192,10 @@ public class SalesAgreementLine : BaseEntity
 
     [MaxLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // ── Discount Tiers ──────────────────────────────────────────────────
 

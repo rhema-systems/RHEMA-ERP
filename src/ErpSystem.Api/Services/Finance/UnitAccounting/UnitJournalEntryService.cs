@@ -13,6 +13,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -616,7 +617,9 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (lines.Any(l => l.Quantity == 0m))
                 throw new InvalidOperationException("Unit journal line quantities cannot be zero.");
 
-            await ValidateLineAccountsAsync(lines.Select(l => l.UnitAccountId).Distinct().ToList(), cancellationToken);
+            await ValidateLineAccountsAsync(
+                lines.Select((line, index) => new QuantityLine(line.UnitAccountId, line.Quantity, index + 1)).ToList(),
+                cancellationToken);
         }
 
         private async Task<FiscalPeriod> ValidateEntryReadyForPostingAsync(
@@ -642,13 +645,16 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             if (lines.Any(l => l.Quantity == 0m))
                 throw new InvalidOperationException("Unit journal line quantities cannot be zero.");
 
-            await ValidateLineAccountsAsync(lines.Select(l => l.UnitAccountId).Distinct().ToList(), cancellationToken);
+            await ValidateLineAccountsAsync(
+                lines.Select(line => new QuantityLine(line.UnitAccountId, line.Quantity, line.LineNumber)).ToList(),
+                cancellationToken);
         }
 
         private async Task ValidateLineAccountsAsync(
-            IReadOnlyCollection<Guid> unitAccountIds,
+            IReadOnlyCollection<QuantityLine> lines,
             CancellationToken cancellationToken)
         {
+            var unitAccountIds = lines.Select(line => line.UnitAccountId).Distinct().ToList();
             var accounts = await _unitOfWork.Repository<UnitAccount>()
                 .GetQueryable(a => a.TenantId == TenantId && unitAccountIds.Contains(a.Id) && !a.IsDeleted)
                 .Select(a => new
@@ -657,7 +663,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     a.AccountNumber,
                     a.IsActive,
                     a.IsPostingAccount,
-                    HasChildren = a.ChildAccounts.Any(c => !c.IsDeleted)
+                    HasChildren = a.ChildAccounts.Any(c => !c.IsDeleted),
+                    UnitTypeCode = a.UnitType != null ? a.UnitType.Code : null,
+                    UnitTypeDecimalPlaces = a.UnitType != null ? (int?)a.UnitType.DecimalPlaces : null,
+                    UnitTypeRoundingIncrement = a.UnitType != null ? a.UnitType.RoundingIncrement : null
                 })
                 .ToListAsync(cancellationToken);
 
@@ -671,7 +680,32 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             var nonPosting = accounts.FirstOrDefault(a => !a.IsPostingAccount || a.HasChildren);
             if (nonPosting != null)
                 throw new InvalidOperationException($"Unit account '{nonPosting.AccountNumber}' is a summary account and cannot receive direct postings.");
+
+            var accountsById = accounts.ToDictionary(account => account.Id);
+            foreach (var line in lines)
+            {
+                var account = accountsById[line.UnitAccountId];
+                if (!account.UnitTypeDecimalPlaces.HasValue)
+                    throw new InvalidOperationException(
+                        $"Unit journal line {line.LineNumber} account '{account.AccountNumber}' has no Unit Type precision policy.");
+
+                try
+                {
+                    PrecisionRoundingPolicy.ValidateQuantity(
+                        line.Quantity,
+                        account.UnitTypeDecimalPlaces.Value,
+                        account.UnitTypeRoundingIncrement);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    throw new InvalidOperationException(
+                        $"Unit journal line {line.LineNumber} quantity {line.Quantity} is invalid for account '{account.AccountNumber}' Unit Type '{account.UnitTypeCode}': {exception.Message}",
+                        exception);
+                }
+            }
         }
+
+        private sealed record QuantityLine(Guid UnitAccountId, decimal Quantity, int LineNumber);
 
         private async Task ApplyUnitBalanceMovementsAsync(
             FiscalPeriod period,

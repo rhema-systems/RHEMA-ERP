@@ -41,7 +41,8 @@ public class CustomerService : ICustomerService
         var partner = await CustomerPartners()
             .FirstOrDefaultAsync(p => p.Id == id, cancellationToken);
 
-        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken: cancellationToken)).Single();
+        return partner == null ? null : (await MapCustomersAsync(
+            new[] { partner }, includeBalances: true, cancellationToken)).Single();
     }
 
     public async Task<CustomerDto?> GetByCodeAsync(string customerCode, CancellationToken cancellationToken = default)
@@ -54,7 +55,8 @@ public class CustomerService : ICustomerService
                 p.CustomerAccountNumber == normalizedCode,
                 cancellationToken);
 
-        return partner == null ? null : (await MapCustomersAsync(new[] { partner }, cancellationToken: cancellationToken)).Single();
+        return partner == null ? null : (await MapCustomersAsync(
+            new[] { partner }, includeBalances: true, cancellationToken)).Single();
     }
 
     public async Task<PagedResult<CustomerDto>> GetAllAsync(CustomerQueryDto query, CancellationToken cancellationToken = default)
@@ -322,13 +324,34 @@ public class CustomerService : ICustomerService
             .AsNoTracking().ToListAsync(cancellationToken);
         var defaultTerm = terms.Where(term => term.IsDefault)
             .OrderBy(term => term.ApplicableTo == "Customer" ? 0 : 1).ThenBy(term => term.DisplayOrder).FirstOrDefault();
+        var asOfDate = DateTime.UtcNow;
+        if (includeBalances)
+        {
+            // Keep the customer register aligned with the same canonical projection used by
+            // aging and unapplied-receipt reporting. This changes read-side evidence only.
+            await _settlementReadModelService.RebuildAsync(new SubledgerSettlementRebuildRequestDto
+            {
+                SourceModule = SubledgerSettlementModules.AccountsReceivable,
+                AsOfDate = asOfDate,
+                RecordAudit = false
+            }, cancellationToken);
+        }
+
         var settlementBalances = includeBalances
             ? (await _settlementReadModelService.GetBalancesAsync(
                     SubledgerSettlementModules.AccountsReceivable,
-                    DateTime.UtcNow,
+                    asOfDate,
                     cancellationToken: cancellationToken))
                 .GroupBy(item => item.CounterpartyId)
                 .ToDictionary(group => group.Key, group => group.Sum(item => item.OutstandingAmount))
+            : new Dictionary<Guid, decimal>();
+        var customerCredits = includeBalances
+            ? (await _settlementReadModelService.GetUnappliedBalancesAsync(
+                    SubledgerSettlementModules.AccountsReceivable,
+                    asOfDate,
+                    cancellationToken: cancellationToken))
+                .GroupBy(item => item.CounterpartyId)
+                .ToDictionary(group => group.Key, group => group.Sum(item => item.UnappliedAmount))
             : new Dictionary<Guid, decimal>();
         return partners.Select(partner =>
         {
@@ -344,7 +367,8 @@ public class CustomerService : ICustomerService
                 term,
                 settlementBalances.TryGetValue(partner.Id, out var authoritativeBalance)
                     ? authoritativeBalance
-                    : includeBalances ? 0m : null);
+                    : includeBalances ? 0m : null,
+                customerCredits.GetValueOrDefault(partner.Id));
         }).ToList();
     }
 
@@ -352,7 +376,8 @@ public class CustomerService : ICustomerService
         BusinessPartner partner,
         BusinessPartnerFinanceProfileReadiness readiness,
         PaymentTerm? paymentTerm,
-        decimal? outstandingBalance = null)
+        decimal? outstandingBalance = null,
+        decimal customerCreditBalance = 0m)
     {
 
         return new CustomerDto
@@ -372,6 +397,7 @@ public class CustomerService : ICustomerService
             TaxId = partner.TaxIdentificationNumber,
             CreditLimit = readiness.ArProfile?.CreditLimit ?? 0m,
             OutstandingBalance = outstandingBalance ?? partner.OutstandingBalance ?? 0m,
+            CustomerCreditBalance = customerCreditBalance,
             PaymentTermsDays = paymentTerm?.DueDays ?? 30,
             PaymentTermId = paymentTerm?.Id,
             PriceGroup = partner.PriceList,
@@ -442,6 +468,8 @@ public class CustomerService : ICustomerService
             TaxAmount = invoice.TaxAmount,
             DiscountAmount = invoice.DiscountAmount,
             TotalAmount = invoice.TotalAmount,
+            RoundingAdjustmentAmount = invoice.RoundingAdjustmentAmount,
+            FinanceRoundingEvidenceId = invoice.FinanceRoundingEvidenceId,
             PaidAmount = invoice.PaidAmount,
             BalanceAmount = invoice.BalanceAmount,
             Status = invoice.Status.ToString(),
@@ -501,6 +529,8 @@ public class CustomerService : ICustomerService
             TotalAmount = payment.TotalAmount,
             AllocatedAmount = payment.AllocatedAmount,
             UnallocatedAmount = payment.UnallocatedAmount,
+            RoundingAdjustmentAmount = payment.RoundingAdjustmentAmount,
+            FinanceRoundingEvidenceId = payment.FinanceRoundingEvidenceId,
             PaymentMethod = payment.PaymentMethod,
             CurrencyCode = payment.CurrencyCode,
             ExchangeRate = payment.ExchangeRate,

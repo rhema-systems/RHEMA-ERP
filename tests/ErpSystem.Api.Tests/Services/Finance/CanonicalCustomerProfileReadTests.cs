@@ -89,6 +89,21 @@ public sealed class CanonicalCustomerProfileReadTests
                     OutstandingAmount = 321m
                 }
             });
+        fixture.Settlement.Setup(value => value.GetUnappliedBalancesAsync(
+                SubledgerSettlementModules.AccountsReceivable,
+                It.IsAny<DateTime>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new SubledgerUnappliedSettlementBalance
+                {
+                    TenantId = fixture.Partner.TenantId,
+                    CounterpartyId = fixture.Partner.Id,
+                    Classification = SubledgerUnappliedSettlementClassifications.CustomerAdvance,
+                    UnappliedAmount = 125m
+                }
+            });
 
         var result = await fixture.Service.GetAllAsync(new CustomerQueryDto
         {
@@ -98,7 +113,13 @@ public sealed class CanonicalCustomerProfileReadTests
 
         result.Items.Should().ContainSingle();
         result.Items.Single().OutstandingBalance.Should().Be(321m);
+        result.Items.Single().CustomerCreditBalance.Should().Be(125m);
         result.Items.Single().ReadinessCode.Should().Be("READY");
+        fixture.Settlement.Verify(value => value.RebuildAsync(
+            It.Is<SubledgerSettlementRebuildRequestDto>(request =>
+                request.SourceModule == SubledgerSettlementModules.AccountsReceivable &&
+                request.RecordAudit == false),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -122,6 +143,9 @@ public sealed class CanonicalCustomerProfileReadTests
             Settlement.Setup(value => value.GetBalancesAsync(It.IsAny<string>(), It.IsAny<DateTime>(),
                     It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(Array.Empty<SubledgerSettlementBalance>());
+            Settlement.Setup(value => value.GetUnappliedBalancesAsync(It.IsAny<string>(), It.IsAny<DateTime>(),
+                    It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<SubledgerUnappliedSettlementBalance>());
             Settlement.Setup(value => value.RebuildAsync(It.IsAny<SubledgerSettlementRebuildRequestDto>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new SubledgerSettlementRebuildResultDto());

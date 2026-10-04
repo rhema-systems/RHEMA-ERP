@@ -355,6 +355,24 @@ export default function FinanceSettingsPage() {
         }
     };
 
+    const roundingGainReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingGainAccountId &&
+        account.accountType === 'Revenue' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const roundingLossReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingLossAccountId &&
+        account.accountType === 'Expense' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const invoiceRoundingReady = Boolean(
+        formData.invoiceRoundingIncrement &&
+        formData.invoiceRoundingIncrement > 0 &&
+        roundingGainReady &&
+        roundingLossReady);
+
     if (loading) {
         return (
             <div className="space-y-6">
@@ -537,16 +555,16 @@ export default function FinanceSettingsPage() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-4">
                         <div className="space-y-2"><Label>Tax rounding method</Label><Select disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingMethod ?? 'Nearest'} onValueChange={value => setFormData({ ...formData, taxRoundingMethod: value as UpdateFinanceSettingsDto['taxRoundingMethod'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Nearest">Nearest</SelectItem><SelectItem value="Up">Up</SelectItem><SelectItem value="Down">Down</SelectItem></SelectContent></Select></div>
-                        <div className="space-y-2"><Label>Tax rounding scope</Label><Select disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingScope ?? 'Line'} onValueChange={value => setFormData({ ...formData, taxRoundingScope: value as UpdateFinanceSettingsDto['taxRoundingScope'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Line">Line</SelectItem><SelectItem value="TaxCodeGroup" disabled>Tax code / group — pending document orchestrator</SelectItem><SelectItem value="Document" disabled>Document — pending document orchestrator</SelectItem></SelectContent></Select></div>
-                        <div className="space-y-2"><Label htmlFor="taxPercentagePrecision">Tax percentage decimals</Label><Input id="taxPercentagePrecision" type="number" min={0} max={4} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxPercentageDecimalPlaces ?? 4} onChange={event => setFormData({ ...formData, taxPercentageDecimalPlaces: Number(event.target.value) })} /></div>
-                        <div className="space-y-2"><Label htmlFor="taxRoundingIncrement">Tax monetary increment</Label><Input id="taxRoundingIncrement" type="number" min={0.000001} step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingIncrement ?? ''} placeholder="Currency minor unit" onChange={event => setFormData({ ...formData, taxRoundingIncrement: event.target.value ? Number(event.target.value) : undefined })} /></div>
+                        <div className="space-y-2"><Label>Tax rounding scope</Label><Select disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingScope ?? 'Line'} onValueChange={value => setFormData({ ...formData, taxRoundingScope: value as UpdateFinanceSettingsDto['taxRoundingScope'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Line">Line</SelectItem><SelectItem value="TaxCodeGroup">Tax code / group</SelectItem><SelectItem value="Document">Document</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label htmlFor="taxPercentagePrecision">Tax percentage decimals</Label><Input id="taxPercentagePrecision" type="number" min={0} max={6} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxPercentageDecimalPlaces ?? 4} onChange={event => setFormData({ ...formData, taxPercentageDecimalPlaces: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label htmlFor="taxRoundingIncrement">Tax monetary increment</Label><Input id="taxRoundingIncrement" type="number" min={0.000001} step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingIncrement ?? ''} placeholder="Currency minor unit" onChange={event => setFormData({ ...formData, taxRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
                     </div>
                     <div className="rounded-md border p-4 space-y-4">
-                        <div className="flex items-center justify-between"><div><Label htmlFor="invoiceRounding">Invoice / cash rounding</Label><p className="text-xs text-muted-foreground">Configuration only. Activation is gated until canonical AR/AP posting integration is approved.</p></div><Switch id="invoiceRounding" disabled checked={formData.invoiceRoundingEnabled ?? false} onCheckedChange={checked => setFormData({ ...formData, invoiceRoundingEnabled: checked })} /></div>
+                        <div className="flex items-center justify-between"><div><Label htmlFor="invoiceRounding">Invoice / cash rounding</Label><p className="text-xs text-muted-foreground">Posts each non-zero delta to the configured gain or loss account through the canonical Finance journal. Configure a positive increment and active direct-posting Revenue and Expense accounts before activation.</p></div><Switch id="invoiceRounding" disabled={settings?.precisionAccountingPolicyLocked || (!formData.invoiceRoundingEnabled && !invoiceRoundingReady)} checked={formData.invoiceRoundingEnabled ?? false} onCheckedChange={checked => setFormData({ ...formData, invoiceRoundingEnabled: checked })} /></div>
                         <div className="grid gap-4 md:grid-cols-3">
-                            <div className="space-y-2"><Label htmlFor="invoiceIncrement">Increment</Label><Input id="invoiceIncrement" type="number" step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingIncrement ?? ''} onChange={event => setFormData({ ...formData, invoiceRoundingIncrement: event.target.value ? Number(event.target.value) : undefined })} /></div>
-                            <div className="space-y-2"><Label>Gain account</Label><AccountPicker id="invoiceRoundingGain" placeholder="Search revenue accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingGainAccountId} onChange={value => setFormData({ ...formData, invoiceRoundingGainAccountId: value })} /></div>
-                            <div className="space-y-2"><Label>Loss account</Label><AccountPicker id="invoiceRoundingLoss" placeholder="Search expense accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingLossAccountId} onChange={value => setFormData({ ...formData, invoiceRoundingLossAccountId: value })} /></div>
+                            <div className="space-y-2"><Label htmlFor="invoiceIncrement">Increment</Label><Input id="invoiceIncrement" type="number" step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingIncrement ?? ''} onChange={event => setFormData({ ...formData, invoiceRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
+                            <div className="space-y-2"><Label>Gain account</Label><AccountPicker id="invoiceRoundingGain" placeholder="Search revenue accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingGainAccountId ?? undefined} onChange={value => setFormData({ ...formData, invoiceRoundingGainAccountId: value ?? null })} /></div>
+                            <div className="space-y-2"><Label>Loss account</Label><AccountPicker id="invoiceRoundingLoss" placeholder="Search expense accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingLossAccountId ?? undefined} onChange={value => setFormData({ ...formData, invoiceRoundingLossAccountId: value ?? null })} /></div>
                         </div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">

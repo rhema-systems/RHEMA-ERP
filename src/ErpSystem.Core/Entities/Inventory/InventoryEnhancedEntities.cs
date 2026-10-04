@@ -33,6 +33,10 @@ public class UnitOfMeasure : TenantEntity
     public bool IsBaseUnit { get; set; } = true;
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; } = 0;
+    [Range(0, 6)]
+    public int DecimalPlaces { get; set; } = 4;
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? RoundingIncrement { get; set; }
 
     // Navigation Properties
     public virtual ICollection<UnitOfMeasureConversion> ConversionsFrom { get; set; } = new List<UnitOfMeasureConversion>();
@@ -265,7 +269,7 @@ public class GoodsReceiptNote : TenantEntity
 /// <summary>
 /// Individual line items on a Goods Receipt Note
 /// </summary>
-public class GoodsReceiptNoteItem : TenantEntity
+public class GoodsReceiptNoteItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     /// <summary>Kilograms per stock base unit captured for this receipt, never read from the live master for allocation.</summary>
     [Column(TypeName = "decimal(22,6)")]
@@ -324,6 +328,10 @@ public class GoodsReceiptNoteItem : TenantEntity
 
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // Storage Location
     public Guid? StorageLocationId { get; set; }
@@ -497,7 +505,7 @@ public class InventoryTransfer : TenantEntity
 /// <summary>
 /// Line items for inventory transfer
 /// </summary>
-public class InventoryTransferItem : TenantEntity
+public class InventoryTransferItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid InventoryTransferId { get; set; }
@@ -552,6 +560,10 @@ public class InventoryTransferItem : TenantEntity
 
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // Source Location
     public Guid? SourceLocationId { get; set; }
@@ -709,7 +721,7 @@ public class PhysicalCount : TenantEntity
 /// <summary>
 /// Individual line items for physical count
 /// </summary>
-public class PhysicalCountItem : TenantEntity
+public class PhysicalCountItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid PhysicalCountId { get; set; }
@@ -732,6 +744,10 @@ public class PhysicalCountItem : TenantEntity
 
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // Quantities
     [Column(TypeName = "decimal(18,4)")]
@@ -1320,7 +1336,7 @@ public class InventoryRequisition : TenantEntity
 /// <summary>
 /// Line items for inventory requisition
 /// </summary>
-public class InventoryRequisitionItem : TenantEntity
+public class InventoryRequisitionItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid InventoryRequisitionId { get; set; }
@@ -1351,6 +1367,10 @@ public class InventoryRequisitionItem : TenantEntity
 
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // Location
     public Guid? LocationId { get; set; }

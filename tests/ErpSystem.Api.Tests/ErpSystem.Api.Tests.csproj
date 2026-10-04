@@ -87,6 +87,7 @@
     <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
     <Compile Include="Controllers\Ehc\EhcPropertyEnquiriesListTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\FinanceApprovalInvoiceProducerRouteTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
     <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
@@ -222,6 +223,7 @@
     <Compile Include="Services\Finance\FinanceBudgetSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\InvoiceCashRoundingPostingAdapterTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\FinanceAccountProvisioningTransactionTests.cs" />
     <Compile Include="Services\Finance\DatabaseSeedFinanceProvisioningIsolationTests.cs" />

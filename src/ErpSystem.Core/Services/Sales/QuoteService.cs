@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -18,6 +19,7 @@ public class QuoteService : IQuoteService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<QuoteService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
     public QuoteService(
         IGenericRepository<Quote> quoteRepo,
@@ -26,7 +28,8 @@ public class QuoteService : IQuoteService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<QuoteService> logger,
-        IDocumentNumberingService documentNumberingService)
+        IDocumentNumberingService documentNumberingService,
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
     {
         _quoteRepo = quoteRepo;
         _lineRepo = lineRepo;
@@ -35,6 +38,7 @@ public class QuoteService : IQuoteService
         _currentUserProvider = currentUserProvider;
         _logger = logger;
         _documentNumberingService = documentNumberingService;
+        _commercialQuantityValidator = commercialQuantityValidator;
     }
 
     #region CRUD
@@ -73,11 +77,14 @@ public class QuoteService : IQuoteService
                 UnitPrice = lineDto.UnitPrice,
                 ProductCode = lineDto.ProductCode,
                 Unit = lineDto.Unit,
+                UnitOfMeasureId = lineDto.UnitOfMeasureId,
                 DiscountPercentage = lineDto.DiscountPercentage ?? 0,
                 TaxAmount = lineDto.TaxAmount ?? 0,
                 TaxCode = lineDto.TaxCode,
                 TenantId = tenantId
             };
+
+            await ValidateLineQuantityAsync(line, "Quote create");
 
             line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
             subTotal += line.LineTotal - line.DiscountAmount;
@@ -129,11 +136,14 @@ public class QuoteService : IQuoteService
                     UnitPrice = lineDto.UnitPrice,
                     ProductCode = lineDto.ProductCode,
                     Unit = lineDto.Unit,
+                    UnitOfMeasureId = lineDto.UnitOfMeasureId,
                     DiscountPercentage = lineDto.DiscountPercentage ?? 0,
                     TaxAmount = lineDto.TaxAmount ?? 0,
                     TaxCode = lineDto.TaxCode,
                     TenantId = quote.TenantId
                 };
+
+                await ValidateLineQuantityAsync(line, "Quote update");
 
                 line.DiscountAmount = line.LineTotal * (line.DiscountPercentage / 100);
                 subTotal += line.LineTotal - line.DiscountAmount;
@@ -210,11 +220,13 @@ public class QuoteService : IQuoteService
 
     public async Task<QuoteDetailDto> SendAsync(Guid id)
     {
-        var quote = await _quoteRepo.GetByIdAsync(id)
+        var quote = await _quoteRepo.GetByIdAsync(id, q => q.LineItems)
             ?? throw new InvalidOperationException($"Quote {id} not found");
 
         if (quote.QuoteStatus != "Draft")
             throw new InvalidOperationException("Only draft quotes can be sent");
+
+        await ValidateQuoteQuantitiesAsync(quote, "Quote send");
 
         quote.QuoteStatus = "Sent";
         quote.SentDate = DateTime.UtcNow;
@@ -228,11 +240,13 @@ public class QuoteService : IQuoteService
 
     public async Task<QuoteDetailDto> AcceptAsync(Guid id)
     {
-        var quote = await _quoteRepo.GetByIdAsync(id)
+        var quote = await _quoteRepo.GetByIdAsync(id, q => q.LineItems)
             ?? throw new InvalidOperationException($"Quote {id} not found");
 
         if (quote.QuoteStatus != "Sent")
             throw new InvalidOperationException("Only sent quotes can be accepted");
+
+        await ValidateQuoteQuantitiesAsync(quote, "Quote accept");
 
         quote.QuoteStatus = "Accepted";
         quote.AcceptedDate = DateTime.UtcNow;
@@ -246,7 +260,7 @@ public class QuoteService : IQuoteService
 
     public async Task<QuoteDetailDto> RejectAsync(Guid id, string? reason = null)
     {
-        var quote = await _quoteRepo.GetByIdAsync(id)
+        var quote = await _quoteRepo.GetByIdAsync(id, q => q.LineItems)
             ?? throw new InvalidOperationException($"Quote {id} not found");
 
         if (quote.QuoteStatus != "Sent")
@@ -268,6 +282,8 @@ public class QuoteService : IQuoteService
 
         if (quote.QuoteStatus != "Accepted")
             throw new InvalidOperationException("Only accepted quotes can be converted to Sales Orders");
+
+        await ValidateQuoteQuantitiesAsync(quote, "Quote conversion");
 
         var salesOrder = await _salesOrderService.ConvertQuoteToSalesOrderAsync(id);
         return salesOrder.Id;
@@ -313,6 +329,20 @@ public class QuoteService : IQuoteService
             _currentUserProvider.TenantId,
             DateTime.UtcNow,
             nameof(Quote));
+    }
+
+    private async Task ValidateQuoteQuantitiesAsync(Quote quote, string boundary)
+    {
+        foreach (var line in quote.LineItems.Where(line => !line.IsDeleted))
+            await ValidateLineQuantityAsync(line, boundary);
+    }
+
+    private Task ValidateLineQuantityAsync(QuoteLineItem line, string boundary)
+    {
+        var validator = _commercialQuantityValidator
+            ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales quotes.");
+        return SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, line.Quantity, $"{boundary} line {line.Id}");
     }
 
     private static QuoteSummaryDto MapToSummaryDto(Quote q, IReadOnlyDictionary<Guid, string> customerNames) => new()
@@ -365,6 +395,10 @@ public class QuoteService : IQuoteService
             LineTotal = li.LineTotal,
             ProductCode = li.ProductCode,
             Unit = li.Unit,
+            UnitOfMeasureId = li.UnitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = li.UnitOfMeasureCodeSnapshot,
+            UnitOfMeasureDecimalPlacesSnapshot = li.UnitOfMeasureDecimalPlacesSnapshot,
+            UnitOfMeasureRoundingIncrementSnapshot = li.UnitOfMeasureRoundingIncrementSnapshot,
             DiscountPercentage = li.DiscountPercentage,
             DiscountAmount = li.DiscountAmount,
             TaxAmount = li.TaxAmount,

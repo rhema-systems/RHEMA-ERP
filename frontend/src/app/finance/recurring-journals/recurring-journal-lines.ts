@@ -22,6 +22,24 @@ export interface RecurringJournalLineSummary {
   errors: string[];
 }
 
+export const formatRecurringJournalAmount = (value: number, currencyCode: string): string => {
+  const normalizedCurrency = currencyCode.trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(normalizedCurrency)) {
+    try {
+      return new Intl.NumberFormat('en-GH', {
+        style: 'currency', currency: normalizedCurrency,
+      }).format(value);
+    } catch {
+      // A tenant setting may be loading or invalid. Rendering totals must never crash the form.
+    }
+  }
+
+  return new Intl.NumberFormat('en-GH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+};
+
 export const newEditableRecurringJournalLine = (
   key = globalThis.crypto.randomUUID()
 ): EditableRecurringJournalLine => ({
