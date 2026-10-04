@@ -188,6 +188,7 @@ export default function EstatePropertyListingsPage() {
     externalLeaseAmount: '',
     externalGroundRentRequired: '',
     externalPremiumChargeRequired: '',
+    externalPremiumChargeAmount: '',
     externalListingCurrency: DEFAULT_ESTATE_CURRENCY.code,
     externalListingNotes: '',
   });
@@ -355,6 +356,10 @@ export default function EstatePropertyListingsPage() {
         selected.externalPremiumChargeRequired == null
           ? ''
           : selected.externalPremiumChargeRequired ? 'Yes' : 'No',
+      externalPremiumChargeAmount:
+        selected.externalPremiumChargeAmount == null
+          ? ''
+          : String(selected.externalPremiumChargeAmount),
       externalListingCurrency:
         selected.externalListingCurrency ||
         selected.currency ||
@@ -438,6 +443,12 @@ export default function EstatePropertyListingsPage() {
   const listingPublicationNeedsPremiumChoice = Boolean(
     form.isPublishedToExternalPortal && listingIncludesCharge && !form.externalPremiumChargeRequired
   );
+  const listingPublicationNeedsPremiumAmount = Boolean(
+    form.isPublishedToExternalPortal &&
+      listingIncludesCharge &&
+      form.externalPremiumChargeRequired === 'Yes' &&
+      !(Number(form.externalPremiumChargeAmount) > 0)
+  );
   const recurringAmount = !listingIsLease && form.externalMonthlyRent
     ? Number(form.externalMonthlyRent)
     : null;
@@ -475,6 +486,10 @@ export default function EstatePropertyListingsPage() {
       toast.error('Select whether a premium charge is required.');
       return;
     }
+    if (listingPublicationNeedsPremiumAmount) {
+      toast.error('Enter the premium charge amount.');
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -501,6 +516,10 @@ export default function EstatePropertyListingsPage() {
         externalPremiumChargeRequired: resolvedIncludesCharge
           ? form.externalPremiumChargeRequired === 'Yes'
           : null,
+        externalPremiumChargeAmount:
+          resolvedIncludesCharge && form.externalPremiumChargeRequired === 'Yes'
+            ? Number(form.externalPremiumChargeAmount)
+            : null,
         externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: form.externalListingNotes,
@@ -553,6 +572,7 @@ export default function EstatePropertyListingsPage() {
         externalMonthlyRent: null,
         externalGroundRentRequired: null,
         externalPremiumChargeRequired: null,
+        externalPremiumChargeAmount: null,
         externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: null,
@@ -1067,7 +1087,16 @@ export default function EstatePropertyListingsPage() {
                         <Label>Premium charge required?</Label>
                         <Select
                           value={form.externalPremiumChargeRequired}
-                          onValueChange={(value) => setForm((current) => ({ ...current, externalPremiumChargeRequired: value }))}
+                          onValueChange={(value) =>
+                            setForm((current) => ({
+                              ...current,
+                              externalPremiumChargeRequired: value,
+                              externalPremiumChargeAmount:
+                                value === 'Yes'
+                                  ? current.externalPremiumChargeAmount
+                                  : '',
+                            }))
+                          }
                           disabled={listingLockedByWorkflow}
                         >
                           <SelectTrigger><SelectValue placeholder="Select Yes or No" /></SelectTrigger>
@@ -1076,6 +1105,25 @@ export default function EstatePropertyListingsPage() {
                             <SelectItem value="No">No</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                    ) : null}
+                    {listingIncludesCharge &&
+                    form.externalPremiumChargeRequired === 'Yes' ? (
+                      <div className="space-y-2">
+                        <Label>Premium charge amount</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          disabled={listingLockedByWorkflow}
+                          value={form.externalPremiumChargeAmount}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              externalPremiumChargeAmount: event.target.value,
+                            }))
+                          }
+                          placeholder="Enter premium charge amount"
+                        />
                       </div>
                     ) : null}
                   </div>
@@ -1177,7 +1225,8 @@ export default function EstatePropertyListingsPage() {
                       listingLockedByWorkflow ||
                       listingPublicationBlockedByGroundRent ||
                       listingPublicationNeedsGroundRentChoice ||
-                      listingPublicationNeedsPremiumChoice
+                      listingPublicationNeedsPremiumChoice ||
+                      listingPublicationNeedsPremiumAmount
                     }
                     title={
                       listingBlockedByAssetStatus
@@ -1186,6 +1235,8 @@ export default function EstatePropertyListingsPage() {
                         ? 'Reserved listings cannot be republished manually.'
                         : listingPublicationNeedsPremiumChoice
                         ? 'Select whether a premium charge is required.'
+                        : listingPublicationNeedsPremiumAmount
+                        ? 'Enter the premium charge amount.'
                         : listingPublicationNeedsGroundRentChoice
                         ? 'Select whether annual ground rent is required.'
                         : listingPublicationBlockedByGroundRent

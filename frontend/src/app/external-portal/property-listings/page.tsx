@@ -623,7 +623,11 @@ export default function ExternalPropertyListingsPage() {
                     ) : null}
                     {selected.externalPremiumChargeRequired ? (
                       <div className="mt-1 text-sm text-slate-600">
-                        Premium charge applies; Sales will confirm the amount.
+                        Premium charge:{' '}
+                        {formatMoney(
+                          selected.externalPremiumChargeAmount,
+                          selected.externalListingCurrency
+                        )}
                       </div>
                     ) : null}
                   </div>

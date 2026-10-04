@@ -107,6 +107,7 @@ export interface EstateManagedAsset {
   externalMonthlyRent?: number;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   rentBillingActivatedAt?: string;
   nextRentBillingDate?: string;
   lastRentInvoiceId?: string;
@@ -210,6 +211,7 @@ export interface EstateLandDemarcation {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -250,6 +252,7 @@ export interface UpdateEstateLandDemarcationDisposition {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -316,6 +319,7 @@ export interface UpdateEstateManagedAssetListing {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;

@@ -968,6 +968,36 @@ export function ProcedureCaseWorkspace({
     }
     return null;
   }, [entityType, module, selectedCase]);
+  const legalPropertyAgreementReviewBlocker = React.useMemo(() => {
+    if (
+      !selectedCase ||
+      entityType !== 'LegalPropertyAgreementReview' ||
+      selectedCase.currentStageName !== 'Head of Legal Signature'
+    ) {
+      return null;
+    }
+
+    const hasCustomerSignedAgreement = selectedCase.documents.some(
+      (document) =>
+        (document.name === 'Customer signed agreement' ||
+          document.name === 'Signed property agreement') &&
+        Boolean(document.fileUrl)
+    );
+    if (!hasCustomerSignedAgreement) {
+      return 'Routing is disabled until the customer returns the signed agreement.';
+    }
+
+    const hasHeadOfLegalSignedAgreement = selectedCase.documents.some(
+      (document) =>
+        document.name === 'Head of Legal signed agreement' &&
+        Boolean(document.fileUrl)
+    );
+    if (!hasHeadOfLegalSignedAgreement) {
+      return 'Apply the final Head of Legal signature before submitting this stage.';
+    }
+
+    return null;
+  }, [entityType, selectedCase]);
   const currentStageEditableFieldKeys = React.useMemo(
     () => new Set(selectedCase?.currentStageFieldKeys ?? []),
     [selectedCase?.currentStageFieldKeys]
@@ -994,7 +1024,8 @@ export function ProcedureCaseWorkspace({
     legalTransferRequiredFieldMessages.length > 0 ||
     !legalTransferPaymentReady ||
     Boolean(facilitiesMaintenanceCloseoutBlocker) ||
-    Boolean(facilitiesComplaintCloseoutBlocker);
+    Boolean(facilitiesComplaintCloseoutBlocker) ||
+    Boolean(legalPropertyAgreementReviewBlocker);
 
   const getDocumentManagementRecordId = (fileUrl?: string | null) => {
     const match = fileUrl?.match(/^\/document-management\/records\/([^/?#]+)/i);
@@ -3247,6 +3278,7 @@ export function ProcedureCaseWorkspace({
                 <Tabs defaultValue="stage" className="space-y-4">
                   <TabsList className="flex h-auto flex-wrap justify-start">
                     <TabsTrigger value="stage">Stage details</TabsTrigger>
+                    <TabsTrigger value="checklist">Checklist</TabsTrigger>
                     <TabsTrigger value="documents">Documents</TabsTrigger>
                     <TabsTrigger value="submit">Submit</TabsTrigger>
                   </TabsList>
@@ -3685,37 +3717,46 @@ export function ProcedureCaseWorkspace({
                   }
                 />
 
+                  </TabsContent>
+
+                  <TabsContent value="checklist" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">
                     Current Stage Checklist
                   </h2>
-                  <div className="mt-3 space-y-3">
-                    {currentStageItems.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm"
-                      >
-                        <Checkbox
-                          checked={item.isCompleted}
-                          disabled={
-                            !selectedCase.canEditCurrentStage || isSaving
-                          }
-                          onCheckedChange={(checked) =>
-                            void toggleChecklist(item.id, checked === true)
-                          }
-                        />
-                        <span
-                          className={
-                            item.isCompleted
-                              ? 'text-muted-foreground line-through'
-                              : ''
-                          }
+                  {currentStageItems.length > 0 ? (
+                    <div className="mt-3 space-y-3">
+                      {currentStageItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm"
                         >
-                          {item.text}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
+                          <Checkbox
+                            checked={item.isCompleted}
+                            disabled={
+                              !selectedCase.canEditCurrentStage || isSaving
+                            }
+                            onCheckedChange={(checked) =>
+                              void toggleChecklist(item.id, checked === true)
+                            }
+                          />
+                          <span
+                            className={
+                              item.isCompleted
+                                ? 'text-muted-foreground line-through'
+                                : ''
+                            }
+                          >
+                            {item.text}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                      This stage has no checklist items.
+                    </p>
+                  )}
                 </div>
                   </TabsContent>
 
@@ -3780,11 +3821,16 @@ export function ProcedureCaseWorkspace({
                         Boolean(signatureRole) &&
                         selectedCase.canEditCurrentStage &&
                         !legalTransferStageSignatureRecorded;
+                      const isPropertyAgreementSourceDocument =
+                        entityType === 'LegalPropertyAgreementReview' &&
+                        (document.name === 'Customer signed agreement' ||
+                          document.name === 'Signed property agreement' ||
+                          document.name === 'Generated draft agreement');
                       const propertyAgreementSigned = entityType === 'LegalPropertyAgreementReview' &&
                         selectedCase.documents.some((item) => item.name === 'Head of Legal signed agreement' && Boolean(item.fileUrl));
                       const canSignPropertyAgreement =
                         entityType === 'LegalPropertyAgreementReview' &&
-                        document.name === 'Generated draft agreement' &&
+                        isPropertyAgreementSourceDocument &&
                         Boolean(document.fileUrl) &&
                         (selectedCase.currentStageName === 'Head of Legal Signature' || selectedCase.currentStageName === 'Head of Legal Release') &&
                         selectedCase.canEditCurrentStage &&
@@ -4071,6 +4117,8 @@ export function ProcedureCaseWorkspace({
                           ? facilitiesMaintenanceCloseoutBlocker
                         : facilitiesComplaintCloseoutBlocker
                           ? facilitiesComplaintCloseoutBlocker
+                        : legalPropertyAgreementReviewBlocker
+                          ? legalPropertyAgreementReviewBlocker
                         : isLegalTransferClientPaymentStage &&
                             !legalTransferPaymentReady
                           ? 'Finance payment must be synced before this stage can be submitted.'

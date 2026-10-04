@@ -1065,6 +1065,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
             && (!IsRentalListingApplication(procedureCase) || IsLeaseListingApplication(procedureCase)))
             await EnsureFullAmountFinancePaymentAsync(procedureCase);
+        if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
+            && IsRentalListingApplication(procedureCase) && !IsLeaseListingApplication(procedureCase))
+            await EnsureFirstMonthRentPaymentAsync(procedureCase);
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
@@ -1380,14 +1383,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             var returned = string.Equals(vettingStatus, "Returned for correction", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(vettingStatus, "Returned", StringComparison.OrdinalIgnoreCase);
             var signedByHeadOfLegal = IsHeadOfLegalSignatureRecorded(FieldValue(legalCase, "signatureStatus"));
+            var readyForCustomerSignature =
+                !returned
+                && !signedByHeadOfLegal
+                && string.Equals(legalCase.CurrentStageName, "Head of Legal Signature", StringComparison.OrdinalIgnoreCase);
             var approved = isCompleted && !returned && signedByHeadOfLegal;
             customerLegalReviewStatus = approved
                 ? "Signed by Head of Legal"
                 : returned
                     ? "Returned by Legal for correction"
-                    : isCompleted
+                    : readyForCustomerSignature
+                        ? "Approved by Legal - ready for customer signature"
+                        : isCompleted
                         ? "Awaiting Head of Legal signature"
-                    : $"Under Legal review - {legalCase.CurrentStageName}";
+                        : $"Under Legal review - {legalCase.CurrentStageName}";
             await UpsertLinkedSourceFieldAsync(
                 tenantId,
                 sourceCase.Id,
@@ -1396,14 +1405,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 customerLegalReviewStatus,
                 actorUserId,
                 now);
-            if (approved || returned)
+            if (approved || returned || readyForCustomerSignature)
             {
                 await UpsertLinkedSourceFieldAsync(
                     tenantId,
                     sourceCase.Id,
                     "customerNotificationStatus",
                     "Customer notification status",
-                    approved ? "Agreement sent to customer portal" : "Legal correction required",
+                    returned ? "Legal correction required" : "Agreement sent to customer portal",
                     actorUserId,
                     now);
             }
@@ -1488,10 +1497,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var customerShouldBeNotified = customerReviewChanged
             && customerNotificationRecipientIds.Count > 0
             && (string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(customerLegalReviewStatus, "Approved by Legal - ready for customer signature", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(customerLegalReviewStatus, "Returned by Legal for correction", StringComparison.OrdinalIgnoreCase));
         if (customerShouldBeNotified)
         {
-            var approved = string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase);
+            var approved = string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(customerLegalReviewStatus, "Approved by Legal - ready for customer signature", StringComparison.OrdinalIgnoreCase);
             try
             {
                 foreach (var recipientId in customerNotificationRecipientIds)
@@ -1503,7 +1514,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                             Type = approved ? "estate.property.agreement-released" : "estate.property.agreement-correction-required",
                             Title = approved ? "Property agreement ready for signature" : "Property agreement requires correction",
                             Message = approved
-                                ? $"The Head of Legal has signed the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title}. You can now review, sign, and upload it."
+                                ? $"Legal has released the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title}. You can now review, sign, and upload it."
                                 : $"Legal returned the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title} for correction.",
                             Priority = approved ? "High" : "Normal",
                             EntityType = "ProcedureCase",
@@ -1797,8 +1808,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var sourceDocument = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
         if (sourceDocument is null) return null;
-        if (!string.Equals(sourceDocument.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Sign the generated draft agreement linked from Estate.");
+        var signingCustomerCopy =
+            string.Equals(sourceDocument.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceDocument.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase);
+        if (!signingCustomerCopy
+            && !string.Equals(sourceDocument.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Sign the customer-signed agreement returned from the portal.");
         if (procedureCase.Documents.Any(item => !item.IsDeleted
             && string.Equals(item.Name, "Head of Legal signed agreement", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(item.FileUrl)))
@@ -1806,29 +1821,44 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
-        var recordId = TryParseDocumentManagementRecordId(sourceDocument.FileUrl)
-            ?? throw new InvalidOperationException("The generated agreement is not linked to a DMS record.");
-        var record = await _db.CentralDocumentRecords
-            .AsNoTracking()
-            .Include(item => item.Versions.Where(version => !version.IsDeleted))
-            .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted)
-            ?? throw new InvalidOperationException("The generated agreement was not found in DMS.");
-        var version = ResolveCurrentDocumentVersion(record)
-            ?? throw new InvalidOperationException("The generated agreement has no document version to sign.");
-        var pdfPath = !string.IsNullOrWhiteSpace(version.RenditionPath)
-            ? version.RenditionPath
-            : version.RepositoryPath;
-        if (string.IsNullOrWhiteSpace(pdfPath))
-            throw new InvalidOperationException("The generated agreement has no file to sign.");
-
         var actor = string.IsNullOrWhiteSpace(_currentUser.FullName)
             ? _currentUser.UserName ?? "Head of Legal"
             : _currentUser.FullName.Trim();
         var now = DateTime.UtcNow;
-        await using var sourceStream = await _fileStorageService.DownloadFileAsync(
-            pdfPath,
-            !string.IsNullOrWhiteSpace(version.RenditionPath) ? record.Id : version.FileUploadRecordId ?? record.Id);
-        var needsPdfConversion = string.IsNullOrWhiteSpace(version.RenditionPath)
+        CentralDocumentRecord? record = null;
+        CentralDocumentVersion? version = null;
+        string? pdfPath = null;
+        Guid downloadRecordId = sourceDocument.Id;
+        if (signingCustomerCopy)
+        {
+            pdfPath = sourceDocument.FileUrl;
+            if (string.IsNullOrWhiteSpace(pdfPath))
+                throw new InvalidOperationException("The customer-signed agreement has no file to sign.");
+        }
+        else
+        {
+            var recordId = TryParseDocumentManagementRecordId(sourceDocument.FileUrl)
+                ?? throw new InvalidOperationException("The generated agreement is not linked to a DMS record.");
+            record = await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .Include(item => item.Versions.Where(version => !version.IsDeleted))
+                .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted)
+                ?? throw new InvalidOperationException("The generated agreement was not found in DMS.");
+            version = ResolveCurrentDocumentVersion(record)
+                ?? throw new InvalidOperationException("The generated agreement has no document version to sign.");
+            pdfPath = !string.IsNullOrWhiteSpace(version.RenditionPath)
+                ? version.RenditionPath
+                : version.RepositoryPath;
+            if (string.IsNullOrWhiteSpace(pdfPath))
+                throw new InvalidOperationException("The generated agreement has no file to sign.");
+            downloadRecordId = !string.IsNullOrWhiteSpace(version.RenditionPath)
+                ? record.Id
+                : version.FileUploadRecordId ?? record.Id;
+        }
+        await using var sourceStream = await _fileStorageService.DownloadFileAsync(pdfPath, downloadRecordId);
+        var needsPdfConversion = !signingCustomerCopy
+            && version is not null
+            && string.IsNullOrWhiteSpace(version.RenditionPath)
             && version.FileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) != true;
         CentralDocumentPdfPreviewResult? preview = null;
         if (needsPdfConversion)
@@ -1838,7 +1868,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             preview = await _renditionService.CreatePdfPreviewAsync(
                 new CentralDocumentPdfPreviewRequest(
                     sourceStream,
-                    version.FileName ?? $"{record.DocumentReference}.docx",
+                    version!.FileName ?? $"{record!.DocumentReference}.docx",
                     version.ContentType ?? "application/octet-stream"),
                 CancellationToken.None);
             if (!preview.Success || preview.PdfStream is null)
@@ -1847,13 +1877,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         using var previewPdf = preview?.PdfStream;
         var signature = await _pdfSigningService.SignAsync(
             previewPdf ?? sourceStream,
-            new CentralDocumentPdfSigningRequest(record.DocumentReference, actor, "Head of Legal", request.Notes, now),
+            new CentralDocumentPdfSigningRequest(
+                record?.DocumentReference ?? procedureCase.ReferenceNumber ?? procedureCase.Title,
+                actor,
+                "Head of Legal",
+                request.Notes,
+                now),
             CancellationToken.None);
         await using var signedStream = new MemoryStream(signature.PdfBytes);
         var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
         {
             FileStream = signedStream,
-            FileName = BuildSignedProcedureDocumentFileName(version.FileName ?? "property-agreement.pdf", "Head of Legal"),
+            FileName = BuildSignedProcedureDocumentFileName(
+                signingCustomerCopy
+                    ? sourceDocument.FileName ?? "customer-signed-agreement.pdf"
+                    : version?.FileName ?? "property-agreement.pdf",
+                "Head of Legal"),
             ContentType = "application/pdf",
             FileSize = signature.PdfBytes.LongLength,
             Category = "procedure-case-documents",
@@ -3656,16 +3695,18 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return procedureCase.CurrentStageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus"],
-            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired"],
+            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus"],
             2 => isRental && approved
-                ? ["decisionStatus", "requestedLeaseTerm", "moveInDate"]
+                ? IsLeaseListingApplication(procedureCase)
+                    ? ["decisionStatus", "requestedLeaseTerm", "moveInDate"]
+                    : ["decisionStatus", "moveInDate"]
                 : ["decisionStatus"],
             3 => ["legalAgreementReviewStatus"],
             // Customer execution values are system-managed by the portal and DMS.
             // Validate their workflow state in ValidatePropertyManagementStageAsync.
             4 => [],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus"]
+                ? ["salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus"]
                 : ["salePaymentStatus", "salePaymentCheckStatus"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)
@@ -3742,6 +3783,28 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
             || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Finance must confirm full payment of the remaining sale or lease amount before conveyance.");
+    }
+
+    private async Task EnsureFirstMonthRentPaymentAsync(ProcedureCase procedureCase)
+    {
+        var amount = ParseProcedureAmount(FieldValue(procedureCase, "listingPrice"));
+        var salesPaid = ParseProcedureAmount(FieldValue(procedureCase, "salesAmountPaid")) ?? 0m;
+        if (amount is not > 0m || salesPaid < 0m || salesPaid > amount.Value)
+            throw new InvalidOperationException("Record the agreed first month rent and valid Sales payment before the Finance check.");
+
+        var balance = decimal.Round(amount.Value - salesPaid, 2, MidpointRounding.AwayFromZero);
+        if (balance <= 0m)
+            return;
+
+        if (!string.Equals(FieldValue(procedureCase, "agreementExecutionStatus"), "Fully executed", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(procedureCase, "saleInvoiceId"), out var invoiceId))
+            throw new InvalidOperationException("After the agreement is fully signed, create the Finance invoice for the remaining first month rent.");
+
+        var invoice = await _invoiceService.GetByIdAsync(invoiceId);
+        if (invoice is null || !AmountsMatch(invoice.TotalAmount, balance)
+            || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
+            || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Finance must confirm full payment of the remaining first month rent before billing can start.");
     }
 
     private static void EnsurePropertyListingPremiumChargeGateReady(ProcedureCase procedureCase)
@@ -3830,6 +3893,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 if (isRental && !IsLeaseListingApplication(procedureCase))
                 {
                     var billingStatus = FieldValue(procedureCase, "billingStartStatus");
+                    if (!IsSalePaymentSatisfied(procedureCase))
+                    {
+                        throw new InvalidOperationException("Collect and confirm the remaining first month rent before completing the Finance check.");
+                    }
+
                     if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "billingStartDate"))
                         || !ContainsAny(billingStatus ?? string.Empty, "Ready for billing", "Billing active", "Rent billing activated"))
                     {
@@ -3903,7 +3971,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     private static bool IsLegalAgreementReviewApproved(string? value)
-        => IsHeadOfLegalSignatureRecorded(value);
+        => IsLegalAgreementReadyForCustomerSignature(value)
+            || IsHeadOfLegalSignatureRecorded(value);
+
+    private static bool IsLegalAgreementReadyForCustomerSignature(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && value.Contains("approved by legal", StringComparison.OrdinalIgnoreCase)
+            && value.Contains("customer signature", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsHeadOfLegalSignatureRecorded(string? value)
         => !string.IsNullOrWhiteSpace(value)
@@ -3920,9 +3994,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return;
         }
 
+        if (!procedureCase.Documents.Any(document => !document.IsDeleted
+            && (string.Equals(document.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(document.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(document.FileUrl)))
+        {
+            throw new InvalidOperationException("The customer must upload the signed agreement before Head of Legal applies the final signature.");
+        }
         if (!IsHeadOfLegalSignatureRecorded(FieldValue(procedureCase, "signatureStatus")))
         {
-            throw new InvalidOperationException("Record Head of Legal signed in Signature status before submitting the agreement to the customer.");
+            throw new InvalidOperationException("Apply the Head of Legal final signature after the customer returns the signed agreement.");
         }
         if (!procedureCase.Documents.Any(document => !document.IsDeleted
             && string.Equals(document.Name, "Head of Legal signed agreement", StringComparison.OrdinalIgnoreCase)
@@ -6483,14 +6564,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return procedureCase.CurrentStageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus", "applicationStatus", "notes"],
-            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired", "premiumChargeAmount", "premiumChargeInvoiceReference", "premiumChargePaymentStatus", "notes"],
+            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "notes"],
             2 => isRental
-                ? ["decisionStatus", "requestedLeaseTerm", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "premiumChargePaymentStatus", "notes"]
-                : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "premiumChargePaymentStatus", "notes"],
+                ? IsLeaseListingApplication(procedureCase)
+                    ? ["decisionStatus", "requestedLeaseTerm", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "notes"]
+                    : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "notes"]
+                : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "notes"],
             3 => ["legalAgreementReviewReference", "legalAgreementReviewStatus", "notes"],
             4 => ["notes"],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus", "notes"]
+                ? ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus", "notes"]
                 : ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "notes"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)

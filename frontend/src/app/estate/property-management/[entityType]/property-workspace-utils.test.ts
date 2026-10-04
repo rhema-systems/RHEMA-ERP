@@ -110,8 +110,9 @@ describe('property listing completion gates', () => {
     });
   });
 
-  it('recognizes the Head of Legal signed status used by the server', () => {
+  it('recognizes Legal release statuses used by the server', () => {
     expect(isLegalAgreementReviewSigned('Head of Legal signed')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Approved by Legal - ready for customer signature')).toBe(true);
     expect(isLegalAgreementReviewSigned('Fully signed agreement')).toBe(true);
     expect(isLegalAgreementReviewSigned('Under Legal review')).toBe(false);
   });
