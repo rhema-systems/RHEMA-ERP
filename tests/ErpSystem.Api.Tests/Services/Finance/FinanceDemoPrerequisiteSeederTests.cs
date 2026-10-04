@@ -128,9 +128,17 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         accounts.Select(account => account.AccountCode).Should().Contain(new[]
         {
             "1030", "1090", "1210", "1540", "1545", "1580", "1595",
-            "2050", "2510", "3200", "4930", "4935", "4940", "5010",
-            "6310", "6320", "6330", "6610", "6700"
+            "2050", "2510", "3200", "4930", "4935", "4940", "4950", "5010",
+            "6310", "6320", "6330", "6610", "6700", "6710"
         });
+        var roundingGain = accounts.Single(account => account.AccountCode == "4950");
+        roundingGain.AccountType.Should().Be(AccountType.Revenue);
+        roundingGain.AllowDirectPosting.Should().BeTrue();
+        roundingGain.IsControlAccount.Should().BeFalse();
+        var roundingLoss = accounts.Single(account => account.AccountCode == "6710");
+        roundingLoss.AccountType.Should().Be(AccountType.Expense);
+        roundingLoss.AllowDirectPosting.Should().BeTrue();
+        roundingLoss.IsControlAccount.Should().BeFalse();
 
         await (Task)categoryMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
         await (Task)settingsMethod!.Invoke(seeder, new object[] { tenantId, baseDate })!;
@@ -180,6 +188,22 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         settings.LeaseInterestExpenseAccountId.Should().NotBeNull();
         settings.WriteOffExpenseAccountId.Should().NotBeNull();
         settings.WriteOffRecoveryAccountId.Should().NotBeNull();
+        settings.InvoiceRoundingGainAccountId.Should().Be(roundingGain.Id);
+        settings.InvoiceRoundingLossAccountId.Should().Be(roundingLoss.Id);
+
+        var deliberateGainMapping = Guid.NewGuid();
+        var deliberateLossMapping = Guid.NewGuid();
+        settings.InvoiceRoundingGainAccountId = deliberateGainMapping;
+        settings.InvoiceRoundingLossAccountId = deliberateLossMapping;
+        await context.SaveChangesAsync();
+
+        await (Task)settingsMethod.Invoke(seeder, new object[] { tenantId, baseDate })!;
+        await context.SaveChangesAsync();
+
+        settings.InvoiceRoundingGainAccountId.Should().Be(deliberateGainMapping,
+            "idempotent provisioning must preserve an existing tenant mapping");
+        settings.InvoiceRoundingLossAccountId.Should().Be(deliberateLossMapping,
+            "idempotent provisioning must preserve an existing tenant mapping");
     }
 
     [Fact]
