@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: committed
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/fin-uat-journal-batch-20261004
 candidate_head: 72665ddd6
@@ -9,8 +9,8 @@ target_ref: origin/master
 depends_on: none
 migration_status: none_required
 verification_status: focused_tests_passed
-integration_commit: pending
-pull_request: pending
+integration_commit: 641cfcf4d
+pull_request: pending-creation
 ---
 
 # Journal Batch UAT corrections - 2026-10-04

@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/fin-uat-exchange-workflow-20261004
 candidate_head: 5ddda43dda3deff0d57d136e7da2eb80c91199ca
@@ -9,8 +9,8 @@ target_ref: origin/master
 depends_on: none
 migration_status: none
 verification_status: focused-test-passed
-integration_commit: pending
-pull_request: pending
+integration_commit: 641cfcf4d
+pull_request: pending-creation
 ---
 
 # Finance UAT workstream: Exchange-rate approval workflow provisioning

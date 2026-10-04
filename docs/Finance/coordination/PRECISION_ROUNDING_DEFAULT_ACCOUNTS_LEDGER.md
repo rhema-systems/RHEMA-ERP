@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: candidate_ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/fin-uat-rounding-defaults-20261004
 candidate_head: 4819c11606b614ab31a74089f7d6246b535dbfe2
@@ -9,8 +9,8 @@ target_ref: origin/master
 depends_on: none
 migration_status: none
 verification_status: focused-tests-passed
-integration_commit: pending
-pull_request: pending
+integration_commit: 641cfcf4d
+pull_request: pending-creation
 ---
 
 # Finance UAT workstream: Invoice and cash rounding default accounts

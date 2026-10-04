@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: ready
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/fin-uat-invoice-lifecycle-20261004
 candidate_head: cfa7a7e820a5b7c61f898be93b61e48e02e51c53
@@ -9,8 +9,8 @@ target_ref: origin/master
 depends_on: none
 migration_status: none
 verification_status: focused-passed-browser-uat-pending
-integration_commit: pending
-pull_request: pending
+integration_commit: 641cfcf4d
+pull_request: pending-creation
 ---
 
 # Finance UAT workstream: AR/AP draft invoice lifecycle and list consistency

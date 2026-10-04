@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: ready_for_review
+integration_status: integrated
 integration_decision: include
 candidate_branch: codex/fin-uat-fixed-asset-bulk-20261004
 candidate_head: pending-consolidation
@@ -10,8 +10,8 @@ depends_on: c91385a8bf88446de38054b3dc546eade54001b0
 completed_commits: b9fb9db7999e1b326e6be3262cd7442773abf44f
 migration_status: none-required
 verification_status: focused-tests-passed-baseline-typecheck-failures
-integration_commit: pending
-pull_request: pending
+integration_commit: 641cfcf4d
+pull_request: pending-creation
 ---
 
 # Finance UAT workstream: Fixed-asset opening import correction
