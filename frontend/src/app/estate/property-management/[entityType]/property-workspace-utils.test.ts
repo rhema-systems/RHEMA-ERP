@@ -5,8 +5,10 @@ import {
   assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
   isFullTermLease,
+  isLegalAgreementReviewSigned,
   leaseExpiryAlert,
   leaseExpiryDate,
+  propertyListingCompletionRequirements,
 } from './property-workspace-utils';
 
 const asset = {
@@ -82,5 +84,35 @@ describe('lease expiry', () => {
     } as EstateManagedAsset;
 
     expect(leaseExpiryAlert(former, new Date('2027-01-01T00:00:00Z'))).toBeNull();
+  });
+});
+
+describe('property listing completion gates', () => {
+  it('does not require agreement or Legal work while completing intake', () => {
+    expect(
+      propertyListingCompletionRequirements(
+        'Intake and validate property request'
+      )
+    ).toEqual({
+      requiresApprovedRentTerms: false,
+      requiresGeneratedAgreement: false,
+      requiresLegalAgreementReview: false,
+    });
+  });
+
+  it('requires agreement and Legal completion at the transaction handoff', () => {
+    expect(
+      propertyListingCompletionRequirements('Approved transaction handoff')
+    ).toEqual({
+      requiresApprovedRentTerms: false,
+      requiresGeneratedAgreement: true,
+      requiresLegalAgreementReview: true,
+    });
+  });
+
+  it('recognizes the Head of Legal signed status used by the server', () => {
+    expect(isLegalAgreementReviewSigned('Head of Legal signed')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Fully signed agreement')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Under Legal review')).toBe(false);
   });
 });

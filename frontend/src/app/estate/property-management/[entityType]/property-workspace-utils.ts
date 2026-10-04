@@ -67,6 +67,31 @@ export function formatEstateMoney(value?: number | null, currency = 'GHS') {
   }).format(value);
 }
 
+export function propertyListingCompletionRequirements(stageName?: string | null) {
+  const normalized = stageName?.trim().toLowerCase() || '';
+  const isDecisionStage =
+    normalized === 'management decision' ||
+    normalized === 'estate decision and agreement';
+  const isAgreementHandoffStage =
+    normalized === 'approved transaction handoff' ||
+    normalized === 'legal agreement review';
+
+  return {
+    requiresApprovedRentTerms: isDecisionStage,
+    requiresGeneratedAgreement:
+      normalized === 'estate decision and agreement' || isAgreementHandoffStage,
+    requiresLegalAgreementReview: isAgreementHandoffStage,
+  };
+}
+
+export function isLegalAgreementReviewSigned(status?: string | null) {
+  const normalized = status?.trim().toLowerCase() || '';
+  return (
+    (normalized.includes('head of legal') && normalized.includes('signed')) ||
+    normalized.includes('fully signed')
+  );
+}
+
 export function propertyReference(asset: EstateManagedAsset) {
   return asset.projectUnitCode || asset.assetCode;
 }

@@ -24,6 +24,7 @@ public partial class DatabaseSeedingServiceTests
     [InlineData("EnsureProjectWorkflowsSeededAsync", null)]
     [InlineData("EnsureProcurementOperationalWorkflowsSeededAsync", null)]
     [InlineData("EnsureEstateSopWorkflowsSeededAsync", null)]
+    [InlineData("EnsurePropertyManagementListingWorkflowSeededAsync", null)]
     [InlineData("EnsureLegalProcedureWorkflowsSeededAsync", null)]
     [InlineData("EnsureEhcWorkflowSeededAsync", null)]
     public async Task StartupWorkflowSeeder_RetainsRetiredCustomDefinitionAndItsSteps(string helper, string? code)

@@ -1263,28 +1263,34 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 now);
         }
 
-        if (procedureCase.OpenedById != Guid.Empty)
+        var customerNotificationRecipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(
+            _db,
+            procedureCase);
+        if (customerNotificationRecipientIds.Count > 0)
         {
             try
             {
-                await _notificationService.CreateNotificationAsync(
-                    new CreateNotificationDto
-                    {
-                        RecipientId = procedureCase.OpenedById,
-                        Type = isReject
-                            ? "estate.property.application-rejected"
-                            : "estate.property.application-clarification",
-                        Title = isReject
-                            ? "Property application rejected"
-                            : "Property application needs clarification",
-                        Message = $"{procedureCase.ReferenceNumber ?? procedureCase.Title}: {reason}",
-                        Priority = isReject ? "High" : "Normal",
-                        EntityType = "ProcedureCase",
-                        EntityId = procedureCase.Id,
-                        ActionUrl = $"/external-portal/my-property-requests/{procedureCase.Id}"
-                    },
-                    userId,
-                    tenantId);
+                foreach (var recipientId in customerNotificationRecipientIds)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        new CreateNotificationDto
+                        {
+                            RecipientId = recipientId,
+                            Type = isReject
+                                ? "estate.property.application-rejected"
+                                : "estate.property.application-clarification",
+                            Title = isReject
+                                ? "Property application rejected"
+                                : "Property application needs clarification",
+                            Message = $"{procedureCase.ReferenceNumber ?? procedureCase.Title}: {reason}",
+                            Priority = isReject ? "High" : "Normal",
+                            EntityType = "ProcedureCase",
+                            EntityId = procedureCase.Id,
+                            ActionUrl = $"/external-portal/my-property-requests/{procedureCase.Id}"
+                        },
+                        userId,
+                        tenantId);
+                }
             }
             catch
             {
@@ -2838,10 +2844,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var transferFee = ParseProcedureAmount(FieldValue(legalCase, "transferFeePayable"));
         var amountText = transferFee.HasValue
@@ -2853,31 +2861,34 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.transfer-fee-invoice-ready",
-                    Title = "Transfer fee invoice ready",
-                    Message = $"Finance AR invoice {invoice.InvoiceNumber} is approved and ready for payment. Pay {amountText} for Legal transfer {legalReference} using reference {paymentRequestReference}.",
-                    Priority = "High",
-                    EntityType = "Invoice",
-                    EntityId = invoice.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["transferFeePayable"] = amountText,
-                        ["paymentRequestReference"] = paymentRequestReference,
-                        ["invoiceId"] = invoice.Id,
-                        ["invoiceNumber"] = invoice.InvoiceNumber,
-                        ["invoiceStatus"] = invoice.Status.ToString()
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.transfer-fee-invoice-ready",
+                        Title = "Transfer fee invoice ready",
+                        Message = $"Finance AR invoice {invoice.InvoiceNumber} is approved and ready for payment. Pay {amountText} for Legal transfer {legalReference} using reference {paymentRequestReference}.",
+                        Priority = "High",
+                        EntityType = "Invoice",
+                        EntityId = invoice.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["transferFeePayable"] = amountText,
+                            ["paymentRequestReference"] = paymentRequestReference,
+                            ["invoiceId"] = invoice.Id,
+                            ["invoiceNumber"] = invoice.InvoiceNumber,
+                            ["invoiceStatus"] = invoice.Status.ToString()
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotificationStatus", "Transfer fee customer notification status", "Notified", actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotifiedAt", "Transfer fee customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
@@ -2916,10 +2927,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
         var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
@@ -2927,28 +2940,31 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.legal-transfer-draft-ready",
-                    Title = "Transfer draft ready for signature",
-                    Message = $"Legal transfer {legalReference} is ready. Download the draft, sign it, and upload the signed copy from My Properties.",
-                    Priority = "High",
-                    EntityType = "ProcedureCase",
-                    EntityId = legalCase.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["draftReference"] = draftReference ?? string.Empty,
-                        ["currentStage"] = legalCase.CurrentStageName ?? string.Empty
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.legal-transfer-draft-ready",
+                        Title = "Transfer draft ready for signature",
+                        Message = $"Legal transfer {legalReference} is ready. Download the draft, sign it, and upload the signed copy from My Properties.",
+                        Priority = "High",
+                        EntityType = "ProcedureCase",
+                        EntityId = legalCase.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["draftReference"] = draftReference ?? string.Empty,
+                            ["currentStage"] = legalCase.CurrentStageName ?? string.Empty
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotificationStatus", "Transfer draft customer notification status", "Notified", actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotifiedAt", "Transfer draft customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
@@ -2994,10 +3010,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
         var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
@@ -3005,27 +3023,30 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.legal-transfer-interview-date",
-                    Title = "Transfer interview date set",
-                    Message = $"Legal transfer {legalReference} has an interview/execution date of {displayDate}. Track the transfer from My Properties.",
-                    Priority = "High",
-                    EntityType = "ProcedureCase",
-                    EntityId = legalCase.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["interviewDate"] = interviewDate
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.legal-transfer-interview-date",
+                        Title = "Transfer interview date set",
+                        Message = $"Legal transfer {legalReference} has an interview/execution date of {displayDate}. Track the transfer from My Properties.",
+                        Priority = "High",
+                        EntityType = "ProcedureCase",
+                        EntityId = legalCase.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["interviewDate"] = interviewDate
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedDate", "Transfer interview customer notified date", interviewDate, actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedAt", "Transfer interview customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
