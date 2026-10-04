@@ -1561,16 +1561,14 @@ public class FinanceApprovalsController : ControllerBase
                         comments,
                         cancellationToken);
 
-                    var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+                    var trustedProducer = await ResolveTrustedCustomerInvoiceProducerAsync(
                         tenantId,
-                        "CustomerInvoice",
                         entityId,
-                        FinanceDimensionRouteId.FinanceArCustomerInvoice,
                         cancellationToken);
-                    if (trustedManualRoute)
+                    if (trustedProducer is not null)
                         await _invoiceService.SendInvoiceAsync(
                             entityId,
-                            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                            trustedProducer,
                             cancellationToken);
                     else
                         await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
@@ -2808,6 +2806,35 @@ public class FinanceApprovalsController : ControllerBase
             && item.SourceLineId == null
             && !item.IsDeleted,
             cancellationToken);
+
+    private async Task<FinancePostingProducerContext?> ResolveTrustedCustomerInvoiceProducerAsync(
+        Guid tenantId,
+        Guid invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var supportedRoutes = new[]
+        {
+            FinanceDimensionRouteId.FinanceArCustomerInvoice,
+            FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice,
+            FinanceDimensionRouteId.InventoryDisposalAuctionInvoice,
+            FinanceDimensionRouteId.SalesOrderCustomerInvoice
+        };
+        var routes = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item =>
+                item.TenantId == tenantId
+                && item.SourceDocumentId == invoiceId
+                && item.SourceLineId == null
+                && supportedRoutes.Contains(item.RouteId)
+                && !item.IsDeleted)
+            .Select(item => item.RouteId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (routes.Count > 1)
+            throw new InvalidOperationException("Customer invoice has conflicting trusted producer routes.");
+
+        return routes.Count == 1 ? new FinancePostingProducerContext(routes[0]) : null;
+    }
 
     private async Task RecordFinanceWorkflowAuditAsync(
         Guid tenantId,
