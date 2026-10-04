@@ -1,9 +1,9 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: in_progress
+integration_status: ready
 integration_decision: include
 candidate_branch: codex/fin-uat-fixed-asset-bulk-20261004
-candidate_head: pending-local-commit
+candidate_head: 3263b1f83e612902ad77cc1f9f5826a17666c453
 base_commit: 6b59a3e841c61f5c0e295f9cce2571fc0d664d8c
 target_ref: origin/master
 depends_on: none
@@ -25,8 +25,9 @@ Add a true select-all / clear-all control for eligible fixed-asset opening rows 
 - Worktree: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP\.w\fin-uat-fixed-asset-bulk-20261004`
 - Branch: `codex/fin-uat-fixed-asset-bulk-20261004`
 - Exact base commit: `6b59a3e841c61f5c0e295f9cce2571fc0d664d8c`
-- Candidate head: pending local commit and browser UAT.
-- Working tree status: intended implementation and ledger changes only before commit.
+- Selection implementation commit: `c91385a8b`.
+- Candidate branch head: `3263b1f83e612902ad77cc1f9f5826a17666c453` (also includes the separately ledgered fixed-asset import correction).
+- Working tree status: clean.
 
 ## Implementation record
 
@@ -60,8 +61,8 @@ None. No schema or data mutation is required.
 
 ## Remaining work
 
-- Commit the intended files and record the commit.
-- Perform browser UAT before changing `integration_status` to `ready`.
+- Integrate this clean candidate through the Finance UAT consolidation protocol when authorized.
+- Perform browser UAT with mixed ready/posted rows after the consolidated runtime is updated.
 
 ## Authorization boundaries
 
@@ -70,4 +71,4 @@ None. No schema or data mutation is required.
 
 ## Integration outcome
 
-Pending.
+Ready for the consolidated Finance UAT candidate; not yet integrated.
