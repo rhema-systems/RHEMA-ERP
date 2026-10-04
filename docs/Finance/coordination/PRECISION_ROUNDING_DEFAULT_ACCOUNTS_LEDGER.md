@@ -3,7 +3,7 @@ integration_cycle: FIN-UAT-2026-10-04-A
 integration_status: candidate_ready
 integration_decision: include
 candidate_branch: codex/fin-uat-rounding-defaults-20261004
-candidate_head: pending-local-commit
+candidate_head: 4819c11606b614ab31a74089f7d6246b535dbfe2
 base_commit: 6b59a3e841c61f5c0e295f9cce2571fc0d664d8c
 target_ref: origin/master
 depends_on: none
@@ -25,7 +25,7 @@ Provision dedicated default gain and loss accounts for invoice/cash rounding so 
 - Implementation worktree: `.w/fin-uat-rounding-defaults-20261004`
 - Branch: `codex/fin-uat-rounding-defaults-20261004`
 - Exact base: `6b59a3e841c61f5c0e295f9cce2571fc0d664d8c`
-- Candidate head: pending local commit.
+- Implementation commit: `4819c11606b614ab31a74089f7d6246b535dbfe2` (`feat(finance): provision rounding default accounts`).
 
 ## Implementation record
 
@@ -60,7 +60,6 @@ No schema migration is required. No tenant database seeding or remediation has b
 
 ## Remaining work
 
-- Commit the candidate and record its exact head.
 - Perform independent diff review during consolidation.
 - Run browser UAT after integration into the consolidated candidate.
 
