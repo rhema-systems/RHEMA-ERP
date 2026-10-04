@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-B
-integration_status: ready_for_review
+integration_status: pr_open
 integration_decision: include
 candidate_branch: codex/finance-procurement-uom-fixture-hotfix
 candidate_head: e73ab5a87
@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none
 verification_status: scoped_pass_with_known_baseline_failures
 integration_commit: pending
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/346
 ---
 
 # Finance procurement reconciliation UOM fixture correction
@@ -72,5 +72,4 @@ pull_request: pending
 
 ## Remaining work
 
-- Push the branch and open a focused follow-up PR.
 - Run the Finance integration gate and merge through normal review.
