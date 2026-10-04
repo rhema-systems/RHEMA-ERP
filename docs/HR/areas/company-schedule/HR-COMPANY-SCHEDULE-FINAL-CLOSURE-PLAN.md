@@ -30,7 +30,8 @@ has not started (the user: "don't start the actual development yet").
    are a light series) and D-17 (no milestone link) are settled, and with them what the migration
    contains. **Seven remain pending the user** — D-10, D-11, D-13, D-14, D-15, D-16 and D-18 — each
    needed before the lanes § 2 lists against it; none blocks lane 0.
-2. Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** Next is lane 1, whose source
+   check needs D-15 settled first. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -99,13 +100,20 @@ are pending; each is needed before the lanes in its "Blocks" column, and none bl
 
 *Appended per lane as each is source-checked and settled with the user, before it is built.*
 
+**Lane 0 (2026-10-04) — two data-step questions, settled by the user the same day: no data steps.**
+
+| # | Question | Settled |
+|---|---|---|
+| **L0-1** | F-53: should the migration move rows saved against a department onto the unit with the same name? | **No — the unit replaces the department outright (D-5), and there is nothing to move.** No event or closure carries a `DepartmentId` on UAT, the dev database or the test-data database, live or deleted. The "legacy rows shown read-only and listed for HR" handling is dropped from lanes 1 and 2. `DepartmentId` stays in the schema only while today's code reads it; a later migration drops it once lanes 1 and 2 have moved every read to the unit. *The first recommendation kept a name-match step as protection for other databases; withdrawn, as it could never act.* |
+| **L0-2** | D-1: should the migration rewrite old closures whose saved scope contradicts their type? | **No.** No closure contradicts D-1: UAT's one is a whole-company Full closure, and the other two databases have none. Lane 1 reads a closure's scope from its type and refuses a contradictory save from now on. |
+
 ---
 
 ## 2. Lane status
 
 | Lane | Scope | Waits on | Status | Proof |
 |---|---|---|---|---|
-| **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, legacy-row rules, upload category) | the UAT counts | ☐ | migration applied on UAT; `__EFMigrationsHistory` row |
+| **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; announcements | D-15 | ☐ | `run-final-review.mjs` closures block |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
@@ -268,37 +276,66 @@ the guarded data step in `20260930151521_PerformanceClosureRetireCycleInProgress
 draft named only the data migration*); Designer and snapshot kept; the user builds; applied to UAT after
 the user's go.
 
-- [ ] **Before writing it**, count on UAT (read-only): events and closures with a `DepartmentId`;
+- [x] **Before writing it**, count on UAT (read-only): events and closures with a `DepartmentId`;
       closures whose type and scope disagree with D-1; duplicate (event, employee) participant and
       attendance rows. Each count decides a step below.
-- [ ] `CompanyEvent`: `RecurrenceSeriesId` (guid?), `OccurrenceNumber` (int?), `OrganizationUnitId`
+- [x] `CompanyEvent`: `RecurrenceSeriesId` (guid?), `OccurrenceNumber` (int?), `OrganizationUnitId`
       (guid?, FK `OrganizationUnits`, Restrict); index on the series id. **No series table (D-12):** the
       occurrences are the series.
-- [ ] `CompanyEvent` (D-9, C-51): `SourceEntityType` (nvarchar(50)?) and `SourceEntityId` (guid?) —
+- [x] `CompanyEvent` (D-9, C-51): `SourceEntityType` (nvarchar(50)?) and `SourceEntityId` (guid?) —
       the record that created the event, today the SHE emergency drill.
-- [ ] `BusinessClosure`: `OrganizationUnitId` (guid?, FK `OrganizationUnits`, Restrict).
+- [x] `BusinessClosure`: `OrganizationUnitId` (guid?, FK `OrganizationUnits`, Restrict).
       (D-9, C-38) `RecursAnnually` (bit NOT NULL DEFAULT 0).
-- [ ] **Legacy rows (F-53).** A row with a `DepartmentId` gets a unit only where the department's name
-      matches exactly one unit's name; the rest stay legacy, shown read-only and listed for HR.
-      Closures whose type and scope disagree with D-1 are normalised by the rule the counts suggest,
-      agreed at this lane's source check.
+- [x] **Legacy rows (F-53) — none; no data step (L0-1, L0-2).** The counts found no row with a
+      `DepartmentId` and no closure contradicting D-1, so the unit replaces the department outright.
 - ~~`CompanyMilestone`: `LinkedEntityType` / `LinkedEntityId`~~ — **not added: D-17 dropped the link.**
-- [ ] `CompanySealAssetKind` gains `Logo` (D-9, C-50) — an enum value, no column.
-- [ ] `EventAttachment`: `UploadedById` (guid?, FK `Employees`), `FileSizeBytes`, `FileUploadRecordId`,
+- [x] `CompanySealAssetKind` gains `Logo` (D-9, C-50) — an enum value, no column.
+- [x] `EventAttachment`: `UploadedById` (guid?, FK `Employees`), `FileSizeBytes`, `FileUploadRecordId`,
       `DocumentRecordId`, `DocumentVersionId` — the `StaffRequisitionAttachment` pattern.
-- [ ] `CompanyMilestoneDocument` (new): `MilestoneId` FK, `FileName`, `FilePath`, `Description`,
+- [x] `CompanyMilestoneDocument` (new): `MilestoneId` FK, `FileName`, `FilePath`, `Description`,
       `UploadDate`, `UploadedById` FK `Employees`, `FileSizeBytes`, `FileUploadRecordId`,
       `DocumentRecordId`, `DocumentVersionId`.
-- [ ] **(F-45)** Unique filtered indexes: `EventParticipants (TenantId, EventId, EmployeeId)` where
+- [x] **(F-45)** Unique filtered indexes: `EventParticipants (TenantId, EventId, EmployeeId)` where
       `EmployeeId IS NOT NULL AND IsDeleted = 0`, and `EventAttendances (TenantId, EventId, EmployeeId)`
       where `IsDeleted = 0`. The guard THROWs naming any duplicates rather than choosing which to lose.
-- [ ] `ControlledFileUploadCategories.HrCompanyScheduleAttachments = "hr-company-schedule-attachments"`,
+- [x] `ControlledFileUploadCategories.HrCompanyScheduleAttachments = "hr-company-schedule-attachments"`,
       in the constants AND in the `SystemCleanScanRequired` block
       (`src/ErpSystem.Core/Interfaces/IControlledFileUploadService.cs`).
-- [ ] `ApplicationDbContext.HR.cs`: DbSet and configuration for the new table(s); FK configuration for
+- [x] `ApplicationDbContext.HR.cs`: DbSet and configuration for the new table(s); FK configuration for
       the new columns.
 
-**State:** *(filled when it lands)*
+**State (2026-10-04): ✅ DONE — applied to UAT, 143 history rows.** The counts were taken; the
+entities, enum, upload category and DbContext were changed. The user scaffolded
+`20261004224953_CompanyScheduleFinalReview`; its body was rewritten as guarded SQL and proved on a
+restored copy of UAT. The user's build was green, with no pending model changes. With the user's go,
+it was applied to UAT (§ 6).
+
+*UAT counts, read-only, 2026-10-04 (`ErpSystemDB_UAT`, 142 history rows, one tenant):*
+
+| What | UAT | Decides |
+|---|---|---|
+| Live events / closures with a `DepartmentId` | 0 of 4 / 0 of 1 (dev and test-data DBs: no events or closures at all) | L0-1: no step |
+| Deleted events / closures with a `DepartmentId` | 0 / 0 | L0-1: no step |
+| Closures disagreeing with D-1 | 0 — the one closure is Full, company-wide, non-working, paid | L0-2: no step |
+| Duplicate live (tenant, event, employee) participant / attendance groups | 0 / 0 (17 participants, 1 external; 5 attendance rows) | F-45 guard passes |
+| Live event attachments, all path-only (F-54) | 4 | lane 2 shows them "reference only"; no migration step |
+| Recurring events / milestones with `RelatedDocuments` text | 0 / 0 | nothing to carry over |
+
+*Made in source (unstaged until the migration joins it):*
+- `CompanyScheduleEntities.cs`: the event's series, unit and source columns; the closure's unit and
+  `RecursAnnually`; the attachment's upload-gate columns; `CompanyMilestoneDocument` with
+  `CompanyMilestone.Documents`.
+- `CompanySealAssetKind.Logo = 3`.
+- `HrCompanyScheduleAttachments`, declared and in `SystemCleanScanRequired`.
+- `ApplicationDbContext.HR.cs`: the DbSet, three Restrict FKs, the two F-45 unique filtered indexes
+  (`UX_EventParticipant_Tenant_Event_Employee`, `UX_EventAttendance_Tenant_Event_Employee`), and
+  indexes on the series id and the unit ids.
+- **Beyond the list above:** an index on `(SourceEntityType, SourceEntityId)` for the drill's lookup
+  of its event.
+- `CompanyMilestoneDocument.UploadedById` is required, as `HrAttachmentUpload` always supplies one;
+  `EventAttachment.UploadedById` is nullable for the four legacy rows.
+- ⚠ From this commit, the Admin-only `POST company-profile/seal-assets/{kind}` accepts `Logo`, because
+  the route binds the enum. Nothing reads a logo asset until lane 4.
 
 ### Lane 1 — Closures (D-1, D-4, D-5, D-15; C-5, C-37, C-38, C-39, R4-10A.4, R4-13.1, F-2, F-24, F-28, F-29, F-51, F-52)
 
@@ -343,7 +380,8 @@ the user's go.
       required; Organisation unit → `OrganizationUnitPickerField`, required; Partial → the whole-company
       switch plus both pickers, and the working-day switch locked on, described). The working-day
       switch's description becomes honest. `organizationUnitId` / `organizationUnitName` replace
-      `departmentId` on the wire; `departmentName` still shown read-only on legacy rows.
+      `departmentId` on the wire. No legacy department rows exist (L0-1), so nothing is shown for them;
+      once lanes 1 and 2 read only the unit, a later migration drops `DepartmentId` from both tables.
 
 **State:** *(filled when it lands)*
 
@@ -679,13 +717,61 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 ## 6. Migration
 
 One batch, lane 0. D-12 and D-17 settled its content — no series table, no milestone-link columns —
-and its data steps wait on the UAT counts lane 0 takes first. The user scaffolds (`ef.ps1 migrations add CompanyScheduleFinalReview`); the body is
+and L0-1 and L0-2 settled that it has no data steps (§ 1c). The user scaffolds (`ef.ps1 migrations add CompanyScheduleFinalReview`); the body is
 rewritten as guarded SQL; the Designer and snapshot are kept; the user builds; applied to UAT with the
 built DLL's `apply-migrations` after the user's go. Proof: `__EFMigrationsHistory` gains the row and
 every new column, index and table exists on UAT. *UAT holds 142 history rows at 1163bbc47, the repo's
 chain exactly, so this migration is the only one pending there (§ 3c).*
 
-**State:** *(filled when it lands)*
+**State (2026-10-04): ✅ applied to UAT.** *Written, proved, built — the user's build green and
+`has-pending-model-changes` clean — then applied, details at the end of this section.*
+`20261004224953_CompanyScheduleFinalReview`: 33 guarded batches up, 26 down; the Designer and the
+regenerated snapshot kept.
+- **Left out of the scaffold:** two `ExternalPremiumChargeAmount` columns. They belong to master's
+  hand-written `20261004103000_AddEstateListingPremiumChargeAmount`, which never updated the snapshot.
+  The snapshot now records them; the snapshot's other change is `LoginPageStyle` moved into
+  alphabetical order.
+- **Kept, guarded:** EF's drop of `IX_EventParticipants_TenantId` and `IX_EventAttendances_TenantId`,
+  done after the unique indexes exist.
+- **F-45 duplicates are refused, not repaired:** errors 51520 (guests) and 51521 (attendance), each
+  naming the event number and the staff number.
+- **No data steps (L0-1, L0-2).**
+- **Down refuses (51522)** while any row uses what Down would drop, and counts it.
+
+*Proof, on `ErpSystemDB_CsL0Copy`, a COPY_ONLY restore of UAT, dropped afterwards with its backup.*
+The SQL was rendered by a Python port of the helpers, mechanically compared with the C#: every
+template, every argument and the refusal's seven counts are identical.
+- Up applied, and applied again: no change. All objects present; six foreign keys trusted; both unique
+  indexes filtered; row counts unchanged.
+- Down returned the copy to its starting state, both `TenantId` indexes restored; a second Down
+  changed nothing. Up applied again.
+- With a recurring closure and a unit-only event, Down refused with 51522 counting both, and dropped
+  nothing.
+- A duplicate guest stopped Up with 51520 ("event EVT-2026-00001 / employee TDC/00001 (2 rows)").
+  Once that was soft-deleted, a duplicate attendance row stopped it with 51521. Once that was
+  soft-deleted too, Up completed, the indexes coexisting with the soft-deleted rows. A fresh live
+  duplicate was then rejected (2601).
+- The proof above was run on the first body, which also carried a department-to-unit name-match step.
+  L0-1 then removed that step: two Up batches went, and Down's two unit counts lost their
+  `AND [DepartmentId] IS NULL`, which existed only to spare mapped rows. The port was updated and
+  re-compared with the C# (identical); the batch counts agree (33 + 26 = 59 calls). A re-run on a fresh
+  copy was not done: the session's path protection blocks deleting the backup file it would leave
+  under `C:\Program Files`. Applying the migration to UAT, after a backup, is the next proof of Up.
+
+*Applied to UAT, 2026-10-04, with the user's go* (the merge #13 recipe: `apply-migrations` from the
+built API, so no web host and no seeders).
+- **Backup:** `MSSQL\Backup\ErpSystemDB_UAT_preCsL0_20261004.bak` (COPY_ONLY, CHECKSUM, verified, 634 MB),
+  KEPT as UAT's restore point.
+- **The compiled migration on a copy first:** restored as `ErpSystemDB_CsL0UatCopy`. Exit 0 in 27 s;
+  history 142 → 143; every column, index and table present; six foreign keys trusted; row counts
+  unchanged. The copy was dropped. This closes the re-run gap above: it ran the built migration
+  itself, not the port.
+- **UAT:** backup re-verified; exit 0 in 24 s; `__EFMigrationsHistory` **142 → 143**, with
+  `20261004224953_CompanyScheduleFinalReview` present. The same probe as the copy: 5/5 event columns,
+  2/2 closure columns, 5/5 attachment columns, the documents table, 10/10 new indexes, the two
+  `TenantId` indexes gone, 6/6 foreign keys trusted, both unique indexes filtered. Rows unchanged:
+  1 closure, 17 guests, 5 attendance, 4 attachments.
+- **Log:** no errors; only the EF model warnings every start prints, none about this module.
 
 ---
 
@@ -754,3 +840,13 @@ chain exactly, so this migration is the only one pending there (§ 3c).*
     `StaffTravelNotices` as the closer notice model.
   - New: F-57, the sidebar gate test (lane 5, with lane 7's entry).
   - No decision changed. Lane 0 starts.
+- **2026-10-04, later** — **Lane 0 written.** The UAT counts were all zero. The user scaffolded
+  `CompanyScheduleFinalReview`; the body was rewritten as guarded SQL and proved on a restored copy of
+  UAT (§ 6). The user settled **L0-1 and L0-2: no data steps.** The unit replaces the department
+  outright, and no row on any local database was saved against a department or contradicts D-1.
+  The legacy-row handling leaves lanes 1 and 2, and `DepartmentId` is to be dropped by a later
+  migration.
+- **2026-10-04, later** — **Lane 0 done.** The user's build was green, with no pending model changes.
+  With the user's go, the migration was applied first to a restored copy of UAT and then to UAT:
+  history 142 → 143, every object present, no row changed; the backup is kept (§ 6). Next: lane 1,
+  which needs D-15.

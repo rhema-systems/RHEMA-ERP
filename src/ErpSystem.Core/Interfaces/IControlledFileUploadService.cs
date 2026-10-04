@@ -257,6 +257,16 @@ public static class ControlledFileUploadCategories
     public const string HrCompanySealAssets = "hr-company-seal-assets";
 
     /// <summary>
+    /// Company-schedule files (final closure D-3): an event's agenda, minutes and slides, and the
+    /// documents evidencing a company milestone — the certificate, the licence.
+    /// </summary>
+    /// <remarks>
+    /// Its own category: an event's papers are circulated to everyone invited, and a milestone's
+    /// certificate is a retained company record, neither of which belongs in another family's pile.
+    /// </remarks>
+    public const string HrCompanyScheduleAttachments = "hr-company-schedule-attachments";
+
+    /// <summary>
     /// Categories that cannot opt out of a clean malware scan through tenant policy.
     /// </summary>
     /// <remarks>
@@ -359,7 +369,10 @@ public static class ControlledFileUploadCategories
                 HrPolicyDocuments,
                 // A collective agreement binds every member of a bargaining unit and is read by all
                 // of them; a union's constitution and correspondence sit beside it.
-                HrUnionDocuments
+                HrUnionDocuments,
+                // An event's papers go to everyone invited, and a milestone's certificate is a
+                // retained company record. Registered in the same change that declares it.
+                HrCompanyScheduleAttachments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

@@ -10840,9 +10840,9 @@ public enum HrPolicyAcknowledgementOutcome
 /// Which instrument of authority a stored company image is.
 /// </summary>
 /// <remarks>
-/// ⚠ One table, two kinds, because they are governed identically: both are what makes a generated
-/// document look authentic, both must be versioned rather than overwritten, and both are replaced
-/// by the same restricted act. Two tables would duplicate that governance and let it drift.
+/// ⚠ One table, three kinds, because they are governed identically: each is what makes a generated
+/// document look authentic, each must be versioned rather than overwritten, and each is replaced
+/// by the same restricted act. Separate tables would duplicate that governance and let it drift.
 /// </remarks>
 public enum CompanySealAssetKind
 {
@@ -10850,7 +10850,13 @@ public enum CompanySealAssetKind
     Seal = 1,
 
     /// <summary>The authorised signatory's signature image.</summary>
-    Signature = 2
+    Signature = 2,
+
+    /// <summary>
+    /// The company logo (company-schedule final closure D-9, C-50) — versioned like the other two,
+    /// because letters and emails embed it; it replaces the free-text <c>CompanyProfile.LogoUrl</c> (F-55).
+    /// </summary>
+    Logo = 3
 }
 
 #endregion
