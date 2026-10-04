@@ -124,7 +124,7 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
     const isEditing = Boolean(tax);
     const accountRequirements = getTaxAccountRequirements(
         formData.applicability,
-        formData.category,
+        formData.category ?? TaxCategory.Standard,
         Boolean(formData.isInputTaxDeductible),
     );
 
