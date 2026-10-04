@@ -205,7 +205,10 @@ const isSalePaymentSatisfied = (procedureCase: ProcedureCaseDetail) => {
     return true;
   }
 
-  const saleInvoiceBalance = caseMoneyValue(procedureCase, 'saleInvoiceBalance');
+  const saleInvoiceBalance = caseMoneyValue(
+    procedureCase,
+    'saleInvoiceBalance'
+  );
   return (
     caseFieldValue(procedureCase, 'saleInvoiceStatus').toLowerCase() ===
       'paid' &&
@@ -333,8 +336,10 @@ const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
     procedureCase,
     'requestType'
   ).toLowerCase();
-  if (requestType.includes('lease') || requestType.includes('rent')) return true;
-  if (requestType.includes('purchase') || requestType.includes('sale')) return false;
+  if (requestType.includes('lease') || requestType.includes('rent'))
+    return true;
+  if (requestType.includes('purchase') || requestType.includes('sale'))
+    return false;
   const listingType = caseFieldValue(
     procedureCase,
     'listingType'
@@ -351,9 +356,18 @@ const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
 };
 
 const isLeaseApplication = (procedureCase: ProcedureCaseDetail) => {
-  const requestType = caseFieldValue(procedureCase, 'requestType').toLowerCase();
-  const listingType = caseFieldValue(procedureCase, 'listingType').toLowerCase();
-  return requestType.includes('lease') || (!requestType && listingType.includes('lease'));
+  const requestType = caseFieldValue(
+    procedureCase,
+    'requestType'
+  ).toLowerCase();
+  const listingType = caseFieldValue(
+    procedureCase,
+    'listingType'
+  ).toLowerCase();
+  return (
+    requestType.includes('lease') ||
+    (!requestType && listingType.includes('lease'))
+  );
 };
 
 const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
@@ -386,14 +400,20 @@ const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
 };
 
 const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
-  const approved = isApprovedDecision(caseFieldValue(procedureCase, 'decisionStatus'));
+  const approved = isApprovedDecision(
+    caseFieldValue(procedureCase, 'decisionStatus')
+  );
   const rental = isRentalApplication(procedureCase);
 
   switch (procedureCase.currentStageIndex) {
     case 0:
       return ['customerValidationStatus', 'listingValidationStatus'];
     case 1:
-      return ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus'];
+      return [
+        'availabilityCheck',
+        'commercialReviewStatus',
+        'reservationStatus',
+      ];
     case 2:
       return rental && approved
         ? isLeaseApplication(procedureCase)
@@ -408,7 +428,12 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
       return [];
     case 5:
       return rental && !isLeaseApplication(procedureCase)
-        ? ['billingStartDate', 'billingStartStatus']
+        ? [
+            'salePaymentStatus',
+            'salePaymentCheckStatus',
+            'billingStartDate',
+            'billingStartStatus',
+          ]
         : ['salePaymentStatus', 'salePaymentCheckStatus'];
     case 6:
       return rental
@@ -422,7 +447,10 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
   }
 };
 
-const isStageFieldComplete = (procedureCase: ProcedureCaseDetail, key: string) => {
+const isStageFieldComplete = (
+  procedureCase: ProcedureCaseDetail,
+  key: string
+) => {
   const value = caseFieldValue(procedureCase, key);
   if (!value) return false;
   if (key === 'moveInDate' || key === 'billingStartDate') {
@@ -474,12 +502,18 @@ const buildAgreementMergeValues = (
   const generatedAgreementReference = firstNonBlank(
     fields.generatedAgreementReference
   );
-  const premiumCharge = fields.premiumChargeRequired === 'Yes'
-    ? firstNonBlank(fields.premiumChargeAmount, 'To be confirmed')
-    : 'Not applicable';
-  const annualGroundRent = fields.groundRentRequired === 'Yes'
-    ? firstNonBlank(fields.groundRentPayable, fields.groundRentComputed, 'To be confirmed')
-    : 'Not applicable';
+  const premiumCharge =
+    fields.premiumChargeRequired === 'Yes'
+      ? firstNonBlank(fields.premiumChargeAmount, 'To be confirmed')
+      : 'Not applicable';
+  const annualGroundRent =
+    fields.groundRentRequired === 'Yes'
+      ? firstNonBlank(
+          fields.groundRentPayable,
+          fields.groundRentComputed,
+          'To be confirmed'
+        )
+      : 'Not applicable';
 
   return {
     ...fields,
@@ -555,9 +589,9 @@ export function ListingApplicationWorkspace() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [completionNotes, setCompletionNotes] = React.useState('');
-  const [dirtyStageFieldKeys, setDirtyStageFieldKeys] = React.useState<Set<string>>(
-    () => new Set()
-  );
+  const [dirtyStageFieldKeys, setDirtyStageFieldKeys] = React.useState<
+    Set<string>
+  >(() => new Set());
   const [saleCloseoutChecklist, setSaleCloseoutChecklist] = React.useState({
     customerStatus: false,
     auditReferences: false,
@@ -765,7 +799,9 @@ export function ListingApplicationWorkspace() {
             ? current
             : applicableTemplates.find(
                 (template) => template.templateCode === preferredCode
-              )?.templateCode || applicableTemplates[0]?.templateCode || ''
+              )?.templateCode ||
+              applicableTemplates[0]?.templateCode ||
+              ''
         );
       } catch {
         setGenerationTemplates([]);
@@ -897,7 +933,9 @@ export function ListingApplicationWorkspace() {
     if (!selectedCase) return;
 
     if (dirtyStageFieldKeys.size > 0) {
-      setError('Save the current stage updates before routing this request forward.');
+      setError(
+        'Save the current stage updates before routing this request forward.'
+      );
       return;
     }
 
@@ -908,7 +946,9 @@ export function ListingApplicationWorkspace() {
       setError(
         `Complete the required current-stage field(s) before routing forward: ${missingStageFields
           .slice(0, 4)
-          .join(', ')}${missingStageFields.length > 4 ? ` and ${missingStageFields.length - 4} more` : ''}.`
+          .join(
+            ', '
+          )}${missingStageFields.length > 4 ? ` and ${missingStageFields.length - 4} more` : ''}.`
       );
       return;
     }
@@ -918,7 +958,9 @@ export function ListingApplicationWorkspace() {
       selectedCase.currentStageIndex >= 1 &&
       !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
     ) {
-      setError('Enter and save the premium charge amount before routing this request forward.');
+      setError(
+        'Enter and save the premium charge amount before routing this request forward.'
+      );
       return;
     }
 
@@ -951,7 +993,9 @@ export function ListingApplicationWorkspace() {
       isRentalApplication(selectedCase) &&
       !caseFieldValue(selectedCase, 'moveInDate')
     ) {
-      setError('Set the approved move-in date before generating the agreement.');
+      setError(
+        'Set the approved move-in date before generating the agreement.'
+      );
       return;
     }
     if (
@@ -960,9 +1004,7 @@ export function ListingApplicationWorkspace() {
       isLeaseApplication(selectedCase) &&
       !caseFieldValue(selectedCase, 'requestedLeaseTerm')
     ) {
-      setError(
-        'Set the approved lease term before generating the agreement.'
-      );
+      setError('Set the approved lease term before generating the agreement.');
       return;
     }
     if (
@@ -1011,8 +1053,10 @@ export function ListingApplicationWorkspace() {
     }
     if (
       stageName === 'customer agreement execution' &&
-      (caseFieldValue(selectedCase, 'agreementExecutionStatus').toLowerCase() !==
-        'fully executed' ||
+      (caseFieldValue(
+        selectedCase,
+        'agreementExecutionStatus'
+      ).toLowerCase() !== 'fully executed' ||
         !caseFieldValue(selectedCase, 'finalSignedAgreementReference'))
     ) {
       setError(
@@ -1021,7 +1065,16 @@ export function ListingApplicationWorkspace() {
       return;
     }
     if (stageName === 'payment, billing and finance check') {
-      if (isRentalApplication(selectedCase) && !isLeaseApplication(selectedCase)) {
+      if (
+        isRentalApplication(selectedCase) &&
+        !isLeaseApplication(selectedCase)
+      ) {
+        if (!isSalePaymentSatisfied(selectedCase)) {
+          setError(
+            'Collect and confirm the remaining first month rent before completing this stage.'
+          );
+          return;
+        }
         if (
           !caseFieldValue(selectedCase, 'billingStartDate') ||
           !containsAny(caseFieldValue(selectedCase, 'billingStartStatus'), [
@@ -1030,7 +1083,9 @@ export function ListingApplicationWorkspace() {
             'Rent billing activated',
           ])
         ) {
-          setError('Confirm rent billing readiness before completing this stage.');
+          setError(
+            'Confirm rent billing readiness before completing this stage.'
+          );
           return;
         }
       } else if (!isSalePaymentSatisfied(selectedCase)) {
@@ -1056,8 +1111,10 @@ export function ListingApplicationWorkspace() {
         }
       } else {
         if (
-          caseFieldValue(selectedCase, 'legalConveyanceStatus').toLowerCase() !==
-          'completed by legal'
+          caseFieldValue(
+            selectedCase,
+            'legalConveyanceStatus'
+          ).toLowerCase() !== 'completed by legal'
         ) {
           setError(
             'Legal must complete conveyance and registration before Estate closeout.'
@@ -1066,9 +1123,10 @@ export function ListingApplicationWorkspace() {
         }
 
         if (
-          !containsAny(caseFieldValue(selectedCase, 'ownershipTransferStatus'), [
-            'Completed',
-          ])
+          !containsAny(
+            caseFieldValue(selectedCase, 'ownershipTransferStatus'),
+            ['Completed']
+          )
         ) {
           setError('Complete ownership transfer before Estate closeout.');
           return;
@@ -1429,7 +1487,11 @@ export function ListingApplicationWorkspace() {
     } catch (saleError) {
       const message = errorMessage(
         saleError,
-        'Unable to create the sale invoice.'
+        selectedCase &&
+          isRentalApplication(selectedCase) &&
+          !isLeaseApplication(selectedCase)
+          ? 'Unable to create the first month rent balance invoice.'
+          : 'Unable to create the sale invoice.'
       );
       setError(message);
       toast.error(message);
@@ -1452,7 +1514,11 @@ export function ListingApplicationWorkspace() {
     } catch (saleError) {
       const message = errorMessage(
         saleError,
-        'Unable to refresh the sale payment status.'
+        selectedCase &&
+          isRentalApplication(selectedCase) &&
+          !isLeaseApplication(selectedCase)
+          ? 'Unable to refresh the first month rent payment status.'
+          : 'Unable to refresh the sale payment status.'
       );
       setError(message);
       toast.error(message);
@@ -1547,9 +1613,10 @@ export function ListingApplicationWorkspace() {
     );
   }
 
-  const summaryFields = selectedCase?.fields.filter((field) =>
-    SUMMARY_FIELD_KEYS.includes(field.key) &&
-    (field.key !== 'requestedLeaseTerm' || isLeaseApplication(selectedCase))
+  const summaryFields = selectedCase?.fields.filter(
+    (field) =>
+      SUMMARY_FIELD_KEYS.includes(field.key) &&
+      (field.key !== 'requestedLeaseTerm' || isLeaseApplication(selectedCase))
   );
   const editableFields = selectedCase
     ? selectedCase.fields.filter(
@@ -1672,8 +1739,9 @@ export function ListingApplicationWorkspace() {
   );
   const legalAgreementReviewSubmitting =
     pendingLegalMatterType === 'agreementReview';
-  const legalAgreementReleasedForCustomer =
-    isLegalAgreementReviewSigned(legalAgreementReviewStatus);
+  const legalAgreementReleasedForCustomer = isLegalAgreementReviewSigned(
+    legalAgreementReviewStatus
+  );
   const customerAgreementAccepted = Boolean(
     selectedCase &&
       caseFieldValue(selectedCase, 'customerAcceptanceStatus').toLowerCase() ===
@@ -1712,7 +1780,6 @@ export function ListingApplicationWorkspace() {
     : Number.NaN;
   const saleFullyPaidInSales = Boolean(
     selectedCase &&
-      (!rentalApplication || leaseApplication) &&
       salePaymentStatus === 'paid in full' &&
       Number.isFinite(estateRemainingAmount) &&
       estateRemainingAmount <= 0
@@ -1861,110 +1928,110 @@ export function ListingApplicationWorkspace() {
 
         <div className="space-y-4">
           {!detailOnly ? (
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <ClipboardCheck className="h-4 w-4" />
-                  Request queue
-                </CardTitle>
-                <Badge variant="outline">
-                  {caseTotalCount} case{caseTotalCount === 1 ? '' : 's'}
-                </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {cases.length === 0 ? (
-                <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                  Customer bids and rental requests will appear here after they
-                  are submitted from a published listing.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[900px] text-sm">
-                    <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">Reference</th>
-                        <th className="px-3 py-2 font-medium">Customer</th>
-                        <th className="px-3 py-2 font-medium">Request</th>
-                        <th className="px-3 py-2 font-medium">Stage</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
-                        <th className="px-3 py-2 text-right font-medium">
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {cases.map((item) => (
-                        <tr key={item.id} className="bg-background">
-                          <td className="px-3 py-3 align-top">
-                            <div className="font-medium">
-                              {item.referenceNumber || item.title}
-                            </div>
-                            <div className="mt-1 max-w-[20rem] truncate text-xs text-muted-foreground">
-                              {summaryFieldValue(item, 'listingReference') ||
-                                summaryFieldValue(item, 'propertyUnit') ||
-                                item.title}
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 align-top text-muted-foreground">
-                            {item.applicantName ||
-                              summaryFieldValue(item, 'customerName') ||
-                              'Customer'}
-                          </td>
-                          <td className="px-3 py-3 align-top">
-                            <Badge variant="secondary">
-                              {requestTypeLabel(item)}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-3 align-top">
-                            <Badge variant="outline">
-                              {item.currentStageName}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-3 align-top">
-                            <div className="flex flex-wrap gap-1">
-                              <Badge
-                                variant="outline"
-                                className={getStatusBadgeClassName(
-                                  queueStatusLabel(item)
-                                )}
-                              >
-                                {queueStatusLabel(item)}
-                              </Badge>
-                              {!item.usesConfiguredWorkflow ? (
-                                <Badge variant="secondary">Manual</Badge>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 text-right align-top">
-                            <Button asChild size="sm" variant="outline">
-                              <Link
-                                href={`/estate/property-management/${ENTITY_TYPE}/cases/${encodeURIComponent(item.id)}`}
-                                className="gap-2"
-                              >
-                                <Eye className="h-4 w-4" />
-                                View
-                              </Link>
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <Card>
+              <CardHeader>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <ClipboardCheck className="h-4 w-4" />
+                    Request queue
+                  </CardTitle>
+                  <Badge variant="outline">
+                    {caseTotalCount} case{caseTotalCount === 1 ? '' : 's'}
+                  </Badge>
                 </div>
-              )}
-              {caseTotalCount > REQUESTS_PER_PAGE ? (
-                <Pagination
-                  currentPage={queuePage}
-                  totalPages={caseTotalPages}
-                  totalItems={caseTotalCount}
-                  pageSize={REQUESTS_PER_PAGE}
-                  onPageChange={setQueuePage}
-                />
-              ) : null}
-            </CardContent>
-          </Card>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {cases.length === 0 ? (
+                  <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                    Customer bids and rental requests will appear here after
+                    they are submitted from a published listing.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[900px] text-sm">
+                      <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Reference</th>
+                          <th className="px-3 py-2 font-medium">Customer</th>
+                          <th className="px-3 py-2 font-medium">Request</th>
+                          <th className="px-3 py-2 font-medium">Stage</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 text-right font-medium">
+                            Action
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {cases.map((item) => (
+                          <tr key={item.id} className="bg-background">
+                            <td className="px-3 py-3 align-top">
+                              <div className="font-medium">
+                                {item.referenceNumber || item.title}
+                              </div>
+                              <div className="mt-1 max-w-[20rem] truncate text-xs text-muted-foreground">
+                                {summaryFieldValue(item, 'listingReference') ||
+                                  summaryFieldValue(item, 'propertyUnit') ||
+                                  item.title}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 align-top text-muted-foreground">
+                              {item.applicantName ||
+                                summaryFieldValue(item, 'customerName') ||
+                                'Customer'}
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <Badge variant="secondary">
+                                {requestTypeLabel(item)}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <Badge variant="outline">
+                                {item.currentStageName}
+                              </Badge>
+                            </td>
+                            <td className="px-3 py-3 align-top">
+                              <div className="flex flex-wrap gap-1">
+                                <Badge
+                                  variant="outline"
+                                  className={getStatusBadgeClassName(
+                                    queueStatusLabel(item)
+                                  )}
+                                >
+                                  {queueStatusLabel(item)}
+                                </Badge>
+                                {!item.usesConfiguredWorkflow ? (
+                                  <Badge variant="secondary">Manual</Badge>
+                                ) : null}
+                              </div>
+                            </td>
+                            <td className="px-3 py-3 text-right align-top">
+                              <Button asChild size="sm" variant="outline">
+                                <Link
+                                  href={`/estate/property-management/${ENTITY_TYPE}/cases/${encodeURIComponent(item.id)}`}
+                                  className="gap-2"
+                                >
+                                  <Eye className="h-4 w-4" />
+                                  View
+                                </Link>
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {caseTotalCount > REQUESTS_PER_PAGE ? (
+                  <Pagination
+                    currentPage={queuePage}
+                    totalPages={caseTotalPages}
+                    totalItems={caseTotalCount}
+                    pageSize={REQUESTS_PER_PAGE}
+                    onPageChange={setQueuePage}
+                  />
+                ) : null}
+              </CardContent>
+            </Card>
           ) : null}
 
           {registerOnly ? null : !selectedCase ? (
@@ -2009,9 +2076,7 @@ export function ListingApplicationWorkspace() {
                     <div className="flex flex-wrap gap-2">
                       <Badge
                         variant="outline"
-                        className={getStatusBadgeClassName(
-                          selectedStatusLabel
-                        )}
+                        className={getStatusBadgeClassName(selectedStatusLabel)}
                       >
                         {selectedStatusLabel}
                       </Badge>
@@ -2061,793 +2126,1038 @@ export function ListingApplicationWorkspace() {
                   <TabsTrigger value="complete">Complete</TabsTrigger>
                 </TabsList>
                 <TabsContent value="request" className="space-y-4">
-              <div className="grid gap-4 xl:grid-cols-2">
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Submitted request
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="grid gap-3 sm:grid-cols-2">
-                    {summaryFields?.map((field) => (
-                      <div
-                        key={field.id}
-                        className={
-                          field.fieldType === 'textarea' ? 'sm:col-span-2' : ''
-                        }
-                      >
-                        <p className="text-xs font-medium text-muted-foreground">
-                          {field.label}
-                        </p>
-                        <p className="mt-1 whitespace-pre-wrap text-sm">
-                          {formatValue(field)}
-                        </p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Current stage: {selectedCase.currentStageName}
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Only the fields needed by this stage are shown.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {editableFields?.length ? (
-                      editableFields.map((field) => (
-                        <div key={field.id} className="space-y-1.5">
-                          <label
-                            className="text-sm font-medium"
-                            htmlFor={field.id}
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">
+                          Submitted request
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="grid gap-3 sm:grid-cols-2">
+                        {summaryFields?.map((field) => (
+                          <div
+                            key={field.id}
+                            className={
+                              field.fieldType === 'textarea'
+                                ? 'sm:col-span-2'
+                                : ''
+                            }
                           >
-                            {field.label}
-                            {requiredStageKeys.includes(field.key)
-                              ? ' *'
-                              : ''}
-                          </label>
-                          {field.fieldType === 'select' &&
-                          field.options?.length ? (
-                            <Select
-                              value={field.value || undefined}
-                              onValueChange={(value) =>
-                                updateField(field.key, value)
-                              }
-                              disabled={
-                                isSaving ||
-                                caseIsCompleted ||
-                                !selectedCase.canEditCurrentStage
-                              }
-                            >
-                              <SelectTrigger id={field.id}>
-                                <SelectValue placeholder="Select" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {field.options.map((option) => (
-                                  <SelectItem key={option} value={option}>
-                                    {option}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          ) : field.fieldType === 'textarea' ? (
-                            <Textarea
-                              id={field.id}
-                              value={field.value ?? ''}
-                              onChange={(event) =>
-                                updateField(field.key, event.target.value)
-                              }
-                              onInput={(event) =>
-                                updateField(
-                                  field.key,
-                                  event.currentTarget.value
-                                )
-                              }
-                              disabled={
-                                isSaving ||
-                                caseIsCompleted ||
-                                !selectedCase.canEditCurrentStage
-                              }
-                            />
-                          ) : (
-                            <Input
-                              id={field.id}
-                              type={
-                                field.fieldType === 'date' ? 'date' : 'text'
-                              }
-                              value={field.value ?? ''}
-                              onChange={(event) =>
-                                updateField(field.key, event.target.value)
-                              }
-                              disabled={
-                                isSaving ||
-                                caseIsCompleted ||
-                                !selectedCase.canEditCurrentStage
-                              }
-                            />
-                          )}
-                        </div>
-                      ))
-                    ) : (
-                      <p className="text-sm text-muted-foreground">
-                        This workflow stage has no configured fields.
-                      </p>
-                    )}
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {field.label}
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap text-sm">
+                              {formatValue(field)}
+                            </p>
+                          </div>
+                        ))}
+                      </CardContent>
+                    </Card>
 
-                    {editableFields?.length ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="gap-2"
-                        onClick={() => void saveCurrentStage()}
-                        disabled={
-                          isSaving ||
-                          caseIsCompleted ||
-                          !selectedCase.canEditCurrentStage
-                        }
-                      >
-                        {isSaving ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="text-base">
+                          Current stage: {selectedCase.currentStageName}
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Only the fields needed by this stage are shown.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {editableFields?.length ? (
+                          editableFields.map((field) => (
+                            <div key={field.id} className="space-y-1.5">
+                              <label
+                                className="text-sm font-medium"
+                                htmlFor={field.id}
+                              >
+                                {field.label}
+                                {requiredStageKeys.includes(field.key)
+                                  ? ' *'
+                                  : ''}
+                              </label>
+                              {field.fieldType === 'select' &&
+                              field.options?.length ? (
+                                <Select
+                                  value={field.value || undefined}
+                                  onValueChange={(value) =>
+                                    updateField(field.key, value)
+                                  }
+                                  disabled={
+                                    isSaving ||
+                                    caseIsCompleted ||
+                                    !selectedCase.canEditCurrentStage
+                                  }
+                                >
+                                  <SelectTrigger id={field.id}>
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {field.options.map((option) => (
+                                      <SelectItem key={option} value={option}>
+                                        {option}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : field.fieldType === 'textarea' ? (
+                                <Textarea
+                                  id={field.id}
+                                  value={field.value ?? ''}
+                                  onChange={(event) =>
+                                    updateField(field.key, event.target.value)
+                                  }
+                                  onInput={(event) =>
+                                    updateField(
+                                      field.key,
+                                      event.currentTarget.value
+                                    )
+                                  }
+                                  disabled={
+                                    isSaving ||
+                                    caseIsCompleted ||
+                                    !selectedCase.canEditCurrentStage
+                                  }
+                                />
+                              ) : (
+                                <Input
+                                  id={field.id}
+                                  type={
+                                    field.fieldType === 'date' ? 'date' : 'text'
+                                  }
+                                  value={field.value ?? ''}
+                                  onChange={(event) =>
+                                    updateField(field.key, event.target.value)
+                                  }
+                                  disabled={
+                                    isSaving ||
+                                    caseIsCompleted ||
+                                    !selectedCase.canEditCurrentStage
+                                  }
+                                />
+                              )}
+                            </div>
+                          ))
                         ) : (
-                          <Save className="h-4 w-4" />
+                          <p className="text-sm text-muted-foreground">
+                            This workflow stage has no configured fields.
+                          </p>
                         )}
-                        Save stage updates
-                      </Button>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              </div>
+
+                        {editableFields?.length ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-2"
+                            onClick={() => void saveCurrentStage()}
+                            disabled={
+                              isSaving ||
+                              caseIsCompleted ||
+                              !selectedCase.canEditCurrentStage
+                            }
+                          >
+                            {isSaving ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Save className="h-4 w-4" />
+                            )}
+                            Save stage updates
+                          </Button>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="documents" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <FileText className="h-4 w-4" />
-                    Customer-submitted documents
-                  </CardTitle>
-                  <p className="text-sm text-muted-foreground">
-                    {agreementAlreadyGenerated
-                      ? 'Review the application evidence and any signed agreement returned by the customer.'
-                      : 'Review the identity, eligibility, offer, and financing evidence submitted with this application.'}
-                  </p>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {selectedCase.documents.length === 0 ? (
-                    <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-                      No customer documents have been uploaded for this request.
-                    </p>
-                  ) : (
-                    selectedCase.documents.map((document) => (
-                      <div key={document.id} className="rounded-md border p-3">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium">
-                              {document.name}
-                            </p>
-                            <p className="mt-1 break-all text-xs text-muted-foreground">
-                              {document.fileName || 'File not attached'}
-                            </p>
-                            {document.uploadedAt ? (
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Uploaded{' '}
-                                {new Intl.DateTimeFormat('en-GB', {
-                                  dateStyle: 'medium',
-                                  timeStyle: 'short',
-                                }).format(new Date(document.uploadedAt))}
-                              </p>
-                            ) : null}
-                            {document.notes ? (
-                              <p className="mt-2 whitespace-pre-wrap text-sm">
-                                {document.notes}
-                              </p>
-                            ) : null}
-                          </div>
-                          {document.fileUrl ? (
-                            <div className="flex shrink-0 flex-wrap gap-2">
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  setPreviewDocumentId((current) =>
-                                    current === document.id ? null : document.id
-                                  )
-                                }
-                              >
-                                <Eye className="mr-2 h-4 w-4" />
-                                {previewDocumentId === document.id
-                                  ? 'Hide PDF'
-                                  : 'View PDF'}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={isSaving}
-                                onClick={() =>
-                                  void downloadCaseDocument(document)
-                                }
-                              >
-                                <Download className="mr-2 h-4 w-4" />
-                                Download PDF
-                              </Button>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <FileText className="h-4 w-4" />
+                        Customer-submitted documents
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground">
+                        {agreementAlreadyGenerated
+                          ? 'Review the application evidence and any signed agreement returned by the customer.'
+                          : 'Review the identity, eligibility, offer, and financing evidence submitted with this application.'}
+                      </p>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {selectedCase.documents.length === 0 ? (
+                        <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                          No customer documents have been uploaded for this
+                          request.
+                        </p>
+                      ) : (
+                        selectedCase.documents.map((document) => (
+                          <div
+                            key={document.id}
+                            className="rounded-md border p-3"
+                          >
+                            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium">
+                                  {document.name}
+                                </p>
+                                <p className="mt-1 break-all text-xs text-muted-foreground">
+                                  {document.fileName || 'File not attached'}
+                                </p>
+                                {document.uploadedAt ? (
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    Uploaded{' '}
+                                    {new Intl.DateTimeFormat('en-GB', {
+                                      dateStyle: 'medium',
+                                      timeStyle: 'short',
+                                    }).format(new Date(document.uploadedAt))}
+                                  </p>
+                                ) : null}
+                                {document.notes ? (
+                                  <p className="mt-2 whitespace-pre-wrap text-sm">
+                                    {document.notes}
+                                  </p>
+                                ) : null}
+                              </div>
+                              {document.fileUrl ? (
+                                <div className="flex shrink-0 flex-wrap gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      setPreviewDocumentId((current) =>
+                                        current === document.id
+                                          ? null
+                                          : document.id
+                                      )
+                                    }
+                                  >
+                                    <Eye className="mr-2 h-4 w-4" />
+                                    {previewDocumentId === document.id
+                                      ? 'Hide PDF'
+                                      : 'View PDF'}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    disabled={isSaving}
+                                    onClick={() =>
+                                      void downloadCaseDocument(document)
+                                    }
+                                  >
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Download PDF
+                                  </Button>
+                                </div>
+                              ) : null}
                             </div>
-                          ) : null}
-                        </div>
-                        {previewDocumentId === document.id &&
-                        document.fileUrl ? (
-                          <div className="mt-3">
-                            <ProcedurePdfViewer
-                              fileUrl={document.fileUrl}
-                              fileName={document.fileName}
-                            />
+                            {previewDocumentId === document.id &&
+                            document.fileUrl ? (
+                              <div className="mt-3">
+                                <ProcedurePdfViewer
+                                  fileUrl={document.fileUrl}
+                                  fileName={document.fileName}
+                                />
+                              </div>
+                            ) : null}
                           </div>
-                        ) : null}
-                      </div>
-                    ))
-                  )}
-                </CardContent>
-              </Card>
+                        ))
+                      )}
+                    </CardContent>
+                  </Card>
                 </TabsContent>
 
                 <TabsContent value="agreement" className="space-y-4">
-              {premiumChargeRequired ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Send className="h-4 w-4" />
-                      Premium charge
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Estate initiates the premium charge invoice, then waits
-                      for Finance payment confirmation before the agreement can
-                      be generated.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-3 text-sm md:grid-cols-4">
-                      <div>
-                        <div className="text-xs text-muted-foreground">
-                          Amount
-                        </div>
-                        <div className="mt-1 font-medium">
-                          {formatMoney(
-                            premiumChargeAmount,
-                            premiumChargeCurrency
-                          )}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground">
-                          Invoice
-                        </div>
-                        <div className="mt-1 font-medium">
-                          {premiumChargeInvoiceReference || 'Not created'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground">
-                          Payment
-                        </div>
-                        <Badge
-                          variant={
-                            premiumChargeSettled ? 'secondary' : 'outline'
-                          }
-                          className="mt-1"
-                        >
-                          {premiumChargePaymentStatus || 'Pending invoice'}
-                        </Badge>
-                      </div>
-                      <div>
-                        <div className="text-xs text-muted-foreground">
-                          Balance
-                        </div>
-                        <div className="mt-1 font-medium">
-                          {Number.isFinite(premiumChargeBalance)
-                            ? formatMoney(
-                                premiumChargeBalance,
+                  {premiumChargeRequired ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Send className="h-4 w-4" />
+                          Premium charge
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Estate initiates the premium charge invoice, then
+                          waits for Finance payment confirmation before the
+                          agreement can be generated.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid gap-3 text-sm md:grid-cols-4">
+                          <div>
+                            <div className="text-xs text-muted-foreground">
+                              Amount
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {formatMoney(
+                                premiumChargeAmount,
                                 premiumChargeCurrency
-                              )
-                            : premiumChargeInvoiceId
-                              ? 'Awaiting Finance'
-                              : 'Not invoiced'}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {premiumChargeInvoiceId ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-2"
-                          disabled={isSaving || premiumChargeSettled}
-                          onClick={() =>
-                            void syncPremiumChargePaymentStatus()
-                          }
-                        >
-                          {isSaving ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                          {premiumChargeSettled
-                            ? 'Premium paid'
-                            : 'Refresh Finance payment'}
-                        </Button>
-                      ) : (
-                        <Button
-                          type="button"
-                          className="gap-2"
-                          disabled={
-                            isSaving ||
-                            premiumChargeSettled ||
-                            !(premiumChargeAmount > 0)
-                          }
-                          onClick={() => void createPremiumChargeInvoice()}
-                        >
-                          {isSaving ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                          Create premium invoice
-                        </Button>
-                      )}
-                      {premiumChargeSettled ? (
-                        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
-                          <CheckCircle2 className="h-4 w-4" />
-                          Agreement can continue
-                        </div>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : null}
-
-              {showAgreementGeneration ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <FileSignature className="h-4 w-4" />
-                      Agreement generation
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      Set the approval details, generate the agreement, and
-                      route it through Legal before customer execution.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-3 md:grid-cols-[1fr_auto]">
-                      <Select
-                        value={selectedTemplateCode || undefined}
-                        onValueChange={setSelectedTemplateCode}
-                        disabled={isSaving || generationTemplates.length === 0}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select agreement template" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {generationTemplates.map((template) => (
-                            <SelectItem
-                              key={template.templateCode}
-                              value={template.templateCode}
-                            >
-                              {template.title}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Button
-                        type="button"
-                        className="gap-2"
-                        onClick={() => void generateAgreement()}
-                        disabled={
-                          isSaving ||
-                          generationTemplates.length === 0 ||
-                          !selectedTemplateCode ||
-                          !approvedDecision ||
-                          missingApprovedMoveInDate ||
-                          missingApprovedRentTerm ||
-                          missingPremiumChargePayment ||
-                          agreementAlreadyGenerated ||
-                          caseIsCompleted
-                        }
-                      >
-                        {isSaving ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <FileSignature className="h-4 w-4" />
-                        )}
-                        {agreementAlreadyGenerated
-                          ? 'Agreement generated'
-                          : 'Generate agreement'}
-                      </Button>
-                    </div>
-                    {generationTemplates.length === 0 ? (
-                      <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                        No {rentalApplication ? 'lease' : 'sale'} agreement
-                        template is available. Upload or activate the correct
-                        transaction template in Central DMS first.
-                      </p>
-                    ) : null}
-                    {missingApprovedRentTerm ? (
-                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        Enter the approved rental term on the current stage
-                        before generating the agreement.
-                      </p>
-                    ) : null}
-                    {missingPremiumChargePayment ? (
-                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        Initiate the premium charge invoice and wait for Finance
-                        payment confirmation before generating the
-                        lease agreement.
-                      </p>
-                    ) : null}
-                    {generatedAgreement ? (
-                      <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-                        Agreement generated with DMS reference{' '}
-                        <span className="font-semibold">
-                          {generatedAgreement.dmsReference}
-                        </span>
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="ml-2 h-auto px-0 text-emerald-900"
-                          onClick={() => setIsAgreementViewerOpen(true)}
-                        >
-                          <Eye className="mr-1 h-3.5 w-3.5" />
-                          View PDF
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="sm"
-                          className="ml-2 h-auto px-0 text-emerald-900"
-                          disabled={isSaving}
-                          onClick={() => void downloadAgreementPdf()}
-                        >
-                          <Download className="mr-1 h-3.5 w-3.5" />
-                          Download PDF
-                        </Button>
-                      </div>
-                    ) : null}
-                    {agreementAlreadyGenerated ? (
-                      <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <div className="flex items-center gap-2 font-medium">
-                            <Gavel className="h-4 w-4" />
-                            Legal review and customer release
+                              )}
+                            </div>
                           </div>
-                          <p className="mt-1 text-sm text-muted-foreground">
-                            {legalAgreementReviewSubmitting
-                              ? 'Submitting draft to Legal...'
-                              : legalAgreementReviewStatus ||
-                                'The draft has not yet been lodged with Legal.'}
-                          </p>
+                          <div>
+                            <div className="text-xs text-muted-foreground">
+                              Invoice
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {premiumChargeInvoiceReference || 'Not created'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground">
+                              Payment
+                            </div>
+                            <Badge
+                              variant={
+                                premiumChargeSettled ? 'secondary' : 'outline'
+                              }
+                              className="mt-1"
+                            >
+                              {premiumChargePaymentStatus || 'Pending invoice'}
+                            </Badge>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground">
+                              Balance
+                            </div>
+                            <div className="mt-1 font-medium">
+                              {Number.isFinite(premiumChargeBalance)
+                                ? formatMoney(
+                                    premiumChargeBalance,
+                                    premiumChargeCurrency
+                                  )
+                                : premiumChargeInvoiceId
+                                  ? 'Awaiting Finance'
+                                  : 'Not invoiced'}
+                            </div>
+                          </div>
                         </div>
-                        <Button
-                          type="button"
-                          variant={
-                            legalAgreementReleasedForCustomer ? 'outline' : 'default'
-                          }
-                          className="gap-2"
-                          disabled={
-                            isSaving ||
-                            legalAgreementReviewSubmitting ||
-                            legalAgreementReviewStarted ||
-                            legalAgreementReleasedForCustomer
-                          }
-                          onClick={() =>
-                            void lodgeLegalMatter('agreementReview')
-                          }
-                        >
-                          {legalAgreementReviewSubmitting ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : legalAgreementReleasedForCustomer ? (
-                            <CheckCircle2 className="h-4 w-4" />
+                        <div className="flex flex-wrap gap-2">
+                          {premiumChargeInvoiceId ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="gap-2"
+                              disabled={isSaving || premiumChargeSettled}
+                              onClick={() =>
+                                void syncPremiumChargePaymentStatus()
+                              }
+                            >
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4" />
+                              )}
+                              {premiumChargeSettled
+                                ? 'Premium paid'
+                                : 'Refresh Finance payment'}
+                            </Button>
                           ) : (
-                            <Send className="h-4 w-4" />
+                            <Button
+                              type="button"
+                              className="gap-2"
+                              disabled={
+                                isSaving ||
+                                premiumChargeSettled ||
+                                !(premiumChargeAmount > 0)
+                              }
+                              onClick={() => void createPremiumChargeInvoice()}
+                            >
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              Create premium invoice
+                            </Button>
                           )}
-                          {legalAgreementReviewSubmitting
-                            ? 'Submitting to Legal...'
-                            : legalAgreementReleasedForCustomer
-                              ? 'Released to customer'
-                              : legalAgreementReviewStarted
-                                ? 'Under Legal review'
-                                : 'Submit draft to Legal'}
-                        </Button>
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              ) : null}
+                          {premiumChargeSettled ? (
+                            <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+                              <CheckCircle2 className="h-4 w-4" />
+                              Agreement can continue
+                            </div>
+                          ) : null}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : null}
 
-              {agreementAlreadyGenerated && legalAgreementReleasedForCustomer ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <FileSignature className="h-4 w-4" />
-                      Customer agreement execution
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {rentalApplication ? 'Rent and lease' : 'Sale'} agreements
-                      follow the Legal release, customer signature, final Legal
-                      signature, and conveyance process.
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="divide-y rounded-md border">
-                      <div className="flex items-start gap-3 p-3">
-                        <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">
-                            Legal release for customer signature
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Legal approved the draft and sent it to the customer portal.
-                          </p>
-                        </div>
-                        <Badge variant="outline">Complete</Badge>
-                      </div>
-                      <div className="flex items-start gap-3 p-3">
-                        {hasActiveCustomerSignedAgreement ? (
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-                        ) : (
-                          <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">
-                            Customer signature
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {hasActiveCustomerSignedAgreement
-                              ? 'The signed customer agreement has been received.'
-                              : customerAgreementAccepted
-                                ? 'Customer accepted the agreement; waiting for the signed upload.'
-                                : 'Customer has been notified; waiting for review, acceptance, and signed upload.'}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            hasActiveCustomerSignedAgreement
-                              ? 'outline'
-                              : 'secondary'
-                          }
-                        >
-                          {hasActiveCustomerSignedAgreement
-                            ? 'Received'
-                            : 'Waiting'}
-                        </Badge>
-                      </div>
-                      <div className="flex items-start gap-3 p-3">
-                        {fullyExecuted ? (
-                          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
-                        ) : (
-                          <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                        )}
-                        <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium">
-                            Final Legal signature and internal execution
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {fullyExecuted
-                              ? 'The final agreement is internally approved and digitally signed.'
-                              : hasActiveCustomerSignedAgreement
-                                ? 'Complete the final Legal signature, then continue with DMS approval and the authorised digital signature.'
-                                : 'This begins after the customer returns the signed agreement.'}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={fullyExecuted ? 'outline' : 'secondary'}
-                        >
-                          {fullyExecuted ? 'Complete' : 'Pending'}
-                        </Badge>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : null}
-
-              {agreementRecord && hasActiveCustomerSignedAgreement ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <ShieldCheck className="h-4 w-4" />
-                      Agreement approval and signature
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {rentalApplication
-                        ? 'The approved move-in date remains inactive until the customer copy is internally approved and digitally signed.'
-                        : 'The sale agreement must be internally approved and digitally signed before conveyance continues.'}
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2 text-sm">
-                      <Badge variant="outline">
-                        {agreementRecord.lifecycleStatus}
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        DMS reference {agreementRecord.documentReference}
-                      </span>
-                    </div>
-                    {agreementWorkflowStatus ? (
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
-                          agreementWorkflowStatus.tone === 'error'
-                            ? 'border-destructive/40 bg-destructive/5 text-destructive'
-                            : agreementWorkflowStatus.tone === 'success'
-                              ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                              : 'border-blue-300 bg-blue-50 text-blue-800'
-                        }`}
-                      >
-                        {agreementWorkflowStatus.tone === 'progress' ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-                        ) : agreementWorkflowStatus.tone === 'success' ? (
-                          <CheckCircle2 className="h-4 w-4 shrink-0" />
-                        ) : null}
-                        <span>{agreementWorkflowStatus.message}</span>
-                      </div>
-                    ) : null}
-                    <Textarea
-                      value={agreementWorkflowNotes}
-                      onChange={(event) =>
-                        setAgreementWorkflowNotes(event.target.value)
-                      }
-                      placeholder="Approval or signature notes (optional)"
-                      disabled={isUpdatingAgreementWorkflow}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      {['draft', 'generated', 'returned for action'].includes(
-                        agreementLifecycle
-                      ) ? (
-                        <Button
-                          type="button"
-                          className="gap-2"
-                          disabled={isUpdatingAgreementWorkflow}
-                          onClick={() =>
-                            void updateAgreementWorkflow('SubmitForApproval')
-                          }
-                        >
-                          {isUpdatingAgreementWorkflow ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Send className="h-4 w-4" />
-                          )}
-                          Submit for approval
-                        </Button>
-                      ) : null}
-                      {agreementLifecycle === 'pending approval' ? (
-                        <>
+                  {showAgreementGeneration ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <FileSignature className="h-4 w-4" />
+                          Agreement generation
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          Set the approval details, generate the agreement, and
+                          route it through Legal before customer execution.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+                          <Select
+                            value={selectedTemplateCode || undefined}
+                            onValueChange={setSelectedTemplateCode}
+                            disabled={
+                              isSaving || generationTemplates.length === 0
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select agreement template" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {generationTemplates.map((template) => (
+                                <SelectItem
+                                  key={template.templateCode}
+                                  value={template.templateCode}
+                                >
+                                  {template.title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                           <Button
                             type="button"
                             className="gap-2"
+                            onClick={() => void generateAgreement()}
                             disabled={
-                              isUpdatingAgreementWorkflow ||
-                              !canManageAgreementApproval
-                            }
-                            title={
-                              canManageAgreementApproval
-                                ? undefined
-                                : 'Property or Estate Manager approval required'
-                            }
-                            onClick={() =>
-                              void updateAgreementWorkflow('Approve')
+                              isSaving ||
+                              generationTemplates.length === 0 ||
+                              !selectedTemplateCode ||
+                              !approvedDecision ||
+                              missingApprovedMoveInDate ||
+                              missingApprovedRentTerm ||
+                              missingPremiumChargePayment ||
+                              agreementAlreadyGenerated ||
+                              caseIsCompleted
                             }
                           >
-                            <ShieldCheck className="h-4 w-4" />
-                            Approve agreement
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={
-                              isUpdatingAgreementWorkflow ||
-                              !canManageAgreementApproval
-                            }
-                            onClick={() =>
-                              void updateAgreementWorkflow('Return')
-                            }
-                          >
-                            Return for correction
-                          </Button>
-                        </>
-                      ) : null}
-                      {agreementLifecycle === 'approved' ? (
-                        <>
-                          <Button
-                            type="button"
-                            className="gap-2"
-                            disabled={
-                              isUpdatingAgreementWorkflow ||
-                              !canDigitallySignAgreement
-                            }
-                            title={
-                              canDigitallySignAgreement
-                                ? undefined
-                                : 'Executive Approver signature required'
-                            }
-                            onClick={() => void updateAgreementWorkflow('Sign')}
-                          >
-                            {activeAgreementWorkflowAction === 'Sign' ? (
+                            {isSaving ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
-                              <PenLine className="h-4 w-4" />
+                              <FileSignature className="h-4 w-4" />
                             )}
-                            {activeAgreementWorkflowAction === 'Sign'
-                              ? 'Signing...'
-                              : 'Digitally sign'}
+                            {agreementAlreadyGenerated
+                              ? 'Agreement generated'
+                              : 'Generate agreement'}
                           </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={
-                              isUpdatingAgreementWorkflow ||
-                              !canManageAgreementApproval
-                            }
-                            onClick={() =>
-                              void updateAgreementWorkflow('Return')
-                            }
-                          >
-                            Return for correction
-                          </Button>
-                        </>
-                      ) : null}
-                      {agreementLifecycle === 'signed' ? (
-                        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
-                          <CheckCircle2 className="h-4 w-4" />
-                          {rentalApplication
-                            ? leaseApplication
-                              ? 'Final agreement signed; lease conveyance is next'
-                              : 'Final agreement signed; move-in is now effective'
-                            : 'Final agreement signed; conveyance and registration has started'}
                         </div>
-                      ) : null}
-                    </div>
-                  </CardContent>
-                </Card>
-              ) : null}
+                        {generationTemplates.length === 0 ? (
+                          <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                            No {rentalApplication ? 'lease' : 'sale'} agreement
+                            template is available. Upload or activate the
+                            correct transaction template in Central DMS first.
+                          </p>
+                        ) : null}
+                        {missingApprovedRentTerm ? (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                            Enter the approved rental term on the current stage
+                            before generating the agreement.
+                          </p>
+                        ) : null}
+                        {missingPremiumChargePayment ? (
+                          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                            Initiate the premium charge invoice and wait for
+                            Finance payment confirmation before generating the
+                            lease agreement.
+                          </p>
+                        ) : null}
+                        {generatedAgreement ? (
+                          <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                            Agreement generated with DMS reference{' '}
+                            <span className="font-semibold">
+                              {generatedAgreement.dmsReference}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-2 h-auto px-0 text-emerald-900"
+                              onClick={() => setIsAgreementViewerOpen(true)}
+                            >
+                              <Eye className="mr-1 h-3.5 w-3.5" />
+                              View PDF
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="sm"
+                              className="ml-2 h-auto px-0 text-emerald-900"
+                              disabled={isSaving}
+                              onClick={() => void downloadAgreementPdf()}
+                            >
+                              <Download className="mr-1 h-3.5 w-3.5" />
+                              Download PDF
+                            </Button>
+                          </div>
+                        ) : null}
+                        {agreementAlreadyGenerated ? (
+                          <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                              <div className="flex items-center gap-2 font-medium">
+                                <Gavel className="h-4 w-4" />
+                                Legal review and customer release
+                              </div>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                {legalAgreementReviewSubmitting
+                                  ? 'Submitting draft to Legal...'
+                                  : legalAgreementReviewStatus ||
+                                    'The draft has not yet been lodged with Legal.'}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant={
+                                legalAgreementReleasedForCustomer
+                                  ? 'outline'
+                                  : 'default'
+                              }
+                              className="gap-2"
+                              disabled={
+                                isSaving ||
+                                legalAgreementReviewSubmitting ||
+                                legalAgreementReviewStarted ||
+                                legalAgreementReleasedForCustomer
+                              }
+                              onClick={() =>
+                                void lodgeLegalMatter('agreementReview')
+                              }
+                            >
+                              {legalAgreementReviewSubmitting ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : legalAgreementReleasedForCustomer ? (
+                                <CheckCircle2 className="h-4 w-4" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              {legalAgreementReviewSubmitting
+                                ? 'Submitting to Legal...'
+                                : legalAgreementReleasedForCustomer
+                                  ? 'Released to customer'
+                                  : legalAgreementReviewStarted
+                                    ? 'Under Legal review'
+                                    : 'Submit draft to Legal'}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  ) : null}
 
-              {agreementAlreadyGenerated && legalAgreementReleasedForCustomer && (!rentalApplication || leaseApplication) ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-base">
-                      <Gavel className="h-4 w-4" />
-                      Legal transfer and conveyance
-                    </CardTitle>
-                    <p className="text-sm text-muted-foreground">
-                      {!fullyExecuted
-                        ? 'This next Legal matter opens after the customer-signed agreement is internally approved and digitally signed.'
-                        : leaseApplication
-                        ? 'Confirm the full lease payment after signing, then start Legal conveyance. Ground rent remains separate from the full-term lease amount.'
-                        : saleFullyPaidInSales
-                          ? 'Sales has collected the full purchase amount, so Estate only completes Legal conveyance and ownership transfer.'
-                          : 'Complete the Estate balance invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
-                    </p>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {(!rentalApplication || leaseApplication) ? (
-                      <div className="space-y-3">
+                  {agreementAlreadyGenerated &&
+                  legalAgreementReleasedForCustomer ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <FileSignature className="h-4 w-4" />
+                          Customer agreement execution
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {rentalApplication ? 'Rent and lease' : 'Sale'}{' '}
+                          agreements follow the Legal release, customer
+                          signature, final Legal signature, and conveyance
+                          process.
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="divide-y rounded-md border">
+                          <div className="flex items-start gap-3 p-3">
+                            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">
+                                Legal release for customer signature
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                Legal approved the draft and sent it to the
+                                customer portal.
+                              </p>
+                            </div>
+                            <Badge variant="outline">Complete</Badge>
+                          </div>
+                          <div className="flex items-start gap-3 p-3">
+                            {hasActiveCustomerSignedAgreement ? (
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                            ) : (
+                              <Send className="mt-0.5 h-4 w-4 shrink-0 text-blue-700" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">
+                                Customer signature
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {hasActiveCustomerSignedAgreement
+                                  ? 'The signed customer agreement has been received.'
+                                  : customerAgreementAccepted
+                                    ? 'Customer accepted the agreement; waiting for the signed upload.'
+                                    : 'Customer has been notified; waiting for review, acceptance, and signed upload.'}
+                              </p>
+                            </div>
+                            <Badge
+                              variant={
+                                hasActiveCustomerSignedAgreement
+                                  ? 'outline'
+                                  : 'secondary'
+                              }
+                            >
+                              {hasActiveCustomerSignedAgreement
+                                ? 'Received'
+                                : 'Waiting'}
+                            </Badge>
+                          </div>
+                          <div className="flex items-start gap-3 p-3">
+                            {fullyExecuted ? (
+                              <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+                            ) : (
+                              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-medium">
+                                Final Legal signature and internal execution
+                              </p>
+                              <p className="text-sm text-muted-foreground">
+                                {fullyExecuted
+                                  ? 'The final agreement is internally approved and digitally signed.'
+                                  : hasActiveCustomerSignedAgreement
+                                    ? 'Complete the final Legal signature, then continue with DMS approval and the authorised digital signature.'
+                                    : 'This begins after the customer returns the signed agreement.'}
+                              </p>
+                            </div>
+                            <Badge
+                              variant={fullyExecuted ? 'outline' : 'secondary'}
+                            >
+                              {fullyExecuted ? 'Complete' : 'Pending'}
+                            </Badge>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+
+                  {agreementRecord && hasActiveCustomerSignedAgreement ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <ShieldCheck className="h-4 w-4" />
+                          Agreement approval and signature
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {rentalApplication
+                            ? 'The approved move-in date remains inactive until the customer copy is internally approved and digitally signed.'
+                            : 'The sale agreement must be internally approved and digitally signed before conveyance continues.'}
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="flex flex-wrap items-center gap-2 text-sm">
+                          <Badge variant="outline">
+                            {agreementRecord.lifecycleStatus}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            DMS reference {agreementRecord.documentReference}
+                          </span>
+                        </div>
+                        {agreementWorkflowStatus ? (
+                          <div
+                            role="status"
+                            aria-live="polite"
+                            className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm ${
+                              agreementWorkflowStatus.tone === 'error'
+                                ? 'border-destructive/40 bg-destructive/5 text-destructive'
+                                : agreementWorkflowStatus.tone === 'success'
+                                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                                  : 'border-blue-300 bg-blue-50 text-blue-800'
+                            }`}
+                          >
+                            {agreementWorkflowStatus.tone === 'progress' ? (
+                              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                            ) : agreementWorkflowStatus.tone === 'success' ? (
+                              <CheckCircle2 className="h-4 w-4 shrink-0" />
+                            ) : null}
+                            <span>{agreementWorkflowStatus.message}</span>
+                          </div>
+                        ) : null}
+                        <Textarea
+                          value={agreementWorkflowNotes}
+                          onChange={(event) =>
+                            setAgreementWorkflowNotes(event.target.value)
+                          }
+                          placeholder="Approval or signature notes (optional)"
+                          disabled={isUpdatingAgreementWorkflow}
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            'draft',
+                            'generated',
+                            'returned for action',
+                          ].includes(agreementLifecycle) ? (
+                            <Button
+                              type="button"
+                              className="gap-2"
+                              disabled={isUpdatingAgreementWorkflow}
+                              onClick={() =>
+                                void updateAgreementWorkflow(
+                                  'SubmitForApproval'
+                                )
+                              }
+                            >
+                              {isUpdatingAgreementWorkflow ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Send className="h-4 w-4" />
+                              )}
+                              Submit for approval
+                            </Button>
+                          ) : null}
+                          {agreementLifecycle === 'pending approval' ? (
+                            <>
+                              <Button
+                                type="button"
+                                className="gap-2"
+                                disabled={
+                                  isUpdatingAgreementWorkflow ||
+                                  !canManageAgreementApproval
+                                }
+                                title={
+                                  canManageAgreementApproval
+                                    ? undefined
+                                    : 'Property or Estate Manager approval required'
+                                }
+                                onClick={() =>
+                                  void updateAgreementWorkflow('Approve')
+                                }
+                              >
+                                <ShieldCheck className="h-4 w-4" />
+                                Approve agreement
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={
+                                  isUpdatingAgreementWorkflow ||
+                                  !canManageAgreementApproval
+                                }
+                                onClick={() =>
+                                  void updateAgreementWorkflow('Return')
+                                }
+                              >
+                                Return for correction
+                              </Button>
+                            </>
+                          ) : null}
+                          {agreementLifecycle === 'approved' ? (
+                            <>
+                              <Button
+                                type="button"
+                                className="gap-2"
+                                disabled={
+                                  isUpdatingAgreementWorkflow ||
+                                  !canDigitallySignAgreement
+                                }
+                                title={
+                                  canDigitallySignAgreement
+                                    ? undefined
+                                    : 'Executive Approver signature required'
+                                }
+                                onClick={() =>
+                                  void updateAgreementWorkflow('Sign')
+                                }
+                              >
+                                {activeAgreementWorkflowAction === 'Sign' ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <PenLine className="h-4 w-4" />
+                                )}
+                                {activeAgreementWorkflowAction === 'Sign'
+                                  ? 'Signing...'
+                                  : 'Digitally sign'}
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={
+                                  isUpdatingAgreementWorkflow ||
+                                  !canManageAgreementApproval
+                                }
+                                onClick={() =>
+                                  void updateAgreementWorkflow('Return')
+                                }
+                              >
+                                Return for correction
+                              </Button>
+                            </>
+                          ) : null}
+                          {agreementLifecycle === 'signed' ? (
+                            <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+                              <CheckCircle2 className="h-4 w-4" />
+                              {rentalApplication
+                                ? leaseApplication
+                                  ? 'Final agreement signed; lease conveyance is next'
+                                  : 'Final agreement signed; move-in is now effective'
+                                : 'Final agreement signed; conveyance and registration has started'}
+                            </div>
+                          ) : null}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ) : null}
+
+                  {agreementAlreadyGenerated &&
+                  legalAgreementReleasedForCustomer &&
+                  (!rentalApplication || leaseApplication) ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <Gavel className="h-4 w-4" />
+                          Legal transfer and conveyance
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {!fullyExecuted
+                            ? 'This next Legal matter opens after the customer-signed agreement is internally approved and digitally signed.'
+                            : leaseApplication
+                              ? 'Confirm the full lease payment after signing, then start Legal conveyance. Ground rent remains separate from the full-term lease amount.'
+                              : saleFullyPaidInSales
+                                ? 'Sales has collected the full purchase amount, so Estate only completes Legal conveyance and ownership transfer.'
+                                : 'Complete the Estate balance invoice, customer payment, and Legal conveyance before ownership transfer is marked complete.'}
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        {!rentalApplication || leaseApplication ? (
+                          <div className="space-y-3">
+                            <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="font-medium">
+                                  {leaseApplication
+                                    ? 'Lease balance invoice and payment'
+                                    : 'Purchase invoice and payment'}
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {saleFullyPaidInSales
+                                    ? 'Sales recorded full payment; no Estate invoice is required.'
+                                    : caseFieldValue(
+                                          selectedCase,
+                                          'saleInvoiceReference'
+                                        )
+                                      ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
+                                      : 'Create the Finance AR invoice for the remaining Estate balance after the agreement is fully signed.'}
+                                </p>
+                                {caseFieldValue(
+                                  selectedCase,
+                                  'salePaymentCheckStatus'
+                                ) ? (
+                                  <p className="mt-1 text-xs text-muted-foreground">
+                                    {caseFieldValue(
+                                      selectedCase,
+                                      'salePaymentCheckStatus'
+                                    )}
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="flex flex-wrap gap-2 sm:justify-end">
+                                {saleInvoiceId ? (
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="gap-2"
+                                    disabled={isSaving}
+                                    onClick={() => void syncSalePaymentStatus()}
+                                  >
+                                    <RefreshCw className="h-4 w-4" />
+                                    Refresh payment status
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="gap-2"
+                                  disabled={
+                                    isSaving ||
+                                    !fullyExecuted ||
+                                    Boolean(saleInvoiceId) ||
+                                    saleFullyPaidInSales
+                                  }
+                                  onClick={() => void createSaleInvoice()}
+                                >
+                                  {saleFullyPaidInSales ? (
+                                    <CheckCircle2 className="h-4 w-4" />
+                                  ) : (
+                                    <Send className="h-4 w-4" />
+                                  )}
+                                  {saleFullyPaidInSales
+                                    ? 'No Estate invoice required'
+                                    : saleInvoiceId
+                                      ? 'Invoice created'
+                                      : 'Create balance invoice'}
+                                </Button>
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div>
+                                <p className="font-medium">
+                                  Conveyance and registration
+                                </p>
+                                <p className="text-sm text-muted-foreground">
+                                  {caseFieldValue(
+                                    selectedCase,
+                                    'legalConveyanceStatus'
+                                  ) ||
+                                    'Required after internal agreement execution before Estate completes the transaction.'}
+                                </p>
+                              </div>
+                              <Button
+                                type="button"
+                                className="gap-2"
+                                disabled={
+                                  isSaving ||
+                                  !fullyExecuted ||
+                                  !saleInvoicePaid ||
+                                  legalConveyanceStarted
+                                }
+                                onClick={() =>
+                                  void lodgeLegalMatter(
+                                    'conveyanceRegistration'
+                                  )
+                                }
+                              >
+                                <Send className="h-4 w-4" />
+                                {legalConveyanceStarted
+                                  ? 'With Legal'
+                                  : 'Start conveyance'}
+                              </Button>
+                            </div>
+                            {!leaseApplication ? (
+                              <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
+                                <div>
+                                  <p className="font-medium">
+                                    Complete ownership transfer
+                                  </p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {caseFieldValue(
+                                      selectedCase,
+                                      'ownershipTransferStatus'
+                                    ) ||
+                                      'Requires a fully paid invoice and completed Legal conveyance.'}
+                                  </p>
+                                </div>
+                                <Button
+                                  type="button"
+                                  className="gap-2"
+                                  disabled={
+                                    isSaving ||
+                                    ownershipTransferCompleted ||
+                                    !canCompleteSaleOwnership
+                                  }
+                                  title={
+                                    canCompleteSaleOwnership ||
+                                    ownershipTransferCompleted
+                                      ? undefined
+                                      : saleFullyPaidInSales
+                                        ? 'Requires completed Legal conveyance'
+                                        : 'Requires full Estate balance payment and completed Legal conveyance'
+                                  }
+                                  onClick={() => void completeSaleOwnership()}
+                                >
+                                  <CheckCircle2 className="h-4 w-4" />
+                                  {ownershipTransferCompleted
+                                    ? 'Ownership transferred'
+                                    : !saleInvoicePaid
+                                      ? 'Awaiting payment'
+                                      : !legalConveyanceCompleted
+                                        ? 'Awaiting Legal'
+                                        : 'Complete ownership transfer'}
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {leaseApplication ? (
+                          <div className="space-y-3">
+                            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+                              <Select
+                                value={selectedLegalMatterType}
+                                onValueChange={setSelectedLegalMatterType}
+                                disabled={isSaving || !fullyExecuted}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="termination">
+                                    Termination / recognition
+                                  </SelectItem>
+                                  <SelectItem value="leaseRenewal">
+                                    Lease renewal
+                                  </SelectItem>
+                                  <SelectItem value="leaseVariation">
+                                    Deed of variation
+                                  </SelectItem>
+                                  <SelectItem value="sublease">
+                                    Sublease
+                                  </SelectItem>
+                                  <SelectItem value="assignment">
+                                    Assignment / vesting
+                                  </SelectItem>
+                                  <SelectItem value="mortgage">
+                                    Consent to mortgage
+                                  </SelectItem>
+                                  <SelectItem value="mortgageInPrinciple">
+                                    Mortgage in principle
+                                  </SelectItem>
+                                  <SelectItem value="disputeAdvisory">
+                                    Property dispute / advisory
+                                  </SelectItem>
+                                  <SelectItem value="courtProcess">
+                                    Court process
+                                  </SelectItem>
+                                  <SelectItem value="otherCourtProcess">
+                                    Other court process
+                                  </SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="gap-2"
+                                disabled={isSaving || !fullyExecuted}
+                                onClick={() =>
+                                  void lodgeLegalMatter(selectedLegalMatterType)
+                                }
+                              >
+                                <Gavel className="h-4 w-4" />
+                                Lodge other Legal matter
+                              </Button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </CardContent>
+                    </Card>
+                  ) : null}
+                  {agreementAlreadyGenerated &&
+                  legalAgreementReleasedForCustomer &&
+                  rentalApplication &&
+                  !leaseApplication ? (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2 text-base">
+                          <FileText className="h-4 w-4" />
+                          First month rent and billing
+                        </CardTitle>
+                        <p className="text-sm text-muted-foreground">
+                          {saleFullyPaidInSales
+                            ? 'Sales recorded the full first month rent, so Estate only confirms the move-in billing start.'
+                            : 'Create and confirm the Finance AR invoice for the remaining first month rent before completing the billing check.'}
+                        </p>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
                         <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <p className="font-medium">
-                              {leaseApplication ? 'Lease balance invoice and payment' : 'Purchase invoice and payment'}
+                              First month rent balance
                             </p>
                             <p className="text-sm text-muted-foreground">
                               {saleFullyPaidInSales
-                                ? 'Sales recorded full payment; no Estate invoice is required.'
-                                : caseFieldValue(
-                                      selectedCase,
-                                      'saleInvoiceReference'
-                                    )
+                                ? 'No Estate invoice is required for the first month.'
+                                : saleInvoiceId
                                   ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
-                                  : 'Create the Finance AR invoice for the remaining Estate balance after the agreement is fully signed.'}
+                                  : 'Create the Finance AR invoice for the remaining first month rent after the agreement is fully signed.'}
                             </p>
                             {caseFieldValue(
                               selectedCase,
@@ -2895,330 +3205,228 @@ export function ListingApplicationWorkspace() {
                                 ? 'No Estate invoice required'
                                 : saleInvoiceId
                                   ? 'Invoice created'
-                                  : 'Create balance invoice'}
+                                  : 'Create rent balance invoice'}
                             </Button>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="font-medium">
-                              Conveyance and registration
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {caseFieldValue(
-                                selectedCase,
-                                'legalConveyanceStatus'
-                              ) ||
-                                'Required after internal agreement execution before Estate completes the transaction.'}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            className="gap-2"
-                            disabled={isSaving || !fullyExecuted || !saleInvoicePaid || legalConveyanceStarted}
-                            onClick={() =>
-                              void lodgeLegalMatter('conveyanceRegistration')
-                            }
-                          >
-                            <Send className="h-4 w-4" />
-                            {legalConveyanceStarted
-                              ? 'With Legal'
-                              : 'Start conveyance'}
-                          </Button>
-                        </div>
-                        {!leaseApplication ? (
-                        <div className="flex flex-col gap-3 rounded-md border p-4 sm:flex-row sm:items-center sm:justify-between">
-                          <div>
-                            <p className="font-medium">
-                              Complete ownership transfer
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {caseFieldValue(
-                                selectedCase,
-                                'ownershipTransferStatus'
-                              ) ||
-                                'Requires a fully paid invoice and completed Legal conveyance.'}
-                            </p>
-                          </div>
-                          <Button
-                            type="button"
-                            className="gap-2"
-                            disabled={
-                              isSaving ||
-                              ownershipTransferCompleted ||
-                              !canCompleteSaleOwnership
-                            }
-                            title={
-                              canCompleteSaleOwnership ||
-                              ownershipTransferCompleted
-                                ? undefined
-                                : saleFullyPaidInSales
-                                  ? 'Requires completed Legal conveyance'
-                                  : 'Requires full Estate balance payment and completed Legal conveyance'
-                            }
-                            onClick={() => void completeSaleOwnership()}
-                          >
-                            <CheckCircle2 className="h-4 w-4" />
-                            {ownershipTransferCompleted
-                              ? 'Ownership transferred'
-                              : !saleInvoicePaid
-                                ? 'Awaiting payment'
-                                : !legalConveyanceCompleted
-                                  ? 'Awaiting Legal'
-                                  : 'Complete ownership transfer'}
-                          </Button>
-                        </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {leaseApplication ? (
-                      <div className="space-y-3">
-                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                          <Select
-                            value={selectedLegalMatterType}
-                            onValueChange={setSelectedLegalMatterType}
-                            disabled={isSaving || !fullyExecuted}
-                          >
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="termination">Termination / recognition</SelectItem>
-                              <SelectItem value="leaseRenewal">Lease renewal</SelectItem>
-                              <SelectItem value="leaseVariation">Deed of variation</SelectItem>
-                              <SelectItem value="sublease">Sublease</SelectItem>
-                              <SelectItem value="assignment">Assignment / vesting</SelectItem>
-                              <SelectItem value="mortgage">Consent to mortgage</SelectItem>
-                              <SelectItem value="mortgageInPrinciple">Mortgage in principle</SelectItem>
-                              <SelectItem value="disputeAdvisory">Property dispute / advisory</SelectItem>
-                              <SelectItem value="courtProcess">Court process</SelectItem>
-                              <SelectItem value="otherCourtProcess">Other court process</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="gap-2"
-                            disabled={isSaving || !fullyExecuted}
-                            onClick={() => void lodgeLegalMatter(selectedLegalMatterType)}
-                          >
-                            <Gavel className="h-4 w-4" />
-                            Lodge other Legal matter
-                          </Button>
-                        </div>
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              ) : null}
+                      </CardContent>
+                    </Card>
+                  ) : null}
                 </TabsContent>
 
                 <TabsContent value="complete" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">
-                    Complete this stage
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {!caseIsCompleted && !selectedCase.canEditCurrentStage ? (
-                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      This stage is assigned to{' '}
-                      <span className="font-medium">
-                        {selectedCase.currentAssignedRole ||
-                          selectedCase.currentStageOwner ||
-                          'another workflow role'}
-                      </span>
-                      . Sign in as a user with that role to update, reject, or
-                      route the request.
-                    </div>
-                  ) : null}
-                  {saleWorkflowCompleted ? (
-                    <>
-                      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-                        <Checkbox
-                          checked={saleCloseoutChecklist.customerStatus}
-                          onCheckedChange={(checked) =>
-                            setSaleCloseoutChecklist((current) => ({
-                              ...current,
-                              customerStatus: checked === true,
-                            }))
-                          }
-                          disabled={isSaving || saleCloseoutArchived}
-                        />
-                        <span>
-                          Customer-facing request status reflects the final
-                          outcome
-                        </span>
-                      </label>
-                      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-                        <Checkbox
-                          checked={saleCloseoutChecklist.auditReferences}
-                          onCheckedChange={(checked) =>
-                            setSaleCloseoutChecklist((current) => ({
-                              ...current,
-                              auditReferences: checked === true,
-                            }))
-                          }
-                          disabled={isSaving || saleCloseoutArchived}
-                        />
-                        <span>
-                          Request is closed with its decision and transaction
-                          audit references
-                        </span>
-                      </label>
-                    </>
-                  ) : (
-                    stageItems.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-start gap-3 rounded-md border p-3 text-sm"
-                      >
-                        <Checkbox
-                          checked={item.isCompleted}
-                          onCheckedChange={(checked) =>
-                            void updateChecklist(item.id, checked === true)
-                          }
-                          disabled={
-                            isSaving ||
-                            caseIsCompleted ||
-                            !selectedCase.canEditCurrentStage
-                          }
-                        />
-                        <span>{item.text}</span>
-                      </label>
-                    ))
-                  )}
-                  <Textarea
-                    value={completionNotes}
-                    onChange={(event) => setCompletionNotes(event.target.value)}
-                    placeholder="Stage completion notes (optional)"
-                    disabled={
-                      saleWorkflowCompleted
-                        ? isSaving || saleCloseoutArchived
-                        : isSaving ||
-                          caseIsCompleted ||
-                          !selectedCase.canEditCurrentStage
-                    }
-                  />
-                  <Button
-                    type="button"
-                    className="gap-2"
-                    onClick={() =>
-                      saleWorkflowCompleted
-                        ? completeSaleCloseout()
-                        : void completeStage()
-                    }
-                    disabled={
-                      saleWorkflowCompleted
-                        ? isSaving ||
-                          saleCloseoutArchived ||
-                          !ownershipTransferCompleted ||
-                          !saleCloseoutConfirmed
-                        : isSaving ||
-                          caseIsCompleted ||
-                          !selectedCase.canEditCurrentStage ||
-                          hasUnsavedStageUpdates ||
-                          missingRequiredStageFields.length > 0 ||
-                          !stageConfirmed ||
-                          missingPremiumChargeAmount ||
-                          missingApprovedMoveInDate ||
-                          missingApprovedRentTerm ||
-                          missingPremiumChargePayment ||
-                          missingApprovedAgreement ||
-                          missingLegalAgreementReview
-                    }
-                  >
-                    {isSaving ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Send className="h-4 w-4" />
-                    )}
-                    {saleWorkflowCompleted
-                      ? saleCloseoutArchived
-                        ? 'Sale closeout archived'
-                        : ownershipTransferCompleted
-                          ? 'Complete sale closeout'
-                          : 'Pending ownership transfer'
-                      : caseIsCompleted
-                        ? 'Case completed'
-                        : selectedCase.usesConfiguredWorkflow
-                          ? 'Complete stage and route forward'
-                          : 'Complete manual stage'}
-                  </Button>
-                  {hasUnsavedStageUpdates ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Save the current stage updates before routing this request
-                      forward.
-                    </p>
-                  ) : null}
-                  {missingRequiredStageFields.length > 0 ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Complete the required current-stage field(s):{' '}
-                      {missingRequiredStageFields.slice(0, 4).join(', ')}
-                      {missingRequiredStageFields.length > 4
-                        ? ` and ${missingRequiredStageFields.length - 4} more`
-                        : ''}
-                      .
-                    </p>
-                  ) : null}
-                  {missingLegalAgreementReview && !missingApprovedAgreement ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Submit the generated agreement to Legal and wait for Legal
-                      release to customer signature before routing this stage forward.
-                    </p>
-                  ) : null}
-                  {missingApprovedAgreement ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Generate the agreement before routing this stage forward.
-                    </p>
-                  ) : null}
-                  {missingApprovedRentTerm ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Enter the approved rental term before routing this rental
-                      case forward.
-                    </p>
-                  ) : null}
-                  {missingPremiumChargeAmount ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Enter and save the premium charge amount before routing
-                      this request forward.
-                    </p>
-                  ) : null}
-                  {missingPremiumChargePayment ? (
-                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Premium charge payment is still pending. Refresh the
-                      Finance payment status after Finance receives payment.
-                    </p>
-                  ) : null}
-                  {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
-                    <div className="flex flex-wrap gap-2 border-t pt-4">
-                      {selectedCase.currentStageIndex > 0 ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="gap-2"
-                          disabled={isSaving}
-                          onClick={() =>
-                            setReviewAction('RequestClarification')
-                          }
-                        >
-                          <Undo2 className="h-4 w-4" />
-                          Return for clarification
-                        </Button>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">
+                        Complete this stage
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {!caseIsCompleted && !selectedCase.canEditCurrentStage ? (
+                        <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          This stage is assigned to{' '}
+                          <span className="font-medium">
+                            {selectedCase.currentAssignedRole ||
+                              selectedCase.currentStageOwner ||
+                              'another workflow role'}
+                          </span>
+                          . Sign in as a user with that role to update, reject,
+                          or route the request.
+                        </div>
                       ) : null}
+                      {saleWorkflowCompleted ? (
+                        <>
+                          <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                            <Checkbox
+                              checked={saleCloseoutChecklist.customerStatus}
+                              onCheckedChange={(checked) =>
+                                setSaleCloseoutChecklist((current) => ({
+                                  ...current,
+                                  customerStatus: checked === true,
+                                }))
+                              }
+                              disabled={isSaving || saleCloseoutArchived}
+                            />
+                            <span>
+                              Customer-facing request status reflects the final
+                              outcome
+                            </span>
+                          </label>
+                          <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                            <Checkbox
+                              checked={saleCloseoutChecklist.auditReferences}
+                              onCheckedChange={(checked) =>
+                                setSaleCloseoutChecklist((current) => ({
+                                  ...current,
+                                  auditReferences: checked === true,
+                                }))
+                              }
+                              disabled={isSaving || saleCloseoutArchived}
+                            />
+                            <span>
+                              Request is closed with its decision and
+                              transaction audit references
+                            </span>
+                          </label>
+                        </>
+                      ) : (
+                        stageItems.map((item) => (
+                          <label
+                            key={item.id}
+                            className="flex items-start gap-3 rounded-md border p-3 text-sm"
+                          >
+                            <Checkbox
+                              checked={item.isCompleted}
+                              onCheckedChange={(checked) =>
+                                void updateChecklist(item.id, checked === true)
+                              }
+                              disabled={
+                                isSaving ||
+                                caseIsCompleted ||
+                                !selectedCase.canEditCurrentStage
+                              }
+                            />
+                            <span>{item.text}</span>
+                          </label>
+                        ))
+                      )}
+                      <Textarea
+                        value={completionNotes}
+                        onChange={(event) =>
+                          setCompletionNotes(event.target.value)
+                        }
+                        placeholder="Stage completion notes (optional)"
+                        disabled={
+                          saleWorkflowCompleted
+                            ? isSaving || saleCloseoutArchived
+                            : isSaving ||
+                              caseIsCompleted ||
+                              !selectedCase.canEditCurrentStage
+                        }
+                      />
                       <Button
                         type="button"
-                        variant="outline"
-                        className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
-                        disabled={isSaving}
-                        onClick={() => setReviewAction('Reject')}
+                        className="gap-2"
+                        onClick={() =>
+                          saleWorkflowCompleted
+                            ? completeSaleCloseout()
+                            : void completeStage()
+                        }
+                        disabled={
+                          saleWorkflowCompleted
+                            ? isSaving ||
+                              saleCloseoutArchived ||
+                              !ownershipTransferCompleted ||
+                              !saleCloseoutConfirmed
+                            : isSaving ||
+                              caseIsCompleted ||
+                              !selectedCase.canEditCurrentStage ||
+                              hasUnsavedStageUpdates ||
+                              missingRequiredStageFields.length > 0 ||
+                              !stageConfirmed ||
+                              missingPremiumChargeAmount ||
+                              missingApprovedMoveInDate ||
+                              missingApprovedRentTerm ||
+                              missingPremiumChargePayment ||
+                              missingApprovedAgreement ||
+                              missingLegalAgreementReview
+                        }
                       >
-                        <XCircle className="h-4 w-4" />
-                        Reject application
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        {saleWorkflowCompleted
+                          ? saleCloseoutArchived
+                            ? 'Sale closeout archived'
+                            : ownershipTransferCompleted
+                              ? 'Complete sale closeout'
+                              : 'Pending ownership transfer'
+                          : caseIsCompleted
+                            ? 'Case completed'
+                            : selectedCase.usesConfiguredWorkflow
+                              ? 'Complete stage and route forward'
+                              : 'Complete manual stage'}
                       </Button>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
+                      {hasUnsavedStageUpdates ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Save the current stage updates before routing this
+                          request forward.
+                        </p>
+                      ) : null}
+                      {missingRequiredStageFields.length > 0 ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Complete the required current-stage field(s):{' '}
+                          {missingRequiredStageFields.slice(0, 4).join(', ')}
+                          {missingRequiredStageFields.length > 4
+                            ? ` and ${missingRequiredStageFields.length - 4} more`
+                            : ''}
+                          .
+                        </p>
+                      ) : null}
+                      {missingLegalAgreementReview &&
+                      !missingApprovedAgreement ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Submit the generated agreement to Legal and wait for
+                          Legal release to customer signature before routing
+                          this stage forward.
+                        </p>
+                      ) : null}
+                      {missingApprovedAgreement ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Generate the agreement before routing this stage
+                          forward.
+                        </p>
+                      ) : null}
+                      {missingApprovedRentTerm ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Enter the approved rental term before routing this
+                          rental case forward.
+                        </p>
+                      ) : null}
+                      {missingPremiumChargeAmount ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Enter and save the premium charge amount before
+                          routing this request forward.
+                        </p>
+                      ) : null}
+                      {missingPremiumChargePayment ? (
+                        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Premium charge payment is still pending. Refresh the
+                          Finance payment status after Finance receives payment.
+                        </p>
+                      ) : null}
+                      {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
+                        <div className="flex flex-wrap gap-2 border-t pt-4">
+                          {selectedCase.currentStageIndex > 0 ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="gap-2"
+                              disabled={isSaving}
+                              onClick={() =>
+                                setReviewAction('RequestClarification')
+                              }
+                            >
+                              <Undo2 className="h-4 w-4" />
+                              Return for clarification
+                            </Button>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                            disabled={isSaving}
+                            onClick={() => setReviewAction('Reject')}
+                          >
+                            <XCircle className="h-4 w-4" />
+                            Reject application
+                          </Button>
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
                 </TabsContent>
               </Tabs>
             </div>

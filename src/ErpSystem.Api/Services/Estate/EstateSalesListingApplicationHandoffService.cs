@@ -171,6 +171,11 @@ public sealed class EstateSalesListingApplicationHandoffService(
         if (salesAmountPaid > amount)
             throw new InvalidOperationException("Sales amount paid cannot be greater than the agreed amount.");
         var estateRemainingAmount = decimal.Round(amount - salesAmountPaid, 2, MidpointRounding.AwayFromZero);
+        var paymentStatus = estateRemainingAmount <= 0m
+            ? "Paid in full"
+            : salesAmountPaid > 0m
+                ? "Part-paid in Sales"
+                : "Pending Estate payment";
         var currency = NormalizeCurrency(request.Currency ?? opportunity.Currency ?? demarcation?.ExternalListingCurrency ?? asset.ExternalListingCurrency ?? customer.Currency);
         var completedAt = request.SalesCompletedAt ?? opportunity.ActualCloseDate ?? DateTime.UtcNow;
         var reference = BuildReference("ESTATE");
@@ -207,10 +212,8 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["salesAmountPaid"] = salesAmountPaid.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
             ["salesPaymentReference"] = TruncateOptional(request.SalesPaymentReference, 200),
             ["estateRemainingAmount"] = estateRemainingAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
-            ["salePaymentCheckStatus"] = BuildSalesPaymentCheckStatus(currency, amount, salesAmountPaid, estateRemainingAmount),
-            ["salePaymentStatus"] = requestType is "Purchase" or "Lease"
-                ? estateRemainingAmount <= 0m ? "Paid in full" : salesAmountPaid > 0m ? "Part-paid in Sales" : "Pending Estate payment"
-                : null,
+            ["salePaymentCheckStatus"] = BuildSalesPaymentCheckStatus(requestType, currency, amount, salesAmountPaid, estateRemainingAmount),
+            ["salePaymentStatus"] = paymentStatus,
             ["requestMessage"] = TruncateOptional(request.Notes, 1000),
             ["customerValidationStatus"] = "Validated by Sales",
             ["listingValidationStatus"] = "Pending",
@@ -225,7 +228,11 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["customerAcceptanceDate"] = completedAt.ToString("yyyy-MM-dd"),
             ["billingStartStatus"] = requestType == "Purchase"
                 ? estateRemainingAmount <= 0m ? "No Estate balance from Sales handoff" : "Estate balance pending"
-                : "Blocked - agreement pending",
+                : requestType == "Rent"
+                    ? estateRemainingAmount <= 0m
+                        ? "Ready for billing - first month rent covered by Sales"
+                        : "Blocked - first month rent balance pending"
+                    : "Blocked - agreement pending",
             ["ownershipTransferStatus"] = requestType == "Purchase"
                 ? estateRemainingAmount <= 0m
                     ? "Blocked - Legal conveyance and registration pending"
@@ -483,15 +490,19 @@ public sealed class EstateSalesListingApplicationHandoffService(
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
 
     private static string BuildSalesPaymentCheckStatus(
+        string requestType,
         string currency,
         decimal agreedAmount,
         decimal salesAmountPaid,
         decimal estateRemainingAmount)
-        => estateRemainingAmount <= 0m
-            ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against agreed amount {currency} {agreedAmount:N2}; no Estate balance remains."
+    {
+        var amountLabel = requestType == "Rent" ? "first month rent" : "agreed amount";
+        return estateRemainingAmount <= 0m
+            ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against {amountLabel} {currency} {agreedAmount:N2}; no Estate balance remains."
             : salesAmountPaid > 0m
-                ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against agreed amount {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}."
-                : $"No Sales payment recorded against agreed amount {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}.";
+                ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against {amountLabel} {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}."
+                : $"No Sales payment recorded against {amountLabel} {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}.";
+    }
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];

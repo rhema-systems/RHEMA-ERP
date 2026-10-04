@@ -1001,7 +1001,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
-    public void RentBillingActivation_CreatesAnIdempotentFinanceArDraftFromLeaseTerms()
+    public void RentBillingActivation_SchedulesNextCycleAfterFirstMonthPayment()
     {
         var controller = ReadSource(
             "src",
@@ -1025,9 +1025,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         activation.Should().Contain("asset.RentBillingActivatedAt.HasValue");
         activation.Should().Contain("Full-term leases use the one-time Estate balance invoice");
         activation.Should().Contain("asset.ExternalMonthlyRent ?? asset.ExternalListingPrice");
-        activation.Should().Contain("asset.CustomerBusinessPartnerId.Value");
-        activation.Should().Contain("BuildRentInvoiceReference(asset.AssetCode, billingStart)");
-        activation.Should().Contain("AccountCode == \"4110\"");
+        activation.Should().Contain("asset.NextRentBillingDate = billingStart.AddMonths(1);");
+        activation.Should().Contain("move-in month is covered by the Sales/Estate first month payment");
         workspace.Should().Contain("Activate billing");
         workspace.Should().Contain("asset.lastRentInvoiceId");
         workspace.Should().Contain("<ConfirmationDialog");

@@ -1065,6 +1065,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
             && (!IsRentalListingApplication(procedureCase) || IsLeaseListingApplication(procedureCase)))
             await EnsureFullAmountFinancePaymentAsync(procedureCase);
+        if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
+            && IsRentalListingApplication(procedureCase) && !IsLeaseListingApplication(procedureCase))
+            await EnsureFirstMonthRentPaymentAsync(procedureCase);
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
@@ -3701,7 +3704,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             // Validate their workflow state in ValidatePropertyManagementStageAsync.
             4 => [],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus"]
+                ? ["salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus"]
                 : ["salePaymentStatus", "salePaymentCheckStatus"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)
@@ -3778,6 +3781,28 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
             || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Finance must confirm full payment of the remaining sale or lease amount before conveyance.");
+    }
+
+    private async Task EnsureFirstMonthRentPaymentAsync(ProcedureCase procedureCase)
+    {
+        var amount = ParseProcedureAmount(FieldValue(procedureCase, "listingPrice"));
+        var salesPaid = ParseProcedureAmount(FieldValue(procedureCase, "salesAmountPaid")) ?? 0m;
+        if (amount is not > 0m || salesPaid < 0m || salesPaid > amount.Value)
+            throw new InvalidOperationException("Record the agreed first month rent and valid Sales payment before the Finance check.");
+
+        var balance = decimal.Round(amount.Value - salesPaid, 2, MidpointRounding.AwayFromZero);
+        if (balance <= 0m)
+            return;
+
+        if (!string.Equals(FieldValue(procedureCase, "agreementExecutionStatus"), "Fully executed", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(procedureCase, "saleInvoiceId"), out var invoiceId))
+            throw new InvalidOperationException("After the agreement is fully signed, create the Finance invoice for the remaining first month rent.");
+
+        var invoice = await _invoiceService.GetByIdAsync(invoiceId);
+        if (invoice is null || !AmountsMatch(invoice.TotalAmount, balance)
+            || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
+            || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Finance must confirm full payment of the remaining first month rent before billing can start.");
     }
 
     private static void EnsurePropertyListingPremiumChargeGateReady(ProcedureCase procedureCase)
@@ -3866,6 +3891,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 if (isRental && !IsLeaseListingApplication(procedureCase))
                 {
                     var billingStatus = FieldValue(procedureCase, "billingStartStatus");
+                    if (!IsSalePaymentSatisfied(procedureCase))
+                    {
+                        throw new InvalidOperationException("Collect and confirm the remaining first month rent before completing the Finance check.");
+                    }
+
                     if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "billingStartDate"))
                         || !ContainsAny(billingStatus ?? string.Empty, "Ready for billing", "Billing active", "Rent billing activated"))
                     {
@@ -6527,7 +6557,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             3 => ["legalAgreementReviewReference", "legalAgreementReviewStatus", "notes"],
             4 => ["notes"],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus", "notes"]
+                ? ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus", "notes"]
                 : ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "notes"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)
