@@ -121,6 +121,12 @@ export interface LeaveRequest {
    */
   attendanceDaysRecorded?: number;
 
+  /**
+   * The employee's staff travel over these days — awaiting approval, approved or under way — one sentence each. On the
+   * single-request read and the approver's list (my approvals, as a badge); advisory (travel final closure, lane 9, D-55).
+   */
+  travelConflicts?: string[];
+
   /** Dates the approver sent back instead. Set while the status is ChangesSuggested. */
   suggestedStartDate?: string | null;
   suggestedEndDate?: string | null;

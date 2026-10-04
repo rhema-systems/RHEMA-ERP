@@ -1006,6 +1006,14 @@ public class LeaveRequestDto
     /// </summary>
     public int AttendanceDaysRecorded { get; set; }
 
+    /// <summary>
+    /// The employee's staff travel over these days — trips awaiting approval, approved or under way — one sentence each.
+    /// Filled on the single-request read, so every way the dates were set shows it, and on the approver's list (my
+    /// approvals), whose rows carry it as a badge (travel final closure, lane 9, D-55). Advisory: nothing refuses leave over
+    /// a trip.
+    /// </summary>
+    public List<string> TravelConflicts { get; set; } = new();
+
     public DateTime? ClosureDate { get; set; }
     public string? ClosureNotes { get; set; }
     public DateTime? CancellationDate { get; set; }

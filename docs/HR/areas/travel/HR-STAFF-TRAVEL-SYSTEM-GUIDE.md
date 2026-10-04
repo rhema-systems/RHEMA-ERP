@@ -2679,7 +2679,7 @@ this may be empty)*.
 
 ## 16. Where staff travel shows up outside its own menu
 
-Seven places. Two are worth a minute of the demo; the rest are for the questions.
+Nine places. Three are worth a minute of the demo; the rest are for the questions.
 
 | Where | What it shows | Worth showing? |
 |---|---|---|
@@ -2689,6 +2689,8 @@ Seven places. Two are worth a minute of the demo; the rest are for the questions
 | **The employee's position → staff level** | The policy guard resolves the applicable policy from the traveller's **staff level, which lives on their position**, not on the employee. A traveller with no position falls back to the organisation-wide policy | Worth one sentence in chapter 13 |
 | **Workflow inbox** (`/workflow/inbox`) | A submitted travel request appears in the assignee's inbox alongside every other approval in the ERP | **Yes** — 30 seconds, and it is the same point as every other module: a manager lives in one inbox |
 | **The bell, and email** *(closure lane 8, slice 8a)* | One topic per event and audience, `StaffTravel.{Event}.Traveller` (in the app and by email) and `.Desk` (in the app, to the HR role's holders but whoever did it), editable on **Administration → Notification Topics**. The desk hears what it must act on: a trip approved (book it), cancelled or sent back for a change by someone outside the desk, an advance to approve, a claim to review, a destination alert sent, and the traveller's messages and files. The approvers keep the workflow engine's own *Approval required*. The old HR-role topics and the engine's three notices to the submitter are switched off — ⚠ a workflow-topic seed switches those three back on until the next travel notice | Only if asked who is told what |
+| **Attendance** *(closure lane 9, slice 9a)* | An approved trip's working days are on the traveller's daily attendance as **On duty**, never over a clock-in, leave or a clerk's entry; the monthly summary counts them as present. The trip's page says how many (chapter 5.1) | **Yes** — open the traveller's attendance for the trip's dates: the days are there, saying which trip |
+| **Leave** *(closure lane 9, slice 9b)* | A leave request over a trip's days — awaiting approval, approved or under way — shows *"Staff travel over these days"* on its page, to the employee, the approver and HR, however its dates were set; on the approvals list, where requests are approved in bulk, as a badge on the row. A warning, not a rule | Only if asked how leave and travel know about each other — travel warns of approved leave at its own submission too |
 | **General Ledger** | ⚠ **Nothing.** No travel transaction posts to GL. Advances, claims and payments are recorded in travel's own tables and the Finance hand-off is an open backlog item (D-4) | Say it plainly if a finance director asks — see **T-58** |
 
 ---

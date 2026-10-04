@@ -67,6 +67,7 @@ import {
   RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
 import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
+import { LeaveTravelConflicts } from '@/components/hr/leave/LeaveTravelConflicts';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -399,6 +400,8 @@ export default function MyLeaveRequestDetailPage({
         )}
       </div>
 
+      {/* Travel final closure, lane 9 (D-55): the employee's own staff travel over these days. */}
+      <LeaveTravelConflicts conflicts={request.travelConflicts} />
       <SuggestedDatesPanel request={request} />
       <RescheduleTrailPanel request={request} />
       {/* Read-only here. Recall is the employer's act, but the employee is the person it happens

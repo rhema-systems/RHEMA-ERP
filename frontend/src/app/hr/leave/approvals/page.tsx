@@ -33,6 +33,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { leaveService } from '@/services/hr/leave.service';
 import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
+import { LeaveTravelConflictBadge } from '@/components/hr/leave/LeaveTravelConflicts';
 
 /**
  * Leave requests awaiting a given manager's decision.
@@ -283,6 +284,8 @@ export default function LeaveApprovalsPage() {
                           <div className="flex flex-wrap items-center gap-1.5">
                             {r.requestNumber}
                             <MatchesApprovedPlanBadge show={r.matchesApprovedPlan} />
+                            {/* Travel final closure, lane 9 (D-55): the employee's staff travel over these days. */}
+                            <LeaveTravelConflictBadge conflicts={r.travelConflicts} />
                             {/* Round 5, lane H: approving it may split it; the request page says how. */}
                             {r.chargeExcessToAnnual && (
                               <Badge

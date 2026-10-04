@@ -34,6 +34,7 @@ import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions
 import { MedicalBoardLinkPanel } from '@/components/hr/leave/MedicalBoardLinkPanel';
 import { MatchesApprovedPlanBadge } from '@/components/hr/leave/MatchesApprovedPlanBadge';
 import { SplitAbsencePanel } from '@/components/hr/leave/SplitAbsencePanel';
+import { LeaveTravelConflicts } from '@/components/hr/leave/LeaveTravelConflicts';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -323,6 +324,9 @@ export default function LeaveRequestDetailPage() {
           </div>
         }
       />
+
+      {/* Travel final closure, lane 9 (D-55): the employee's staff travel over these days, before anyone decides. */}
+      <LeaveTravelConflicts conflicts={r.travelConflicts} />
 
       <Tabs defaultValue="overview">
         <TabsList>

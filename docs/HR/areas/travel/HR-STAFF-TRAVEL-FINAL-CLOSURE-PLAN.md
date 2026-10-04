@@ -101,8 +101,12 @@ baseline (D-13); lane 0 was built the same day.**
    clearance never sees travel (V6); a recovered advance stays out in travel after the final settlement (V7). **9a**
    attendance (D-53, D-54) — migration `TravelClosureAttendanceLink` (proven 28/28 on a scratch copy; applied to UAT after
    restore point `ErpSystemDB_UAT_before_travell9.bak`), the scheduled run 15/15, `run-final-touchpoints.mjs` 43/43 twice,
-   reminders 222, the regression unchanged twice — **staged 2026-10-03**; its first sweep put Kumasi's two days on duty.
-   Next: **9b** (the leave warning, D-55), **9c** (separation, D-56…D-58), **9d** (the payroll hand-off).
+   reminders 222, the regression unchanged twice — committed `67cb65f83`; its first sweep put Kumasi's two days on duty.
+   **9b** the leave warning (D-55) — on the leave request page, and at the user's word as a badge on the approvals list
+   (proven end to end on a scratch copy, and in a browser) — touchpoints 55/55 twice, the regression unchanged twice —
+   **staged 2026-10-04**. Next: **9c** (separation, D-56…D-58), then **9d** (the payroll hand-off). **From 9c on the run cadence
+   is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
+   (`tools/run-regression.sh <tag> [2]`).
 13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
    `bad482a8d`.
 
@@ -203,7 +207,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
 | **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
-| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a staged 2026-10-03 (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice) |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b staged 2026-10-04 (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser) |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
@@ -3032,6 +3036,48 @@ bookings **148** (003605, 653279), money **288** (060609, 710205), policy **131*
 demo's four trips as they were, 56 attendance rows of which the two on duty are Kumasi's, no fixture attendance row, summary,
 employee, login or mail setting left.
 
+**As built — slice 9b, the leave warning (2026-10-03).** No migration.
+- *The warning (D-55, V5).* `LeaveService.GetLeaveRequestByIdAsync` — leave's single read, beside its attendance count — fills
+  `LeaveRequestDto.TravelConflicts`: one sentence per trip of the employee **awaiting approval, approved or under way** whose
+  days overlap the leave's, either end inclusive (training's and recruitment's reading of travel): *"{name} has staff
+  travel TR-… (approved) from 19 Oct 2026 to 20 Oct 2026, over these days."* (dates in the invariant culture — the server's
+  own writes *Sept*). None for leave cancelled or rejected. Computed on every read, so the request's creation, an approver's
+  suggested dates and a reschedule all show it, with no change to any of leave's write paths; nothing refuses the leave.
+- *Screens.* A shared `LeaveTravelConflicts` banner — *"Staff travel over these days"*, in the shape of the leave plan's
+  reliever clashes — on the HR desk's leave request page (where approvers decide one by one) and on the employee's own.
+  Frontend type-check (leave-scoped) and lint clean. **And on the approvals list** — put to the user as a known limit, and
+  added at their word: the list approves in bulk without opening each request, so its rows carry the same warning as a
+  badge (*"Staff travel over these days"*, or *"N trips over these days"*, each trip's sentence in its tooltip).
+  `GetMyPendingApprovalsAsync` fills the field for the page in one query, as it already marks the rows matching an approved
+  plan; the single read uses the same `MarkTravelConflictsAsync`.
+- *Guide.* Chapter 16 — attendance and leave join the places travel shows up outside its menu.
+- *Harness.* `run-final-touchpoints.mjs` §7: a leave request planted over a trip (13 columns — a fixture employee has no
+  leave entitlement to pass leave's own gates) and read through leave's real endpoint — to HR and to the employee; the
+  wording; awaiting approval, then approved; a day after the trip names nothing; a draft on its first day names it; cancelled
+  leave names nothing; a cancelled trip leaves nothing; HR's approvals list carries the field on every row. On UAT the list's
+  badge cannot be exercised end to end — a planted request has no workflow instance, so no approver's list holds it, and a
+  real one would be routed by UAT's live leave route to the demo's approvers. Clean-up deletes the planted rows.
+- *The badge, proven end to end on a scratch copy of UAT (the user's ask, 2026-10-04).* `tools/prove-leave-badge-scratch.mjs`
+  (refuses unless `DEMO_DB` names a scratch copy) against the API started on `ErpSystemDB_TravelL9bScratch` (a COPY_ONLY
+  restore): a real Compassionate leave request raised and submitted through leave's own API for a fixture traveller with a
+  trip awaiting approval over those days; leave's live workflow routed it — to **every Manager-role holder** of the fixture
+  (chief, director, unit head, the unrelated manager), not to the traveller's own supervisor, who holds only the Employee
+  role: on UAT that would have been the demo's managers — and every list holding it carried the trip's sentence on its row,
+  **9/9**. Then **in a browser**: the frontend (`next dev`) against the scratch API, Edge driven by `playwright-core` (in the
+  scratchpad — no browser download), signed in as the chief, `/hr/leave/approvals` showed the request's row with the amber
+  **"Staff travel over these days"** badge and the trip's sentence as its tooltip; the copy's other pending leave (the demo's)
+  carried none — **all checks passed**, screenshot kept in the session scratchpad. The servers stopped and the copy dropped
+  afterwards.
+
+**Suites (9b).** No migration. `run-final-touchpoints.mjs` **43 → 55** (§7): **55/55 twice** on the warning's build (951520,
+019355), and again **twice** on the badge's build (195309, 860692). The badge **9/9** on a scratch copy and seen in a browser
+(above). The scheduled run **15/15** (072107), `run-final-reminders.mjs` **222/222** (774286), and the regression twice, all
+unchanged — portal **177** (563921, 260088), compliance **96** (622332, 317704), bookings **148** (684748, 379928), money **288**
+(765888, 437904), policy **131** (848961, 518191), lifecycle **257** (900898, 570280), truth **118** (003447, 673580), approvals
+**123** (046893, 717327), fleet **194** (113009, 782652) — the last run at the old cadence: 9b changed no travel code, and the
+user then set the cadence above (§ 7) from 9c on. After the runs: the demo's four trips as they were, attendance at 56 (the
+two on duty Kumasi's), no planted leave, fixture row, login or mail setting left.
+
 ### Lane 10 — Docs, demo pack, harness, hand-offs
 
 - [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
@@ -3146,6 +3192,11 @@ fleet trip.
 
 - Each lane's suite green **twice** on UAT, then the full travel regression (the sixteen existing
   suites as lane 0 re-pointed them, plus the new ones), its count recorded in the harness README.
+  **From slice 9c on (the user, 2026-10-04 — a post-slice run had reached 75 minutes):** a slice that changes no travel
+  code runs its own suite twice and no regression; a slice that changes travel code runs its own suite twice and **one**
+  full regression pass; **two passes only when a lane closes**. In the harness, the teardown's re-delete of resurrected
+  notices (#36) runs once per pass, and the reminders suite runs after the regression, so it never waits for leave's HR
+  digest. The full regression stays the net for cross-lane breakage in travel code — it caught 8c's D-52.
 - **Actors:** an HR officer; a second HR officer (D-2, D-8); a plain employee (every portal check); the
   traveller's own line manager **and** an unrelated manager (D-7 — one must succeed, one must be
   refused); `admin` only to mint fixtures.
@@ -3339,3 +3390,8 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   monthly summary counting on duty as present. The build succeeded; on the user's go a restore point, the migration
   applied to UAT, and the first sweep put Kumasi's two days on duty. Touchpoints 43/43 twice; the regression unchanged
   twice. Staged. Next: 9b.
+- **2026-10-04** — The user committed 9a (`67cb65f83`). **Slice 9b built** — the leave warning (D-55): computed on every read
+  of a leave request and shown on its page; at the user's word also a badge on the approvals list, which approves in bulk
+  without opening a request — proven end to end on a scratch copy of UAT (a real leave request, routed by leave's live
+  route to every Manager-role holder) and in a browser (Edge, the badge and its tooltip on the row). Touchpoints 55/55
+  twice; the regression unchanged twice. The user set the run cadence from 9c on (§ 7). Staged. Next: 9c.
