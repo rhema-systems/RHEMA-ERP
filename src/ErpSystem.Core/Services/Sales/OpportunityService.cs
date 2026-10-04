@@ -31,13 +31,15 @@ public class OpportunityService : IOpportunityService
 
     public async Task<OpportunityDetailDto> CreateAsync(CreateOpportunityDto dto)
     {
+        var stage = await ResolveStageAsync(dto.StageDefinitionId, dto.Stage, useFirstOpenStageWhenEmpty: true);
         var opp = new Opportunity
         {
             Name = dto.Name,
             Description = dto.Description,
             CustomerId = dto.CustomerId,
             LeadId = dto.LeadId,
-            Stage = dto.Stage,
+            StageDefinitionId = stage.Id,
+            Stage = stage.Name,
             Probability = dto.Probability,
             Amount = dto.Amount,
             Currency = dto.Currency ?? "USD",
@@ -49,8 +51,11 @@ public class OpportunityService : IOpportunityService
             Notes = dto.Notes,
             TenantId = _currentUserProvider.TenantId
         };
+        if (stage.IsClosed)
+            opp.ActualCloseDate = DateTime.UtcNow;
 
         await _opportunityRepo.AddAsync(opp);
+        await AddStageHistoryAsync(opp, stage.Id);
         await _unitOfWork.SaveChangesAsync();
 
         _logger.LogInformation("Created Opportunity {OppName} worth {Amount} {Currency}", opp.Name, opp.Amount, opp.Currency);
@@ -65,7 +70,9 @@ public class OpportunityService : IOpportunityService
         if (dto.Name != null) opp.Name = dto.Name;
         if (dto.Description != null) opp.Description = dto.Description;
         if (dto.CustomerId.HasValue) opp.CustomerId = dto.CustomerId;
-        if (dto.Stage != null) opp.Stage = dto.Stage;
+        OpportunityStageDefinition? targetStage = null;
+        if (dto.StageDefinitionId.HasValue || !string.IsNullOrWhiteSpace(dto.Stage))
+            targetStage = await ResolveStageAsync(dto.StageDefinitionId, dto.Stage);
         if (dto.Probability.HasValue) opp.Probability = dto.Probability.Value;
         if (dto.Amount.HasValue) opp.Amount = dto.Amount.Value;
         if (dto.ExpectedCloseDate.HasValue) opp.ExpectedCloseDate = dto.ExpectedCloseDate.Value;
@@ -74,6 +81,9 @@ public class OpportunityService : IOpportunityService
         if (dto.AssignedToId.HasValue) opp.AssignedToId = dto.AssignedToId;
         if (dto.Competitors != null) opp.Competitors = dto.Competitors;
         if (dto.Notes != null) opp.Notes = dto.Notes;
+
+        if (targetStage is not null && targetStage.Id != opp.StageDefinitionId)
+            await ApplyStageTransitionAsync(opp, targetStage);
 
         await _opportunityRepo.UpdateAsync(opp);
         await _unitOfWork.SaveChangesAsync();
@@ -86,6 +96,7 @@ public class OpportunityService : IOpportunityService
         var opp = await _opportunityRepo.GetByIdAsync(id,
             o => o.Lead!,
             o => o.AssignedTo!,
+            o => o.StageDefinition!,
             o => o.Quotes,
             o => o.Activities);
 
@@ -147,23 +158,13 @@ public class OpportunityService : IOpportunityService
         var opp = await _opportunityRepo.GetByIdAsync(id)
             ?? throw new InvalidOperationException($"Opportunity {id} not found");
 
-        if (opp.Stage == "Closed Won" || opp.Stage == "Closed Lost")
+        var currentStage = await ResolveCurrentStageAsync(opp);
+        if (currentStage.IsClosed)
             throw new InvalidOperationException("Cannot advance a closed opportunity");
 
         var previousStage = opp.Stage;
-        opp.Stage = newStage;
-
-        // Auto-adjust probability based on stage
-        opp.Probability = newStage switch
-        {
-            "Prospecting" => 10,
-            "Qualification" => 20,
-            "Needs Analysis" => 40,
-            "Value Proposition" => 50,
-            "Proposal" => 60,
-            "Negotiation" => 80,
-            _ => opp.Probability
-        };
+        var targetStage = await ResolveStageAsync(null, newStage);
+        await ApplyStageTransitionAsync(opp, targetStage);
 
         if (notes != null) opp.Notes = $"{opp.Notes}\n[{previousStage} → {newStage}] {notes}".Trim();
 
@@ -179,9 +180,8 @@ public class OpportunityService : IOpportunityService
         var opp = await _opportunityRepo.GetByIdAsync(id)
             ?? throw new InvalidOperationException($"Opportunity {id} not found");
 
-        opp.Stage = "Closed Won";
-        opp.Probability = 100;
-        opp.ActualCloseDate = DateTime.UtcNow;
+        var wonStage = await GetOutcomeStageAsync(won: true);
+        await ApplyStageTransitionAsync(opp, wonStage);
         if (notes != null) opp.Notes = $"{opp.Notes}\n[Won] {notes}".Trim();
 
         await _opportunityRepo.UpdateAsync(opp);
@@ -196,9 +196,8 @@ public class OpportunityService : IOpportunityService
         var opp = await _opportunityRepo.GetByIdAsync(id)
             ?? throw new InvalidOperationException($"Opportunity {id} not found");
 
-        opp.Stage = "Closed Lost";
-        opp.Probability = 0;
-        opp.ActualCloseDate = DateTime.UtcNow;
+        var lostStage = await GetOutcomeStageAsync(won: false);
+        await ApplyStageTransitionAsync(opp, lostStage);
         opp.LossReason = dto.LossReason;
         if (dto.Notes != null) opp.Notes = $"{opp.Notes}\n[Lost] {dto.Notes}".Trim();
 
@@ -216,7 +215,11 @@ public class OpportunityService : IOpportunityService
     public async Task<List<OpportunitySummaryDto>> GetPipelineAsync(Guid? assignedToId = null)
     {
         var query = _opportunityRepo.GetQueryable()
-            .Where(o => o.Stage != "Closed Won" && o.Stage != "Closed Lost");
+            .Where(o =>
+                (o.StageDefinitionId.HasValue && o.StageDefinition != null && !o.StageDefinition.IsClosed) ||
+                (!o.StageDefinitionId.HasValue &&
+                 o.Stage != "Closed Won" &&
+                 o.Stage != "Closed Lost"));
 
         if (assignedToId.HasValue)
             query = query.Where(o => o.AssignedToId == assignedToId.Value);
@@ -250,6 +253,7 @@ public class OpportunityService : IOpportunityService
     {
         Id = o.Id,
         Name = o.Name,
+        StageDefinitionId = o.StageDefinitionId,
         Stage = o.Stage,
         Probability = o.Probability,
         Amount = o.Amount,
@@ -269,6 +273,7 @@ public class OpportunityService : IOpportunityService
     {
         Id = o.Id,
         Name = o.Name,
+        StageDefinitionId = o.StageDefinitionId,
         Description = o.Description,
         Stage = o.Stage,
         Probability = o.Probability,
@@ -315,6 +320,98 @@ public class OpportunityService : IOpportunityService
             CreatedAt = a.CreatedAt
         }).ToList() ?? new()
     };
+
+    private async Task<OpportunityStageDefinition> ResolveStageAsync(
+        Guid? stageDefinitionId,
+        string? stage,
+        bool useFirstOpenStageWhenEmpty = false)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var stages = _unitOfWork.Repository<OpportunityStageDefinition>().GetQueryable()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.IsActive);
+
+        OpportunityStageDefinition? resolved = null;
+        if (stageDefinitionId.HasValue)
+        {
+            resolved = await stages.SingleOrDefaultAsync(value => value.Id == stageDefinitionId.Value);
+        }
+        else if (!string.IsNullOrWhiteSpace(stage))
+        {
+            var requested = stage.Trim();
+            resolved = await stages.SingleOrDefaultAsync(value =>
+                value.Name == requested || value.Code == requested);
+        }
+        else if (useFirstOpenStageWhenEmpty)
+        {
+            resolved = await stages
+                .Where(value => !value.IsClosed)
+                .OrderBy(value => value.SortOrder)
+                .ThenBy(value => value.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        return resolved ?? throw new InvalidOperationException(
+            "Select an active configured opportunity stage before saving the opportunity.");
+    }
+
+    private async Task<OpportunityStageDefinition> ResolveCurrentStageAsync(Opportunity opportunity)
+    {
+        if (opportunity.StageDefinitionId.HasValue)
+            return await ResolveStageAsync(opportunity.StageDefinitionId, null);
+
+        return await ResolveStageAsync(null, opportunity.Stage);
+    }
+
+    private async Task<OpportunityStageDefinition> GetOutcomeStageAsync(bool won)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var matches = await _unitOfWork.Repository<OpportunityStageDefinition>().GetQueryable()
+            .Where(value => value.TenantId == tenantId && !value.IsDeleted && value.IsActive
+                && value.IsClosed && (won ? value.IsWon : value.IsLost))
+            .OrderBy(value => value.SortOrder)
+            .Take(2)
+            .ToListAsync();
+        if (matches.Count != 1)
+            throw new InvalidOperationException(won
+                ? "Configure exactly one active Won opportunity stage before closing this opportunity."
+                : "Configure exactly one active Lost opportunity stage before closing this opportunity.");
+        return matches[0];
+    }
+
+    private async Task ApplyStageTransitionAsync(Opportunity opportunity, OpportunityStageDefinition stage)
+    {
+        if (opportunity.StageDefinitionId == stage.Id) return;
+
+        opportunity.StageDefinitionId = stage.Id;
+        opportunity.Stage = stage.Name;
+        if (stage.DefaultProbability.HasValue)
+            opportunity.Probability = stage.DefaultProbability.Value;
+        opportunity.ActualCloseDate = stage.IsClosed ? DateTime.UtcNow : null;
+        await AddStageHistoryAsync(opportunity, stage.Id);
+    }
+
+    private Task AddStageHistoryAsync(Opportunity opportunity, Guid stageDefinitionId)
+    {
+        return _unitOfWork.Repository<OpportunityStageHistory>().AddAsync(new OpportunityStageHistory
+        {
+            TenantId = _currentUserProvider.TenantId,
+            OpportunityId = opportunity.Id,
+            StageDefinitionId = stageDefinitionId,
+            EnteredAt = DateTime.UtcNow,
+            AmountSnapshot = opportunity.Amount,
+            CurrencySnapshot = NormalizeCurrency(opportunity.Currency),
+            ProbabilitySnapshot = Math.Clamp(opportunity.Probability, 0, 100),
+            IsLegacySnapshot = false
+        });
+    }
+
+    private static string? NormalizeCurrency(string? currency)
+    {
+        var code = currency?.Trim().ToUpperInvariant();
+        return code is { Length: 3 } && code.All(character => character is >= 'A' and <= 'Z')
+            ? code
+            : null;
+    }
 
     #endregion
 }

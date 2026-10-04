@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { apiService } from '@/services/api.service';
@@ -23,6 +23,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -98,6 +106,25 @@ function PropertyEnquiries() {
     if (requestedId) setSelectedId(requestedId);
   }, [requestedId]);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
+  const [searchInput, setSearchInput] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [crmFilter, setCrmFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('all');
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      setSearch(searchInput.trim());
+      setPage(1);
+    }, 300);
+    return () => window.clearTimeout(timeout);
+  }, [searchInput]);
+  const createdFrom = useMemo(() => {
+    if (dateFilter === 'all') return undefined;
+    return new Date(
+      Date.now() - Number(dateFilter) * 24 * 60 * 60 * 1000
+    ).toISOString();
+  }, [dateFilter]);
   const [emailBody, setEmailBody] = useState('');
   const [activityType, setActivityType] =
     useState<ProspectActivityType>('Contact');
@@ -166,6 +193,7 @@ function PropertyEnquiries() {
     salesCompletedAt: '',
     notes: '',
   });
+  const salesAmountPaidEditedRef = useRef(false);
   const [confirmHandoff, setConfirmHandoff] = useState(false);
   const client = useQueryClient();
   const { toast } = useToast();
@@ -173,9 +201,27 @@ function PropertyEnquiries() {
   const { canClear, canReverse } =
     getPropertyEnquiryDepositAccess(hasPermission);
   const queue = useQuery({
-    queryKey: ['property-enquiries', page],
-    queryFn: () => propertyEnquiryService.list(page),
+    queryKey: [
+      'property-enquiries', page, pageSize, search, statusFilter, crmFilter,
+      dateFilter,
+    ],
+    queryFn: () =>
+      propertyEnquiryService.list(page, {
+        pageSize,
+        search,
+        status: statusFilter === 'all' ? undefined : statusFilter,
+        crmLinked: crmFilter === 'all' ? undefined : crmFilter === 'linked',
+        createdFrom,
+      }),
   });
+  useEffect(() => {
+    if (!queue.data) return;
+    const lastPage = Math.max(
+      1,
+      Math.ceil((queue.data.totalCount ?? 0) / pageSize)
+    );
+    if (page > lastPage) setPage(lastPage);
+  }, [page, pageSize, queue.data]);
   const detail = useQuery({
     queryKey: ['property-enquiry', selectedId],
     enabled: Boolean(selectedId),
@@ -442,6 +488,17 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      setConfirmOpportunity(false);
+      toast({
+        title: 'Opportunity could not be created',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'Review the enquiry and try creating the opportunity again.',
+        variant: 'destructive',
+      });
+    },
   });
   const recordDeposit = useMutation({
     mutationFn: () =>
@@ -556,7 +613,6 @@ function PropertyEnquiries() {
     addActivity.error ||
     linkPartner.error ||
     createPartner.error ||
-    createOpportunity.error ||
     depositReceipts.error ||
     finalizePartner.error ||
     partnerMatches.error ||
@@ -576,6 +632,7 @@ function PropertyEnquiries() {
     listingType === 'SaleAndRent' ||
     listingType === 'SaleAndLease';
   useEffect(() => {
+    salesAmountPaidEditedRef.current = false;
     setHandoffDraft({
       salesReference: '',
       agreedAmount: '',
@@ -595,6 +652,13 @@ function PropertyEnquiries() {
     )
       return;
 
+    const defaultAmountPaid = salesOrder && salesOrder.amountPaid > 0
+      ? String(salesOrder.amountPaid)
+      : prospect &&
+          prospect.clearedDeposit > 0 &&
+          prospect.currency === (salesOrder?.currency || opportunity?.currency)
+        ? String(prospect.clearedDeposit)
+        : '';
     setHandoffDraft((current) => ({
       ...current,
       salesReference: current.salesReference || salesOrder?.reference || '',
@@ -605,9 +669,9 @@ function PropertyEnquiries() {
           : opportunity && opportunity.amount > 0
             ? String(opportunity.amount)
             : ''),
-      salesAmountPaid:
-        current.salesAmountPaid ||
-        (salesOrder ? String(salesOrder.amountPaid) : ''),
+      salesAmountPaid: salesAmountPaidEditedRef.current
+        ? current.salesAmountPaid
+        : defaultAmountPaid,
       salesPaymentReference:
         current.salesPaymentReference || salesOrder?.paymentReference || '',
       currency:
@@ -625,6 +689,9 @@ function PropertyEnquiries() {
     salesOrder?.reference,
     salesOrder?.agreedAmount,
     salesOrder?.amountPaid,
+    salesOrder?.currency,
+    prospect?.clearedDeposit,
+    prospect?.currency,
     salesOrder?.paymentReference,
     salesOrder?.currency,
     salesOrder?.completedAt,
@@ -672,7 +739,7 @@ function PropertyEnquiries() {
         ? String(ticket.propertyListing.price)
         : '';
     const initialCurrency = resolveOpportunityCurrency(
-      ticket.prospect?.currency || ticket.propertyListing?.currency,
+      ticket.propertyListing?.currency,
       activeCurrencies.data ?? []
     );
     setAgreedAmount(initialAmount);
@@ -701,92 +768,214 @@ function PropertyEnquiries() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="grid gap-5 lg:grid-cols-[minmax(280px,1fr)_2fr]">
-        <section className="space-y-3" aria-label="Property enquiry queue">
-          <div className="flex items-center justify-between">
-            <span>{queue.data?.totalCount ?? 0} enquiries</span>
-            <Button variant="outline" onClick={() => void queue.refetch()}>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1.75fr)]">
+        <section className="min-w-0 space-y-3" aria-label="Property enquiry queue">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="font-semibold">Enquiry register</h2>
+              <p className="text-sm text-slate-600">
+                {queue.data?.totalCount ?? 0} matching enquiries
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => void queue.refetch()}>
               Refresh
             </Button>
           </div>
-          {queue.isLoading && <p>Loading enquiries…</p>}
-          {queue.data?.data.length === 0 && (
-            <p className="rounded-md border p-5 text-slate-500">
-              No property enquiries yet.
-            </p>
-          )}
-          {queue.data?.data.map((item) => (
-            <button
-              key={item.id}
-              disabled={sendEmail.isPending || submitHandoff.isPending}
-              onClick={() => {
-                setSelectedId(item.id);
-                setEmailBody('');
-                setActivityType('Contact');
-                setActivityNotes('');
-                setQualificationNotes('');
-                setQualificationScore('40');
-                setAgreedAmount('');
-                setQualificationCurrency('GHS');
-                setOpportunityDraft({
-                  amount: '',
-                  currency: 'GHS',
-                  expectedCloseDate: '',
-                  reserveProperty: true,
-                  reservationDays: '14',
-                  notes: '',
-                });
-                setDepositDraft({
-                  amount: '',
-                  paymentMethod: 'BankTransfer',
-                  transactionReference: '',
-                  receivedAt: '',
-                });
-                setDepositAction(null);
-                setReversalReason('');
-                setDepositActionDate('');
-                setShowMatches(false);
-                setSelectedMatchId('');
-                setHandoffDraft({
-                  salesReference: '',
-                  agreedAmount: '',
-                  requestedLeaseTerm: '',
-                  salesAmountPaid: '',
-                  salesPaymentReference: '',
-                  currency: '',
-                  salesCompletedAt: '',
-                  notes: '',
-                });
-                sendEmail.reset();
-                submitHandoff.reset();
-              }}
-              className={`w-full rounded-md border p-4 text-left ${selectedId === item.id ? 'border-blue-500 bg-blue-50' : 'bg-white'}`}
-            >
-              <p className="font-semibold">{item.ticketNumber}</p>
-              <p>{item.subject}</p>
-              <p className="mt-1 text-sm text-slate-600">
-                {item.requesterName || 'Public prospect'} · {item.status}
+          <div className="space-y-2 rounded-lg border bg-white p-3">
+            <label htmlFor="property-enquiry-search" className="text-sm font-medium">
+              Search enquiries
+            </label>
+            <Input
+              id="property-enquiry-search"
+              type="search"
+              maxLength={100}
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="Reference, subject or enquirer"
+            />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="space-y-1 text-xs font-medium">
+                <span>Status</span>
+                <select
+                  aria-label="Filter by status"
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={statusFilter}
+                  onChange={(event) => {
+                    setStatusFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All statuses</option>
+                  <option value="Acknowledged">Acknowledged</option>
+                  <option value="InProgress">In progress</option>
+                  <option value="PendingUser">Pending user</option>
+                  <option value="PendingThirdParty">Pending third party</option>
+                  <option value="Resolved">Resolved</option>
+                  <option value="Closed">Closed</option>
+                  <option value="Reopened">Reopened</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-medium">
+                <span>CRM linkage</span>
+                <select
+                  aria-label="Filter by CRM linkage"
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={crmFilter}
+                  onChange={(event) => {
+                    setCrmFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">All enquiries</option>
+                  <option value="linked">Linked to CRM</option>
+                  <option value="unlinked">Not linked to CRM</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-medium">
+                <span>Received</span>
+                <select
+                  aria-label="Filter by received date"
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={dateFilter}
+                  onChange={(event) => {
+                    setDateFilter(event.target.value);
+                    setPage(1);
+                  }}
+                >
+                  <option value="all">Any time</option>
+                  <option value="7">Last 7 days</option>
+                  <option value="30">Last 30 days</option>
+                  <option value="90">Last 90 days</option>
+                </select>
+              </label>
+              <label className="space-y-1 text-xs font-medium">
+                <span>Rows per page</span>
+                <select
+                  aria-label="Rows per page"
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div className="overflow-hidden rounded-lg border bg-white">
+            <Table aria-label="Property enquiries">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Enquiry</TableHead>
+                  <TableHead>Enquirer</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Received</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {queue.data?.data.map((item) => (
+                  <TableRow key={item.id} data-state={selectedId === item.id ? 'selected' : undefined}>
+                    <TableCell>
+                      <button
+                        type="button"
+                        disabled={sendEmail.isPending || submitHandoff.isPending}
+                        aria-current={selectedId === item.id ? 'true' : undefined}
+                        onClick={() => {
+                          setSelectedId(item.id);
+                          setEmailBody('');
+                          setActivityType('Contact');
+                          setActivityNotes('');
+                          setQualificationNotes('');
+                          setQualificationScore('40');
+                          setAgreedAmount('');
+                          setQualificationCurrency('GHS');
+                          setOpportunityDraft({
+                            amount: '',
+                            currency: 'GHS',
+                            expectedCloseDate: '',
+                            reserveProperty: true,
+                            reservationDays: '14',
+                            notes: '',
+                          });
+                          setDepositDraft({
+                            amount: '',
+                            paymentMethod: 'BankTransfer',
+                            transactionReference: '',
+                            receivedAt: '',
+                          });
+                          setDepositAction(null);
+                          setReversalReason('');
+                          setDepositActionDate('');
+                          setShowMatches(false);
+                          setSelectedMatchId('');
+                          setHandoffDraft({
+                            salesReference: '',
+                            agreedAmount: '',
+                            requestedLeaseTerm: '',
+                            salesAmountPaid: '',
+                            salesPaymentReference: '',
+                            currency: '',
+                            salesCompletedAt: '',
+                            notes: '',
+                          });
+                          sendEmail.reset();
+                          submitHandoff.reset();
+                        }}
+                        className="max-w-[12rem] text-left font-semibold text-blue-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600 disabled:opacity-50"
+                      >
+                        <span className="block">{item.ticketNumber}</span>
+                        <span className="block truncate text-xs font-normal text-slate-600" title={item.subject}>
+                          {item.subject}
+                        </span>
+                      </button>
+                    </TableCell>
+                    <TableCell className="max-w-[9rem] truncate" title={item.requesterName || undefined}>
+                      {item.requesterName || 'Public prospect'}
+                    </TableCell>
+                    <TableCell>{item.status.replace(/([a-z])([A-Z])/g, '$1 $2')}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {new Date(item.createdAt).toLocaleDateString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {queue.isLoading && <p className="p-4 text-sm text-slate-600">Loading enquiries…</p>}
+            {!queue.isLoading && !queue.isError && queue.data?.data.length === 0 && (
+              <p className="p-5 text-sm text-slate-600">
+                No enquiries match these filters.
               </p>
-            </button>
-          ))}
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              disabled={page <= 1 || sendEmail.isPending}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              disabled={
-                page * 25 >= (queue.data?.totalCount ?? 0) ||
-                sendEmail.isPending
-              }
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+            <span className="text-slate-600">
+              {queue.data?.totalCount
+                ? `Showing ${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, queue.data.totalCount)} of ${queue.data.totalCount}`
+                : 'Showing 0 enquiries'}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1 || queue.isFetching || sendEmail.isPending}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                Previous
+              </Button>
+              <span>Page {page} of {Math.max(1, Math.ceil((queue.data?.totalCount ?? 0) / pageSize))}</span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page * pageSize >= (queue.data?.totalCount ?? 0) || queue.isFetching || sendEmail.isPending}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </section>
         <section
@@ -866,12 +1055,12 @@ function PropertyEnquiries() {
                           id="qualification-currency"
                           maxLength={3}
                           value={qualificationCurrency}
-                          onChange={(event) =>
-                            setQualificationCurrency(
-                              event.target.value.toUpperCase()
-                            )
-                          }
+                          readOnly
+                          aria-readonly="true"
                         />
+                        <p className="text-xs text-slate-600">
+                          Inherited from the listed property.
+                        </p>
                       </div>
                     </div>
                     <div className="space-y-1">
@@ -964,7 +1153,7 @@ function PropertyEnquiries() {
                     </p>
                     <a
                       className="text-blue-700 underline"
-                      href={`/crm/opportunities?id=${encodeURIComponent(opportunity.id)}`}
+                      href={`/crm/opportunities?opportunityId=${encodeURIComponent(opportunity.id)}`}
                     >
                       Open opportunity
                     </a>
@@ -999,12 +1188,6 @@ function PropertyEnquiries() {
                           <Select
                             value={opportunityDraft.currency}
                             disabled
-                            onValueChange={(currency) =>
-                              setOpportunityDraft((value) => ({
-                                ...value,
-                                currency,
-                              }))
-                            }
                           >
                             <SelectTrigger aria-label="Opportunity Currency">
                               <SelectValue placeholder="Select currency" />
@@ -1018,7 +1201,7 @@ function PropertyEnquiries() {
                             </SelectContent>
                           </Select>
                           <p className="text-xs text-slate-600">
-                            Inherited from the qualified prospect or property listing.
+                            Inherited from the listed property.
                           </p>
                         </div>
                         <div className="space-y-1">
@@ -1308,7 +1491,7 @@ function PropertyEnquiries() {
                                 })
                               }
                             >
-                              Clear
+                              Confirm and post deposit
                             </Button>
                           ) : null}
                           {receipt.status === 'Cleared' && canReverse ? (
@@ -1820,13 +2003,21 @@ function PropertyEnquiries() {
                           step="0.01"
                           value={handoffDraft.salesAmountPaid}
                           placeholder="0.00"
-                          onChange={(event) =>
+                          onChange={(event) => {
+                            salesAmountPaidEditedRef.current = true;
                             setHandoffDraft((value) => ({
                               ...value,
                               salesAmountPaid: event.target.value,
-                            }))
-                          }
+                            }));
+                          }}
                         />
+                        {prospect && prospect.clearedDeposit > 0 ? (
+                          <p className="text-xs text-slate-600">
+                            Cleared prospect deposits: {prospect.currency}{' '}
+                            {prospect.clearedDeposit.toLocaleString()}. Verify the
+                            total against Sales payments before handover.
+                          </p>
+                        ) : null}
                       </div>
                       <div className="space-y-1">
                         <Label htmlFor="estate-sales-payment-reference">
@@ -1932,7 +2123,12 @@ function PropertyEnquiries() {
         description="This creates the explicit Sales opportunity for the qualified prospect and links it to the original enquiry. It does not register the prospect as a customer."
         confirmText="Create Opportunity"
         onConfirm={async () => {
-          await createOpportunity.mutateAsync();
+          try {
+            await createOpportunity.mutateAsync();
+          } catch {
+            // The mutation shows the server error in a toast and closes this prompt.
+            return false;
+          }
         }}
         isLoading={createOpportunity.isPending}
       />
@@ -1962,19 +2158,19 @@ function PropertyEnquiries() {
           <DialogHeader>
             <DialogTitle>
               {depositAction?.kind === 'clear'
-                ? 'Clear deposit receipt?'
+                ? 'Confirm deposit receipt?'
                 : 'Reverse cleared deposit?'}
             </DialogTitle>
             <DialogDescription>
               {depositAction?.kind === 'clear'
-                ? `Clearing ${depositAction?.receiptNumber || 'this receipt'} makes it count toward the customer-registration threshold and posts through the configured prospect-deposit accounts.`
+                ? `Confirming ${depositAction?.receiptNumber || 'this receipt'} makes it count toward the customer-registration threshold and posts through the configured prospect-deposit accounts.`
                 : `Reversing ${depositAction?.receiptNumber || 'this receipt'} removes it from the cleared threshold. The audit trail and original receipt remain.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1">
             <Label htmlFor="deposit-action-date">
               {depositAction?.kind === 'clear'
-                ? 'Clearance date and time'
+                ? 'Deposit confirmation date and time'
                 : 'Reversal date and time'}
             </Label>
             <Input
@@ -2024,7 +2220,7 @@ function PropertyEnquiries() {
               {decideDeposit.isPending
                 ? 'Saving…'
                 : depositAction?.kind === 'clear'
-                  ? 'Clear receipt'
+                  ? 'Confirm and post deposit'
                   : 'Reverse receipt'}
             </Button>
           </DialogFooter>

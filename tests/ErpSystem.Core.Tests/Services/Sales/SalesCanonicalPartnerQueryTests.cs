@@ -18,10 +18,13 @@ namespace ErpSystem.Core.Tests.Services.Sales;
 public class SalesCanonicalPartnerQueryTests
 {
     [Fact]
-    public async Task OpportunityQueries_ShouldExecuteWithIgnoredCustomerNavigationAndReturnCanonicalName()
+    public async Task OpportunityQueries_ShouldUseBusinessPartnerNavigationAndReturnCanonicalName()
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Db.Model.FindEntityType(typeof(Opportunity))!.FindNavigation(nameof(Opportunity.Customer)).Should().BeNull();
+        var navigation = fixture.Db.Model.FindEntityType(typeof(Opportunity))!
+            .FindNavigation(nameof(Opportunity.BusinessPartner));
+        navigation.Should().NotBeNull();
+        navigation!.ForeignKey.PrincipalEntityType.ClrType.Should().Be(typeof(BusinessPartner));
         var service = new OpportunityService(fixture.Repo<Opportunity>(), fixture.Unit.Object, fixture.User,
             NullLogger<OpportunityService>.Instance);
 

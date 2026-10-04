@@ -295,6 +295,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     // CRM entities
     public DbSet<Lead> Leads { get; set; }
     public DbSet<Opportunity> Opportunities { get; set; }
+    public DbSet<OpportunityStageDefinition> OpportunityStageDefinitions { get; set; }
+    public DbSet<OpportunityStageHistory> OpportunityStageHistories { get; set; }
     public DbSet<Quote> Quotes { get; set; }
     public DbSet<QuoteLineItem> QuoteLineItems { get; set; }
     public DbSet<SalesForecast> SalesForecasts { get; set; }
@@ -1609,7 +1611,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<Opportunity>(entity =>
         {
             entity.ToTable("Opportunities");
-            entity.HasOne(e => e.Customer)
+            entity.HasIndex(e => new { e.TenantId, e.StageDefinitionId, e.IsDeleted });
+            entity.HasIndex(e => new { e.TenantId, e.ExpectedCloseDate, e.IsDeleted });
+            entity.HasOne(e => e.BusinessPartner)
                 .WithMany()
                 .HasForeignKey(e => e.CustomerId)
                 .OnDelete(DeleteBehavior.Restrict);
@@ -1620,6 +1624,42 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.AssignedTo)
                 .WithMany()
                 .HasForeignKey(e => e.AssignedToId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.StageDefinition)
+                .WithMany(e => e.Opportunities)
+                .HasForeignKey(e => e.StageDefinitionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OpportunityStageDefinition>(entity =>
+        {
+            entity.ToTable("OpportunityStageDefinitions");
+            entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.SortOrder });
+            entity.HasCheckConstraint("CK_OpportunityStageDefinition_Outcome",
+                "NOT ([IsWon] = 1 AND [IsLost] = 1) AND ([IsWon] = 0 OR [IsClosed] = 1) AND ([IsLost] = 0 OR [IsClosed] = 1)");
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OpportunityStageHistory>(entity =>
+        {
+            entity.ToTable("OpportunityStageHistories");
+            entity.HasIndex(e => new { e.TenantId, e.EnteredAt, e.StageDefinitionId });
+            entity.HasIndex(e => new { e.TenantId, e.OpportunityId, e.EnteredAt });
+            entity.HasOne(e => e.Opportunity)
+                .WithMany(e => e.StageHistory)
+                .HasForeignKey(e => e.OpportunityId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.StageDefinition)
+                .WithMany(e => e.History)
+                .HasForeignKey(e => e.StageDefinitionId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
@@ -6409,7 +6449,6 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<Opportunity>(entity =>
         {
-            entity.Ignore(x => x.Customer);
             entity.HasOne(x => x.Lead)
                 .WithMany(x => x.Opportunities)
                 .HasForeignKey(x => x.LeadId)

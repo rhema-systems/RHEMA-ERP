@@ -4337,7 +4337,7 @@ export const navigationItems: NavItem[] = [
         roles: ADMINISTRATION_ROLES,
         children: [
           {
-            title: 'Security',
+            title: 'Security Management',
             href: '/administration/security/dashboard',
             icon: Shield,
           },

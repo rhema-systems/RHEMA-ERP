@@ -13,8 +13,10 @@ import {
   ArrowRight,
   Banknote,
   Boxes,
+  ChartNoAxesCombined,
   CircleCheckBig,
   Clock3,
+  Coins,
   FileText,
   FolderKanban,
   Gauge,
@@ -24,9 +26,11 @@ import {
   ShieldAlert,
   type LucideIcon,
   RefreshCw,
+  Scale,
   ShoppingCart,
   Sparkles,
   TrendingUp,
+  Wallet,
   WalletCards,
   Wrench,
 } from 'lucide-react';
@@ -54,7 +58,9 @@ import { systemHealthService } from '../../services/systemHealthService';
 import {
   CompactProgressWidget,
   ConversionFunnelWidget,
+  DashboardCoverageNotice,
   DashboardEmptyState,
+  DashboardModuleUnavailableWidget,
   ExecutiveWidget,
   ExpenseAccountsWidget,
   FinancialPerformanceWidget,
@@ -83,16 +89,15 @@ const buildQueryHref = (path: string, parameters: Record<string, string | undefi
   return suffix ? `${path}?${suffix}` : path;
 };
 
-const getCrmFunnelHref = (stage: string) => {
-  const normalized = stage.trim().toLowerCase();
-  if (normalized === 'enquiry' || normalized === 'lead' || normalized === 'leads') {
-    return '/crm/leads?status=New';
-  }
-  if (normalized === 'qualified') {
-    return '/crm/leads?status=Qualified';
-  }
-  return buildQueryHref('/crm/opportunities', { stage });
-};
+const getCrmPipelineHref = (stageId: string) =>
+  buildQueryHref('/crm/opportunities', { stageDefinitionId: stageId });
+
+const getCrmFunnelHref = (stageId: string, rangeStart: string, rangeEnd: string) =>
+  buildQueryHref('/crm/opportunities', {
+    reachedStageDefinitionId: stageId,
+    stageEnteredFrom: rangeStart,
+    stageEnteredTo: rangeEnd,
+  });
 
 const formatNumber = (value: number) =>
   new Intl.NumberFormat('en-US', {
@@ -291,6 +296,7 @@ export default function Dashboard() {
   }
 
   const unavailableModules = getUnavailableDashboardModules(data.moduleStatus);
+  const moduleStatus = (name: string) => data.moduleStatus.find((module) => module.module === name);
   const moduleIsAvailable = (...names: string[]) => names.every((name) =>
     data.moduleStatus.find((module) => module.module === name)?.available !== false);
   const { currencyCode: reportingCurrency, decimalPlaces: reportingDecimals } = resolveDashboardReportingCurrency(data);
@@ -326,7 +332,7 @@ export default function Dashboard() {
     });
   }
 
-  if (moduleIsAvailable('CRM')) summaryCards.push(
+  if (data.crm && moduleIsAvailable('CRM')) summaryCards.push(
     {
       title: 'CRM Pipeline',
       value: formatNumber(data.crm?.openOpportunityCount ?? 0),
@@ -338,7 +344,7 @@ export default function Dashboard() {
       icon: TrendingUp,
     });
 
-  if (moduleIsAvailable('Projects')) summaryCards.push(
+  if (data.projectDashboard && moduleIsAvailable('Projects')) summaryCards.push(
     {
       title: 'Projects',
       value: formatNumber(data.projectDashboard?.activeProjects ?? 0),
@@ -401,16 +407,35 @@ export default function Dashboard() {
     });
 
   const pipelineStageData = (data.crm?.pipelineByStage ?? []).map((stage) => ({
+    stageId: stage.stageId,
     stage: stage.stage,
+    stageOrder: stage.stageOrder,
+    isClosed: stage.isClosed,
+    isWon: stage.isWon,
     opportunities: stage.opportunityCount,
     quotes: stage.quoteCount,
+    percentageOfActivePipeline: stage.percentageOfActivePipeline,
+    averageAgeDays: stage.averageAgeDays,
+    stalledOpportunityCount: stage.stalledOpportunityCount,
+    overdueOpportunityCount: stage.overdueOpportunityCount,
+    amountsByCurrency: stage.amountsByCurrency,
+    weightedAmountsByCurrency: stage.weightedAmountsByCurrency,
+    opportunitiesWithoutCurrencyCount: stage.opportunitiesWithoutCurrencyCount,
   }));
 
   const crmFunnelData = (data.crm?.conversionFunnel ?? []).map((stage) => ({
+    stageId: stage.stageId,
     stage: stage.stage,
+    stageOrder: stage.stageOrder,
     count: stage.count,
     conversionRate: stage.conversionRate,
+    overallConversionRate: stage.overallConversionRate,
+    amountsByCurrency: stage.amountsByCurrency,
+    opportunitiesWithoutCurrencyCount: stage.opportunitiesWithoutCurrencyCount,
   }));
+  const getCurrentCrmFunnelHref = (stageId: string) => data.crm
+    ? getCrmFunnelHref(stageId, data.crm.funnelRangeStart, data.crm.funnelRangeEnd)
+    : '/crm/opportunities';
 
   const crmHealthData = (data.crm?.accountRiskByBand ?? []).map((band) => ({
     name: band.label,
@@ -481,6 +506,18 @@ export default function Dashboard() {
       : []),
   ].filter((item) => item.count > 0);
 
+  const alertCoverageGaps = [
+    ...(!data.crm ? ['CRM'] : []),
+    ...(!data.projectDashboard ? ['Projects'] : []),
+    ...(!data.maintenanceOverview && !data.maintenanceMetrics ? ['Maintenance'] : []),
+    ...(!procurementQueuesAvailable ? ['Procurement'] : []),
+  ];
+
+  const workQueueCoverageGaps = [
+    ...(!procurementQueuesAvailable ? ['Procurement'] : []),
+    ...(!inventoryQueuesAvailable ? ['Inventory'] : []),
+  ];
+
   const operationalWorkQueues = [
     ...(procurementQueuesAvailable
       ? [
@@ -524,7 +561,7 @@ export default function Dashboard() {
       value: formatReportingMoney(data.financeOverview.kpis.revenue),
       meta: formatComparison(data.financeOverview.kpis.revenueChangePercent, 'previous period'),
       href: detailedLedgerHref,
-      icon: TrendingUp,
+      icon: ChartNoAxesCombined,
       iconClassName: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/70 dark:text-emerald-300',
       surfaceClassName: 'from-emerald-50/95 via-white to-white dark:from-emerald-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
       trendColor: '#18b77d',
@@ -535,8 +572,8 @@ export default function Dashboard() {
       value: formatReportingMoney(data.financeOverview.kpis.expenses),
       meta: formatComparison(data.financeOverview.kpis.expensesChangePercent, 'previous period'),
       href: detailedLedgerHref,
-      icon: Banknote,
-      iconClassName: 'bg-rose-100 text-rose-600 dark:bg-rose-950/70 dark:text-rose-300',
+      icon: Wallet,
+      iconClassName: 'bg-blue-100 text-blue-600 dark:bg-blue-950/70 dark:text-blue-300',
       surfaceClassName: 'from-rose-50/95 via-white to-white dark:from-rose-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
       trendColor: '#ef476f',
       trendValues: data.financeOverview.monthly.map((point) => point.expenses),
@@ -546,8 +583,8 @@ export default function Dashboard() {
       value: formatReportingMoney(data.financeOverview.kpis.netProfit),
       meta: formatComparison(data.financeOverview.kpis.netProfitChangePercent, 'previous period'),
       href: detailedLedgerHref,
-      icon: Gauge,
-      iconClassName: 'bg-blue-100 text-blue-600 dark:bg-blue-950/70 dark:text-blue-300',
+      icon: Scale,
+      iconClassName: 'bg-violet-100 text-violet-600 dark:bg-violet-950/70 dark:text-violet-300',
       surfaceClassName: 'from-blue-50/95 via-white to-white dark:from-blue-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
       trendColor: '#2474ff',
       trendValues: data.financeOverview.monthly.map((point) => point.revenue - point.expenses),
@@ -557,8 +594,8 @@ export default function Dashboard() {
       value: formatReportingMoney(data.financeOverview.kpis.cashOnHand),
       meta: 'As at the selected period end',
       href: detailedLedgerHref,
-      icon: WalletCards,
-      iconClassName: 'bg-amber-100 text-amber-600 dark:bg-amber-950/70 dark:text-amber-300',
+      icon: Coins,
+      iconClassName: 'bg-orange-100 text-orange-600 dark:bg-orange-950/70 dark:text-orange-300',
       surfaceClassName: 'from-amber-50/95 via-white to-white dark:from-amber-950/30 dark:via-[#1d1d1d] dark:to-[#1d1d1d]',
       trendColor: '#f59e0b',
       trendValues: [] as number[],
@@ -700,9 +737,7 @@ export default function Dashboard() {
                   </div>
                 </div>
               ) : (
-                <ExecutiveWidget title="Financial performance" description="Posted general-ledger movement" href="/finance" actionLabel="Open finance">
-                  <DashboardEmptyState title="Financial data is not available" description="This panel appears when the finance dashboard is permitted and available." href="/finance" actionLabel="Open finance" />
-                </ExecutiveWidget>
+                <DashboardModuleUnavailableWidget title="Financial performance" moduleName="Finance" accessRestricted={moduleStatus('Finance')?.accessRestricted} href="/finance" />
               )}
             </section>
           </div>
@@ -731,9 +766,10 @@ export default function Dashboard() {
             </ExecutiveWidget>
 
             <ExecutiveWidget title="Active Alerts" description={`${criticalAlertCount} records require review`} icon={<AlertTriangle className="h-4 w-4 text-rose-500" />} className="min-h-[285px]">
+              <DashboardCoverageNotice modules={alertCoverageGaps} />
               <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
                 {operationalAlerts.length === 0 ? (
-                  <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-3 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"><CircleCheckBig className="h-4 w-4" />No active operational alerts</div>
+                  <div className="flex items-center gap-2 rounded-xl bg-emerald-50 px-3 py-3 text-xs font-medium text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"><CircleCheckBig className="h-4 w-4" />{alertCoverageGaps.length > 0 ? 'No alerts found in available modules' : 'No active operational alerts'}</div>
                 ) : operationalAlerts.slice(0, 4).map((alert, index) => (
                   <Link key={alert.label} href={alert.href} className="group flex items-center gap-2 border-b border-slate-100 py-1.5 last:border-0 dark:border-neutral-800">
                     <span className={cn('flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-[0.65rem] font-bold', index === 0 ? 'bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300')}>{formatNumber(alert.count)}</span>
@@ -748,22 +784,52 @@ export default function Dashboard() {
 
         <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12" aria-label="Customer relationship performance and personal work">
           <div className="xl:col-span-3 [&>section]:h-full">
-            <PipelineWidget
-              data={pipelineStageData}
-              href="/crm/opportunities"
-              getHref={(stage) => buildQueryHref('/crm/opportunities', { stage })}
-            />
+            {data.crm ? (
+              <PipelineWidget
+                data={pipelineStageData}
+                href="/crm/opportunities"
+                getHref={getCrmPipelineHref}
+                preferredCurrency={data.reportingCurrency?.currencyCode}
+                pipelineAsOf={data.crm.pipelineAsOf}
+              />
+            ) : (
+              <DashboardModuleUnavailableWidget title="CRM Pipeline" moduleName="CRM" accessRestricted={moduleStatus('CRM')?.accessRestricted} href="/crm/opportunities" className="h-full" />
+            )}
           </div>
           <div className="xl:col-span-3 [&>section]:h-full">
-            <ConversionFunnelWidget data={crmFunnelData} href="/crm/leads" getHref={getCrmFunnelHref} />
+            {data.crm ? (
+              <ConversionFunnelWidget
+                data={crmFunnelData}
+                href="/crm/opportunities"
+                getHref={getCurrentCrmFunnelHref}
+                preferredCurrency={data.reportingCurrency?.currencyCode}
+                rangeStart={data.crm.funnelRangeStart}
+                rangeEnd={data.crm.funnelRangeEnd}
+                historyCoverageStart={data.crm.historyCoverageStart}
+                lostOpportunityCount={data.crm.lostOpportunityCount}
+                dataQualityIssues={data.crm.dataQualityIssues}
+              />
+            ) : (
+              <DashboardModuleUnavailableWidget title="Sales Conversion Funnel" moduleName="CRM" accessRestricted={moduleStatus('CRM')?.accessRestricted} href="/crm/leads" className="h-full" />
+            )}
           </div>
           <div className="xl:col-span-3 [&>section]:h-full">
-            <RiskMixWidget data={crmHealthData} href="/crm/accounts" />
+            {data.crm ? (
+              <RiskMixWidget data={crmHealthData} href="/crm/accounts" />
+            ) : (
+              <DashboardModuleUnavailableWidget title="Account Risk Mix" moduleName="CRM" accessRestricted={moduleStatus('CRM')?.accessRestricted} href="/crm/accounts" className="h-full" />
+            )}
           </div>
           <aside className="xl:col-span-3" aria-label="My tasks and approvals">
             <ExecutiveWidget title="My Tasks & Approvals" description="Live workload across permitted modules" href="/workflow/inbox" actionLabel="View all" icon={<ListTodo className="h-4 w-4 text-violet-600" />} className="h-full">
+              <DashboardCoverageNotice modules={workQueueCoverageGaps} />
               {operationalWorkQueues.length === 0 ? (
-                <DashboardEmptyState title="No permitted queues" description="Available operational work will appear here." href="/workflow/inbox" actionLabel="Open inbox" />
+                <DashboardEmptyState
+                  title={workQueueCoverageGaps.length > 0 ? 'No work found in available queues' : 'No pending work'}
+                  description={workQueueCoverageGaps.length > 0 ? 'Some queue data is restricted or unavailable.' : 'Available operational work will appear here.'}
+                  href="/workflow/inbox"
+                  actionLabel="Open inbox"
+                />
               ) : (
                 <div className="space-y-1 px-4 pb-4 pt-1 sm:px-5">
                   {operationalWorkQueues.slice(0, 4).map((queue, index) => (
@@ -781,29 +847,41 @@ export default function Dashboard() {
 
         <section className="grid gap-3 lg:grid-cols-2 xl:grid-cols-12" aria-label="Operational delivery overview">
           <div className="xl:col-span-3 [&>section]:h-full">
-            <CompactProgressWidget
-              title="Project Delivery Pressure"
-              description="Tasks, milestones, risks and issues"
-              data={projectPressureData}
-              href="/development/projects"
-              actionLabel="View projects"
-              emptyTitle="No project pressure"
-              emptyDescription="No overdue tasks, milestones, risks or issues are currently visible."
-            />
+            {data.projectDashboard ? (
+              <CompactProgressWidget
+                title="Project Delivery Pressure"
+                description="Tasks, milestones, risks and issues"
+                data={projectPressureData}
+                href="/development/projects"
+                actionLabel="View projects"
+                emptyTitle="No project pressure"
+                emptyDescription="No overdue tasks, milestones, risks or issues are currently visible."
+              />
+            ) : (
+              <DashboardModuleUnavailableWidget title="Project Delivery Pressure" moduleName="Projects" accessRestricted={moduleStatus('Projects')?.accessRestricted} href="/development/projects" className="h-full" />
+            )}
           </div>
           <div className="xl:col-span-3 [&>section]:h-full">
-            <CompactProgressWidget
-              title="Inventory Queue"
-              description="Approvals and issue workload"
-              data={inventoryQueueData.map((item) => ({ name: item.label, value: item.count }))}
-              href="/inventory/requisitions"
-              actionLabel="View queue"
-              emptyTitle="Inventory queue is clear"
-              emptyDescription="No permitted approvals or issue requests are waiting."
-            />
+            {inventoryQueuesAvailable ? (
+              <CompactProgressWidget
+                title="Inventory Queue"
+                description="Approvals and issue workload"
+                data={inventoryQueueData.map((item) => ({ name: item.label, value: item.count }))}
+                href="/inventory/requisitions"
+                actionLabel="View queue"
+                emptyTitle="Inventory queue is clear"
+                emptyDescription="No permitted approvals or issue requests are waiting."
+              />
+            ) : (
+              <DashboardModuleUnavailableWidget title="Inventory Queue" moduleName="Inventory" accessRestricted={moduleStatus('Inventory Queues')?.accessRestricted} href="/inventory/requisitions" className="h-full" />
+            )}
           </div>
           <div className="xl:col-span-3 [&>section]:h-full">
-            <MaintenanceTrendWidget data={maintenanceTrendData} href="/maintenance/work-orders" />
+            {data.maintenanceTrends ? (
+              <MaintenanceTrendWidget data={maintenanceTrendData} href="/maintenance/work-orders" />
+            ) : (
+              <DashboardModuleUnavailableWidget title="Maintenance Work Orders" moduleName="Maintenance" accessRestricted={moduleStatus('Maintenance Trends')?.accessRestricted} href="/maintenance/work-orders" className="h-full" />
+            )}
           </div>
           <aside className="relative min-h-[190px] overflow-hidden rounded-2xl border border-blue-200/70 bg-gradient-to-br from-blue-700 via-blue-600 to-sky-400 p-5 text-white shadow-[0_14px_34px_-22px_rgba(37,99,235,0.72)] xl:col-span-3" aria-label="RHEMA ERP brand message">
             <div className="absolute -bottom-16 -right-10 h-44 w-44 rounded-full bg-white/20 blur-2xl" />

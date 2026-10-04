@@ -117,8 +117,8 @@ export default function SmsSettingsPage() {
       toast({
         title: testAsOtp ? 'Test verification SMS sent' : 'Test SMS sent',
         description: result.message || (testAsOtp
-          ? 'The OTP test message was accepted by the configured SMS provider.'
-          : 'The ordinary test message was accepted by the configured SMS provider.'),
+          ? 'The sample verification message was accepted by the configured SMS provider.'
+          : 'The test message was accepted by the configured SMS provider.'),
         variant: 'success',
       });
       setTestPhoneNumber('');
@@ -232,7 +232,7 @@ export default function SmsSettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>mNotify</CardTitle>
-          <CardDescription>Sends JSON requests through the mNotify Quick SMS API.</CardDescription>
+          <CardDescription>Sends JSON requests through the mNotify Quick SMS API. Verification messages use regular SMS credits.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-center gap-3">
@@ -319,9 +319,9 @@ export default function SmsSettingsPage() {
         onOpenChange={setTestDialogOpen}
         title={testAsOtp ? 'Send test verification SMS' : 'Send test SMS'}
         description={testAsOtp
-          ? 'Use the same OTP campaign mode as public property-enquiry verification. Provider OTP charges may apply.'
-          : "Send an ordinary, non-OTP message through the tenant's saved SMS configuration. Provider charges may apply."}
-        confirmText={testAsOtp ? 'Send OTP test' : 'Send test SMS'}
+          ? 'Send a sample verification message through the same regular SMS delivery path as property enquiries. The sample code cannot verify a contact. SMS credits may be charged.'
+          : "Send a regular message through the tenant's saved SMS configuration. SMS credits may be charged."}
+        confirmText={testAsOtp ? 'Send verification test' : 'Send test SMS'}
         onConfirm={confirmTestSms}
         isLoading={sendTest.isPending}
         confirmDisabled={!testPhoneIsValid}
@@ -342,16 +342,16 @@ export default function SmsSettingsPage() {
           )}
           <div className="flex items-start justify-between gap-4 rounded-md border border-slate-200 p-3">
             <div className="space-y-1">
-              <Label htmlFor="sms-test-as-otp">Test OTP verification delivery</Label>
+              <Label htmlFor="sms-test-as-otp">Send a sample verification message</Label>
               <p className="text-xs text-slate-500">
-                Sends the same mNotify OTP campaign type used by the public property-enquiry verification flow.
+                Uses the same regular SMS delivery path as public property enquiries. The test code is not valid.
               </p>
             </div>
             <Switch
               id="sms-test-as-otp"
               checked={testAsOtp}
               onCheckedChange={setTestAsOtp}
-              aria-label="Test OTP verification delivery"
+              aria-label="Send a sample verification message"
             />
           </div>
         </div>

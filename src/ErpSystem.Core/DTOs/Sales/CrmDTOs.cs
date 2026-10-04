@@ -171,7 +171,8 @@ public class OpportunitySummaryDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string Stage { get; set; } = "Prospecting";
+    public Guid? StageDefinitionId { get; set; }
+    public string Stage { get; set; } = string.Empty;
     public int Probability { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
@@ -209,7 +210,8 @@ public class CreateOpportunityDto
 
     public Guid? CustomerId { get; set; }
     public Guid? LeadId { get; set; }
-    public string Stage { get; set; } = "Prospecting";
+    public Guid? StageDefinitionId { get; set; }
+    public string? Stage { get; set; }
 
     [Range(0, 100)]
     public int Probability { get; set; } = 10;
@@ -242,6 +244,7 @@ public class UpdateOpportunityDto
     public string? Description { get; set; }
 
     public Guid? CustomerId { get; set; }
+    public Guid? StageDefinitionId { get; set; }
     public string? Stage { get; set; }
 
     [Range(0, 100)]

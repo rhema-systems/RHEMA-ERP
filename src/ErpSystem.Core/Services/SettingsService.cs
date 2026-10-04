@@ -3,6 +3,7 @@ using System.Net.Mail;
 using System.Reflection;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -22,6 +23,7 @@ public interface ISettingsService
     Task<Security?> GetSecuritySettingsAsync(Guid tenantId);
     Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
+    Task<Security> UpdateLoginPageStyleAsync(Enums.LoginPageStyle loginPageStyle);
 
     Task<SystemSettings?> GetSystemSettingAsync(string key);
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
@@ -325,8 +327,10 @@ public class SettingsService : ISettingsService
     {
         try
         {
-            // Get settings from default tenant or first available tenant
-            var settings = await _unitOfWork.Repository<Security>().GetAllAsync();
+            // Public pre-auth settings must have a deterministic owner. Use the seeded
+            // DEFAULT tenant rather than whichever row the database happens to return first.
+            var settings = await _unitOfWork.Repository<Security>()
+                .FindAsync(s => s.TenantId == Constants.Tenants.DefaultTenantId);
             var defaultSettings = settings.FirstOrDefault();
 
             if (defaultSettings != null)
@@ -389,8 +393,10 @@ public class SettingsService : ISettingsService
                 // Legal URLs
                 existingSettings.TermsOfServiceUrl = settings.TermsOfServiceUrl;
                 existingSettings.PrivacyPolicyUrl = settings.PrivacyPolicyUrl;
+                existingSettings.LoginPageStyle = settings.LoginPageStyle;
 
                 existingSettings.UpdatedAt = DateTime.UtcNow;
+                existingSettings.UpdatedBy = _currentUserService.UserName;
 
                 await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
                 await _unitOfWork.SaveChangesAsync();
@@ -416,6 +422,42 @@ public class SettingsService : ISettingsService
             _logger.LogError(ex, "Error updating security settings");
             throw;
         }
+    }
+
+    public async Task<Security> UpdateLoginPageStyleAsync(Enums.LoginPageStyle loginPageStyle)
+    {
+        if (!Enum.IsDefined(loginPageStyle))
+        {
+            throw new ArgumentOutOfRangeException(nameof(loginPageStyle), loginPageStyle, "Unsupported login page style.");
+        }
+
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var existingSettings = await GetSecuritySettingsAsync();
+
+        if (existingSettings != null)
+        {
+            existingSettings.LoginPageStyle = loginPageStyle;
+            existingSettings.UpdatedAt = DateTime.UtcNow;
+            existingSettings.UpdatedBy = _currentUserService.UserName;
+            await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
+            await _unitOfWork.SaveChangesAsync();
+            _logger.LogInformation("Updated login page style for tenant {TenantId} to {LoginPageStyle}", tenantId, loginPageStyle);
+            return existingSettings;
+        }
+
+        var settings = new Security
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            LoginPageStyle = loginPageStyle,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUserService.UserName
+        };
+
+        var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(settings);
+        await _unitOfWork.SaveChangesAsync();
+        _logger.LogInformation("Created security settings with login page style for tenant {TenantId}", tenantId);
+        return createdSettings;
     }
 
     #endregion

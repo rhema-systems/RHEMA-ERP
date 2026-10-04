@@ -7,11 +7,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { crmService, type CrmOverviewDto } from '@/services/crmService';
+import { formatCrmAmount, formatCrmCurrencyTotals, formatCrmMissingCurrencyCount } from './crmMoney';
 import { Activity, AlertTriangle, ArrowRight, BarChart3, FileText, Mail, Megaphone, MessageSquare, RefreshCw, ShieldCheck, TrendingUp, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
-
-const formatMoney = (value: number, currency: string = 'USD') =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : 'None';
 const formatScore = (value: number) => `${value.toFixed(0)}/100`;
@@ -20,12 +18,16 @@ const getMessage = (error: unknown, fallback: string) => error instanceof Error 
 export default function CrmPage() {
   const [overview, setOverview] = useState<CrmOverviewDto | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   const load = async () => {
     try {
       setLoading(true);
+      setLoadError(false);
       setOverview(await crmService.getOverview(10));
     } catch (error: unknown) {
+      setOverview(null);
+      setLoadError(true);
       toast.error(getMessage(error, 'Failed to load CRM overview'));
     } finally {
       setLoading(false);
@@ -42,9 +44,9 @@ export default function CrmPage() {
     }
 
     return [
-      { label: 'Open Pipeline', value: overview.openOpportunityCount.toLocaleString(), hint: formatMoney(overview.openOpportunityValue) },
-      { label: 'Weighted Pipeline', value: formatMoney(overview.weightedPipelineValue), hint: `${overview.qualifiedLeadCount} qualified leads` },
-      { label: 'Active Quotes', value: overview.activeQuoteCount.toLocaleString(), hint: formatMoney(overview.activeQuoteValue) },
+      { label: 'Open Pipeline', value: overview.openOpportunityCount.toLocaleString(), hint: [formatCrmCurrencyTotals(overview.openOpportunityValuesByCurrency), formatCrmMissingCurrencyCount(overview.openOpportunitiesWithoutCurrencyCount)].filter(Boolean).join(' · ') },
+      { label: 'Weighted Pipeline', value: formatCrmCurrencyTotals(overview.weightedPipelineValuesByCurrency), hint: `${overview.qualifiedLeadCount} qualified leads` },
+      { label: 'Active Quotes', value: overview.activeQuoteCount.toLocaleString(), hint: [formatCrmCurrencyTotals(overview.activeQuoteValuesByCurrency), formatCrmMissingCurrencyCount(overview.activeQuotesWithoutCurrencyCount)].filter(Boolean).join(' · ') },
       { label: 'Active Accounts', value: overview.activeAccountCount.toLocaleString(), hint: `${overview.atRiskAccountCount} at risk` },
       { label: 'Avg Health', value: formatScore(overview.averageAccountHealthScore), hint: 'Across CRM-linked accounts' },
       { label: 'Follow-Ups', value: overview.leadsNeedingFollowUpCount.toLocaleString(), hint: `${overview.expiringContractCount} contracts expiring` },
@@ -56,7 +58,7 @@ export default function CrmPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">CRM</h1>
-          <p className="text-muted-foreground">ERP-native customer relationship overview across pipeline, accounts, and delivery commitments.</p>
+          <p className="text-muted-foreground">Live tenant CRM records across pipeline, accounts, and delivery commitments.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
@@ -155,12 +157,18 @@ export default function CrmPage() {
           <Card key={item.label}>
             <CardHeader className="pb-2">
               <CardDescription>{item.label}</CardDescription>
-              <CardTitle>{item.value}</CardTitle>
+              <CardTitle className="break-words text-xl">{item.value}</CardTitle>
             </CardHeader>
             <CardContent className="pt-0 text-xs text-muted-foreground">{item.hint}</CardContent>
           </Card>
         ))}
       </div>
+
+      {loadError ? (
+        <div role="alert" className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">
+          CRM data could not be loaded. Refresh to try again.
+        </div>
+      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
@@ -170,7 +178,7 @@ export default function CrmPage() {
           </CardHeader>
           <CardContent>
             {loading ? <div className="py-10 text-center text-muted-foreground">Loading opportunities...</div> : null}
-            {!loading && !overview?.opportunities.length ? <div className="py-10 text-center text-muted-foreground">No open opportunities available.</div> : null}
+            {!loading && !loadError && !overview?.opportunities.length ? <div className="py-10 text-center text-muted-foreground">No open opportunities available.</div> : null}
             {!loading && overview?.opportunities.length ? (
               <Table>
                 <TableHeader>
@@ -199,8 +207,8 @@ export default function CrmPage() {
                       </TableCell>
                       <TableCell>{formatDate(item.expectedCloseDate)}</TableCell>
                       <TableCell className="text-right">
-                        <div>{formatMoney(item.amount, item.currency)}</div>
-                        <div className="text-xs text-muted-foreground">{item.probability}% | {formatMoney(item.weightedValue, item.currency)}</div>
+                        <div>{formatCrmAmount(item.amount, item.currency)}</div>
+                        <div className="text-xs text-muted-foreground">{item.probability}% | {formatCrmAmount(item.weightedValue, item.currency)}</div>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -217,7 +225,7 @@ export default function CrmPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             {loading ? <div className="py-10 text-center text-muted-foreground">Loading follow-ups...</div> : null}
-            {!loading && !overview?.followUps.length ? <div className="py-10 text-center text-muted-foreground">No near-term follow-ups are due.</div> : null}
+            {!loading && !loadError && !overview?.followUps.length ? <div className="py-10 text-center text-muted-foreground">No near-term follow-ups are due.</div> : null}
             {!loading && overview?.followUps.map((item) => (
               <div key={`${item.entityType}-${item.entityId}`} className="rounded-lg border p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -264,7 +272,7 @@ export default function CrmPage() {
         </CardHeader>
         <CardContent>
           {loading ? <div className="py-10 text-center text-muted-foreground">Loading account overview...</div> : null}
-          {!loading && !overview?.accounts.length ? <div className="py-10 text-center text-muted-foreground">No CRM-linked accounts are available yet.</div> : null}
+          {!loading && !loadError && !overview?.accounts.length ? <div className="py-10 text-center text-muted-foreground">No CRM-linked accounts are available yet.</div> : null}
           {!loading && overview?.accounts.length ? (
             <Table>
               <TableHeader>
@@ -303,19 +311,24 @@ export default function CrmPage() {
                     </TableCell>
                     <TableCell>
                       <div>{account.activeProjectCount}/{account.totalProjectCount} active</div>
-                      <div className="text-xs text-muted-foreground">
-                        {account.activeProjectCount} projects | {formatMoney(account.projectValue)}
-                      </div>
+                      <div className="break-words text-xs text-muted-foreground">{formatCrmCurrencyTotals(account.projectValuesByCurrency)}</div>
+                      {formatCrmMissingCurrencyCount(account.projectsWithoutCurrencyCount) ? (
+                        <div className="text-xs text-muted-foreground">{formatCrmMissingCurrencyCount(account.projectsWithoutCurrencyCount)}</div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <div>{account.activeContractCount}/{account.totalContractCount} active</div>
-                      <div className="text-xs text-muted-foreground">
-                        {account.activeContractCount} contracts | {formatMoney(account.contractValue)}
-                      </div>
+                      <div className="break-words text-xs text-muted-foreground">{formatCrmCurrencyTotals(account.contractValuesByCurrency)}</div>
+                      {formatCrmMissingCurrencyCount(account.contractsWithoutCurrencyCount) ? (
+                        <div className="text-xs text-muted-foreground">{formatCrmMissingCurrencyCount(account.contractsWithoutCurrencyCount)}</div>
+                      ) : null}
                     </TableCell>
                     <TableCell>
                       <div>{account.tenderAwardCount} awards | {account.tenderBidCount} bids</div>
-                      <div className="text-xs text-muted-foreground">{formatMoney(account.tenderAwardedValue)}</div>
+                      <div className="break-words text-xs text-muted-foreground">{formatCrmCurrencyTotals(account.tenderAwardedValuesByCurrency)}</div>
+                      {formatCrmMissingCurrencyCount(account.tenderAwardsWithoutCurrencyCount) ? (
+                        <div className="text-xs text-muted-foreground">{formatCrmMissingCurrencyCount(account.tenderAwardsWithoutCurrencyCount)}</div>
+                      ) : null}
                     </TableCell>
                     <TableCell>{formatDate(account.nextMilestoneDate)}</TableCell>
                   </TableRow>

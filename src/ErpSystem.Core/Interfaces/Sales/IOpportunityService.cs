@@ -5,7 +5,7 @@ namespace ErpSystem.Core.Interfaces.Sales;
 
 /// <summary>
 /// Service interface for Opportunity/Deal management — the pipeline tracking engine.
-/// Handles full lifecycle: Prospecting → Qualification → Proposal → Negotiation → Closed Won/Lost.
+/// Handles the tenant-configured opportunity lifecycle and its closed outcomes.
 /// </summary>
 public interface IOpportunityService
 {

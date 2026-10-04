@@ -52,7 +52,7 @@ public sealed class EnterpriseDashboardService
         var financeTask = RunAuthorizedModuleAsync(
             "Finance",
             FinancePermissions.ViewFinance,
-            async sp => await sp.GetRequiredService<IGeneralLedgerService>()
+            async (sp, _) => await sp.GetRequiredService<IGeneralLedgerService>()
                 .GetFinanceDashboardAsync(rangeStartDate, rangeEndDate),
             fallback: (Core.DTOs.Finance.FinanceDashboardDto?)null,
             fallbackMessage: "Finance analytics are unavailable");
@@ -60,7 +60,7 @@ public sealed class EnterpriseDashboardService
         var crmTask = RunAuthorizedModuleAsync(
             "CRM",
             "Sales",
-            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+            async (sp, _) => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
                 .GetCrmAsync(rangeStartDate, rangeEndExclusive),
             fallback: (EnterpriseCrmDashboardDto?)null,
             fallbackMessage: "CRM analytics are unavailable");
@@ -74,7 +74,7 @@ public sealed class EnterpriseDashboardService
         var procurementQueuesTask = RunAuthorizedModuleAsync(
             "Procurement Queues",
             "Procurement",
-            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+            async (sp, _) => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
                 .GetProcurementQueuesAsync(rangeStartDate, rangeEndExclusive),
             fallback: new EnterpriseOperationalQueueDto(),
             fallbackMessage: "Procurement queues are unavailable");
@@ -82,8 +82,8 @@ public sealed class EnterpriseDashboardService
         var inventoryQueuesTask = RunAuthorizedModuleAsync(
             "Inventory Queues",
             "Inventory",
-            async sp => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
-                .GetInventoryQueuesAsync(rangeStartDate, rangeEndExclusive),
+            async (sp, superAdminInTenant) => await sp.GetRequiredService<EnterpriseDashboardProjectionService>()
+                .GetInventoryQueuesAsync(rangeStartDate, rangeEndExclusive, includeAllTenantRequisitions: superAdminInTenant),
             fallback: new EnterpriseOperationalQueueDto(),
             fallbackMessage: "Inventory queues are unavailable");
 
@@ -108,7 +108,7 @@ public sealed class EnterpriseDashboardService
         var procurementInventoryManagementTask = RunAuthorizedModuleAsync(
             "Procurement and Inventory Management",
             "Procurement",
-            async sp => await sp.GetRequiredService<ProcurementInventoryManagementDashboardService>()
+            async (sp, _) => await sp.GetRequiredService<ProcurementInventoryManagementDashboardService>()
                 .GetAsync(rangeStartDate, rangeEndDate, warehouseId, locationId),
             fallback: (ProcurementInventoryManagementDashboardDto?)null,
             fallbackMessage: "Procurement and inventory management metrics are unavailable");
@@ -223,7 +223,7 @@ public sealed class EnterpriseDashboardService
     private async Task<ModuleResult<T>> RunAuthorizedModuleAsync<T>(
         string module,
         string permissionPolicy,
-        Func<IServiceProvider, Task<T>> action,
+        Func<IServiceProvider, bool, Task<T>> action,
         T fallback,
         string fallbackMessage)
     {
@@ -232,8 +232,16 @@ public sealed class EnterpriseDashboardService
             using var scope = _scopeFactory.CreateScope();
             var authorization = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
             var principal = scope.ServiceProvider.GetRequiredService<IHttpContextAccessor>().HttpContext?.User;
+            var isModuleClaimPolicy = permissionPolicy is "Sales" or "Procurement" or "Inventory";
+            // dashboard.read checks the active user's tenant membership before granting
+            // SuperAdmin access. Ordinary users still need the module policy below.
+            var superAdminInTenant = principal?.Identity?.IsAuthenticated == true &&
+                principal.IsInRole(Constants.Roles.SuperAdmin) &&
+                isModuleClaimPolicy &&
+                (await authorization.AuthorizeAsync(principal, resource: null, "dashboard.read")).Succeeded;
             if (principal?.Identity?.IsAuthenticated != true ||
-                !(await authorization.AuthorizeAsync(principal, resource: null, permissionPolicy)).Succeeded)
+                (!superAdminInTenant &&
+                 !(await authorization.AuthorizeAsync(principal, resource: null, permissionPolicy)).Succeeded))
             {
                 return new ModuleResult<T>(
                     fallback,
@@ -245,7 +253,7 @@ public sealed class EnterpriseDashboardService
                     });
             }
 
-            var data = await action(scope.ServiceProvider);
+            var data = await action(scope.ServiceProvider, superAdminInTenant);
             return new ModuleResult<T>(
                 data,
                 new EnterpriseDashboardModuleStatusDto

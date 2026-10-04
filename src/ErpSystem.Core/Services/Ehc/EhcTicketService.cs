@@ -885,17 +885,18 @@ public sealed class EhcTicketService : IEhcTicketService
 
         // Start workflow instance (drives status transitions)
         var workflowName = await ResolveWorkflowNameForTicketAsync(ticket, cancellationToken);
-        var workflowInstance = await _workflowEngine.StartWorkflowAsync(
-            workflowName,
-            ticket.Id,
-            workflowActorUserId,
-            dataContext: new
-            {
-                ticketId = ticket.Id,
-                ticketNumber = ticket.TicketNumber,
-                ticketType = ticket.TicketType.ToString(),
-                priority = ticket.Priority.ToString()
-            });
+        var workflowContext = new
+        {
+            ticketId = ticket.Id,
+            ticketNumber = ticket.TicketNumber,
+            ticketType = ticket.TicketType.ToString(),
+            priority = ticket.Priority.ToString()
+        };
+        var workflowInstance = anonymousRequester
+            ? await _workflowEngine.StartWorkflowForTenantAsync(
+                workflowName, tenantId, ticket.Id, workflowActorUserId, workflowContext)
+            : await _workflowEngine.StartWorkflowAsync(
+                workflowName, ticket.Id, workflowActorUserId, workflowContext);
 
         ticket.WorkflowInstanceId = workflowInstance.Id;
         await ticketRepo.UpdateAsync(ticket);

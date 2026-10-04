@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import React, { type CSSProperties, type ReactNode } from 'react';
+import React, { useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ArrowRight,
   BarChart3,
@@ -28,6 +28,22 @@ const compactNumber = (value: number) => new Intl.NumberFormat('en', {
   notation: 'compact',
   maximumFractionDigits: 1,
 }).format(value);
+
+const formatStageMoney = (amount: number, currency: string, compact = false) =>
+  new Intl.NumberFormat('en-US', {
+    style: 'currency', currency, currencyDisplay: 'code',
+    maximumFractionDigits: compact ? 1 : 0,
+    ...(compact ? { notation: 'compact' as const } : {}),
+  }).format(amount);
+
+const riskColor = (name: string) => {
+  const band = name.trim().toLowerCase();
+  if (band.includes('critical') || band.includes('high')) return '#ef4444';
+  if (band.includes('medium') || band.includes('moderate')) return '#f97316';
+  if (band.includes('low')) return '#3b82f6';
+  if (band.includes('no risk') || band.includes('none')) return '#22c55e';
+  return '#94a3b8';
+};
 
 export function ExecutiveWidget({
   title,
@@ -109,9 +125,48 @@ export function DashboardEmptyState({
   );
 }
 
+export function DashboardModuleUnavailableWidget({
+  title,
+  moduleName,
+  accessRestricted = false,
+  href,
+  className,
+}: {
+  title: string;
+  moduleName: string;
+  accessRestricted?: boolean;
+  href?: string;
+  className?: string;
+}) {
+  const message = accessRestricted
+    ? `${moduleName} dashboard access is restricted for this account.`
+    : `${moduleName} dashboard data could not be loaded. Try refreshing the page.`;
+
+  return (
+    <ExecutiveWidget title={title} description={message} className={className}>
+      <DashboardEmptyState
+        title={accessRestricted ? `${moduleName} dashboard access restricted` : `${moduleName} dashboard unavailable`}
+        description={message}
+        href={accessRestricted ? undefined : href}
+        actionLabel={href ? `Open ${moduleName}` : undefined}
+      />
+    </ExecutiveWidget>
+  );
+}
+
+export function DashboardCoverageNotice({ modules }: { modules: string[] }) {
+  if (modules.length === 0) return null;
+
+  return (
+    <p role="status" className="mx-4 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200 sm:mx-5">
+      Partial view: {modules.join(', ')} dashboard data is restricted or unavailable.
+    </p>
+  );
+}
+
 function ChartTooltip({ active, payload, label, formatValue }: {
   active?: boolean;
-  payload?: Array<{ color?: string; name?: string; value?: number }>;
+  payload?: Array<{ color?: string; dataKey?: string | number; name?: string; value?: number }>;
   label?: string;
   formatValue: (value: number) => string;
 }) {
@@ -215,28 +270,119 @@ export function PipelineWidget({
   data,
   href,
   getHref,
+  preferredCurrency,
+  pipelineAsOf,
 }: {
-  data: Array<{ stage: string; opportunities: number; quotes: number }>;
+  data: Array<{
+    stageId: string;
+    stage: string;
+    stageOrder: number;
+    isClosed: boolean;
+    isWon: boolean;
+    opportunities: number;
+    quotes: number;
+    percentageOfActivePipeline: number;
+    averageAgeDays: number;
+    stalledOpportunityCount: number;
+    overdueOpportunityCount: number;
+    amountsByCurrency?: Array<{ currency: string; amount: number }>;
+    weightedAmountsByCurrency?: Array<{ currency: string; amount: number }>;
+    opportunitiesWithoutCurrencyCount?: number;
+  }>;
   href: string;
-  getHref: (stage: string) => string;
+  getHref: (stageId: string) => string;
+  preferredCurrency?: string;
+  pipelineAsOf?: string;
 }) {
-  const total = data.reduce((sum, item) => sum + item.opportunities, 0);
-  const maximum = Math.max(1, ...data.map((item) => item.opportunities));
+  const visible = [...data].sort((left, right) => left.stageOrder - right.stageOrder || left.stage.localeCompare(right.stage));
+  const activeStages = visible.filter((item) => !item.isClosed);
+  const total = activeStages.reduce((sum, item) => sum + item.opportunities, 0);
+  const hasRecords = visible.some((item) => item.opportunities > 0);
+  const currencies = Array.from(new Set(data.flatMap((item) => [
+    ...(item.amountsByCurrency?.map((value) => value.currency) ?? []),
+    ...(item.weightedAmountsByCurrency?.map((value) => value.currency) ?? []),
+  ]))).sort();
+  const [metric, setMetric] = useState<'value' | 'weighted' | 'count'>('value');
+  const [currency, setCurrency] = useState(() => preferredCurrency && currencies.includes(preferredCurrency) ? preferredCurrency : currencies[0] ?? '');
+  const selectedCurrency = currencies.includes(currency)
+    ? currency
+    : preferredCurrency && currencies.includes(preferredCurrency) ? preferredCurrency : currencies[0] ?? '';
+  const metricValue = (item: typeof data[number]) => metric === 'count'
+    ? item.opportunities
+    : (metric === 'weighted' ? item.weightedAmountsByCurrency : item.amountsByCurrency)
+        ?.find((value) => value.currency === selectedCurrency)?.amount ?? 0;
+  const maximum = Math.max(1, ...visible.map(metricValue));
+  const totalsByCurrency = currencies.map((code) => ({
+    currency: code,
+    amount: activeStages.reduce((sum, item) => sum + (
+      (metric === 'weighted' ? item.weightedAmountsByCurrency : item.amountsByCurrency)
+        ?.find((value) => value.currency === code)?.amount ?? 0
+    ), 0),
+  }));
+  const missingCurrencyCount = data.reduce((sum, item) => sum + (item.opportunitiesWithoutCurrencyCount ?? 0), 0);
   return (
-    <ExecutiveWidget title="CRM Pipeline" description={`${total} active opportunities`} href={href} actionLabel="View opportunities">
-      {data.length === 0 ? (
+    <ExecutiveWidget title="CRM Pipeline" href={href} actionLabel="View opportunities" className="min-h-[255px]">
+      {!hasRecords ? (
         <DashboardEmptyState title="No CRM data yet" description="Opportunities will appear here once created." href={href} actionLabel="Open CRM" />
       ) : (
-        <div className="space-y-2.5 px-4 pb-4 pt-1 sm:px-5">
-          {data.slice(0, 5).map((item, index) => (
-            <Link key={item.stage} href={getHref(item.stage)} className="group grid grid-cols-[5rem_1fr_auto] items-center gap-2.5 text-[0.7rem]">
-              <span className="truncate font-medium text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">{item.stage}</span>
-              <span className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-neutral-800">
-                <span className="block h-full rounded-full" style={{ width: `${Math.max(5, (item.opportunities / maximum) * 100)}%`, backgroundColor: DASHBOARD_COLORS[index % DASHBOARD_COLORS.length] }} />
+        <div className="px-4 pb-4 sm:px-5">
+          <div className="mb-3 flex items-start justify-between gap-2 border-b border-slate-100 pb-3 dark:border-neutral-800">
+            <div className="min-w-0">
+              <span className="block text-[0.68rem] font-medium text-slate-500 dark:text-slate-400">
+                {metric === 'count' ? 'Active opportunities' : metric === 'weighted' ? 'Active weighted pipeline' : 'Active pipeline value'}
               </span>
-              <strong className="w-8 text-right text-slate-900 dark:text-white">{item.opportunities}</strong>
-            </Link>
-          ))}
+              {metric !== 'count' ? (
+                totalsByCurrency.length > 0 ? (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {totalsByCurrency.map((item) => (
+                      <strong key={item.currency} className="block break-words text-lg font-bold leading-tight text-slate-950 dark:text-white">
+                        {formatStageMoney(item.amount, item.currency)}
+                      </strong>
+                    ))}
+                  </div>
+                ) : <strong className="mt-1 block text-sm text-slate-500">No recorded value</strong>
+              ) : <strong className="mt-1 block text-xl font-bold leading-tight text-slate-950 dark:text-white">{total.toLocaleString()}</strong>}
+            </div>
+            <select
+              aria-label="CRM pipeline metric"
+              value={metric}
+              onChange={(event) => setMetric(event.target.value as 'value' | 'weighted' | 'count')}
+              className="max-w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[0.68rem] font-medium text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-slate-200"
+            >
+              <option value="value">By Value</option>
+              <option value="weighted">Weighted</option>
+              <option value="count">By count</option>
+            </select>
+          </div>
+          {metric !== 'count' && currencies.length > 1 ? (
+            <label className="mb-3 flex items-center gap-2 text-[0.68rem] text-slate-500 dark:text-slate-400">
+              Compare bars in
+              <select value={selectedCurrency} onChange={(event) => setCurrency(event.target.value)} aria-label="CRM pipeline bar currency" className="rounded-lg border border-slate-200 bg-white px-2 py-1 font-medium text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-slate-200">
+                {currencies.map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
+            </label>
+          ) : null}
+          <div className="space-y-2.5">
+            {visible.map((item, index) => (
+              <Link key={item.stageId} href={getHref(item.stageId)} title={`${item.opportunities} opportunities · ${item.averageAgeDays} average days in stage · ${item.stalledOpportunityCount} stalled · ${item.overdueOpportunityCount} overdue`} className="group grid grid-cols-[minmax(5.5rem,0.8fr)_minmax(3rem,1.1fr)_auto] items-center gap-2.5 text-[0.7rem]">
+                <span className="truncate font-medium text-slate-600 group-hover:text-blue-700 dark:text-slate-300 dark:group-hover:text-blue-300">{item.stage}</span>
+                <span className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-neutral-800">
+                  <span className="block h-full rounded-full bg-blue-600 transition-[width] duration-500" style={{ width: `${metricValue(item) > 0 ? Math.max(4, (metricValue(item) / maximum) * 100) : 0}%`, opacity: 1 - index * 0.1 }} />
+                </span>
+                {metric === 'count' ? <strong className="whitespace-nowrap text-right text-slate-900 dark:text-white">{item.opportunities}</strong> : (
+                  <span className="flex flex-col items-end text-right font-semibold text-slate-900 dark:text-white">
+                    {(metric === 'weighted' ? item.weightedAmountsByCurrency : item.amountsByCurrency)?.length
+                      ? (metric === 'weighted' ? item.weightedAmountsByCurrency : item.amountsByCurrency)?.map((value) => <span key={value.currency} className="whitespace-nowrap">{formatStageMoney(value.amount, value.currency, true)}</span>)
+                      : <span className="text-slate-400">—</span>}
+                  </span>
+                )}
+              </Link>
+            ))}
+          </div>
+          {missingCurrencyCount > 0 && metric !== 'count' ? (
+            <p className="mt-3 text-[0.65rem] text-slate-500 dark:text-slate-400">{missingCurrencyCount} opportunities without a recorded currency are excluded from value totals.</p>
+          ) : null}
+          {pipelineAsOf ? <p className="mt-2 text-[0.62rem] text-slate-400">Current-state snapshot as of {new Date(pipelineAsOf).toLocaleString()}.</p> : null}
         </div>
       )}
     </ExecutiveWidget>
@@ -247,41 +393,96 @@ export function ConversionFunnelWidget({
   data,
   href,
   getHref,
+  preferredCurrency,
+  rangeStart,
+  rangeEnd,
+  historyCoverageStart,
+  lostOpportunityCount = 0,
+  dataQualityIssues = [],
 }: {
-  data: Array<{ stage: string; count: number; conversionRate: number | null }>;
+  data: Array<{
+    stageId: string;
+    stage: string;
+    stageOrder: number;
+    count: number;
+    conversionRate: number | null;
+    overallConversionRate: number | null;
+    amountsByCurrency?: Array<{ currency: string; amount: number }>;
+    opportunitiesWithoutCurrencyCount?: number;
+  }>;
   href: string;
-  getHref: (stage: string) => string;
+  getHref: (stageId: string) => string;
+  preferredCurrency?: string;
+  rangeStart?: string;
+  rangeEnd?: string;
+  historyCoverageStart?: string | null;
+  lostOpportunityCount?: number;
+  dataQualityIssues?: string[];
 }) {
-  const maximum = Math.max(1, ...data.map((item) => item.count));
+  const currencies = Array.from(new Set(data.flatMap((item) => item.amountsByCurrency?.map((value) => value.currency) ?? []))).sort();
+  const [metric, setMetric] = useState(() => preferredCurrency && currencies.includes(preferredCurrency) ? preferredCurrency : currencies[0] ?? 'count');
+  const selectedMetric = metric === 'count' || currencies.includes(metric)
+    ? metric
+    : preferredCurrency && currencies.includes(preferredCurrency) ? preferredCurrency : currencies[0] ?? 'count';
+  const metricValue = (item: typeof data[number]) => selectedMetric === 'count'
+    ? item.count
+    : item.amountsByCurrency?.find((value) => value.currency === selectedMetric)?.amount ?? 0;
+  const visible = [...data]
+    .sort((left, right) => left.stageOrder - right.stageOrder || left.stage.localeCompare(right.stage));
+  const total = visible[0] ? metricValue(visible[0]) : 0;
+  const missingCurrencyCount = data.reduce((sum, item) => sum + (item.opportunitiesWithoutCurrencyCount ?? 0), 0);
+  const funnelColors = ['#2563eb', '#3b82f6', '#8b5cf6', '#f59e0b', '#10b981'];
+  const widths = visible.map((_, index) => Math.max(32, 100 - index * (68 / Math.max(visible.length - 1, 1))));
+  const rangeLabel = rangeStart && rangeEnd
+    ? `${new Date(rangeStart).toLocaleDateString()}–${new Date(rangeEnd).toLocaleDateString()}`
+    : null;
   return (
-    <ExecutiveWidget title="Sales Conversion Funnel" description="Lead-to-delivery conversion" href={href} actionLabel="View details">
+    <ExecutiveWidget title="Sales Conversion Funnel" description={rangeLabel ? `Stage entries during ${rangeLabel}` : 'Historical opportunity stage entries'} href={href} actionLabel="View details" className="min-h-[255px]">
       {data.length === 0 ? (
-        <DashboardEmptyState title="No funnel data yet" description="Conversion stages will appear as leads progress." href={href} actionLabel="Open leads" />
+        <DashboardEmptyState title="No funnel data yet" description="Opportunity stages will appear here once recorded." href={href} actionLabel="Open opportunities" />
       ) : (
-        <div className="grid grid-cols-[minmax(7rem,1fr)_minmax(7.5rem,0.85fr)] items-center gap-4 px-4 pb-4 pt-1 sm:px-5">
-          <div className="space-y-1.5">
-            {data.slice(0, 5).map((item, index) => {
-              const width = Math.max(32, (item.count / maximum) * 100);
+        <div className="px-4 pb-4 pt-1 sm:px-5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <span className="truncate text-[0.68rem] font-medium text-slate-500 dark:text-slate-400">
+              {selectedMetric === 'count' ? `${total} opportunities` : `${formatStageMoney(total, selectedMetric)} in selected currency`}
+            </span>
+            <select
+              aria-label="Conversion funnel metric"
+              value={selectedMetric}
+              onChange={(event) => setMetric(event.target.value)}
+              className="max-w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-[0.68rem] font-medium text-slate-700 dark:border-neutral-700 dark:bg-neutral-900 dark:text-slate-200"
+            >
+              <option value="count">By count</option>
+              {currencies.map((currency) => <option key={currency} value={currency}>{currency} value</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-[minmax(6rem,1.05fr)_minmax(8rem,0.95fr)] items-center gap-3">
+          <div className="mx-auto w-full max-w-[155px] space-y-[2px]" role="img" aria-label="Opportunity stage funnel">
+            {visible.map((item, index) => {
+              const amount = metricValue(item);
               return (
-                <Link key={item.stage} href={getHref(item.stage)} className="mx-auto block h-7 transition-transform hover:scale-[1.02]" style={{ width: `${width}%` }} aria-label={`${item.stage}: ${item.count}`}>
-                  <span
-                    className="flex h-full items-center justify-center rounded-md text-[0.65rem] font-bold text-white shadow-sm"
-                    style={{ background: `linear-gradient(90deg, ${DASHBOARD_COLORS[index % DASHBOARD_COLORS.length]}, ${DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length]})`, clipPath: 'polygon(4% 0, 96% 0, 88% 100%, 12% 100%)' }}
-                  >
-                    {item.count}
-                  </span>
-                </Link>
+                <div key={item.stageId} className="mx-auto h-6 rounded-[7px] transition-[width] duration-500" style={{ width: `${widths[index]}%`, backgroundColor: funnelColors[index % funnelColors.length], clipPath: 'polygon(2% 0, 98% 0, 89% 100%, 11% 100%)' }} aria-label={`${item.stage}: ${selectedMetric === 'count' ? `${item.count} opportunities` : formatStageMoney(amount, selectedMetric)}`} />
               );
             })}
           </div>
-          <div className="space-y-2.5">
-            {data.slice(0, 5).map((item) => (
-              <Link key={item.stage} href={getHref(item.stage)} className="grid grid-cols-[1fr_auto] gap-2 text-[0.68rem] hover:text-blue-700 dark:hover:text-blue-300">
-                <span className="truncate text-slate-600 dark:text-slate-300">{item.stage}</span>
-                <strong>{item.conversionRate === null ? '—' : `${item.conversionRate.toFixed(0)}%`}</strong>
+          <div className="space-y-[2px]">
+            {visible.map((item, index) => (
+              <Link key={item.stageId} href={getHref(item.stageId)} title={item.conversionRate === null ? 'No prior-stage denominator' : `${item.conversionRate.toFixed(1)}% from prior stage`} className="grid h-6 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md px-1 text-[0.68rem] hover:bg-blue-50 hover:text-blue-700 dark:hover:bg-blue-950/30 dark:hover:text-blue-300">
+                <span className="flex min-w-0 items-center gap-1.5"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: funnelColors[index % funnelColors.length] }} /><span className="truncate text-slate-600 dark:text-slate-300">{item.stage}</span></span>
+                <strong className="whitespace-nowrap text-slate-900 dark:text-white">
+                  {selectedMetric === 'count' ? item.count : formatStageMoney(metricValue(item), selectedMetric, true)}
+                  <span className="ml-1 font-normal text-slate-500">({item.overallConversionRate === null ? '—' : `${Math.round(item.overallConversionRate)}%`})</span>
+                </strong>
               </Link>
             ))}
           </div>
+          </div>
+          {missingCurrencyCount > 0 && selectedMetric !== 'count' ? (
+            <p className="mt-2 text-[0.65rem] text-slate-500 dark:text-slate-400">{missingCurrencyCount} opportunities without currency are excluded from value totals.</p>
+          ) : null}
+          {lostOpportunityCount > 0 ? <p className="mt-2 text-[0.65rem] text-slate-500 dark:text-slate-400">Lost during range: {lostOpportunityCount}.</p> : null}
+          {historyCoverageStart ? <p className="mt-1 text-[0.62rem] text-slate-400">Tracked stage history starts {new Date(historyCoverageStart).toLocaleDateString()}.</p> : null}
+          {dataQualityIssues.length > 0 ? <p className="mt-1 line-clamp-2 text-[0.62rem] text-amber-700 dark:text-amber-300">{dataQualityIssues[0]}</p> : null}
         </div>
       )}
     </ExecutiveWidget>
@@ -296,15 +497,19 @@ export function RiskMixWidget({
   href: string;
 }) {
   const total = data.reduce((sum, item) => sum + item.value, 0);
+  const ordered = [...data].sort((left, right) => {
+    const rank = (name: string) => name.toLowerCase().includes('critical') ? 0 : name.toLowerCase().includes('high') ? 1 : name.toLowerCase().includes('medium') ? 2 : name.toLowerCase().includes('low') ? 3 : name.toLowerCase().includes('no risk') ? 4 : 5;
+    return rank(left.name) - rank(right.name) || left.name.localeCompare(right.name);
+  });
   let cursor = 0;
-  const segments = data.map((item, index) => {
+  const segments = ordered.map((item) => {
     const start = cursor;
     cursor += total ? (item.value / total) * 100 : 0;
-    return `${DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length]} ${start}% ${cursor}%`;
+    return `${riskColor(item.name)} ${start}% ${cursor}%`;
   });
   const donutStyle: CSSProperties = { background: total ? `conic-gradient(${segments.join(',')})` : '#e2e8f0' };
   return (
-    <ExecutiveWidget title="Account Risk Mix" description="Active business-partner health" href={href} actionLabel="View accounts">
+    <ExecutiveWidget title="Account Risk Mix" description="Active business-partner health" href={href} actionLabel="View accounts" className="min-h-[255px]">
       {data.length === 0 ? (
         <DashboardEmptyState title="No account risk data yet" description="Risk bands will appear after account assessments." href={href} actionLabel="Open accounts" />
       ) : (
@@ -316,9 +521,9 @@ export function RiskMixWidget({
             </div>
           </div>
           <div className="space-y-2.5">
-            {data.slice(0, 5).map((item, index) => (
+            {ordered.slice(0, 5).map((item) => (
               <Link key={item.name} href={`${href}?healthCategory=${encodeURIComponent(item.name)}`} className="grid grid-cols-[auto_1fr_auto] items-center gap-2 text-[0.68rem] hover:text-blue-700 dark:hover:text-blue-300">
-                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: DASHBOARD_COLORS[(index + 1) % DASHBOARD_COLORS.length] }} />
+                <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: riskColor(item.name) }} />
                 <span className="truncate text-slate-600 dark:text-slate-300">{item.name}</span>
                 <strong>{item.value} <span className="font-normal text-slate-400">({total ? Math.round((item.value / total) * 100) : 0}%)</span></strong>
               </Link>

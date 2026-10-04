@@ -98,13 +98,19 @@ export interface CrmAccountOverviewDto {
   totalProjectCount: number;
   activeProjectCount: number;
   projectValue: number;
+  projectValuesByCurrency?: CrmCurrencyAmountDto[];
+  projectsWithoutCurrencyCount?: number;
   totalContractCount: number;
   activeContractCount: number;
   contractValue: number;
+  contractValuesByCurrency?: CrmCurrencyAmountDto[];
+  contractsWithoutCurrencyCount?: number;
   tenderInvitationCount: number;
   tenderBidCount: number;
   tenderAwardCount: number;
   tenderAwardedValue: number;
+  tenderAwardedValuesByCurrency?: CrmCurrencyAmountDto[];
+  tenderAwardsWithoutCurrencyCount?: number;
   hasOpenFollowUp: boolean;
   isAtRisk: boolean;
   healthScore: number;
@@ -591,6 +597,7 @@ export interface CrmCampaignDetailDto extends CrmCampaignListItemDto {
 export interface CrmOpportunityOverviewDto {
   opportunityId: string;
   name: string;
+  stageDefinitionId?: string;
   stage: string;
   amount: number;
   currency: string;
@@ -918,8 +925,13 @@ export interface CrmOverviewDto {
   openOpportunityCount: number;
   openOpportunityValue: number;
   weightedPipelineValue: number;
+  openOpportunityValuesByCurrency?: CrmCurrencyAmountDto[];
+  weightedPipelineValuesByCurrency?: CrmCurrencyAmountDto[];
+  openOpportunitiesWithoutCurrencyCount?: number;
   activeQuoteCount: number;
   activeQuoteValue: number;
+  activeQuoteValuesByCurrency?: CrmCurrencyAmountDto[];
+  activeQuotesWithoutCurrencyCount?: number;
   activeAccountCount: number;
   atRiskAccountCount: number;
   averageAccountHealthScore: number;
@@ -929,6 +941,11 @@ export interface CrmOverviewDto {
   accounts: CrmAccountOverviewDto[];
   opportunities: CrmOpportunityOverviewDto[];
   followUps: CrmFollowUpOverviewDto[];
+}
+
+export interface CrmCurrencyAmountDto {
+  currency: string;
+  amount: number;
 }
 
 export interface CrmPipelineStageReportDto {
@@ -1050,6 +1067,8 @@ export interface CrmConversionStageMetricDto {
   entityCount: number;
   relatedOpportunityCount: number;
   totalValue: number;
+  valuesByCurrency?: CrmCurrencyAmountDto[];
+  unspecifiedCurrencyCount?: number;
   conversionRate: number;
 }
 
@@ -1104,6 +1123,9 @@ export interface CrmConversionsDto {
   opportunityToProjectRate: number;
   totalOpportunityValue: number;
   weightedPipelineValue: number;
+  totalOpportunityValuesByCurrency?: CrmCurrencyAmountDto[];
+  weightedPipelineValuesByCurrency?: CrmCurrencyAmountDto[];
+  opportunitiesWithoutCurrencyCount?: number;
   funnel: CrmConversionStageMetricDto[];
   journeys: CrmConversionJourneyDto[];
   leakage: CrmConversionLeakDto[];
@@ -1197,7 +1219,8 @@ export interface CreateCrmOpportunityDto {
   description?: string;
   businessPartnerId?: string;
   leadId?: string;
-  stage: string;
+  stageDefinitionId?: string;
+  stage?: string;
   probability: number;
   amount: number;
   currency: string;
@@ -1212,6 +1235,22 @@ export interface CreateCrmOpportunityDto {
 }
 
 export type UpdateCrmOpportunityDto = CreateCrmOpportunityDto;
+
+export interface CrmOpportunityStageDefinitionDto {
+  stageId: string;
+  code: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  isClosed: boolean;
+  isWon: boolean;
+  isLost: boolean;
+  defaultProbability?: number;
+}
+
+export interface UpdateCrmOpportunityStageDto extends Omit<CrmOpportunityStageDefinitionDto, 'stageId'> {
+  stageId?: string;
+}
 
 export interface CreateCrmActivityDto {
   subject: string;
@@ -1369,6 +1408,10 @@ export interface GetCrmOpportunitiesParams {
   pageSize?: number;
   search?: string;
   stage?: string;
+  stageDefinitionId?: string;
+  reachedStageDefinitionId?: string;
+  stageEnteredFrom?: string;
+  stageEnteredTo?: string;
   businessPartnerId?: string;
   leadId?: string;
   opportunityType?: string;
@@ -1770,6 +1813,10 @@ class CrmService {
       pageSize: params.pageSize ?? 25,
       search: params.search,
       stage: params.stage,
+      stageDefinitionId: params.stageDefinitionId,
+      reachedStageDefinitionId: params.reachedStageDefinitionId,
+      stageEnteredFrom: params.stageEnteredFrom,
+      stageEnteredTo: params.stageEnteredTo,
       businessPartnerId: params.businessPartnerId,
       leadId: params.leadId,
       opportunityType: params.opportunityType,
@@ -1788,6 +1835,25 @@ class CrmService {
     });
 
     return parseResponse<CrmOpportunityDetailDto>(response, 'Failed to load CRM opportunity');
+  }
+
+  async getOpportunityStages(includeInactive = false): Promise<CrmOpportunityStageDefinitionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/crm/opportunity-stages${buildQuery({ includeInactive })}`, {
+      headers: getAuthHeaders(false),
+      cache: 'no-store',
+    });
+
+    return parseResponse<CrmOpportunityStageDefinitionDto[]>(response, 'Failed to load opportunity stages');
+  }
+
+  async updateOpportunityStages(stages: UpdateCrmOpportunityStageDto[]): Promise<CrmOpportunityStageDefinitionDto[]> {
+    const response = await fetch(`${API_BASE_URL}/crm/opportunity-stages`, {
+      method: 'PUT',
+      headers: getAuthHeaders(),
+      body: JSON.stringify({ stages }),
+    });
+
+    return parseResponse<CrmOpportunityStageDefinitionDto[]>(response, 'Failed to update opportunity stages');
   }
 
   async getQuotes(params: GetCrmQuotesParams = {}): Promise<PagedResult<CrmQuoteListItemDto>> {

@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -20,6 +21,7 @@ import {
   type CrmLeadDetailDto,
   type CrmOpportunityDetailDto,
   type CrmOpportunityListItemDto,
+  type CrmOpportunityStageDefinitionDto,
   type PagedResult,
 } from '@/services/crmService';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
@@ -45,7 +47,6 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const OPPORTUNITY_STAGE_OPTIONS = ['Prospecting', 'Qualification', 'Proposal', 'Negotiation', 'Closed Won', 'Closed Lost'];
 const OPPORTUNITY_TYPE_OPTIONS = ['New Business', 'Existing Customer', 'Renewal', 'Upsell'];
 const LEAD_SOURCE_OPTIONS = ['Referral', 'Website', 'Campaign', 'Tender', 'Partner', 'Direct', 'Unknown'];
 
@@ -59,14 +60,16 @@ const createEmptyOpportunityForm = (
   businessPartnerId?: string,
   leadId?: string,
   opportunityType?: string,
-  currency = 'GHS'
+  currency = 'GHS',
+  defaultStage?: CrmOpportunityStageDefinitionDto,
 ): CreateCrmOpportunityDto => ({
   name: '',
   description: '',
   businessPartnerId: businessPartnerId || '',
   leadId: leadId || '',
-  stage: 'Prospecting',
-  probability: 10,
+  stageDefinitionId: defaultStage?.stageId,
+  stage: defaultStage?.name,
+  probability: defaultStage?.defaultProbability ?? 10,
   amount: 0,
   currency,
   expectedCloseDate: addDays(30),
@@ -79,7 +82,7 @@ const createEmptyOpportunityForm = (
   lossReason: '',
 });
 
-const formatMoney = (value: number, currency: string = 'USD') =>
+const formatMoney = (value: number, currency: string) =>
   new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : 'None';
@@ -111,6 +114,7 @@ const buildOpportunityPayload = (form: CreateCrmOpportunityDto): CreateCrmOpport
   description: toOptionalString(form.description),
   businessPartnerId: form.businessPartnerId || undefined,
   leadId: form.leadId || undefined,
+  stageDefinitionId: form.stageDefinitionId || undefined,
   stage: form.stage,
   probability: Number(form.probability) || 0,
   amount: Number(form.amount) || 0,
@@ -130,6 +134,7 @@ const mapOpportunityToForm = (opportunity: CrmOpportunityDetailDto): CreateCrmOp
   description: opportunity.description || '',
   businessPartnerId: opportunity.businessPartnerId || '',
   leadId: opportunity.leadId || '',
+  stageDefinitionId: opportunity.stageDefinitionId,
   stage: opportunity.stage,
   probability: opportunity.probability,
   amount: opportunity.amount,
@@ -152,6 +157,7 @@ function OpportunityDialog({
   saving,
   accounts,
   leads,
+  stages,
   currencies,
   currencyLocked = false,
   inheritedLead,
@@ -170,6 +176,7 @@ function OpportunityDialog({
   saving: boolean;
   accounts: BusinessPartnerDto[];
   leads: CrmLeadListItemDto[];
+  stages: CrmOpportunityStageDefinitionDto[];
   currencies: SalesCurrencyReferenceDto[];
   currencyLocked?: boolean;
   inheritedLead?: string;
@@ -270,14 +277,24 @@ function OpportunityDialog({
 
           <div className="space-y-2">
             <Label>Stage</Label>
-            <Select value={form.stage} onValueChange={(value) => onChange('stage', value)}>
+            <Select
+              value={form.stageDefinitionId || ''}
+              onValueChange={(value) => {
+                const selected = stages.find((stage) => stage.stageId === value);
+                onChange('stageDefinitionId', value);
+                onChange('stage', selected?.name);
+                if (selected?.defaultProbability !== undefined) {
+                  onChange('probability', selected.defaultProbability);
+                }
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select stage" />
               </SelectTrigger>
               <SelectContent>
-                {OPPORTUNITY_STAGE_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
+                {stages.map((stage) => (
+                  <SelectItem key={stage.stageId} value={stage.stageId}>
+                    {stage.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -446,18 +463,25 @@ export default function CrmOpportunitiesPage() {
   const resolvedSearchParams = searchParams ?? new URLSearchParams();
   const scopedBusinessPartnerId = resolvedSearchParams.get('businessPartnerId') || '';
   const scopedLeadId = resolvedSearchParams.get('leadId') || '';
-  const requestedOpportunityId = resolvedSearchParams.get('opportunityId') || '';
+  const requestedOpportunityId = resolvedSearchParams.get('opportunityId') || resolvedSearchParams.get('id') || '';
+  const reachedStageDefinitionId = resolvedSearchParams.get('reachedStageDefinitionId') || '';
+  const stageEnteredFrom = resolvedSearchParams.get('stageEnteredFrom') || '';
+  const stageEnteredTo = resolvedSearchParams.get('stageEnteredTo') || '';
 
   const [search, setSearch] = useState(resolvedSearchParams.get('search') || '');
-  const [stage, setStage] = useState(resolvedSearchParams.get('stage') || 'all');
+  const [stageDefinitionId, setStageDefinitionId] = useState(
+    resolvedSearchParams.get('stageDefinitionId') || 'all'
+  );
   const [opportunityType, setOpportunityType] = useState(resolvedSearchParams.get('opportunityType') || 'all');
   const [page, setPage] = useState(1);
 
   const [result, setResult] = useState<PagedResult<CrmOpportunityListItemDto> | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
   const [selectedOpportunityId, setSelectedOpportunityId] = useState(requestedOpportunityId);
   const [selectedOpportunity, setSelectedOpportunity] = useState<CrmOpportunityDetailDto | null>(null);
+  const detailPanelRef = useRef<HTMLDivElement>(null);
   const requestedIdRef = useRef(requestedOpportunityId);
   requestedIdRef.current = requestedOpportunityId;
   const detailRequest = useRef(0);
@@ -472,6 +496,7 @@ export default function CrmOpportunitiesPage() {
 
   const [accounts, setAccounts] = useState<BusinessPartnerDto[]>([]);
   const [leads, setLeads] = useState<CrmLeadListItemDto[]>([]);
+  const [stages, setStages] = useState<CrmOpportunityStageDefinitionDto[]>([]);
   const [currencies, setCurrencies] = useState<SalesCurrencyReferenceDto[]>([]);
   const [scopedLead, setScopedLead] = useState<CrmLeadDetailDto | null>(null);
   const [scopedLeadError, setScopedLeadError] = useState('');
@@ -537,9 +562,10 @@ export default function CrmOpportunitiesPage() {
 
   const loadLookups = async () => {
     try {
-      const [partnerData, leadData] = await Promise.all([
+      const [partnerData, leadData, stageData] = await Promise.all([
         businessPartnerService.getAllPartnersForDropdown(),
         crmService.getLeads({ page: 1, pageSize: 100 }),
+        crmService.getOpportunityStages(),
       ]);
 
       const filteredAccounts = partnerData
@@ -549,6 +575,19 @@ export default function CrmOpportunitiesPage() {
 
       setAccounts(filteredAccounts);
       setLeads(leadData.items);
+      setStages(stageData);
+      setForm((current) => {
+        if (current.stageDefinitionId) return current;
+        const defaultStage = stageData.find((stage) => !stage.isClosed) || stageData[0];
+        return defaultStage
+          ? {
+              ...current,
+              stageDefinitionId: defaultStage.stageId,
+              stage: defaultStage.name,
+              probability: defaultStage.defaultProbability ?? current.probability,
+            }
+          : current;
+      });
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM opportunity lookups'));
     }
@@ -570,7 +609,10 @@ export default function CrmOpportunitiesPage() {
         page: requestedPage,
         pageSize: 12,
         search: search || undefined,
-        stage: stage === 'all' ? undefined : stage,
+        stageDefinitionId: stageDefinitionId === 'all' ? undefined : stageDefinitionId,
+        reachedStageDefinitionId: reachedStageDefinitionId || undefined,
+        stageEnteredFrom: stageEnteredFrom || undefined,
+        stageEnteredTo: stageEnteredTo || undefined,
         businessPartnerId: scopedBusinessPartnerId || undefined,
         leadId: scopedLeadId || undefined,
         opportunityType: opportunityType === 'all' ? undefined : opportunityType,
@@ -579,16 +621,11 @@ export default function CrmOpportunitiesPage() {
       if (requestedIdAtLoad !== requestedIdRef.current) return;
       setResult(data);
 
-      if (requestedOpportunityId && requestedPage === 1) {
-        setSelectedOpportunityId(requestedOpportunityId);
-        return;
-      }
-
-      if (selectedOpportunityId && data.items.some((item) => item.opportunityId === selectedOpportunityId)) {
-        return;
-      }
-
-      setSelectedOpportunityId(data.items[0]?.opportunityId || '');
+      setSelectedOpportunityId((current) => {
+        if (current === requestedOpportunityId && requestedOpportunityId) return current;
+        if (current && data.items.some((item) => item.opportunityId === current)) return current;
+        return data.items[0]?.opportunityId || '';
+      });
     } catch (error: unknown) {
       toast.error(getMessage(error, 'Failed to load CRM opportunities'));
     } finally {
@@ -599,6 +636,7 @@ export default function CrmOpportunitiesPage() {
   const loadOpportunityDetail = async (opportunityId: string) => {
     const request = ++detailRequest.current;
     setSelectedOpportunity(null);
+    setDetailError('');
     if (!opportunityId) {
       setDetailLoading(false);
       return;
@@ -610,7 +648,9 @@ export default function CrmOpportunitiesPage() {
       if (request === detailRequest.current) setSelectedOpportunity(detail);
     } catch (error: unknown) {
       if (request !== detailRequest.current) return;
-      toast.error(getMessage(error, 'Failed to load CRM opportunity detail'));
+      const message = getMessage(error, 'Failed to load CRM opportunity detail');
+      toast.error(message);
+      setDetailError(message);
       setSelectedOpportunity(null);
     } finally {
       if (request === detailRequest.current) setDetailLoading(false);
@@ -624,7 +664,16 @@ export default function CrmOpportunitiesPage() {
 
   useEffect(() => {
     void loadOpportunities(page);
-  }, [page, stage, scopedBusinessPartnerId, scopedLeadId, opportunityType]);
+  }, [
+    page,
+    stageDefinitionId,
+    reachedStageDefinitionId,
+    stageEnteredFrom,
+    stageEnteredTo,
+    scopedBusinessPartnerId,
+    scopedLeadId,
+    opportunityType,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -641,6 +690,12 @@ export default function CrmOpportunitiesPage() {
   }, [selectedOpportunityId]);
 
   useEffect(() => {
+    if (requestedOpportunityId && selectedOpportunity?.opportunityId === requestedOpportunityId) {
+      detailPanelRef.current?.focus();
+    }
+  }, [requestedOpportunityId, selectedOpportunity?.opportunityId]);
+
+  useEffect(() => {
     if (newRequestHandled || resolvedSearchParams.get('new') !== '1') {
       return;
     }
@@ -651,6 +706,7 @@ export default function CrmOpportunitiesPage() {
       scopedLeadId,
       resolvedSearchParams.get('opportunityType') || undefined,
       resolveOpportunityCurrency(scopedLead?.propertyEnquiryCurrency, currencies),
+      stages.find((stage) => !stage.isClosed) || stages[0],
     ));
     setFormOpen(true);
     setNewRequestHandled(true);
@@ -658,7 +714,20 @@ export default function CrmOpportunitiesPage() {
 
   const metrics = useMemo(() => {
     const items = result?.items || [];
-    const weightedValue = items.reduce((sum, item) => sum + item.weightedValue, 0);
+    const weightedByCurrency = new Map<string, number>();
+    items.forEach((item) => {
+      const currency = item.currency?.trim().toUpperCase() || resolveOpportunityCurrency(undefined, currencies);
+      weightedByCurrency.set(
+        currency,
+        (weightedByCurrency.get(currency) || 0) + item.weightedValue
+      );
+    });
+    const weightedValue = weightedByCurrency.size
+      ? Array.from(weightedByCurrency.entries())
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([currency, value]) => formatMoney(value, currency))
+          .join(' · ')
+      : formatMoney(0, resolveOpportunityCurrency(undefined, currencies));
 
     return [
       {
@@ -669,8 +738,8 @@ export default function CrmOpportunitiesPage() {
       },
       {
         label: 'Weighted Pipeline',
-        value: formatMoney(weightedValue),
-        hint: 'Current page only',
+        value: weightedValue,
+        hint: weightedByCurrency.size > 1 ? 'By currency · current page only' : 'Current page only',
         icon: TrendingUp,
       },
       {
@@ -686,7 +755,7 @@ export default function CrmOpportunitiesPage() {
         icon: Target,
       },
     ];
-  }, [result]);
+  }, [result, currencies]);
 
   const scopedAccountName = accounts.find((account) => account.id === scopedBusinessPartnerId)?.partnerName;
   const scopedLeadName =
@@ -700,6 +769,7 @@ export default function CrmOpportunitiesPage() {
       scopedLeadId,
       opportunityType !== 'all' ? opportunityType : undefined,
       resolveOpportunityCurrency(scopedLead?.propertyEnquiryCurrency, currencies),
+      stages.find((stage) => !stage.isClosed) || stages[0],
     ));
     setFormOpen(true);
   };
@@ -735,6 +805,10 @@ export default function CrmOpportunitiesPage() {
     }
     if (!form.name.trim()) {
       toast.error('Opportunity name is required.');
+      return;
+    }
+    if (!form.stageDefinitionId) {
+      toast.error('Select a configured opportunity stage.');
       return;
     }
 
@@ -789,26 +863,25 @@ export default function CrmOpportunitiesPage() {
     }
   };
 
+  const focusedOpportunity = Boolean(requestedOpportunityId && selectedOpportunityId === requestedOpportunityId);
+  const stageBadgeVariant = (id?: string): 'default' | 'destructive' | 'outline' => {
+    const configuredStage = stages.find((stage) => stage.stageId === id);
+    if (configuredStage?.isWon) return 'default';
+    if (configuredStage?.isLost) return 'destructive';
+    return 'outline';
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">CRM Opportunities</h1>
           <p className="text-muted-foreground">
-            Manage deal flow while keeping accounts anchored on BusinessPartner and leads anchored on the existing sales model.
+            Review deals, customer accounts, and next steps.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <Button asChild variant="outline">
-            <Link href="/crm/renewals">Renewals</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/crm">Back to Overview</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/crm/conversions">Conversions</Link>
-          </Button>
           <Button variant="outline" onClick={() => void loadOpportunities(page)}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
@@ -820,7 +893,20 @@ export default function CrmOpportunitiesPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <nav className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground" aria-label="Related CRM pages">
+        <Link href="/crm" className="hover:text-foreground hover:underline">Overview</Link>
+        <Link href="/crm/renewals" className="hover:text-foreground hover:underline">Renewals</Link>
+        <Link href="/crm/conversions" className="hover:text-foreground hover:underline">Conversions</Link>
+      </nav>
+
+      {focusedOpportunity ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm">
+          <span className="font-medium text-blue-900">Viewing the linked opportunity</span>
+          <Link href="/crm/opportunities" className="text-blue-700 underline">Browse all opportunities</Link>
+        </div>
+      ) : null}
+
+      {!focusedOpportunity ? <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => {
           const Icon = metric.icon;
 
@@ -837,33 +923,30 @@ export default function CrmOpportunitiesPage() {
             </Card>
           );
         })}
-      </div>
+      </div> : null}
 
-      {(scopedBusinessPartnerId || scopedLeadId || opportunityType !== 'all') ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Scoped View</CardTitle>
-            <CardDescription>
-              This workspace was opened from a CRM drill-in and is currently filtered to that context.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center gap-2">
+      {(scopedBusinessPartnerId || scopedLeadId || stageDefinitionId !== 'all' || reachedStageDefinitionId || opportunityType !== 'all') ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm" aria-label="Active opportunity scope">
             {scopedBusinessPartnerId ? <Badge variant="secondary">Account: {scopedAccountName || scopedBusinessPartnerId}</Badge> : null}
             {scopedLeadId ? <Badge variant="secondary">Lead: {scopedLeadName || scopedLeadId}</Badge> : null}
+            {stageDefinitionId !== 'all' ? (
+              <Badge variant="secondary">
+                Stage: {stages.find((stage) => stage.stageId === stageDefinitionId)?.name || stageDefinitionId}
+              </Badge>
+            ) : null}
+            {reachedStageDefinitionId ? (
+              <Badge variant="secondary">
+                Reached: {stages.find((stage) => stage.stageId === reachedStageDefinitionId)?.name || reachedStageDefinitionId}
+              </Badge>
+            ) : null}
             {opportunityType !== 'all' ? <Badge variant="secondary">Type: {opportunityType}</Badge> : null}
             <Button asChild variant="link" className="px-0">
               <Link href="/crm/opportunities">Clear scope</Link>
             </Button>
-          </CardContent>
-        </Card>
+        </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Filters</CardTitle>
-          <CardDescription>Search the opportunity list and focus on specific pipeline stages or commercial types.</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-[1.4fr_0.8fr_0.8fr]">
+      {!focusedOpportunity ? <div className="grid gap-3 rounded-lg border bg-card p-3 md:grid-cols-[1.4fr_0.8fr_0.8fr]" aria-label="Opportunity filters">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-muted-foreground" />
             <Input
@@ -874,18 +957,18 @@ export default function CrmOpportunitiesPage() {
             />
           </div>
 
-          <Select value={stage} onValueChange={(value) => {
+          <Select value={stageDefinitionId} onValueChange={(value) => {
             setPage(1);
-            setStage(value);
+            setStageDefinitionId(value);
           }}>
             <SelectTrigger>
               <SelectValue placeholder="Filter by stage" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All stages</SelectItem>
-              {OPPORTUNITY_STAGE_OPTIONS.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option}
+              {stages.map((stage) => (
+                <SelectItem key={stage.stageId} value={stage.stageId}>
+                  {stage.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -907,11 +990,10 @@ export default function CrmOpportunitiesPage() {
               ))}
             </SelectContent>
           </Select>
-        </CardContent>
-      </Card>
+      </div> : null}
 
-      <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
-        <Card>
+      <div className="flex flex-col gap-4">
+        <Card className={focusedOpportunity ? 'order-2' : ''}>
           <CardHeader>
             <CardTitle>Pipeline Queue</CardTitle>
             <CardDescription>
@@ -951,7 +1033,7 @@ export default function CrmOpportunitiesPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-2">
-                          <Badge variant={opportunity.stage === 'Closed Won' ? 'default' : opportunity.stage === 'Closed Lost' ? 'destructive' : 'outline'}>
+                          <Badge variant={stageBadgeVariant(opportunity.stageDefinitionId)}>
                             {opportunity.stage}
                           </Badge>
                           {opportunity.isClosingSoon ? <Badge variant="secondary">Closing Soon</Badge> : null}
@@ -1019,15 +1101,21 @@ export default function CrmOpportunitiesPage() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card ref={detailPanelRef} tabIndex={-1} className={focusedOpportunity ? 'order-1 focus-visible:ring-2 focus-visible:ring-blue-500' : ''}>
           <CardHeader>
-            <CardTitle>Opportunity Detail</CardTitle>
-            <CardDescription>Inspect account, lead, commercial notes, and close timing for the selected deal.</CardDescription>
+            <CardTitle>{focusedOpportunity ? 'Linked Opportunity' : 'Opportunity Detail'}</CardTitle>
+            <CardDescription>Account, value, timing, and related work for the selected deal.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {detailLoading ? <div className="py-16 text-center text-muted-foreground">Loading opportunity detail...</div> : null}
 
-            {!detailLoading && !selectedOpportunity ? (
+            {!detailLoading && detailError ? (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                {detailError}
+              </div>
+            ) : null}
+
+            {!detailLoading && !selectedOpportunity && !detailError ? (
               <div className="py-16 text-center text-muted-foreground">Select an opportunity to inspect and manage it.</div>
             ) : null}
 
@@ -1041,13 +1129,7 @@ export default function CrmOpportunitiesPage() {
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Badge
-                      variant={selectedOpportunity.stage === 'Closed Won'
-                        ? 'default'
-                        : selectedOpportunity.stage === 'Closed Lost'
-                          ? 'destructive'
-                          : 'outline'}
-                    >
+                    <Badge variant={stageBadgeVariant(selectedOpportunity.stageDefinitionId)}>
                       {selectedOpportunity.stage}
                     </Badge>
                     {selectedOpportunity.isClosingSoon ? <Badge variant="secondary">Closing Soon</Badge> : null}
@@ -1139,12 +1221,15 @@ export default function CrmOpportunitiesPage() {
                   </div>
                 ) : null}
 
-                <div className="grid gap-3 lg:grid-cols-2">
+                <Tabs key={selectedOpportunity.opportunityId} defaultValue="conversion" className="space-y-3">
+                  <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+                    <TabsTrigger value="conversion">Conversion Chain ({selectedOpportunity.conversionChain.nodes.length})</TabsTrigger>
+                    <TabsTrigger value="quotes">Quotes ({selectedOpportunity.quotes.length})</TabsTrigger>
+                    <TabsTrigger value="contracts">Related Contracts ({selectedOpportunity.relatedContracts.length})</TabsTrigger>
+                    <TabsTrigger value="projects">Related Projects ({selectedOpportunity.relatedProjects.length})</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="quotes">
                   <div className="rounded-lg border p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="font-medium">Quotes</div>
-                      <Badge variant="outline">{selectedOpportunity.quotes.length}</Badge>
-                    </div>
                     {!selectedOpportunity.quotes.length ? (
                       <div className="text-sm text-muted-foreground">No quotes are linked to this opportunity yet.</div>
                     ) : (
@@ -1177,11 +1262,9 @@ export default function CrmOpportunitiesPage() {
                     )}
                   </div>
 
+                  </TabsContent>
+                  <TabsContent value="conversion">
                   <div className="rounded-lg border p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="font-medium">Conversion Chain</div>
-                      <Badge variant="outline">{selectedOpportunity.conversionChain.nodes.length} steps</Badge>
-                    </div>
                     {!selectedOpportunity.conversionChain.nodes.length ? (
                       <div className="text-sm text-muted-foreground">No conversion chain has been assembled yet.</div>
                     ) : (
@@ -1220,14 +1303,11 @@ export default function CrmOpportunitiesPage() {
                       </div>
                     )}
                   </div>
-                </div>
 
-                <div className="grid gap-3 lg:grid-cols-2">
+                  </TabsContent>
+
+                  <TabsContent value="contracts">
                   <div className="rounded-lg border p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="font-medium">Related Contracts</div>
-                      <Badge variant="outline">{selectedOpportunity.relatedContracts.length}</Badge>
-                    </div>
                     {!selectedOpportunity.relatedContracts.length ? (
                       <div className="text-sm text-muted-foreground">No related contracts are linked yet.</div>
                     ) : (
@@ -1256,11 +1336,9 @@ export default function CrmOpportunitiesPage() {
                     )}
                   </div>
 
+                  </TabsContent>
+                  <TabsContent value="projects">
                   <div className="rounded-lg border p-4">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div className="font-medium">Related Projects</div>
-                      <Badge variant="outline">{selectedOpportunity.relatedProjects.length}</Badge>
-                    </div>
                     {!selectedOpportunity.relatedProjects.length ? (
                       <div className="text-sm text-muted-foreground">No related projects are linked yet.</div>
                     ) : (
@@ -1288,7 +1366,8 @@ export default function CrmOpportunitiesPage() {
                       </div>
                     )}
                   </div>
-                </div>
+                  </TabsContent>
+                </Tabs>
               </>
             ) : null}
           </CardContent>
@@ -1303,6 +1382,7 @@ export default function CrmOpportunitiesPage() {
         saving={saving}
         accounts={accounts}
         leads={leads}
+        stages={stages}
         currencies={currencies}
         currencyLocked={
           formMode === 'create' &&

@@ -181638,6 +181638,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("StageDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -181660,11 +181663,165 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AssignedToId");
 
+                    b.HasIndex("CustomerId");
+
                     b.HasIndex("LeadId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("StageDefinitionId");
+
+                    b.HasIndex("TenantId", "ExpectedCloseDate", "IsDeleted");
+
+                    b.HasIndex("TenantId", "StageDefinitionId", "IsDeleted");
 
                     b.ToTable("Opportunities", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.OpportunityStageDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("DefaultProbability")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsClosed")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsLost")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsWon")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "SortOrder");
+
+                    b.ToTable("OpportunityStageDefinitions", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OpportunityStageDefinition_Outcome", "NOT ([IsWon] = 1 AND [IsLost] = 1) AND ([IsWon] = 0 OR [IsClosed] = 1) AND ([IsLost] = 0 OR [IsClosed] = 1)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.OpportunityStageHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AmountSnapshot")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencySnapshot")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("EnteredAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsLegacySnapshot")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OpportunityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ProbabilitySnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("StageDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OpportunityId");
+
+                    b.HasIndex("StageDefinitionId");
+
+                    b.HasIndex("TenantId", "EnteredAt", "StageDefinitionId");
+
+                    b.HasIndex("TenantId", "OpportunityId", "EnteredAt");
+
+                    b.ToTable("OpportunityStageHistories", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.PaymentPlan", b =>
@@ -184398,6 +184555,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<int>("JwtTokenLifetimeMinutes")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LoginPageStyle")
                         .HasColumnType("int");
 
                     b.Property<Guid?>("LastModifiedById")
@@ -240209,10 +240369,20 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("AssignedToId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.BusinessPartner", "BusinessPartner")
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Sales.Lead", "Lead")
                         .WithMany("Opportunities")
                         .HasForeignKey("LeadId")
                         .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("ErpSystem.Core.Entities.Sales.OpportunityStageDefinition", "StageDefinition")
+                        .WithMany("Opportunities")
+                        .HasForeignKey("StageDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -240222,7 +240392,49 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("AssignedTo");
 
+                    b.Navigation("BusinessPartner");
+
                     b.Navigation("Lead");
+
+                    b.Navigation("StageDefinition");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.OpportunityStageDefinition", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.OpportunityStageHistory", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Sales.Opportunity", "Opportunity")
+                        .WithMany("StageHistory")
+                        .HasForeignKey("OpportunityId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Sales.OpportunityStageDefinition", "StageDefinition")
+                        .WithMany("History")
+                        .HasForeignKey("StageDefinitionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Opportunity");
+
+                    b.Navigation("StageDefinition");
 
                     b.Navigation("Tenant");
                 });
@@ -245869,6 +246081,15 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Activities");
 
                     b.Navigation("Quotes");
+
+                    b.Navigation("StageHistory");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.OpportunityStageDefinition", b =>
+                {
+                    b.Navigation("History");
+
+                    b.Navigation("Opportunities");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.PaymentPlan", b =>

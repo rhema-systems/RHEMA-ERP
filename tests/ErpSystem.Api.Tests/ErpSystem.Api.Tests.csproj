@@ -65,6 +65,7 @@
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
+    <Compile Include="Controllers\Settings\LoginAppearanceSettingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\UserTenantMappingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\InternalUserCredentialsControllerTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
@@ -84,6 +85,7 @@
     <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactContractTests.cs" />
     <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactControllerTests.cs" />
     <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
+    <Compile Include="Controllers\Ehc\EhcPropertyEnquiriesListTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinanceApprovalInvoiceProducerRouteTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />

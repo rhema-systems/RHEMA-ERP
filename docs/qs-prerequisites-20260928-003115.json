@@ -1,0 +1,274 @@
+﻿{
+    "Database":  "RhemaERP_VpsTest_20260926_173800",
+    "CapturedUtc":  "2026-09-28T00:31:15.2197838Z",
+    "ReadOnly":  true,
+    "OperationalBaseline":  {
+                                "Counts":  {
+                                               "Actors":  16,
+                                               "Bins":  3,
+                                               "CanonicalSuppliers":  2,
+                                               "Categories":  6,
+                                               "Items":  9,
+                                               "ItemUomLinks":  9,
+                                               "LegacySuppliers":  0,
+                                               "Responsibilities":  8,
+                                               "ResponsibilityWarehouses":  9,
+                                               "RoleLinks":  34,
+                                               "SupplierApProfiles":  2,
+                                               "SupplierRoles":  2,
+                                               "TenantMemberships":  16,
+                                               "UnitsOfMeasure":  5,
+                                               "Warehouses":  2
+                                           },
+                                "Fingerprint":  "D05E7069B4DED2E5364C6BB5AC45071EB6F3FD31A06ED8A40DCAB8921E533036",
+                                "Failures":  [
+
+                                             ],
+                                "Ready":  true
+                            },
+    "Prerequisites":  [
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "admin",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "ap.officer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "finance.manager",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "financeapprover",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "financereviewer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementevaluator",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementofficer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "tdc0102-checker-201531",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.contractor",
+                              "Finding":  "Missing"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "admin",
+                              "Finding":  "SuperAdmin"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "admin",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "Accounts Payable Officer"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "TDC_HEAD_OF_PROCUREMENT"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "TDC_STORES_MANAGER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "finance.manager",
+                              "Finding":  "Finance Manager"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "finance.manager",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "financeapprover",
+                              "Finding":  "Finance User"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "financereviewer",
+                              "Finding":  "TDC_FINANCE_REVIEWER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "Procurement User"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "TDC_HEAD_OF_PROCUREMENT"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "TDC_STORES_MANAGER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementevaluator",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementofficer",
+                              "Finding":  "TDC_PROCUREMENT_OFFICER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "tdc0102-checker-201531",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "Manager"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "Employee"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "Employee"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Contractor partner",
+                              "Reference":  "uat.qs.contractor",
+                              "Finding":  "Missing active partner link; external portal bid cannot be verified"
+                          },
+                          {
+                              "Category":  "QS profile",
+                              "Reference":  "DEFAULT",
+                              "Finding":  "No published effective QS configuration profile"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_BOQ",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_CLAIM",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_ESTIMATE",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_FINAL_ACCOUNT",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_MEASUREMENT",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_PAYMENT_CERTIFICATE",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_RETENTION_RELEASE",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_VALUATION",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_VARIATION",
+                              "Finding":  "No active published definition; inspect configured QS decision binding"
+                          }
+                      ],
+    "QsEndToEndVerified":  false,
+    "Pending":  [
+                    "Verify actual stage permissions and project/contract assignments",
+                    "Confirm approved budget, accounting mappings and open Finance period",
+                    "Confirm current rates, authority limits and QS decision bindings",
+                    "Verify scanner/DMS upload and download",
+                    "Execute fresh A-E records and the authorised F Finance boundary in the HTML walkthrough"
+                ]
+}

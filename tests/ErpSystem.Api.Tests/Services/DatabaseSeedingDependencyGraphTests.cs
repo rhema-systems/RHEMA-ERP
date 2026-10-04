@@ -35,7 +35,8 @@ public sealed class DatabaseSeedingDependencyGraphTests
             .OrderBy(type => type.FullName, StringComparer.Ordinal)
             .ToArray();
 
-        registeredSeederTypes.Should().HaveCount(11);
+        registeredSeederTypes.Should().HaveCount(12);
+        registeredSeederTypes.Should().Contain(typeof(PaymentTermBaselineSeeder));
 
         using var provider = services.BuildServiceProvider(new ServiceProviderOptions
         {

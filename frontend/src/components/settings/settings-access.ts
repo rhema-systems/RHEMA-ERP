@@ -219,6 +219,10 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     'settings.read',
     'settings.update',
   ]),
+  anyAccess(exactPath('/administration/settings/security'), [
+    'settings.read',
+    'settings.update',
+  ]),
   anyAccess(exactPath('/administration/reports'), ['reports.create']),
   anyAccess(exactPath('/administration/identity-management/users'), [
     'users.read',

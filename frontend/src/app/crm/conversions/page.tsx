@@ -9,14 +9,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { crmService, type CrmConversionsDto } from '@/services/crmService';
+import { formatCrmAmount, formatCrmCurrencyTotals, formatCrmMissingCurrencyCount } from '../crmMoney';
 import { BarChart3, BriefcaseBusiness, FileText, RefreshCw, TrendingUp, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MONTH_OPTIONS = [3, 6, 12];
 const OPPORTUNITY_TYPE_OPTIONS = ['New Business', 'Existing Customer', 'Renewal', 'Upsell'];
-
-const formatMoney = (value: number, currency: string = 'USD') =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value);
 
 const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : 'None';
 const formatPercent = (value: number) => `${value.toFixed(1)}%`;
@@ -75,6 +73,7 @@ export default function CrmConversionsPage() {
         businessPartnerId: scopedBusinessPartnerId || undefined,
       }));
     } catch (error: unknown) {
+      setConversions(null);
       toast.error(getMessage(error, 'Failed to load CRM conversions'));
     } finally {
       setLoading(false);
@@ -246,7 +245,12 @@ export default function CrmConversionsPage() {
                         <TableCell className="font-medium">{stage.stage}</TableCell>
                         <TableCell>{stage.entityCount}</TableCell>
                         <TableCell>{stage.relatedOpportunityCount}</TableCell>
-                        <TableCell className="text-right">{formatMoney(stage.totalValue)}</TableCell>
+                        <TableCell className="text-right">
+                          <div>{formatCrmCurrencyTotals(stage.valuesByCurrency)}</div>
+                          {formatCrmMissingCurrencyCount(stage.unspecifiedCurrencyCount) ? (
+                            <div className="text-xs text-muted-foreground">{formatCrmMissingCurrencyCount(stage.unspecifiedCurrencyCount)}</div>
+                          ) : null}
+                        </TableCell>
                         <TableCell className="text-right">{formatPercent(stage.conversionRate)}</TableCell>
                       </TableRow>
                     ))}
@@ -263,10 +267,13 @@ export default function CrmConversionsPage() {
               <CardContent className="space-y-3">
                 <div className="rounded-lg border p-4">
                   <div className="text-xs uppercase tracking-wide text-muted-foreground">Weighted Pipeline</div>
-                  <div className="mt-2 text-2xl font-semibold">{formatMoney(conversions.weightedPipelineValue)}</div>
+                  <div className="mt-2 break-words text-2xl font-semibold">{formatCrmCurrencyTotals(conversions.weightedPipelineValuesByCurrency)}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    {formatMoney(conversions.totalOpportunityValue)} total opportunity value in the current chain window
+                    {formatCrmCurrencyTotals(conversions.totalOpportunityValuesByCurrency)} total opportunity value in the current chain window
                   </div>
+                  {formatCrmMissingCurrencyCount(conversions.opportunitiesWithoutCurrencyCount) ? (
+                    <div className="mt-1 text-xs text-muted-foreground">{formatCrmMissingCurrencyCount(conversions.opportunitiesWithoutCurrencyCount)}</div>
+                  ) : null}
                 </div>
 
                 {!conversions.leakage.length ? (
@@ -288,7 +295,7 @@ export default function CrmConversionsPage() {
                       <div className="mt-3 text-sm text-muted-foreground">{item.leakageReason}</div>
                       <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                         <div>
-                          {item.amount !== undefined ? formatMoney(item.amount, item.currency || 'USD') : 'No amount recorded'}
+                          {item.amount !== undefined ? formatCrmAmount(item.amount, item.currency) : 'No amount recorded'}
                           {item.referenceDate ? ` | ${formatDate(item.referenceDate)}` : ''}
                         </div>
                         <Link href={resolveLeakHref(item.entityType, item.entityId)} className="font-medium text-foreground hover:underline">
@@ -348,7 +355,7 @@ export default function CrmConversionsPage() {
                         <TableCell className="text-right">
                           <div>{formatDate(journey.expectedCloseDate)}</div>
                           <div className="text-xs text-muted-foreground">
-                            {formatMoney(journey.weightedValue, journey.currency)} weighted
+                            {formatCrmAmount(journey.weightedValue, journey.currency)} weighted
                           </div>
                         </TableCell>
                       </TableRow>
@@ -396,7 +403,7 @@ export default function CrmConversionsPage() {
                         <TableCell className="text-right">
                           <div>{item.referenceDate ? formatDate(item.referenceDate) : 'None'}</div>
                           <div className="text-xs text-muted-foreground">
-                            {item.amount !== undefined ? formatMoney(item.amount, item.currency || 'USD') : 'No amount'}
+                            {item.amount !== undefined ? formatCrmAmount(item.amount, item.currency) : 'No amount'}
                           </div>
                         </TableCell>
                       </TableRow>

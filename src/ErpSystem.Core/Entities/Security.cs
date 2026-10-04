@@ -95,6 +95,9 @@ public class Security : BaseEntity
     [StringLength(2048)]
     public string? PrivacyPolicyUrl { get; set; }
 
+    // Public login appearance. The default remains usable when a tenant has not configured it yet.
+    public LoginPageStyle LoginPageStyle { get; set; } = LoginPageStyle.LightCorporate;
+
     // Tenant association
     public Guid TenantId { get; set; }
     public virtual Tenant Tenant { get; set; } = null!;

@@ -27,6 +27,10 @@ export function PropertyEnquiryDetails({
             {property.listingReference} · {property.listingType}
           </p>
           <p className="text-sm">
+            <span className="font-medium">Asset type:</span>{' '}
+            {property.assetType || 'Not recorded'}
+          </p>
+          <p className="text-sm">
             {property.location || 'Location not recorded'}
           </p>
           <p className="font-medium">
@@ -73,9 +77,13 @@ export function PropertyEnquiryDetails({
           <p>
             <span className="font-medium">Business partner:</span>{' '}
             {prospect?.businessPartnerId
-              ? `Linked (${prospect.businessPartnerId})`
+              ? prospect.businessPartnerName ||
+                (property?.businessPartnerId === prospect.businessPartnerId
+                  ? property.businessPartnerName
+                  : null) ||
+                'Linked customer'
               : property?.businessPartnerId
-                ? property.businessPartnerName
+                ? property.businessPartnerName || 'Linked customer'
                 : 'Public prospect — not linked'}
           </p>
           {prospect?.businessPartnerLinkedAt ? (

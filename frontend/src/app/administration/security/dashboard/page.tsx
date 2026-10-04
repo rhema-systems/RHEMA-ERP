@@ -18,12 +18,14 @@ import { TwoFactorAuth } from '../../../../components/security/TwoFactorAuth'
 import { AuditLog } from '../../../../components/security/AuditLog'
 import { DeviceManagement } from '../../../../components/security/DeviceManagement'
 import { SecurityPolicies } from '../../../../components/security/SecurityPolicies'
+import { LoginAppearanceSettings } from '../../../../components/security/LoginAppearanceSettings'
 import { SessionManagementTab } from '@/components/admin/SessionManagementTab';
 import { useToast } from '../../../../hooks/use-toast'
+import { useAuth } from '../../../../hooks/use-auth'
 import { settingsService } from '../../../../services/settings'
 import { securityService, type SecurityMetrics, type SecurityAlert } from '../../../../services/security'
 import { authService } from '../../../../services/auth'
-import type { SecuritySettings as SecuritySettingsDto } from '../../../../services/settings'
+import type { LoginPageStyle, SecuritySettings as SecuritySettingsDto } from '../../../../services/settings'
 import { 
   Shield, 
   Users, 
@@ -42,7 +44,8 @@ import {
   Bot,
   Save,
   Loader2,
-  Monitor
+  Monitor,
+  MonitorCog
 } from 'lucide-react'
 import { ClientOnly } from '../../../../components/ui/client-only'
 
@@ -173,16 +176,30 @@ const toSecuritySettingsDto = (
 
 export default function SecurityDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview')
+  const [settingsTab, setSettingsTab] = useState('password')
+  const [selectedLoginPageStyle, setSelectedLoginPageStyle] = useState<LoginPageStyle>('LightCorporate')
   const [realTimeAlerts, setRealTimeAlerts] = useState<SecurityAlert[]>([])
   const [realTimeMetrics, setRealTimeMetrics] = useState<SecurityMetrics | null>(null)
   const { toast } = useToast()
   const queryClient = useQueryClient()
+  const { hasAnyRole } = useAuth()
+  const canManageLoginAppearance = hasAnyRole(['SuperAdmin', 'TenantAdmin'])
   const currentUser = authService.getStoredUser()
 
   // Fetch current security settings
   const { data: settings, isLoading: settingsLoading, error: settingsError } = useQuery({
     queryKey: ['securitySettings'],
     queryFn: () => settingsService.getSecuritySettings(),
+  })
+
+  const {
+    data: loginAppearance,
+    isLoading: isLoginAppearanceLoading,
+    isError: isLoginAppearanceError,
+  } = useQuery({
+    queryKey: ['loginAppearanceSettings'],
+    queryFn: () => settingsService.getLoginAppearance(),
+    enabled: canManageLoginAppearance,
   })
 
   // Fetch security metrics
@@ -240,6 +257,22 @@ export default function SecurityDashboardPage() {
     reset(toSecuritySettingsFormValues(settings))
   }, [settings, reset])
 
+  useEffect(() => {
+    if (loginAppearance) {
+      setSelectedLoginPageStyle(loginAppearance.loginPageStyle)
+    }
+  }, [loginAppearance])
+
+  useEffect(() => {
+    const parameters = new URLSearchParams(window.location.search)
+    if (parameters.get('tab') === 'settings') {
+      setActiveTab('settings')
+    }
+    if (parameters.get('section') === 'appearance' && canManageLoginAppearance) {
+      setSettingsTab('appearance')
+    }
+  }, [canManageLoginAppearance])
+
   // Setup real-time security data subscriptions
   useEffect(() => {
     // Subscribe to real-time security alerts
@@ -269,9 +302,28 @@ export default function SecurityDashboardPage() {
 
   // Settings update mutation
   const updateMutation = useMutation({
-    mutationFn: (data: SecuritySettingsDto) => settingsService.updateSecuritySettings(data),
+    mutationFn: async ({
+      securitySettings,
+      loginPageStyle,
+    }: {
+      securitySettings?: SecuritySettingsDto
+      loginPageStyle?: LoginPageStyle
+    }) => {
+      const updates: Promise<unknown>[] = []
+
+      if (securitySettings) {
+        updates.push(settingsService.updateSecuritySettings(securitySettings))
+      }
+
+      if (loginPageStyle) {
+        updates.push(settingsService.updateLoginAppearance({ loginPageStyle }))
+      }
+
+      await Promise.all(updates)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['securitySettings'] })
+      queryClient.invalidateQueries({ queryKey: ['loginAppearanceSettings'] })
       toast({
         title: 'Settings Updated',
         description: 'Security settings have been updated successfully.',
@@ -288,7 +340,12 @@ export default function SecurityDashboardPage() {
   })
 
   const onSubmit = (data: SecuritySettingsFormValues) => {
-    updateMutation.mutate(toSecuritySettingsDto(data))
+    if (settingsTab === 'appearance' && canManageLoginAppearance && loginAppearance) {
+      updateMutation.mutate({ loginPageStyle: selectedLoginPageStyle })
+      return
+    }
+
+    updateMutation.mutate({ securitySettings: toSecuritySettingsDto(data) })
   }
 
   // Alert dismiss functionality
@@ -932,8 +989,8 @@ export default function SecurityDashboardPage() {
               <div className="border-t border-slate-200 dark:border-slate-700 mb-6"></div>
             </div>
             
-            <Tabs defaultValue="password">
-              <TabsList className="grid grid-cols-5 gap-1 h-10 bg-slate-50 dark:bg-slate-900 p-1 rounded-md border shadow-sm">
+            <Tabs value={settingsTab} onValueChange={setSettingsTab}>
+              <TabsList className={`grid h-auto grid-cols-2 gap-1 bg-slate-50 p-1 shadow-sm md:grid-cols-3 dark:bg-slate-900 ${canManageLoginAppearance ? 'xl:grid-cols-6' : 'xl:grid-cols-5'}`}>
                 <TabsTrigger value="password" className="flex items-center gap-2 text-sm data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:border-blue-200 dark:data-[state=active]:bg-blue-900 dark:data-[state=active]:text-blue-100 data-[state=active]:shadow-none">
                   <Key className="h-4 w-4" />
                   Password
@@ -950,6 +1007,12 @@ export default function SecurityDashboardPage() {
                   <Bot className="h-4 w-4" />
                   reCAPTCHA
                 </TabsTrigger>
+                {canManageLoginAppearance && (
+                  <TabsTrigger value="appearance" className="flex items-center gap-2 text-sm data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:border-blue-200 dark:data-[state=active]:bg-blue-900 dark:data-[state=active]:text-blue-100 data-[state=active]:shadow-none">
+                    <MonitorCog className="h-4 w-4" />
+                    Login Appearance
+                  </TabsTrigger>
+                )}
                 <TabsTrigger value="legal" className="flex items-center gap-2 text-sm data-[state=active]:bg-blue-50 data-[state=active]:text-blue-700 data-[state=active]:border-blue-200 dark:data-[state=active]:bg-blue-900 dark:data-[state=active]:text-blue-100 data-[state=active]:shadow-none">
                   <FileText className="h-4 w-4" />
                   Legal
@@ -1378,6 +1441,22 @@ export default function SecurityDashboardPage() {
                   </CardContent>
                 </Card>
               </TabsContent>
+
+              {canManageLoginAppearance && (
+                <TabsContent value="appearance">
+                  <LoginAppearanceSettings
+                    value={selectedLoginPageStyle}
+                    onValueChange={setSelectedLoginPageStyle}
+                    disabled={updateMutation.isPending}
+                    isLoading={isLoginAppearanceLoading}
+                    errorMessage={
+                      isLoginAppearanceError
+                        ? 'Login appearance settings could not be loaded. Refresh the page and try again.'
+                        : null
+                    }
+                  />
+                </TabsContent>
+              )}
             </Tabs>
           </form>
         </TabsContent>

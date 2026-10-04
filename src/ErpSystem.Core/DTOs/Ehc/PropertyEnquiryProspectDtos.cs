@@ -28,7 +28,7 @@ public sealed class QualifyPropertyEnquiryRequest
 {
     [Range(1, 100)] public int QualificationScore { get; set; } = 40;
     [Range(0.01, 999999999999.99)] public decimal AgreedAmount { get; set; }
-    [Required, RegularExpression("^[A-Za-z]{3}$")] public string Currency { get; set; } = "GHS";
+    [RegularExpression("^[A-Za-z]{3}$")] public string? Currency { get; set; }
     [StringLength(2000)] public string? Notes { get; set; }
 }
 
@@ -45,7 +45,7 @@ public sealed class DisqualifyPropertyEnquiryRequest
 public sealed class CreatePropertyEnquiryOpportunityRequest
 {
     [Range(0.01, 999999999999.99)] public decimal Amount { get; set; }
-    [Required, RegularExpression("^[A-Za-z]{3}$")] public string Currency { get; set; } = "GHS";
+    [RegularExpression("^[A-Za-z]{3}$")] public string? Currency { get; set; }
     public DateTime ExpectedCloseDate { get; set; }
     public bool ReserveProperty { get; set; } = true;
     [Range(1, 365)] public int ReservationDays { get; set; } = 14;

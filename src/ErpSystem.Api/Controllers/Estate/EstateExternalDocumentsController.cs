@@ -2944,9 +2944,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 await _db.SaveChangesAsync(cancellationToken);
             }
 
-            await _db.EhcPublicPropertyEnquiryVerifications
-                .Where(item => item.Id == grant.Id && item.ContactId == null)
-                .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ContactId, publicContact.Id), cancellationToken);
+            if (!grant.ContactId.HasValue)
+            {
+                await _db.EhcPublicPropertyEnquiryVerifications
+                    .Where(item => item.Id == grant.Id && item.ContactId == null)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ContactId, publicContact.Id), cancellationToken);
+            }
             await LinkHistoricalPublicEnquiriesAsync(publicContact, cancellationToken);
 
             var reference = demarcationListing is null ? asset.AssetCode

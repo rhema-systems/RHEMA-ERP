@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Api.Controllers.Estate;
 using ErpSystem.Api.Controllers.Ehc;
@@ -15,6 +17,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -83,6 +86,46 @@ public sealed class PropertyListingEnquiryTests
         db.AddRange(asset, portion, partner, new EhcTicketCategory { TenantId = tenantId, Code = "PROPERTY-LISTING", Name = "Property enquiry", AppliesToType = EhcTicketType.Enquiry });
         await db.SaveChangesAsync(); return (asset, portion, partner);
     }
+
+    private async Task<string> SeedVerifiedPublicContactAsync(
+        ApplicationDbContext db,
+        Guid listingId,
+        Guid submissionId,
+        string email)
+    {
+        const string token = "verified-contact-token-for-property-enquiry";
+        var normalizedContact = email.Trim().ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        var contact = new EhcPublicPropertyEnquiryContact
+        {
+            TenantId = tenantId,
+            Channel = "Email",
+            NormalizedContact = normalizedContact,
+            ContactName = "Ama Mensah",
+            LastVerifiedAtUtc = now
+        };
+        var grant = new EhcPublicPropertyEnquiryVerification
+        {
+            TenantId = tenantId,
+            ListingId = listingId,
+            Channel = "Email",
+            ContactHash = Hash(normalizedContact),
+            RequestedAtUtc = now,
+            VerifiedAtUtc = now,
+            ExpiresAtUtc = now.AddMinutes(10),
+            VerificationTokenHash = Hash(token),
+            Contact = contact,
+            ContactId = contact.Id,
+            ConsumedAtUtc = now,
+            ConsumedSubmissionId = submissionId
+        };
+        db.AddRange(contact, grant);
+        await db.SaveChangesAsync();
+        return token;
+    }
+
+    private static string Hash(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     [Theory]
     [InlineData(EstateManagedAssetType.Land, "land-management", true)]
@@ -246,7 +289,8 @@ public sealed class PropertyListingEnquiryTests
             ContactName = "Ama Mensah",
             ContactEmail = "ama@example.com",
             ContactPhone = "+233 20 555 0101",
-            PreferredContactMethod = "InternalWorkflow"
+            PreferredContactMethod = "InternalWorkflow",
+            ContactVerificationToken = "12345678901234567890123456789012"
         };
         var submissionValidationResults = new List<ValidationResult>();
         Assert.False(Validator.TryValidateObject(
@@ -403,18 +447,20 @@ public sealed class PropertyListingEnquiryTests
                 })
             .ReturnsAsync(new EhcTicketDetailDto { TicketNumber = "EHC-PUBLIC-001" });
 
+        var submissionId = Guid.NewGuid();
+        var verificationToken = await SeedVerifiedPublicContactAsync(
+            db, seeded.Portion.Id, submissionId, "ama@example.test");
         var result = await Controller(db, tickets).CreatePublicListingEnquiry(
             seeded.Portion.Id,
             new PublicPropertyListingEnquiryRequestDto
             {
-                SubmissionId = Guid.NewGuid(),
+                SubmissionId = submissionId,
                 Message = "  Please send the deposit and viewing details.  ",
                 ContactName = "  Ama Mensah  ",
                 ContactEmail = "ama@example.test",
-                ContactPhone = "  +233 24 555 0101  ",
                 PreferredContactMethod = "Email",
-                AlternativePhoneNumber = "+233 50 100 2000",
-                ContactReference = "  GH-REF-100  "
+                ContactReference = "  GH-REF-100  ",
+                ContactVerificationToken = verificationToken
             },
             default);
 
@@ -430,8 +476,8 @@ public sealed class PropertyListingEnquiryTests
         Assert.Null(capturedProperty.BusinessPartnerId);
         Assert.Equal("Ama Mensah", capturedProperty.ContactName);
         Assert.Equal("ama@example.test", capturedProperty.ContactEmail);
-        Assert.Equal("+233 24 555 0101", capturedProperty.ContactPhone);
-        Assert.Equal("+233 50 100 2000", capturedProperty.AlternativePhoneNumber);
+        Assert.Null(capturedProperty.ContactPhone);
+        Assert.Null(capturedProperty.AlternativePhoneNumber);
         Assert.Equal("Email", capturedProperty.PreferredContactMethod);
         Assert.Equal("GH-REF-100", capturedProperty.ContactReference);
         Assert.Equal(tenantId, capturedTenantId);
@@ -456,15 +502,18 @@ public sealed class PropertyListingEnquiryTests
         await db.SaveChangesAsync();
 
         var tickets = new Mock<IEhcTicketService>();
+        var submissionId = Guid.NewGuid();
+        var verificationToken = await SeedVerifiedPublicContactAsync(
+            db, seeded.Portion.Id, submissionId, "ama@example.test");
         var result = await Controller(db, tickets).CreatePublicListingEnquiry(
             seeded.Portion.Id,
             new PublicPropertyListingEnquiryRequestDto
             {
-                SubmissionId = Guid.NewGuid(),
+                SubmissionId = submissionId,
                 Message = "Please contact me about this listing.",
                 ContactName = "Ama Mensah",
                 ContactEmail = "ama@example.test",
-                ContactPhone = "+233245550101"
+                ContactVerificationToken = verificationToken
             },
             default);
 
@@ -1012,7 +1061,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task ListingApplicationRequiresPublishedWorkflow()
+    public async Task ListingApplicationOpensWithCatalogStagesWhenNoWorkflowIsPublished()
     {
         await using var db = Database();
         var currentUser = User();
@@ -1035,7 +1084,7 @@ public sealed class PropertyListingEnquiryTests
             Mock.Of<IJobCardService>(),
             Mock.Of<IEhcTicketService>());
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
+        var result = await procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
             "PropertyManagement",
             "EstatePropertyManagementListingApplication",
             "Purchase enquiry - Parcel Two",
@@ -1050,11 +1099,52 @@ public sealed class PropertyListingEnquiryTests
                 ["listingReference"] = "LAND-002-PORTION-002",
                 ["requestType"] = "Sale",
                 ["currency"] = "GHS"
-            })));
+            }));
 
-        Assert.Contains("Publish a workflow", error.Message);
-        Assert.False(await db.ProcedureCases.AnyAsync());
+        Assert.Equal("PropertyManagement", result.Module);
+        var savedCase = await db.ProcedureCases.SingleAsync();
+        Assert.Null(savedCase.WorkflowDefinitionId);
+        Assert.Null(savedCase.WorkflowInstanceId);
+        Assert.Equal("Open", savedCase.Status);
         Assert.DoesNotContain(workflow.Invocations, item => item.Method.Name == nameof(IWorkflowEngine.StartWorkflowAsync));
+    }
+
+    [Fact]
+    public async Task ListingApplicationStillStartsPublishedWorkflow()
+    {
+        await using var db = Database();
+        var currentUser = User();
+        currentUser.SetupGet(item => item.UserName).Returns("estate.manager");
+        currentUser.SetupGet(item => item.Roles).Returns(["Estate Manager"]);
+        var entityType = new WorkflowEntityType { TenantId = tenantId,
+            Code = "EstatePropertyManagementListingApplication", Name = "EstatePropertyManagementListingApplication" };
+        var definition = new WorkflowDefinition { TenantId = tenantId, EntityType = entityType,
+            Name = "Listing approval", LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+            PublishedAt = DateTime.UtcNow, IsActive = true };
+        definition.Steps.Add(new WorkflowStep { TenantId = tenantId, WorkflowDefinition = definition,
+            Name = "Estate approval", StepType = WorkflowStepType.Approval, Order = 0, IsStartStep = true });
+        db.Add(entityType);
+        db.Add(definition);
+        await db.SaveChangesAsync();
+
+        var workflow = new Mock<IWorkflowEngine>();
+        workflow.Setup(item => item.StartWorkflowAsync(definition.Id, It.IsAny<Guid>(), userId, It.IsAny<object>()))
+            .ThrowsAsync(new InvalidOperationException("Workflow startup failed"));
+        var procedures = new ProcedureCaseService(
+            db, currentUser.Object, new LegalProcedureCatalogService(), new EstateProcedureCatalogService(),
+            new FacilitiesProcedureCatalogService(), new PropertyManagementProcedureCatalogService(),
+            new PlanningProcedureCatalogService(), workflow.Object, Mock.Of<INotificationService>(),
+            Mock.Of<IFileStorageService>(), Mock.Of<IInvoiceService>(),
+            Mock.Of<ICentralDocumentPdfSigningService>(), Mock.Of<IJobCardService>(), Mock.Of<IEhcTicketService>());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(
+            new CreateProcedureCaseRequest("PropertyManagement", "EstatePropertyManagementListingApplication",
+                "Purchase enquiry", "ESTATE-001", "Estate Customer", "Sales - Estate Enquiry",
+                DateTime.UtcNow, "Completed Sales transaction handed to Estate.",
+                new Dictionary<string, string?> { ["applicationReference"] = "ESTATE-001" })));
+
+        Assert.Equal("Workflow startup failed", error.Message);
+        workflow.Verify(item => item.StartWorkflowAsync(definition.Id, It.IsAny<Guid>(), userId, It.IsAny<object>()), Times.Once);
     }
 
     [Fact]

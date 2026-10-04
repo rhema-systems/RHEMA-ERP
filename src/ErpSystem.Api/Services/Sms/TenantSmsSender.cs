@@ -349,10 +349,12 @@ public sealed class TenantSmsSender : ITenantSmsSender
         {
             return _crypto.Decrypt(encryptedValue);
         }
-        catch
+        catch (Exception ex)
         {
-            // Preserve compatibility with rows created before SMS secrets were encrypted.
-            return encryptedValue;
+            // CryptoService accepts legacy plain-text values. Never pass unreadable
+            // ciphertext to the provider as though it were a valid API key.
+            throw new InvalidOperationException(
+                "The tenant SMS credential could not be decrypted. Check Security:EncryptionKey or save the API key again.", ex);
         }
     }
 
