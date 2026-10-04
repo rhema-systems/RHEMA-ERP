@@ -58,6 +58,116 @@ public sealed class BankingSettlementReleaseGateTests
         holding.BalanceAuthority.Should().Be("PrimaryBookGL");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-MasterData")]
+    public async Task LiquidityAccount_ShouldRejectCurrencyUnsupportedBySingleCurrencyGlAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+
+        var create = () => service.CreateLiquidityAccountAsync(new CreateLiquidityAccountDto
+        {
+            Code = "USD-TILL",
+            Name = "USD Till",
+            AccountType = LiquidityAccountType.CashTill,
+            Currency = "USD",
+            GLAccountId = setup.HoldingGlAccount.Id
+        });
+
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*only accepts GHS*cannot support a USD liquidity account*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-MasterData")]
+    public async Task LiquidityAccount_ShouldRequireActiveCurrencyLinkForMultiCurrencyGlAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        setup.HoldingGlAccount.IsMultiCurrency = true;
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+
+        var create = () => service.CreateLiquidityAccountAsync(new CreateLiquidityAccountDto
+        {
+            Code = "USD-CLEARING",
+            Name = "USD Clearing",
+            AccountType = LiquidityAccountType.OtherSettlementClearing,
+            Currency = "USD",
+            GLAccountId = setup.HoldingGlAccount.Id
+        });
+
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*does not have an active USD currency link*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-MasterData")]
+    public async Task LiquidityAccount_ShouldAcceptActiveCurrencyLinkForMultiCurrencyGlAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        setup.HoldingGlAccount.IsMultiCurrency = true;
+        db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = setup.HoldingGlAccount.Id,
+            LinkedCurrencyCode = "USD",
+            IsActive = true,
+            EffectiveDate = DateTime.UtcNow.AddDays(-1),
+            CreatedByUserId = userId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "seed"
+        });
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, userId, CreateWorkflow());
+
+        var created = await service.CreateLiquidityAccountAsync(new CreateLiquidityAccountDto
+        {
+            Code = "USD-CLEARING",
+            Name = "USD Clearing",
+            AccountType = LiquidityAccountType.OtherSettlementClearing,
+            Currency = "USD",
+            GLAccountId = setup.HoldingGlAccount.Id
+        });
+
+        created.Currency.Should().Be("USD");
+        created.GLAccountId.Should().Be(setup.HoldingGlAccount.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-MasterData")]
+    public async Task BankLiquidityAccount_ShouldUseBankMasterGlMapping()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+
+        var create = () => service.CreateLiquidityAccountAsync(new CreateLiquidityAccountDto
+        {
+            Code = "BANK-LIQUIDITY",
+            Name = "Operating Bank Liquidity",
+            AccountType = LiquidityAccountType.Bank,
+            Currency = setup.BankAccount.Currency,
+            GLAccountId = setup.HoldingGlAccount.Id,
+            BankAccountId = setup.BankAccount.Id
+        });
+
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must use the GL account mapped to the selected bank account master*");
+    }
+
     [Theory]
     [InlineData(LiquidityEntryType.CashExpense)]
     [InlineData(LiquidityEntryType.PettyCashReplenishment)]
