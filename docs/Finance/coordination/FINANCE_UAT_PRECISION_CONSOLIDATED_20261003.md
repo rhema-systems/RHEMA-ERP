@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-03-A
-integration_status: integrated
+integration_status: merged
 integration_decision: include
 candidate_branch: codex/finance-uat-precision-consolidated-20261003
 candidate_head: f8b836269cac7ec71c486692bca44e29bb5287a3
@@ -72,6 +72,14 @@ No focused failure remains. Existing compiler warnings are baseline warnings. De
 ## Remaining work
 
 Await PR review and merge. No implementation or focused verification work remains.
+
+## Post-merge migration correction — 4 October 2026
+
+- Local API startup exposed SQL Server error 4902 in `20261003070000_AddFinanceRoundingEvidenceReconciliation`: the migration targeted `CashTransactions`, while the mapped physical table is singular `CashTransaction`.
+- The migration's Up/Down column, index and foreign-key operations now consistently target `CashTransaction`.
+- PR #343 merged at `8a54cb47d3792c2cfbf10873356de91e009dcc2d` before this correction reached its head. The correction therefore moved to follow-up branch `codex/finance-cashtransaction-migration-hotfix` from that exact merged commit.
+- The correction remains authored and unapplied. No database was contacted or mutated.
+- Focused verification confirmed the current model snapshot maps `CashTransaction`, the migration contains all three singular references and no plural reference, and `git diff --check` passes apart from the repository line-ending notice.
 
 ## Authorization boundaries
 
