@@ -67,6 +67,7 @@ export interface InvoiceLineItem {
     taxRate: number;
     taxAmount?: number;
     taxCode?: string;
+    taxGroupId?: string | null;
     unit?: string;
     discountPercentage: number;
     discountAmount: number;
@@ -104,6 +105,7 @@ export interface Invoice {
     paymentTermId?: string | null;
     discountAmount: number;
     discountReason?: string | null;
+    taxGroupId?: string | null;
     reference?: string;
     isOpeningBalance: boolean;
     earlyPaymentDiscountPercentage?: number;
@@ -134,6 +136,23 @@ export interface InvoiceCreateRequest {
     taxGroupId?: string | null;
     isOpeningBalance?: boolean;
     notes?: string;
+    lineItems: InvoiceLineItemRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
+}
+
+export interface InvoiceUpdateRequest {
+    id: string;
+    invoiceDate: string;
+    dueDate?: string;
+    reference?: string;
+    notes?: string;
+    currencyCode: string;
+    exchangeRate?: number;
+    exchangeRateId?: string;
+    discountAmount?: number;
+    discountReason?: string | null;
+    taxGroupId?: string | null;
+    isOpeningBalance?: boolean;
     lineItems: InvoiceLineItemRequest[];
     financeDimensions?: FinanceSourceDocumentDimensionInput;
 }

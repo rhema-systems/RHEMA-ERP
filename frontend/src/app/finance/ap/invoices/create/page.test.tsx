@@ -5,11 +5,21 @@ import { VendorInvoiceFormPage } from '@/components/finance/ap/VendorInvoiceForm
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 
-const { queryData, toast, push, dimensionPanel } = vi.hoisted(() => ({ queryData: {} as Record<string, unknown>, toast: vi.fn(), push: vi.fn(), dimensionPanel: vi.fn() }));
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push, back: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
+const { queryData, toast, push, refresh, invalidateQueries, dimensionPanel } = vi.hoisted(() => ({
+  queryData: {} as Record<string, unknown>,
+  toast: vi.fn(),
+  push: vi.fn(),
+  refresh: vi.fn(),
+  invalidateQueries: vi.fn().mockResolvedValue(undefined),
+  dimensionPanel: vi.fn(),
+}));
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh, back: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
 vi.mock('@/contexts/TenantContext', () => ({ useTenant: () => ({ currentTenantCode: 'DEFAULT' }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
-vi.mock('@tanstack/react-query', () => ({ useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => ({ data: enabled === false ? undefined : queryData[queryKey[0]], isLoading: false, isFetching: false, error: null }) }));
+vi.mock('@tanstack/react-query', () => ({
+  useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => ({ data: enabled === false ? undefined : queryData[queryKey[0]], isLoading: false, isFetching: false, error: null }),
+  useQueryClient: () => ({ invalidateQueries }),
+}));
 vi.mock('@/components/finance/dimensions/source-document-dimension-panel', () => ({ SourceDocumentDimensionPanel: (props: unknown) => { dimensionPanel(props); return <div />; } }));
 vi.mock('@/services/financeCommonService', () => ({ paymentTermService: { getByApplicableTo: vi.fn().mockResolvedValue([]) } }));
 vi.mock('@/services/accountsPayableService', () => ({ accountsPayableService: { createInvoice: vi.fn(), updateInvoice: vi.fn(), getInvoiceBudgetCells: vi.fn().mockResolvedValue([]) } }));

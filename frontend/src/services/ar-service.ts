@@ -6,6 +6,7 @@ import type {
     CustomerUpdateRequest,
     Invoice,
     InvoiceCreateRequest,
+    InvoiceUpdateRequest,
     CustomerPayment,
     PaymentCreateRequest,
     PaymentAllocationRequest,
@@ -132,6 +133,14 @@ class ArService {
 
     public async createInvoice(data: InvoiceCreateRequest): Promise<Invoice> {
         return apiService.post<Invoice>(`${this.baseUrl}/invoices`, data);
+    }
+
+    public async updateInvoice(id: string, data: InvoiceUpdateRequest): Promise<Invoice> {
+        return apiService.put<Invoice>(`${this.baseUrl}/invoices/${id}`, { ...data, id });
+    }
+
+    public async deleteInvoice(id: string): Promise<void> {
+        await apiService.delete(`${this.baseUrl}/invoices/${id}`);
     }
 
     public async submitInvoiceForApproval(id: string): Promise<Invoice> {

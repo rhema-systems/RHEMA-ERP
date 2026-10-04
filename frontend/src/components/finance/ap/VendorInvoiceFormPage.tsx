@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useForm, useFieldArray, Controller, type FieldPath } from 'react-hook-form';
+import { useForm, useFieldArray, Controller, type FieldErrors, type FieldPath } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import {
@@ -58,7 +58,7 @@ import { TaxApplicability, TaxCategory, type Tax } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import type { ApBudgetCell } from '@/types/ap';
@@ -127,6 +127,7 @@ type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
 export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const searchParams = useSearchParams();
     const preselectedSupplierId = searchParams.get('supplierId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
@@ -469,6 +470,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 form.setValue(`lineItems.${index}.budgetEntryId`, preserveBudgetEntryId);
             }
         } catch (error: any) {
+            await queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            if (editInvoice) {
+                await queryClient.invalidateQueries({ queryKey: ['vendor-invoice', editInvoice.id] });
+            }
+
             toast({
                 title: 'Budget cells unavailable',
                 description: error.message || 'Unable to load adopted Finance budget cells for this account.',
@@ -1085,6 +1091,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             router.push(isEditMode && editInvoice
                 ? `/finance/ap/invoices/${editInvoice.id}`
                 : '/finance/ap/invoices');
+            router.refresh();
         } catch (error: any) {
             toast({
                 title: 'Error',
@@ -1094,6 +1101,22 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         } finally {
             setIsSubmitting(false);
         }
+    };
+
+    const onInvalid = (errors: FieldErrors<InvoiceFormValues>) => {
+        const firstField = Object.keys(errors)[0];
+        toast({
+            title: 'Review the highlighted invoice fields',
+            description: firstField
+                ? 'The invoice was not saved because one or more required values are missing or invalid.'
+                : 'The invoice was not saved. Review the form and try again.',
+            variant: 'destructive',
+        });
+        requestAnimationFrame(() => {
+            const invalid = document.querySelector<HTMLElement>('[aria-invalid="true"], [data-invalid="true"]');
+            invalid?.focus();
+            invalid?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
     };
 
     const editSupplierMissing = Boolean(
@@ -1163,7 +1186,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 </div>
             </div>
 
-            <form onSubmit={form.handleSubmit(onSubmit as any)} className="space-y-8">
+            <form onSubmit={form.handleSubmit(onSubmit as any, onInvalid)} className="space-y-8" noValidate>
                 <Card>
                     <CardHeader>
                         <CardTitle>Invoice Details</CardTitle>

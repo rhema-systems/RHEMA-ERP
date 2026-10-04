@@ -11,7 +11,8 @@ import {
     FileText,
     DollarSign,
     Send,
-    Ban
+    Ban,
+    Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -56,6 +57,7 @@ export default function InvoicesPage() {
     const [statusFilter, setStatusFilter] = useState<string>('');
     const { hasPermission, hasAnyPermission } = useAuth();
     const [invoiceToSubmit, setInvoiceToSubmit] = useState<Invoice | null>(null);
+    const [invoiceToDelete, setInvoiceToDelete] = useState<Invoice | null>(null);
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['invoices', page, pageSize, debouncedSearchTerm, statusFilter, openingBalanceOnly],
@@ -101,6 +103,17 @@ export default function InvoicesPage() {
                 description: error.message || 'Failed to submit invoice for approval',
                 variant: 'destructive',
             });
+        },
+    });
+
+    const deleteInvoiceMutation = useMutation({
+        mutationFn: (id: string) => arService.deleteInvoice(id),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            toast({ title: 'Draft invoice deleted', description: 'The customer invoice draft was removed.' });
+        },
+        onError: (error: any) => {
+            toast({ title: 'Unable to delete invoice', description: error.message || 'The draft invoice could not be deleted.', variant: 'destructive' });
         },
     });
 
@@ -258,6 +271,11 @@ export default function InvoicesPage() {
                                                             <Send className="mr-2 h-4 w-4" /> Submit for Approval
                                                         </DropdownMenuItem>
                                                         )}
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AR.Invoices.Delete', 'Finance.AR.Invoices.Write']) && (
+                                                            <DropdownMenuItem className="text-red-600" onClick={(event) => { event.stopPropagation(); setInvoiceToDelete(invoice); }}>
+                                                                <Trash2 className="mr-2 h-4 w-4" /> Delete Draft
+                                                            </DropdownMenuItem>
+                                                        )}
                                                         {(invoice.status === 'Sent' || invoice.status === 'Posted' || invoice.status === 'Overdue') && hasPermission('Finance.AR.Invoices.Void') && (
                                                             <DropdownMenuItem
                                                                 className="text-red-600"
@@ -314,6 +332,21 @@ export default function InvoicesPage() {
                     if (!invoiceToSubmit) return false;
                     await submitInvoiceMutation.mutateAsync(invoiceToSubmit.id);
                     setInvoiceToSubmit(null);
+                }}
+                maxWidth="500px"
+            />
+            <ConfirmationDialog
+                open={invoiceToDelete !== null}
+                onOpenChange={(open) => !open && setInvoiceToDelete(null)}
+                title="Delete draft customer invoice?"
+                description={invoiceToDelete ? `${invoiceToDelete.invoiceNumber} will be permanently removed. Posted or submitted invoices cannot be deleted.` : undefined}
+                confirmText="Delete draft"
+                variant="destructive"
+                isLoading={deleteInvoiceMutation.isPending}
+                onConfirm={async () => {
+                    if (!invoiceToDelete) return false;
+                    await deleteInvoiceMutation.mutateAsync(invoiceToDelete.id);
+                    setInvoiceToDelete(null);
                 }}
                 maxWidth="500px"
             />

@@ -55,11 +55,14 @@ import { paymentTermService, type PaymentTermListDto } from '@/services/financeC
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
 import { format, addDays } from 'date-fns';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
-import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import {
+    toFinancePostingDimensionValues,
+    toFinanceSourceDimensionFormState,
+} from '@/lib/finance/source-document-dimensions';
 import {
     allocateDocumentTradeDiscount,
     calculateNetTradeDiscountLineAmount,
@@ -134,14 +137,17 @@ const invoiceSchema = z.object({
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
 
-export default function NewInvoicePage() {
+export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const router = useRouter();
+    const queryClient = useQueryClient();
     const searchParams = useSearchParams();
     const preselectedBusinessPartnerId = searchParams.get('businessPartnerId');
     const defaultOpeningBalance = searchParams.get('openingBalance') === 'true';
     const { toast } = useToast();
     const { currentTenantCode } = useTenant();
     const exchangeRateRequestId = useRef(0);
+    const editHydratedRef = useRef(false);
+    const isEditMode = Boolean(editInvoiceId);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
     const [customerComboOpen, setCustomerComboOpen] = useState(false);
@@ -151,6 +157,18 @@ export default function NewInvoicePage() {
     const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
     const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
     const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
+
+    const {
+        data: editInvoice,
+        isLoading: editInvoiceLoading,
+        error: editInvoiceError,
+    } = useQuery({
+        queryKey: ['invoice', editInvoiceId],
+        queryFn: () => editInvoiceId
+            ? arService.getInvoice(editInvoiceId)
+            : Promise.reject(new Error('An invoice id is required for editing.')),
+        enabled: isEditMode,
+    });
 
     // Fetch customers for the dropdown
     const { data: customersData, isLoading: customersLoading } = useQuery({
@@ -514,6 +532,47 @@ export default function NewInvoicePage() {
         }
     }, [preselectedBusinessPartnerId, customersData]);
 
+    useEffect(() => {
+        if (!isEditMode || !editInvoice || !customersData?.items || editHydratedRef.current) return;
+        const customer = customersData.items.find(item => item.id === editInvoice.businessPartnerId);
+        if (!customer) return;
+
+        editHydratedRef.current = true;
+        setSelectedCustomer(customer);
+        const dimensionState = toFinanceSourceDimensionFormState(editInvoice.financeDimensions);
+        setDefaultDimensionValues(dimensionState.defaultValues);
+        setLineDimensionValues(dimensionState.lineValues);
+        setApplyDefaultToAll(false);
+        form.reset({
+            businessPartnerId: editInvoice.businessPartnerId,
+            invoiceDate: new Date(editInvoice.invoiceDate),
+            dueDate: editInvoice.dueDate ? new Date(editInvoice.dueDate) : addDays(new Date(editInvoice.invoiceDate), 30),
+            currencyCode: editInvoice.currencyCode,
+            exchangeRate: editInvoice.exchangeRate || 1,
+            exchangeRateId: editInvoice.exchangeRateId || undefined,
+            exchangeRateDate: new Date(editInvoice.invoiceDate),
+            exchangeRateSource: editInvoice.exchangeRateId ? 'Daily' : 'Functional',
+            currencyOverrideReason: editInvoice.currencyOverrideReason || '',
+            paymentTermId: editInvoice.paymentTermId || 'none',
+            discountAmount: editInvoice.discountAmount || 0,
+            discountReason: editInvoice.discountReason || '',
+            isOpeningBalance: editInvoice.isOpeningBalance,
+            notes: editInvoice.notes || '',
+            taxGroupId: editInvoice.taxGroupId || 'none',
+            lineItems: editInvoice.lineItems.map(line => ({
+                sourceLineId: line.id,
+                lineItemType: 'GLAccount' as const,
+                productId: line.productId,
+                glAccountId: line.glAccountId || '',
+                description: line.description,
+                quantity: line.quantity,
+                unitPrice: line.unitPrice,
+                discountPercentage: line.discountPercentage || 0,
+                taxGroupId: line.taxGroupId || 'none',
+            })),
+        });
+    }, [customersData?.items, editInvoice, form, isEditMode]);
+
 
     const onSubmit = async (data: InvoiceFormValues) => {
         setIsSubmitting(true);
@@ -537,7 +596,7 @@ export default function NewInvoicePage() {
                 });
                 return;
             }
-            await arService.createInvoice({
+            const request = {
                 ...data,
                 invoiceDate: data.invoiceDate.toISOString(),
                 dueDate: data.dueDate.toISOString(),
@@ -572,24 +631,70 @@ export default function NewInvoicePage() {
                     }),
                     applyDefaultToEligibleLines: applyDefaultToAll,
                 },
-            });
+            };
+
+            if (isEditMode && editInvoice) {
+                await arService.updateInvoice(editInvoice.id, {
+                    id: editInvoice.id,
+                    invoiceDate: request.invoiceDate,
+                    dueDate: request.dueDate,
+                    reference: editInvoice.reference,
+                    notes: request.notes,
+                    currencyCode: request.currencyCode,
+                    exchangeRate: request.exchangeRate,
+                    exchangeRateId: request.exchangeRateId,
+                    discountAmount: request.discountAmount,
+                    discountReason: request.discountReason,
+                    taxGroupId: request.taxGroupId,
+                    isOpeningBalance: request.isOpeningBalance,
+                    lineItems: request.lineItems,
+                    financeDimensions: request.financeDimensions,
+                });
+            } else {
+                await arService.createInvoice(request);
+            }
+
+            await queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            if (editInvoice) {
+                await queryClient.invalidateQueries({ queryKey: ['invoice', editInvoice.id] });
+            }
 
             toast({
                 title: 'Success',
-                description: 'Invoice created successfully',
+                description: isEditMode ? 'Invoice updated successfully' : 'Invoice created successfully',
             });
 
-            router.push('/finance/ar/invoices');
+            router.push(isEditMode && editInvoice ? `/finance/ar/invoices/${editInvoice.id}` : '/finance/ar/invoices');
         } catch (error: any) {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to create invoice',
+                description: error.message || `Failed to ${isEditMode ? 'update' : 'create'} invoice`,
                 variant: 'destructive',
             });
         } finally {
             setIsSubmitting(false);
         }
     };
+
+    if (isEditMode && (editInvoiceLoading || !editHydratedRef.current) && !editInvoiceError) {
+        return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>;
+    }
+
+    if (isEditMode && (editInvoiceError || !editInvoice || !['Draft', 'Rejected'].includes(editInvoice.status))) {
+        return (
+            <div className="mx-auto max-w-2xl space-y-4 p-8">
+                <h1 className="text-2xl font-bold">Unable to edit customer invoice</h1>
+                <p className="text-muted-foreground">
+                    {editInvoiceError instanceof Error
+                        ? editInvoiceError.message
+                        : 'Only Draft or Rejected invoices may be changed.'}
+                </p>
+                <Button variant="outline" onClick={() => router.push(editInvoice ? `/finance/ar/invoices/${editInvoice.id}` : '/finance/ar/invoices')}>
+                    Back to invoice
+                </Button>
+            </div>
+        );
+    }
 
     return (
         <div className="space-y-8 p-8 max-w-[1200px] mx-auto">
@@ -608,7 +713,7 @@ export default function NewInvoicePage() {
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Invoice Details</CardTitle>
+                        <CardTitle>{isEditMode ? 'Edit Invoice' : 'Invoice Details'}</CardTitle>
                     </CardHeader>
                     <CardContent className="grid gap-6 md:grid-cols-2">
                         <div className="space-y-2">
@@ -620,6 +725,7 @@ export default function NewInvoicePage() {
                                         role="combobox"
                                         aria-expanded={customerComboOpen}
                                         className="w-full justify-between"
+                                        disabled={isEditMode}
                                     >
                                         {selectedCustomer
                                             ? `${selectedCustomer.customerName} (${selectedCustomer.customerCode})`
@@ -1309,11 +1415,15 @@ export default function NewInvoicePage() {
                         </Button>
                         <Button type="submit" disabled={isSubmitting}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Create Invoice
+                            {isEditMode ? 'Save Changes' : 'Create Invoice'}
                         </Button>
                     </CardFooter>
                 </Card>
             </form>
         </div>
     );
+}
+
+export default function NewInvoicePage() {
+    return <InvoiceFormPage />;
 }
