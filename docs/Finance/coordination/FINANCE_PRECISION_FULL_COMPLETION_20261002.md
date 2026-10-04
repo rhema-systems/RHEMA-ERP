@@ -80,3 +80,12 @@
 
 - Functional precision behavior, relational AR/AP coverage, governed UOM coverage, and compilation are green.
 - Repository-wide EF runtime-model/snapshot parity remains red and requires a separately bounded reconciliation of the accumulated hand-authored migration metadata. That work must preserve the governed six-decimal UOM evidence columns and must not be applied to a database without renewed authorization.
+
+## Consolidated integration outcome — 4 October 2026
+
+- Precision completion was committed as `f8b836269cac7ec71c486692bca44e29bb5287a3` and integrated into `codex/finance-uat-precision-consolidated-20261003` as `12e81c3be` from refreshed base `0e69222faf4026de32c2df22757cd5e31ad9cbf3`.
+- Integration reconciliation preserves Procurement-owned commercial UOM increments and evidence at `decimal(18,6)`; no four-decimal narrowing was accepted. The RFQ quote-item shadow UOM relationship was also retained to avoid a destructive generated drop.
+- The model snapshot was reconciled to the authored migrations. A definitive `dotnet ef migrations has-pending-model-changes` check now exits 0 with no pending changes.
+- Combined verification passed: solution/API builds; 2/2 relational AR/AP JPY/KWD/CLF tests; 24/24 commercial UOM tests; 72/72 guard/customer/calendar/journal tests; 74/74 settings/tax/cash-rounding/migration tests; 22/22 precision-policy tests; 52/52 unit-accounting/UOM tests; 18-file frontend lint; and 5/5 recurring-journal frontend tests.
+- All migrations remain authored and unapplied. No database was contacted or mutated.
+- Consolidated PR: pending creation.

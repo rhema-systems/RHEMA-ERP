@@ -7140,6 +7140,21 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         foreach (var (entityType, propertyName, columnType) in overrides)
             builder.Entity(entityType).Property(propertyName).HasColumnType(columnType);
+
+        // Commercial quantity evidence is persisted at six decimals by the authored UOM
+        // migrations. Keep the legacy name-based decimal convention from narrowing those
+        // immutable snapshots back to four decimals in the runtime model.
+        foreach (var entityType in builder.Model.GetEntityTypes()
+                     .Where(entity => typeof(ICommercialQuantityEvidenceLine).IsAssignableFrom(entity.ClrType)))
+        {
+            builder.Entity(entityType.ClrType)
+                .Property(nameof(ICommercialQuantityEvidenceLine.UnitOfMeasureRoundingIncrementSnapshot))
+                .HasColumnType("decimal(18,6)");
+        }
+
+        builder.Entity<AccountTransaction>()
+            .Property(entity => entity.CommercialQuantityRoundingIncrement)
+            .HasColumnType("decimal(18,6)");
     }
 
     private static void ConfigurePayrollEntities(ModelBuilder builder)
