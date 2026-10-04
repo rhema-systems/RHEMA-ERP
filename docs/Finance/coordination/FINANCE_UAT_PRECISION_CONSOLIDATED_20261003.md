@@ -73,6 +73,13 @@ No focused failure remains. Existing compiler warnings are baseline warnings. De
 
 Await PR review and merge. No implementation or focused verification work remains.
 
+## Pre-merge migration correction — 4 October 2026
+
+- Local API startup exposed SQL Server error 4902 in `20261003070000_AddFinanceRoundingEvidenceReconciliation`: the migration targeted `CashTransactions`, while the mapped physical table is singular `CashTransaction`.
+- The migration's Up/Down column, index and foreign-key operations now consistently target `CashTransaction`.
+- The correction remains authored and unapplied. No database was contacted or mutated.
+- Focused verification confirmed the current model snapshot maps `CashTransaction`, the migration contains all three singular references and no plural reference, and `git diff --check` passes apart from the repository line-ending notice.
+
 ## Authorization boundaries
 
 Push and one PR are authorized. `git pull`, primary-checkout mutation, migration application, deployment, force-push, worktree removal, and branch deletion are not authorized and were not performed.
