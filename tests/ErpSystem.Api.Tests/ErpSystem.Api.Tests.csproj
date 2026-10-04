@@ -85,6 +85,7 @@
     <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactControllerTests.cs" />
     <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\FinanceApprovalInvoiceProducerRouteTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
     <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
