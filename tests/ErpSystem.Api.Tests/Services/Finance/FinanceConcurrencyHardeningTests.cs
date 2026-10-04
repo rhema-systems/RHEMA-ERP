@@ -11,6 +11,20 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinanceConcurrencyHardeningTests
 {
     [Theory]
+    [InlineData("ExchangeRate", true)]
+    [InlineData("Invoice", true)]
+    [InlineData("invoice", true)]
+    [InlineData("VendorInvoice", true)]
+    [InlineData("JournalEntry", false)]
+    public void ApprovalOutcomeTransaction_ShouldUseSerializableIsolationWhenOutcomeTransitionsBookAuthority(
+        string entityType,
+        bool expected)
+    {
+        FinanceApprovalsController.RequiresSerializableOutcomeTransaction(entityType)
+            .Should().Be(expected);
+    }
+
+    [Theory]
     [InlineData("Invoice", "AR_INVOICE_POSTING_BLOCKED")]
     [InlineData("VendorInvoice", "AP_INVOICE_POSTING_BLOCKED")]
     public void InvoiceApprovalPostingFailure_ShouldPreserveSafeValidationMessage(

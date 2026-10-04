@@ -991,7 +991,7 @@ public class FinanceApprovalsController : ControllerBase
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            var isolationLevel = Normalize(entityType) == Normalize("ExchangeRate")
+            var isolationLevel = RequiresSerializableOutcomeTransaction(entityType)
                 ? IsolationLevel.Serializable
                 : IsolationLevel.ReadCommitted;
             await using var transaction = await _db.Database.BeginTransactionAsync(
@@ -1018,6 +1018,9 @@ public class FinanceApprovalsController : ControllerBase
             }
         });
     }
+
+    internal static bool RequiresSerializableOutcomeTransaction(string entityType)
+        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE";
 
     internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
         string entityType,
