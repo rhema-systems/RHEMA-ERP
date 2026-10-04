@@ -443,10 +443,40 @@ public class CrmController : ControllerBase
         [FromQuery] string? stage = null,
         [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] Guid? leadId = null,
-        [FromQuery] string? opportunityType = null)
+        [FromQuery] string? opportunityType = null,
+        [FromQuery] Guid? stageDefinitionId = null,
+        [FromQuery] Guid? reachedStageDefinitionId = null,
+        [FromQuery] DateTime? stageEnteredFrom = null,
+        [FromQuery] DateTime? stageEnteredTo = null)
     {
-        var opportunities = await _crmService.GetOpportunitiesAsync(page, pageSize, search, stage, businessPartnerId, leadId, opportunityType);
+        var opportunities = await _crmService.GetOpportunitiesAsync(
+            page, pageSize, search, stage, businessPartnerId, leadId, opportunityType, stageDefinitionId,
+            reachedStageDefinitionId, stageEnteredFrom, stageEnteredTo);
         return Ok(opportunities);
+    }
+
+    [HttpGet("opportunity-stages")]
+    [Authorize(Policy = "Sales")]
+    public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> GetOpportunityStages(
+        [FromQuery] bool includeInactive = false)
+        => Ok(await _crmService.GetOpportunityStagesAsync(includeInactive));
+
+    [HttpPut("opportunity-stages")]
+    [Authorize(Policy = "Sales")]
+    public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> UpdateOpportunityStages(
+        [FromBody] UpdateCrmOpportunityStagesDto dto)
+    {
+        if (!ModelState.IsValid)
+            return ValidationProblem(ModelState);
+
+        try
+        {
+            return Ok(await _crmService.UpdateOpportunityStagesAsync(dto));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpGet("opportunities/{opportunityId:guid}")]

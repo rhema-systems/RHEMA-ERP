@@ -1110,7 +1110,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
 
-        var stages = await BuildStageSeedsAsync(procedureCase.Module, procedureCase.EntityType);
+        var stages = await BuildStageSeedsAsync(procedureCase.Module, procedureCase.EntityType,
+            usePublishedWorkflow: procedureCase.WorkflowDefinitionId.HasValue
+                || !AllowsCatalogWorkflowFallback(procedureCase.Module, procedureCase.EntityType));
         var currentPosition = stages.FindIndex(stage => stage.Index == procedureCase.CurrentStageIndex);
         var nextStage = currentPosition >= 0 && currentPosition + 1 < stages.Count ? stages[currentPosition + 1] : null;
 
@@ -4702,6 +4704,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         Guid? workflowDefinitionId,
         string action)
     {
+        if (AllowsCatalogWorkflowFallback(module, entityType) && !workflowDefinitionId.HasValue)
+        {
+            return;
+        }
         if (!RequiresPublishedWorkflowForProcedureCase(module, entityType) || workflowDefinitionId.HasValue)
         {
             return;
@@ -4712,6 +4718,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private void EnsureWorkflowRuntimeForProcedureCase(ProcedureCase procedureCase, string action)
     {
+        if (AllowsCatalogWorkflowFallback(procedureCase.Module, procedureCase.EntityType)
+            && !procedureCase.WorkflowDefinitionId.HasValue)
+        {
+            return;
+        }
         if (!RequiresPublishedWorkflowForProcedureCase(procedureCase.Module, procedureCase.EntityType)
             || procedureCase.WorkflowInstanceId.HasValue)
         {
@@ -4756,10 +4767,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static string MissingPublishedWorkflowMessage(string module, string entityType, string action)
         => $"Publish a workflow for {module} / {entityType} before {action} this procedure case.";
 
-    private async Task<List<StageSeed>> BuildStageSeedsAsync(string module, string entityType)
+    private static bool AllowsCatalogWorkflowFallback(string module, string entityType)
+        => string.Equals(module, "PropertyManagement", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<List<StageSeed>> BuildStageSeedsAsync(string module, string entityType,
+        bool usePublishedWorkflow = true)
     {
         var tenantId = RequireTenantId();
-        var workflow = await _db.WorkflowDefinitions
+        var workflow = usePublishedWorkflow ? await _db.WorkflowDefinitions
             .AsNoTracking()
             .Include(item => item.EntityType)
             .Include(item => item.Steps)
@@ -4770,7 +4786,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 && (item.EntityType.Name == entityType || item.EntityType.Code == entityType))
             .OrderByDescending(item => item.PublishedAt ?? item.CreatedAt)
             .ThenByDescending(item => item.Version)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync() : null;
 
         if (workflow is not null && workflow.Steps.Count > 0)
         {
@@ -4790,8 +4806,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
-        // Catalog stages are retained only as a backend fallback for non-case workspaces and legacy reads.
-        // Case-style procedure routing is blocked unless a published workflow is available.
+        // The listing application may use catalog stages when opened before its workflow is published.
+        // Other case-style procedures still require a published workflow.
         return module switch
         {
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages

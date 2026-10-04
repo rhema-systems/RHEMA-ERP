@@ -941,7 +941,9 @@ public class CrmControllerRouteTests
     {
         var crmService = new Mock<ICrmService>();
         crmService
-            .Setup(x => x.GetOpportunitiesAsync(1, 20, "atlas", "Negotiation", null, null, "Renewal"))
+            .Setup(x => x.GetOpportunitiesAsync(
+                1, 20, "atlas", "Negotiation", null, null, "Renewal",
+                null, null, null, null))
             .ReturnsAsync(new PagedResult<CrmOpportunityListItemDto>
             {
                 Items = new List<CrmOpportunityListItemDto>

@@ -16,6 +16,12 @@ public interface IWorkflowEngine
         object? dataContext = null);
 
     /// <summary>
+    /// Starts a workflow for a tenant resolved by a public endpoint without an authenticated user.
+    /// </summary>
+    Task<WorkflowInstance> StartWorkflowForTenantAsync(string workflowName, Guid tenantId, Guid entityId,
+        Guid initiatedById, object? dataContext = null);
+
+    /// <summary>
     /// Starts a workflow from one exact immutable Published definition version.
     /// </summary>
     Task<WorkflowInstance> StartWorkflowAsync(Guid workflowDefinitionId, Guid entityId, Guid initiatedById,

@@ -39,18 +39,47 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             && SalesAndMarketingOrganizationUnitCodes.Contains(t.AssignedOrganizationUnit.Code));
 
     [HttpGet]
-    public async Task<IActionResult> List([FromQuery] int page = 1, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> List(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25,
+        [FromQuery] string? search = null,
+        [FromQuery] EhcTicketStatus? status = null,
+        [FromQuery] bool? crmLinked = null,
+        [FromQuery] DateTime? createdFrom = null,
+        CancellationToken cancellationToken = default)
     {
         page = Math.Max(1, page);
-        var total = await Query().CountAsync(cancellationToken);
-        var rows = await Query().OrderByDescending(t => t.CreatedAt).Skip((page - 1) * 25).Take(25)
+        pageSize = Math.Clamp(pageSize, 10, 50);
+        page = Math.Min(page, int.MaxValue / pageSize);
+        var term = search?.Trim();
+        if (term?.Length > 100)
+            return BadRequest(new { success = false, message = "Search must be 100 characters or fewer." });
+
+        var query = Query();
+        if (!string.IsNullOrEmpty(term))
+        {
+            query = query.Where(t => t.TicketNumber.Contains(term)
+                || (t.Subject != null && t.Subject.Contains(term))
+                || (t.PublicPropertyEnquiryContact != null
+                    && t.PublicPropertyEnquiryContact.ContactName.Contains(term)));
+        }
+        if (status.HasValue) query = query.Where(t => t.Status == status.Value);
+        if (crmLinked.HasValue)
+            query = query.Where(t => (t.CrmLeadId != null) == crmLinked.Value);
+        if (createdFrom.HasValue) query = query.Where(t => t.CreatedAt >= createdFrom.Value);
+
+        var total = await query.CountAsync(cancellationToken);
+        var rows = await query.OrderByDescending(t => t.CreatedAt).ThenByDescending(t => t.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
             .Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt, t.CrmLeadId,
-                t.PropertyListingContextJson, FallbackRequesterName = t.RequesterUser == null
+                t.PropertyListingContextJson, ContactName = t.PublicPropertyEnquiryContact == null
+                    ? null : t.PublicPropertyEnquiryContact.ContactName,
+                FallbackRequesterName = t.RequesterUser == null
                     ? null : t.RequesterUser.FirstName + " " + t.RequesterUser.LastName })
             .ToArrayAsync(cancellationToken);
         var items = rows.Select(t => new { t.Id, t.TicketNumber, t.Subject, t.Status, t.CreatedAt, t.FirstRespondedAt, t.CrmLeadId,
-            RequesterName = PublicContactName(t.PropertyListingContextJson) ?? t.FallbackRequesterName }).ToArray();
-        return Ok(new { success = true, data = items, totalCount = total, page, pageSize = 25 });
+            RequesterName = PublicContactName(t.PropertyListingContextJson) ?? t.ContactName ?? t.FallbackRequesterName }).ToArray();
+        return Ok(new { success = true, data = items, totalCount = total, page, pageSize });
     }
 
     [HttpGet("search")]
@@ -73,7 +102,20 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     public async Task<IActionResult> Get(Guid id, CancellationToken cancellationToken)
     {
         if (!await Query().AnyAsync(t => t.Id == id, cancellationToken)) return NotFound();
-        return Ok(new { success = true, data = await tickets.GetTicketByIdAsync(id, cancellationToken) });
+        var detail = await tickets.GetTicketByIdAsync(id, cancellationToken);
+        if (detail?.PropertyListing is { } property)
+        {
+            var asset = await db.EstateManagedAssets.AsNoTracking()
+                .Where(item => item.Id == property.ParentAssetId
+                    && item.TenantId == currentUser.TenantId && !item.IsDeleted)
+                .Select(item => new { item.AssetType })
+                .SingleOrDefaultAsync(cancellationToken);
+            detail.PropertyListing = property with
+            {
+                AssetType = asset?.AssetType.ToString() ?? property.AssetType
+            };
+        }
+        return Ok(new { success = true, data = detail });
     }
 
     [HttpGet("{id:guid}/sales-order-source")]

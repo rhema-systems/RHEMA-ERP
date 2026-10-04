@@ -17,6 +17,14 @@ export interface PropertyEnquiryQueueItem {
   requesterName: string;
 }
 
+export interface PropertyEnquiryListFilters {
+  pageSize?: number;
+  search?: string;
+  status?: string;
+  crmLinked?: boolean;
+  createdFrom?: string;
+}
+
 export interface PropertyEnquiryProspect {
   ticketId: string;
   leadId: string;
@@ -152,14 +160,26 @@ type Envelope<T> = {
   data: T;
   message?: string;
   totalCount?: number;
+  page?: number;
+  pageSize?: number;
 };
 
 const baseUrl = '/ehc/internal/property-enquiries';
 
 export const propertyEnquiryService = {
-  async list(page = 1): Promise<Envelope<PropertyEnquiryQueueItem[]>> {
+  async list(
+    page = 1,
+    filters: PropertyEnquiryListFilters = {}
+  ): Promise<Envelope<PropertyEnquiryQueueItem[]>> {
+    const params = new URLSearchParams({ page: String(page) });
+    if (filters.pageSize) params.set('pageSize', String(filters.pageSize));
+    if (filters.search?.trim()) params.set('search', filters.search.trim());
+    if (filters.status) params.set('status', filters.status);
+    if (filters.crmLinked !== undefined)
+      params.set('crmLinked', String(filters.crmLinked));
+    if (filters.createdFrom) params.set('createdFrom', filters.createdFrom);
     return apiService.request<Envelope<PropertyEnquiryQueueItem[]>>(
-      `${baseUrl}?page=${page}`,
+      `${baseUrl}?${params.toString()}`,
       { method: 'GET' }
     );
   },

@@ -13,6 +13,35 @@ namespace ErpSystem.Api.Tests.Services;
 public sealed class TenantEmailSenderTests
 {
     [Fact]
+    public async Task SendAsync_RejectsUnreadableSmtpPasswordBeforeConnecting()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        db.EmailSettings.Add(new EmailSettings
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SmtpHost = "smtp.example.test",
+            SmtpPort = 587,
+            SmtpUsername = "mailer",
+            SmtpPassword = "stored-ciphertext",
+            FromAddress = "mailer@example.test",
+            FromName = "Test"
+        });
+        await db.SaveChangesAsync();
+        var crypto = new Mock<ICryptoService>();
+        crypto.Setup(service => service.Decrypt("stored-ciphertext"))
+            .Throws(new InvalidOperationException("decryption failed"));
+        var sender = new TenantEmailSender(db, crypto.Object, NullLogger<TenantEmailSender>.Instance);
+
+        var action = () => sender.SendAsync(
+            tenantId, "visitor@example.test", "Verification", "Code 123456");
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*SMTP password could not be decrypted*");
+    }
+
+    [Fact]
     public async Task SendAsync_DoesNotUseAnotherTenantsSmtpConfiguration()
     {
         await using var db = CreateDb();

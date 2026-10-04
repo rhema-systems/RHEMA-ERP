@@ -46,14 +46,14 @@ internal static class MNotifySmsGateway
             throw new ArgumentException("SMS message is required.", nameof(message));
 
         var requestUri = AppendApiKey(endpointUri, options.ApiKey);
+        // The ERP owns OTP verification; mNotify delivers every message as regular SMS.
         var payload = new MNotifyQuickSmsRequest
         {
             Recipient = new[] { NormalizeRecipient(toPhoneNumber) },
             Sender = options.SenderId.Trim(),
             Message = message,
             IsSchedule = false,
-            ScheduleDate = string.Empty,
-            SmsType = isOtp ? "otp" : null
+            ScheduleDate = string.Empty
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUri)
@@ -212,9 +212,6 @@ internal static class MNotifySmsGateway
 
         [JsonPropertyName("schedule_date")]
         public string ScheduleDate { get; init; } = string.Empty;
-
-        [JsonPropertyName("sms_type")]
-        public string? SmsType { get; init; }
     }
 
     private sealed class MNotifyQuickSmsResponse

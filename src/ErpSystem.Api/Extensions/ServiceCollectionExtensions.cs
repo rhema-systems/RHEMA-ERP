@@ -2350,12 +2350,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
         public static IServiceCollection AddErpSystemLogging(this IServiceCollection services, IConfiguration configuration)
         {
-            Log.Logger = new LoggerConfiguration()
+            var loggerConfiguration = new LoggerConfiguration()
                 .ReadFrom.Configuration(configuration)
                 .Enrich.FromLogContext()
                 .Enrich.WithThreadId()
-                .Enrich.WithMachineName()
-                .CreateLogger();
+                .Enrich.WithMachineName();
+
+            // The VPS deploy preserves server settings and may start without an appsettings file.
+            // Keep errors visible through the service's captured stdout in that case.
+            if (!configuration.GetSection("Serilog:WriteTo").Exists())
+            {
+                if (!configuration.GetSection("Serilog:MinimumLevel").Exists())
+                    loggerConfiguration.MinimumLevel.Warning();
+                loggerConfiguration.WriteTo.Console();
+            }
+
+            Log.Logger = loggerConfiguration.CreateLogger();
 
             services.AddSerilog();
 

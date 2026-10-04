@@ -16,7 +16,7 @@ public sealed class SmsSettingsControllerTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SendTestSms_UsesRequestedStandardOrOtpDeliveryMode(bool isOtp)
+    public async Task SendTestSms_UsesRequestedStandardOrVerificationMessage(bool isOtp)
     {
         var tenantId = Guid.NewGuid();
         var currentUser = new Mock<ICurrentUserService>();

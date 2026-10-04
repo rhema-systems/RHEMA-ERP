@@ -76,7 +76,9 @@ public class SettingsController : ControllerBase
 
                     // Legal URLs
                     TermsOfServiceUrl = null,
-                    PrivacyPolicyUrl = null
+                    PrivacyPolicyUrl = null,
+
+                    LoginPageStyle = Core.Enums.LoginPageStyle.LightCorporate.ToString()
                 });
             }
 
@@ -113,7 +115,8 @@ public class SettingsController : ControllerBase
 
                 // Legal URLs
                 TermsOfServiceUrl = settings.TermsOfServiceUrl,
-                PrivacyPolicyUrl = settings.PrivacyPolicyUrl
+                PrivacyPolicyUrl = settings.PrivacyPolicyUrl,
+                LoginPageStyle = settings.LoginPageStyle.ToString()
             });
         }
         catch (Exception ex)
@@ -131,6 +134,18 @@ public class SettingsController : ControllerBase
         {
             // Get existing settings for audit logging
             var existingSettings = await _settingsService.GetSecuritySettingsAsync();
+
+            var loginPageStyle = existingSettings?.LoginPageStyle ?? Core.Enums.LoginPageStyle.LightCorporate;
+            if (!string.IsNullOrWhiteSpace(request.LoginPageStyle) &&
+                !TryParseLoginPageStyle(request.LoginPageStyle, out loginPageStyle))
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Invalid login page style",
+                    Detail = "LoginPageStyle must be LightCorporate or DarkPremium.",
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
 
             // Convert DTO to Security entity
             var securitySettings = new Core.Entities.Security
@@ -166,7 +181,9 @@ public class SettingsController : ControllerBase
 
                 // Legal URLs
                 TermsOfServiceUrl = request.TermsOfServiceUrl,
-                PrivacyPolicyUrl = request.PrivacyPolicyUrl
+                PrivacyPolicyUrl = request.PrivacyPolicyUrl,
+
+                LoginPageStyle = loginPageStyle
             };
 
             var updatedSettings = await _settingsService.UpdateSecuritySettingsAsync(securitySettings);
@@ -220,7 +237,8 @@ public class SettingsController : ControllerBase
                 HCaptchaSiteKey = updatedSettings.HCaptchaSiteKey,
                 HCaptchaSecretKey = updatedSettings.HCaptchaSecretKey,
                 TermsOfServiceUrl = updatedSettings.TermsOfServiceUrl,
-                PrivacyPolicyUrl = updatedSettings.PrivacyPolicyUrl
+                PrivacyPolicyUrl = updatedSettings.PrivacyPolicyUrl,
+                LoginPageStyle = updatedSettings.LoginPageStyle.ToString()
             };
 
             return Ok(responseDto);
@@ -230,6 +248,90 @@ public class SettingsController : ControllerBase
             _logger.LogError(ex, "Error updating security settings");
             return StatusCode(500, "An error occurred while updating security settings");
         }
+    }
+
+    /// <summary>
+    /// Gets the login page presentation configured for the caller's tenant.
+    /// </summary>
+    [HttpGet("login-appearance")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<LoginAppearanceSettingsDto>> GetLoginAppearance()
+    {
+        var settings = await _settingsService.GetSecuritySettingsAsync();
+        return Ok(new LoginAppearanceSettingsDto
+        {
+            LoginPageStyle = (settings?.LoginPageStyle ?? Core.Enums.LoginPageStyle.LightCorporate).ToString()
+        });
+    }
+
+    /// <summary>
+    /// Updates only the public login presentation without overwriting other security settings.
+    /// </summary>
+    [HttpPut("login-appearance")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<LoginAppearanceSettingsDto>> UpdateLoginAppearance(
+        [FromBody] LoginAppearanceSettingsDto request)
+    {
+        if (!TryParseLoginPageStyle(request.LoginPageStyle, out var loginPageStyle))
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Invalid login page style",
+                Detail = "LoginPageStyle must be LightCorporate or DarkPremium.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        var existing = await _settingsService.GetSecuritySettingsAsync();
+        var previousStyle = existing?.LoginPageStyle.ToString();
+        var updated = await _settingsService.UpdateLoginPageStyleAsync(loginPageStyle);
+
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var usernameClaim = User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.Email)?.Value;
+        var tenantId = _currentUserService.TenantId;
+
+        if (Guid.TryParse(userIdClaim, out var userId) && !string.IsNullOrWhiteSpace(usernameClaim) && tenantId.HasValue)
+        {
+            await _auditLogService.CreateAuditLogAsync(new Core.Entities.AuditLog
+            {
+                UserId = userId,
+                Username = usernameClaim,
+                Action = existing == null ? "CREATE" : "UPDATE",
+                Resource = "LoginPageAppearance",
+                ResourceId = updated.Id.ToString(),
+                OldValues = previousStyle == null
+                    ? null
+                    : System.Text.Json.JsonSerializer.Serialize(new LoginAppearanceSettingsDto
+                    {
+                        LoginPageStyle = previousStyle
+                    }),
+                NewValues = System.Text.Json.JsonSerializer.Serialize(new LoginAppearanceSettingsDto
+                {
+                    LoginPageStyle = updated.LoginPageStyle.ToString()
+                }),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+                TenantId = tenantId.Value
+            });
+        }
+
+        return Ok(new LoginAppearanceSettingsDto
+        {
+            LoginPageStyle = updated.LoginPageStyle.ToString()
+        });
+    }
+
+    private static bool TryParseLoginPageStyle(
+        string? value,
+        out Core.Enums.LoginPageStyle loginPageStyle)
+    {
+        if (Enum.TryParse(value, ignoreCase: false, out loginPageStyle) && Enum.IsDefined(loginPageStyle))
+        {
+            return true;
+        }
+
+        loginPageStyle = Core.Enums.LoginPageStyle.LightCorporate;
+        return false;
     }
 
     /// <summary>
@@ -660,7 +762,7 @@ public class SettingsController : ControllerBase
                 await _tenantSmsSender.SendOtpAsync(
                     tenantId.Value,
                     request.PhoneNumber.Trim(),
-                    "Rhema ERP test verification code: 123456. Your tenant OTP SMS configuration is working.",
+                    "Rhema ERP test verification code: 123456. Test only; this code cannot be used to verify.",
                     HttpContext.RequestAborted);
             }
             else
@@ -1060,6 +1162,13 @@ public class SecuritySettingsDto
     // Legal URLs
     public string? TermsOfServiceUrl { get; set; }
     public string? PrivacyPolicyUrl { get; set; }
+
+    public string? LoginPageStyle { get; set; }
+}
+
+public sealed class LoginAppearanceSettingsDto
+{
+    public string LoginPageStyle { get; set; } = Core.Enums.LoginPageStyle.LightCorporate.ToString();
 }
 
 // Field Label DTOs

@@ -2503,6 +2503,49 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        private async Task<(Core.Entities.Security Settings, Tenant? Tenant)> ResolvePublicSecuritySettingsAsync()
+        {
+            Core.Entities.Security? settings = null;
+            Tenant? resolvedTenant = null;
+            var host = GetEffectiveHost();
+
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                var tenant = await _tenantService.GetTenantByDomainAsync(host);
+                if (tenant != null && tenant.Status == TenantStatus.Active)
+                {
+                    resolvedTenant = tenant;
+                    settings = await _settingsService.GetSecuritySettingsAsync(tenant.Id);
+                }
+            }
+
+            settings ??= await _settingsService.GetPublicSecuritySettingsAsync();
+            return (settings ?? new Core.Entities.Security(), resolvedTenant);
+        }
+
+        [HttpGet("/api/public/config/login")]
+        [AllowAnonymous]
+        [EnableRateLimiting("PublicPortalPolicy")]
+        public async Task<ActionResult<LoginAppearanceSettingsDto>> GetPublicLoginConfiguration()
+        {
+            try
+            {
+                var (settings, _) = await ResolvePublicSecuritySettingsAsync();
+                return Ok(new LoginAppearanceSettingsDto
+                {
+                    LoginPageStyle = settings.LoginPageStyle.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to retrieve public login configuration; using LightCorporate fallback");
+                return Ok(new LoginAppearanceSettingsDto
+                {
+                    LoginPageStyle = Core.Enums.LoginPageStyle.LightCorporate.ToString()
+                });
+            }
+        }
+
         [HttpGet("security-settings")]
         [AllowAnonymous]
         public async Task<IActionResult> GetPublicSecuritySettings()
@@ -2511,52 +2554,27 @@ namespace ErpSystem.Api.Controllers
             {
                 // This endpoint provides public security settings needed for registration and login
                 // (password policy, CAPTCHA settings, etc.) without requiring authentication
-
-                // Try to get actual security settings from the database
-                Core.Entities.Security? settings = null;
-                Tenant? resolvedTenant = null;
-                try
-                {
-                    // Prefer host-based tenant selection for public portals (e.g. support.company.com)
-                    var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
-                    var host = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : Request.Host.Host;
-
-                    if (!string.IsNullOrWhiteSpace(host))
-                    {
-                        var tenant = await _tenantService.GetTenantByDomainAsync(host);
-                        if (tenant != null && tenant.Status == TenantStatus.Active)
-                        {
-                            resolvedTenant = tenant;
-                            settings = await _settingsService.GetSecuritySettingsAsync(tenant.Id);
-                        }
-                    }
-
-                    // Fallback to the default tenant settings if host-based lookup didn't resolve
-                    settings ??= await _settingsService.GetPublicSecuritySettingsAsync();
-                    _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
-                        settings?.CaptchaEnabled, settings?.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings?.RecaptchaSiteKey);
-                }
-                catch (Exception settingsEx)
-                {
-                    _logger.LogWarning(settingsEx, "Failed to retrieve public security settings from database, using defaults");
-                }
+                var (settings, resolvedTenant) = await ResolvePublicSecuritySettingsAsync();
+                _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
+                    settings.CaptchaEnabled, settings.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings.RecaptchaSiteKey);
 
                 // Return actual security settings or defaults
                 var publicSettings = new
                 {
                     tenantCode = resolvedTenant?.Code,
                     tenantName = resolvedTenant?.Name,
-                    passwordMinLength = settings?.PasswordMinLength ?? 8,
-                    passwordRequireUppercase = settings?.PasswordRequireUppercase ?? true,
-                    passwordRequireLowercase = settings?.PasswordRequireLowercase ?? true,
-                    passwordRequireDigits = settings?.PasswordRequireDigits ?? true,
-                    passwordRequireSpecialChars = settings?.PasswordRequireSpecialChars ?? true,
-                    captchaEnabled = settings?.CaptchaEnabled ?? false,
-                    captchaProvider = settings?.CaptchaProvider ?? "recaptcha",
-                    recaptchaSiteKey = settings?.RecaptchaSiteKey,
-                    hCaptchaSiteKey = settings?.HCaptchaSiteKey,
-                    termsOfServiceUrl = settings?.TermsOfServiceUrl,
-                    privacyPolicyUrl = settings?.PrivacyPolicyUrl
+                    passwordMinLength = settings.PasswordMinLength,
+                    passwordRequireUppercase = settings.PasswordRequireUppercase,
+                    passwordRequireLowercase = settings.PasswordRequireLowercase,
+                    passwordRequireDigits = settings.PasswordRequireDigits,
+                    passwordRequireSpecialChars = settings.PasswordRequireSpecialChars,
+                    captchaEnabled = settings.CaptchaEnabled,
+                    captchaProvider = settings.CaptchaProvider,
+                    recaptchaSiteKey = settings.RecaptchaSiteKey,
+                    hCaptchaSiteKey = settings.HCaptchaSiteKey,
+                    termsOfServiceUrl = settings.TermsOfServiceUrl,
+                    privacyPolicyUrl = settings.PrivacyPolicyUrl,
+                    loginPageStyle = settings.LoginPageStyle.ToString()
                 };
 
                 _logger.LogInformation("Public security settings retrieved: CAPTCHA enabled = {CaptchaEnabled}, Provider = {CaptchaProvider}, Site Key = {SiteKeyPrefix}...",
@@ -2582,7 +2600,8 @@ namespace ErpSystem.Api.Controllers
                     recaptchaSiteKey = (string?)null,
                     hCaptchaSiteKey = (string?)null,
                     termsOfServiceUrl = (string?)null,
-                    privacyPolicyUrl = (string?)null
+                    privacyPolicyUrl = (string?)null,
+                    loginPageStyle = Core.Enums.LoginPageStyle.LightCorporate.ToString()
                 };
 
                 return Ok(fallbackSettings);

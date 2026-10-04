@@ -12,6 +12,7 @@ import PropertyEnquiriesPage from './page';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
+  toast: vi.fn(),
   prospectStatus: 'New',
 }));
 
@@ -34,7 +35,7 @@ vi.mock('@/components/estate/PropertyEnquiryDetails', () => ({
   PropertyEnquiryDetails: () => null,
 }));
 vi.mock('@/hooks/use-toast', () => ({
-  useToast: () => ({ toast: vi.fn() }),
+  useToast: () => ({ toast: mocks.toast }),
 }));
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ hasPermission: () => false }),
@@ -44,6 +45,7 @@ describe('property enquiry contact linkage', () => {
   beforeEach(() => {
     vi.stubGlobal('React', React);
     mocks.prospectStatus = 'New';
+    mocks.toast.mockReset();
     mocks.request.mockReset();
     mocks.request.mockImplementation(
       async (endpoint: string, options?: { method?: string }) => {
@@ -57,6 +59,9 @@ describe('property enquiry contact linkage', () => {
               status: 'Contacted',
             },
           };
+        }
+        if (endpoint.endsWith('/prospect/opportunity') && options?.method === 'POST') {
+          throw new Error('This property already has an active reservation.');
         }
         if (endpoint.includes('?page=')) {
           return { success: true, data: [], totalCount: 0 };
@@ -162,8 +167,39 @@ describe('property enquiry contact linkage', () => {
     expect(currency).toHaveTextContent('GHS');
     expect(currency).toBeDisabled();
     expect(
-      screen.getByText('Inherited from the qualified prospect or property listing.')
+      screen.getByText('Inherited from the listed property.')
     ).toBeInTheDocument();
+    client.clear();
+  });
+
+  it('keeps qualification currency read only from the listed property', async () => {
+    mocks.prospectStatus = 'Contacted';
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(<QueryClientProvider client={client}><PropertyEnquiriesPage /></QueryClientProvider>);
+
+    const currency = await screen.findByLabelText('Currency');
+    expect(currency).toHaveValue('GHS');
+    expect(currency).toHaveAttribute('readonly');
+    client.clear();
+  });
+
+  it('shows opportunity creation errors as a toast near the user action', async () => {
+    mocks.prospectStatus = 'Qualified';
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(<QueryClientProvider client={client}><PropertyEnquiriesPage /></QueryClientProvider>);
+
+    fireEvent.change(await screen.findByLabelText('Expected close date'), {
+      target: { value: '2026-12-31' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Opportunity' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Opportunity' }));
+
+    await waitFor(() => expect(mocks.toast).toHaveBeenCalledWith({
+      title: 'Opportunity could not be created',
+      description: 'This property already has an active reservation.',
+      variant: 'destructive',
+    }));
+    expect(screen.queryByText('This property already has an active reservation.')).not.toBeInTheDocument();
     client.clear();
   });
 });

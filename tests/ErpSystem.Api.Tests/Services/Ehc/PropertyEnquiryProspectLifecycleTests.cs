@@ -6,6 +6,7 @@ using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -13,10 +14,12 @@ using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using ErpSystem.Shared;
@@ -57,6 +60,26 @@ public sealed class PropertyEnquiryProspectLifecycleTests
     }
 
     [Fact]
+    public void Opportunity_customer_account_maps_to_business_partner_with_a_guarded_migration()
+    {
+        using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var opportunity = db.Model.FindEntityType(typeof(Opportunity));
+        Assert.NotNull(opportunity);
+        var customerForeignKey = Assert.Single(opportunity!.GetForeignKeys(), key =>
+            key.Properties.Any(property => property.Name == nameof(Opportunity.CustomerId)));
+        Assert.Equal(typeof(BusinessPartner), customerForeignKey.PrincipalEntityType.ClrType);
+
+        var operations = new LinkOpportunityCustomerToBusinessPartner().UpOperations;
+        var guard = Assert.IsType<SqlOperation>(operations[0]);
+        Assert.Contains("partner.TenantId = opportunity.TenantId", guard.Sql);
+        Assert.Contains("THROW 51041", guard.Sql);
+        var foreignKey = Assert.IsType<AddForeignKeyOperation>(operations[^1]);
+        Assert.Equal("BusinessPartners", foreignKey.PrincipalTable);
+        Assert.Equal(new[] { "CustomerId" }, foreignKey.Columns);
+    }
+
+    [Fact]
     public async Task Explicit_opportunity_action_reconciles_a_legacy_ticket_opportunity_without_creating_a_duplicate()
     {
         var tenantId = Guid.NewGuid();
@@ -94,6 +117,15 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             Currency = "GHS",
             ExpectedCloseDate = DateTime.UtcNow.AddDays(30)
         };
+        var customer = new BusinessPartner
+        {
+            TenantId = tenantId,
+            PartnerCode = "CUS-LEGACY-001",
+            PartnerName = "Ama Mensah",
+            PartnerType = "Customer",
+            ApprovalStatus = "Approved",
+            IsActive = true
+        };
         var ticket = new EhcTicket
         {
             TenantId = tenantId,
@@ -114,11 +146,12 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             TenantId = tenantId,
             TicketId = ticket.Id,
             LeadId = lead.Id,
+            BusinessPartnerId = customer.Id,
             Status = EhcPropertyProspectStatuses.Qualified,
             AgreedAmount = 125000m,
             Currency = "GHS"
         };
-        db.AddRange(salesUnit, lead, opportunity, ticket, prospect);
+        db.AddRange(salesUnit, lead, opportunity, customer, ticket, prospect);
         await db.SaveChangesAsync();
 
         var currentUser = new Mock<ICurrentUserService>();
@@ -144,7 +177,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             ExpectedCloseDate = DateTime.UtcNow.AddDays(14),
             ReserveProperty = false
         }));
-        Assert.Contains("qualified prospect currency (GHS)", currencyError.Message);
+        Assert.Contains("listed property currency (GHS)", currencyError.Message);
 
         var result = await service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
         {
@@ -164,6 +197,136 @@ public sealed class PropertyEnquiryProspectLifecycleTests
         Assert.Equal(opportunity.Id, savedTicket.CrmOpportunityId);
         Assert.Equal(opportunity.Id, savedProspect.OpportunityId);
         Assert.Equal(EhcPropertyProspectStatuses.Opportunity, savedProspect.Status);
+        Assert.Equal(customer.Id, (await db.Opportunities.AsNoTracking().SingleAsync(item => item.Id == opportunity.Id)).CustomerId);
+    }
+
+    [Fact]
+    public async Task New_opportunity_uses_existing_customer_account_and_website_source()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var salesUnit = new OrganizationUnit
+        {
+            TenantId = tenantId, OrganizationLevelId = Guid.NewGuid(), Name = "Sales",
+            Code = "DEPT-SALES", Path = "/SALES", IsActive = true
+        };
+        var customer = new BusinessPartner
+        {
+            TenantId = tenantId, PartnerCode = "CUS-001", PartnerName = "Ama Mensah",
+            PartnerType = "Customer", ApprovalStatus = "Approved", IsActive = true,
+            PrimaryEmail = "ama@example.test"
+        };
+        var lead = new Lead
+        {
+            TenantId = tenantId, ReferenceNumber = "LEAD-001", Status = "Active",
+            EffectiveDate = DateTime.UtcNow, FirstName = "Ama", LastName = "Mensah",
+            LeadStatus = "Qualified"
+        };
+        var ticket = new EhcTicket
+        {
+            TenantId = tenantId, TicketNumber = "EHC-001", TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged, Description = "Public property enquiry",
+            AssignedOrganizationUnitId = salesUnit.Id, CrmLeadId = lead.Id,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public property", "Sale", "USD",
+                "Accra", 100000m, Guid.NewGuid(), null, null, "Ama Mensah", "Ama Mensah",
+                "ama@example.test", null, PublicContactId: Guid.NewGuid()))
+        };
+        var prospect = new EhcPropertyEnquiryProspect
+        {
+            TenantId = tenantId, TicketId = ticket.Id, LeadId = lead.Id,
+            Status = EhcPropertyProspectStatuses.Qualified,
+            AgreedAmount = 100000m, Currency = "USD"
+        };
+        db.AddRange(salesUnit, customer, lead, ticket, prospect);
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserName).Returns("sales.manager");
+        var opportunityId = Guid.NewGuid();
+        var opportunityService = new Mock<IOpportunityService>();
+        opportunityService.Setup(item => item.CreateAsync(It.IsAny<ErpSystem.Core.DTOs.Sales.CreateOpportunityDto>()))
+            .ReturnsAsync(new ErpSystem.Core.DTOs.Sales.OpportunityDetailDto { Id = opportunityId });
+        var service = new PropertyEnquiryProspectService(db, currentUser.Object,
+            Mock.Of<IBusinessPartnerService>(), opportunityService.Object,
+            Mock.Of<ISalesAllocationService>(), Mock.Of<IProspectDepositFinancePostingService>(),
+            Mock.Of<INotificationService>(), Mock.Of<IEhcTicketService>(),
+            NullLogger<PropertyEnquiryProspectService>.Instance);
+
+        var result = await service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
+        {
+            Amount = 100000m, ExpectedCloseDate = DateTime.UtcNow.AddDays(14),
+            ReserveProperty = false
+        });
+
+        Assert.Equal(opportunityId, result.OpportunityId);
+        Assert.Equal(customer.Id, result.BusinessPartnerId);
+        opportunityService.Verify(item => item.CreateAsync(It.Is<ErpSystem.Core.DTOs.Sales.CreateOpportunityDto>(dto =>
+            dto.CustomerId == customer.Id && dto.LeadSource == "Website"
+            && dto.OpportunityType == "Existing Customer" && dto.Currency == "USD")), Times.Once);
+    }
+
+    [Fact]
+    public async Task Finalizing_approved_customer_with_cleared_deposit_closes_linked_opportunity_as_won()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var salesUnit = new OrganizationUnit { TenantId = tenantId, OrganizationLevelId = Guid.NewGuid(),
+            Name = "Sales", Code = "DEPT-SALES", Path = "/SALES", IsActive = true };
+        var lead = new Lead { TenantId = tenantId, ReferenceNumber = "LEAD-CONVERT-001", Status = "Active",
+            EffectiveDate = DateTime.UtcNow, FirstName = "Ama", LastName = "Mensah", LeadStatus = "Qualified" };
+        var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-CONVERT-001",
+            PartnerName = "Ama Mensah", PartnerType = "Customer", ApprovalStatus = "Approved", IsActive = true };
+        var opportunity = new Opportunity { TenantId = tenantId, Name = "Public property enquiry",
+            LeadId = lead.Id, Stage = "Qualification", Probability = 20, Amount = 1000m, Currency = "GHS" };
+        var ticket = new EhcTicket { TenantId = tenantId, TicketNumber = "EHC-CONVERT-001",
+            TicketType = EhcTicketType.Enquiry, Status = EhcTicketStatus.Acknowledged,
+            Description = "Public property enquiry", AssignedOrganizationUnitId = salesUnit.Id,
+            CrmLeadId = lead.Id, CrmOpportunityId = opportunity.Id,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public property", "Sale", "GHS",
+                "Accra", 1000m, Guid.NewGuid(), null, null, "Ama Mensah", "Ama Mensah",
+                "ama@example.test", null)) };
+        var prospect = new EhcPropertyEnquiryProspect { TenantId = tenantId, TicketId = ticket.Id,
+            LeadId = lead.Id, OpportunityId = opportunity.Id, BusinessPartnerId = partner.Id,
+            Status = EhcPropertyProspectStatuses.Opportunity, AgreedAmount = 1000m, Currency = "GHS",
+            DepositRequirementType = ProspectDepositRequirementTypes.Fixed, FixedDepositAmount = 200m };
+        var receipt = new ProspectDepositReceipt { TenantId = tenantId, ProspectId = prospect.Id,
+            TicketId = ticket.Id, LeadId = lead.Id, OpportunityId = opportunity.Id,
+            ReceiptNumber = "PDR-CONVERT-001", Amount = 200m, Currency = "GHS",
+            Status = ProspectDepositReceiptStatuses.Cleared, ReceivedAt = DateTime.UtcNow };
+        db.AddRange(salesUnit, lead, partner, opportunity, ticket, prospect, receipt);
+        await db.SaveChangesAsync();
+
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(item => item.TenantId).Returns(tenantId);
+        user.SetupGet(item => item.UserId).Returns(actorId.ToString());
+        user.SetupGet(item => item.UserName).Returns("sales.manager");
+        var posting = new Mock<IProspectDepositFinancePostingService>();
+        posting.Setup(item => item.TransferToCustomerAdvanceAsync(receipt, partner.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProspectDepositCustomerAdvanceTransferResult(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), false));
+        var service = new PropertyEnquiryProspectService(db, user.Object,
+            Mock.Of<IBusinessPartnerService>(), Mock.Of<IOpportunityService>(),
+            Mock.Of<ISalesAllocationService>(), posting.Object,
+            Mock.Of<INotificationService>(), Mock.Of<IEhcTicketService>(),
+            NullLogger<PropertyEnquiryProspectService>.Instance);
+
+        var result = await service.FinalizeBusinessPartnerAsync(ticket.Id);
+
+        Assert.Equal(EhcPropertyProspectStatuses.Converted, result.Status);
+        var savedOpportunity = await db.Opportunities.AsNoTracking().SingleAsync(item => item.Id == opportunity.Id);
+        Assert.Equal("Closed Won", savedOpportunity.Stage);
+        Assert.Equal(100, savedOpportunity.Probability);
+        Assert.NotNull(savedOpportunity.ActualCloseDate);
+        Assert.Equal(partner.Id, savedOpportunity.CustomerId);
+        Assert.Equal("Converted", (await db.Leads.AsNoTracking().SingleAsync(item => item.Id == lead.Id)).LeadStatus);
+        Assert.NotNull((await db.Set<ProspectDepositReceipt>().AsNoTracking()
+            .SingleAsync(item => item.Id == receipt.Id)).TransferredToCustomerAdvanceAt);
+        posting.Verify(item => item.TransferToCustomerAdvanceAsync(receipt, partner.Id, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -298,7 +461,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             Status = EhcTicketStatus.Acknowledged,
             PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
                 "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public land", "Sale", "GHS",
-                "Accra", 200000m, Guid.NewGuid(), null, null, "Ama Mensah", "Ama Mensah",
+                "Accra", 200000m, Guid.NewGuid(), Guid.NewGuid(), null, "Ama Mensah", "Ama Mensah",
                 "ama@example.test", "+233245550101"))
         };
         var prospect = new EhcPropertyEnquiryProspect

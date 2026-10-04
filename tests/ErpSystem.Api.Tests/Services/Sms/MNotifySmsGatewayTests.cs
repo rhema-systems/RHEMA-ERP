@@ -36,7 +36,7 @@ public sealed class MNotifySmsGatewayTests
     }
 
     [Fact]
-    public async Task SendAsync_IncludesOtpTypeOnlyForOtpSms()
+    public async Task SendAsync_OmitsOtpTypeForOtpSms()
     {
         var handler = new RecordingHandler(SuccessResponse());
         using var client = new HttpClient(handler);
@@ -50,7 +50,7 @@ public sealed class MNotifySmsGatewayTests
             CancellationToken.None);
 
         using var body = JsonDocument.Parse(handler.Body!);
-        body.RootElement.GetProperty("sms_type").GetString().Should().Be("otp");
+        body.RootElement.TryGetProperty("sms_type", out _).Should().BeFalse();
     }
 
     [Fact]

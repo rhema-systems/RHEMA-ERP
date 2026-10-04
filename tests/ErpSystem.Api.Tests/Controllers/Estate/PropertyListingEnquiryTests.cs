@@ -15,6 +15,7 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -996,7 +997,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task ListingApplicationRequiresPublishedWorkflow()
+    public async Task ListingApplicationOpensWithCatalogStagesWhenNoWorkflowIsPublished()
     {
         await using var db = Database();
         var currentUser = User();
@@ -1019,7 +1020,7 @@ public sealed class PropertyListingEnquiryTests
             Mock.Of<IJobCardService>(),
             Mock.Of<IEhcTicketService>());
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
+        var result = await procedures.CreateCaseAsync(new CreateProcedureCaseRequest(
             "PropertyManagement",
             "EstatePropertyManagementListingApplication",
             "Purchase enquiry - Parcel Two",
@@ -1034,11 +1035,52 @@ public sealed class PropertyListingEnquiryTests
                 ["listingReference"] = "LAND-002-PORTION-002",
                 ["requestType"] = "Sale",
                 ["currency"] = "GHS"
-            })));
+            }));
 
-        Assert.Contains("Publish a workflow", error.Message);
-        Assert.False(await db.ProcedureCases.AnyAsync());
+        Assert.Equal("PropertyManagement", result.Module);
+        var savedCase = await db.ProcedureCases.SingleAsync();
+        Assert.Null(savedCase.WorkflowDefinitionId);
+        Assert.Null(savedCase.WorkflowInstanceId);
+        Assert.Equal("Open", savedCase.Status);
         Assert.DoesNotContain(workflow.Invocations, item => item.Method.Name == nameof(IWorkflowEngine.StartWorkflowAsync));
+    }
+
+    [Fact]
+    public async Task ListingApplicationStillStartsPublishedWorkflow()
+    {
+        await using var db = Database();
+        var currentUser = User();
+        currentUser.SetupGet(item => item.UserName).Returns("estate.manager");
+        currentUser.SetupGet(item => item.Roles).Returns(["Estate Manager"]);
+        var entityType = new WorkflowEntityType { TenantId = tenantId,
+            Code = "EstatePropertyManagementListingApplication", Name = "EstatePropertyManagementListingApplication" };
+        var definition = new WorkflowDefinition { TenantId = tenantId, EntityType = entityType,
+            Name = "Listing approval", LifecycleStatus = WorkflowDefinitionLifecycleStatus.Published,
+            PublishedAt = DateTime.UtcNow, IsActive = true };
+        definition.Steps.Add(new WorkflowStep { TenantId = tenantId, WorkflowDefinition = definition,
+            Name = "Estate approval", StepType = WorkflowStepType.Approval, Order = 0, IsStartStep = true });
+        db.Add(entityType);
+        db.Add(definition);
+        await db.SaveChangesAsync();
+
+        var workflow = new Mock<IWorkflowEngine>();
+        workflow.Setup(item => item.StartWorkflowAsync(definition.Id, It.IsAny<Guid>(), userId, It.IsAny<object>()))
+            .ThrowsAsync(new InvalidOperationException("Workflow startup failed"));
+        var procedures = new ProcedureCaseService(
+            db, currentUser.Object, new LegalProcedureCatalogService(), new EstateProcedureCatalogService(),
+            new FacilitiesProcedureCatalogService(), new PropertyManagementProcedureCatalogService(),
+            new PlanningProcedureCatalogService(), workflow.Object, Mock.Of<INotificationService>(),
+            Mock.Of<IFileStorageService>(), Mock.Of<IInvoiceService>(),
+            Mock.Of<ICentralDocumentPdfSigningService>(), Mock.Of<IJobCardService>(), Mock.Of<IEhcTicketService>());
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => procedures.CreateCaseAsync(
+            new CreateProcedureCaseRequest("PropertyManagement", "EstatePropertyManagementListingApplication",
+                "Purchase enquiry", "ESTATE-001", "Estate Customer", "Sales - Estate Enquiry",
+                DateTime.UtcNow, "Completed Sales transaction handed to Estate.",
+                new Dictionary<string, string?> { ["applicationReference"] = "ESTATE-001" })));
+
+        Assert.Equal("Workflow startup failed", error.Message);
+        workflow.Verify(item => item.StartWorkflowAsync(definition.Id, It.IsAny<Guid>(), userId, It.IsAny<object>()), Times.Once);
     }
 
     [Fact]

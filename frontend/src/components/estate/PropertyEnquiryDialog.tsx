@@ -199,7 +199,7 @@ export function PropertyEnquiryDialog({
           otpCode,
         });
       setContactVerification(verification);
-      setContactName(verification.profile.contactName || '');
+      setContactName((current) => verification.profile.contactName || current);
       if (verification.profile.contactEmail) {
         setContactEmail(verification.profile.contactEmail);
       }

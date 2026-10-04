@@ -1,0 +1,526 @@
+﻿{
+    "Database":  "RhemaERP_VpsTest_20260926_173800",
+    "CapturedUtc":  "2026-09-28T07:29:15.7305368Z",
+    "ReadOnly":  true,
+    "OperationalBaseline":  {
+                                "Counts":  {
+                                               "Actors":  16,
+                                               "Bins":  3,
+                                               "CanonicalSuppliers":  2,
+                                               "Categories":  6,
+                                               "Items":  9,
+                                               "ItemUomLinks":  9,
+                                               "LegacySuppliers":  0,
+                                               "Responsibilities":  8,
+                                               "ResponsibilityWarehouses":  9,
+                                               "RoleLinks":  34,
+                                               "SupplierApProfiles":  2,
+                                               "SupplierRoles":  2,
+                                               "TenantMemberships":  16,
+                                               "UnitsOfMeasure":  5,
+                                               "Warehouses":  2
+                                           },
+                                "Fingerprint":  "D05E7069B4DED2E5364C6BB5AC45071EB6F3FD31A06ED8A40DCAB8921E533036",
+                                "Failures":  [
+
+                                             ],
+                                "Ready":  true
+                            },
+    "Prerequisites":  [
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "admin",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "ap.officer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "finance.manager",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "financeapprover",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "financereviewer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementevaluator",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "procurementofficer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "tdc0102-checker-201531",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.consultant",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.contractor",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.engineer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "Active; permissions and assignments still require verification"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "admin",
+                              "Finding":  "SuperAdmin"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "admin",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "Accounts Payable Officer"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "TDC_HEAD_OF_PROCUREMENT"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "ap.officer",
+                              "Finding":  "TDC_STORES_MANAGER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "finance.manager",
+                              "Finding":  "Finance Manager"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "finance.manager",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "financeapprover",
+                              "Finding":  "Finance User"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "financereviewer",
+                              "Finding":  "TDC_FINANCE_REVIEWER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "Procurement User"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "TDC_HEAD_OF_PROCUREMENT"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementapprover",
+                              "Finding":  "TDC_STORES_MANAGER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementevaluator",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "procurementofficer",
+                              "Finding":  "TDC_PROCUREMENT_OFFICER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "tdc0102-checker-201531",
+                              "Finding":  "TDC_EVALUATOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "Manager"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.approver",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.consultant",
+                              "Finding":  "ExternalUser"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.contractor",
+                              "Finding":  "ExternalUser"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.engineer",
+                              "Finding":  "TDC_CIVIL_ENGINEER"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "Employee"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.preparer",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "Employee"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "TDC_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Actor role",
+                              "Reference":  "uat.qs.reviewer",
+                              "Finding":  "TDC_SUPERVISING_QUANTITY_SURVEYOR"
+                          },
+                          {
+                              "Category":  "Contractor partner",
+                              "Reference":  "QS-UAT-CONT-001",
+                              "Finding":  "Fictional QS UAT Contractor / Approved"
+                          },
+                          {
+                              "Category":  "Estate ready land",
+                              "Reference":  "Available for new project",
+                              "Finding":  "Count=2; Select the required portion from Estate in New Project; assignment is made during UAT"
+                          },
+                          {
+                              "Category":  "Estate ready land reference",
+                              "Reference":  "LAND-2026-8C30C53A-PORTION-001",
+                              "Finding":  "Selectable in New Project; verify this is the intended UAT land"
+                          },
+                          {
+                              "Category":  "Estate ready land reference",
+                              "Reference":  "TDC-PORTAL-LAND-001-PORTION-001",
+                              "Finding":  "Selectable in New Project; verify this is the intended UAT land"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-001",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-002",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-003",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-004",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-005",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-006",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-007",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-008",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-009",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-010",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-011",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-012",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-013",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-014",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-015",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-016",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS decision",
+                              "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-017",
+                              "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective"
+                          },
+                          {
+                              "Category":  "QS profile",
+                              "Reference":  "DEFAULT",
+                              "Finding":  "No published effective QS configuration profile"
+                          },
+                          {
+                              "Category":  "QS profile",
+                              "Reference":  "TDC-QUANTITY-SURVEY v1",
+                              "Finding":  "Draft; configuration review and publication required"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_BOQ",
+                              "Finding":  "QS UAT v1 - QS BoQ"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_CLAIM",
+                              "Finding":  "QS UAT v1 - QS Claim"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_ESTIMATE",
+                              "Finding":  "QS UAT v1 - QS Estimate"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_FINAL_ACCOUNT",
+                              "Finding":  "QS UAT v1 - QS Final Account"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_MEASUREMENT",
+                              "Finding":  "QS UAT v1 - QS Measurement"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_PAYMENT_CERTIFICATE",
+                              "Finding":  "QS UAT v1 - QS Payment Certificate"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_RETENTION_RELEASE",
+                              "Finding":  "QS UAT v1 - QS Retention Release"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_VALUATION",
+                              "Finding":  "QS UAT v1 - QS Valuation"
+                          },
+                          {
+                              "Category":  "QS workflow",
+                              "Reference":  "QS_VARIATION",
+                              "Finding":  "QS UAT v1 - QS Variation"
+                          }
+                      ],
+    "QsEndToEndVerified":  false,
+    "PrerequisiteSetupRequired":  true,
+    "MissingPrerequisites":  [
+                                 {
+                                     "Category":  "QS profile",
+                                     "Reference":  "DEFAULT",
+                                     "Finding":  "No published effective QS configuration profile"
+                                 }
+                             ],
+    "ReadyLandCount":  2,
+    "ConfigurationReviewRequired":  true,
+    "ConfigurationReview":  [
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-001",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-002",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-003",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-004",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-005",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-006",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-007",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-008",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-009",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-010",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-011",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-012",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-013",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-014",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-015",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-016",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY / QS-DEC-017",
+                                    "Finding":  "Profile v1; Status=Draft; Approval=Pending; Evidence=Missing; Currently effective",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "DEFAULT",
+                                    "Finding":  "No published effective QS configuration profile",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "TDC-QUANTITY-SURVEY v1",
+                                    "Finding":  "Draft; configuration review and publication required",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "Workflow bindings and performers",
+                                    "Finding":  "Verify the selected QS decision routes, independent stage performers and authority limits; an active definition alone is insufficient.",
+                                    "Route":  "/administration/workflow"
+                                },
+                                {
+                                    "Reference":  "Rates, evidence and Finance",
+                                    "Finding":  "Confirm approved rates, required DMS/report templates, supplier accounting mappings, applicable tax and open posting period before the relevant UAT stage.",
+                                    "Route":  "/administration/project-management/quantity-survey-config"
+                                },
+                                {
+                                    "Reference":  "Project and contract assignments",
+                                    "Finding":  "Assign the preparer, reviewer, engineer, approver, contractor and consultant to the fresh UAT project/contract as required.",
+                                    "Route":  "/development/projects"
+                                }
+                            ],
+    "Pending":  [
+                    "Verify actual stage permissions and project/contract assignments",
+                    "Confirm approved budget, accounting mappings and open Finance period",
+                    "Confirm current rates, authority limits and QS decision bindings",
+                    "Verify scanner/DMS upload and download",
+                    "Execute fresh A-E records and the authorised F Finance boundary in the HTML walkthrough"
+                ]
+}

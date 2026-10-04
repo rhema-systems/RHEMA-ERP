@@ -30,6 +30,14 @@ public sealed class EnterpriseCrmDashboardDto
     public int ActiveQuoteCount { get; set; }
     public int ActiveAccountCount { get; set; }
     public int AtRiskAccountCount { get; set; }
+    public DateTime PipelineAsOf { get; set; }
+    public string FunnelModel { get; set; } = "StageTransitionHistory";
+    public DateTime FunnelRangeStart { get; set; }
+    public DateTime FunnelRangeEnd { get; set; }
+    public DateTime? HistoryCoverageStart { get; set; }
+    public int LegacyHistorySnapshotCount { get; set; }
+    public int LostOpportunityCount { get; set; }
+    public List<string> DataQualityIssues { get; set; } = new();
     public List<EnterpriseDashboardStageCountDto> PipelineByStage { get; set; } = new();
     public List<EnterpriseDashboardCountPointDto> AccountRiskByBand { get; set; } = new();
     public List<EnterpriseDashboardFunnelPointDto> ConversionFunnel { get; set; } = new();
@@ -37,16 +45,39 @@ public sealed class EnterpriseCrmDashboardDto
 
 public sealed class EnterpriseDashboardStageCountDto
 {
+    public Guid StageId { get; set; }
     public string Stage { get; set; } = string.Empty;
+    public int StageOrder { get; set; }
+    public bool IsClosed { get; set; }
+    public bool IsWon { get; set; }
+    public bool IsLost { get; set; }
     public int OpportunityCount { get; set; }
     public int QuoteCount { get; set; }
+    public decimal PercentageOfActivePipeline { get; set; }
+    public decimal AverageAgeDays { get; set; }
+    public int StalledOpportunityCount { get; set; }
+    public int OverdueOpportunityCount { get; set; }
+    public List<EnterpriseDashboardCurrencyAmountDto> AmountsByCurrency { get; set; } = new();
+    public List<EnterpriseDashboardCurrencyAmountDto> WeightedAmountsByCurrency { get; set; } = new();
+    public int OpportunitiesWithoutCurrencyCount { get; set; }
+}
+
+public sealed class EnterpriseDashboardCurrencyAmountDto
+{
+    public string Currency { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
 
 public sealed class EnterpriseDashboardFunnelPointDto
 {
+    public Guid StageId { get; set; }
     public string Stage { get; set; } = string.Empty;
+    public int StageOrder { get; set; }
     public int Count { get; set; }
     public decimal? ConversionRate { get; set; }
+    public decimal? OverallConversionRate { get; set; }
+    public List<EnterpriseDashboardCurrencyAmountDto> AmountsByCurrency { get; set; } = new();
+    public int OpportunitiesWithoutCurrencyCount { get; set; }
 }
 
 public sealed class EnterpriseOperationalQueueDto

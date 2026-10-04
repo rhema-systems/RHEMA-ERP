@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   businessPartnerId: null as string | null,
   depositThresholdMet: false,
   depositError: null as string | null,
+  opportunityStage: 'Qualified',
+  salesOrderAmountPaid: null as number | null,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -66,6 +68,8 @@ describe('property enquiry deposit controls', () => {
     mocks.businessPartnerId = null;
     mocks.depositThresholdMet = false;
     mocks.depositError = null;
+    mocks.opportunityStage = 'Qualified';
+    mocks.salesOrderAmountPaid = null;
     mocks.request.mockReset();
     mocks.request.mockImplementation(async (endpoint: string, options?: RequestInit) => {
       if (endpoint.endsWith('/prospect/qualify')) {
@@ -82,8 +86,15 @@ describe('property enquiry deposit controls', () => {
             opportunity: {
               id: 'opportunity-1',
               referenceNumber: 'OPP-001',
-              stage: 'Qualified',
+              stage: mocks.opportunityStage,
               amount: 10000,
+              currency: 'GHS',
+            },
+            salesOrder: mocks.salesOrderAmountPaid === null ? null : {
+              id: 'order-1',
+              reference: 'SO-001',
+              agreedAmount: 10000,
+              amountPaid: mocks.salesOrderAmountPaid,
               currency: 'GHS',
             },
           },
@@ -232,7 +243,7 @@ describe('property enquiry deposit controls', () => {
 
     expect(await screen.findByLabelText('Receipt date and time')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/PDR-001/)).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm and post deposit' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Reverse' })).not.toBeInTheDocument();
     client.clear();
   });
@@ -269,10 +280,10 @@ describe('property enquiry deposit controls', () => {
     mocks.permissions.add(REVERSE_PROSPECT_DEPOSIT_PERMISSION);
     const client = renderPage();
 
-    expect(await screen.findByRole('button', { name: 'Clear' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Confirm and post deposit' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reverse' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
-    expect(screen.getByLabelText('Clearance date and time')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm and post deposit' }));
+    expect(screen.getByLabelText('Deposit confirmation date and time')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     fireEvent.click(screen.getByRole('button', { name: 'Reverse' }));
     expect(screen.getByLabelText('Reversal date and time')).toBeInTheDocument();
@@ -328,6 +339,35 @@ describe('property enquiry deposit controls', () => {
     expect(href).toContain('propertyEnquiryId=enquiry-1');
     expect(href).toContain('propertyEnquiryAssetType=Property');
     expect(href).toContain('saleableSourceLocked=true');
+    client.clear();
+  });
+
+  it('prefills the Estate handover amount from cleared deposits without adding Sales Order payments', async () => {
+    mocks.prospectStatus = 'Converted';
+    mocks.opportunityStage = 'Closed Won';
+    const client = renderPage();
+
+    expect(await screen.findByLabelText('Amount paid in Sales')).toHaveValue(2000);
+    expect(screen.getByText(/Cleared prospect deposits: GHS 2,000/)).toBeInTheDocument();
+    client.clear();
+  });
+
+  it('opens the linked CRM opportunity using its exact detail parameter', async () => {
+    const client = renderPage();
+
+    expect(await screen.findByRole('link', { name: 'Open opportunity' })).toHaveAttribute(
+      'href', '/crm/opportunities?opportunityId=opportunity-1'
+    );
+    client.clear();
+  });
+
+  it('prefers an existing paid Sales Order amount over the deposit default', async () => {
+    mocks.prospectStatus = 'Converted';
+    mocks.opportunityStage = 'Closed Won';
+    mocks.salesOrderAmountPaid = 3500;
+    const client = renderPage();
+
+    expect(await screen.findByLabelText('Amount paid in Sales')).toHaveValue(3500);
     client.clear();
   });
 });

@@ -79,9 +79,42 @@ export interface EnterpriseCrmDashboard {
   activeQuoteCount: number
   activeAccountCount: number
   atRiskAccountCount: number
-  pipelineByStage: Array<{ stage: string; opportunityCount: number; quoteCount: number }>
+  pipelineAsOf: string
+  funnelModel: string
+  funnelRangeStart: string
+  funnelRangeEnd: string
+  historyCoverageStart?: string | null
+  legacyHistorySnapshotCount: number
+  lostOpportunityCount: number
+  dataQualityIssues: string[]
+  pipelineByStage: Array<{
+    stageId: string
+    stage: string
+    stageOrder: number
+    isClosed: boolean
+    isWon: boolean
+    isLost: boolean
+    opportunityCount: number
+    quoteCount: number
+    percentageOfActivePipeline: number
+    averageAgeDays: number
+    stalledOpportunityCount: number
+    overdueOpportunityCount: number
+    amountsByCurrency?: Array<{ currency: string; amount: number }>
+    weightedAmountsByCurrency?: Array<{ currency: string; amount: number }>
+    opportunitiesWithoutCurrencyCount?: number
+  }>
   accountRiskByBand: Array<{ label: string; count: number }>
-  conversionFunnel: Array<{ stage: string; count: number; conversionRate: number | null }>
+  conversionFunnel: Array<{
+    stageId: string
+    stage: string
+    stageOrder: number
+    count: number
+    conversionRate: number | null
+    overallConversionRate: number | null
+    amountsByCurrency?: Array<{ currency: string; amount: number }>
+    opportunitiesWithoutCurrencyCount?: number
+  }>
 }
 
 export interface EnterpriseOperationalQueue {

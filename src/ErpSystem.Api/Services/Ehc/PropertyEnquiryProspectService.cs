@@ -69,6 +69,10 @@ public sealed class PropertyEnquiryProspectService(
     {
         var (ticket, property) = await LoadTicketAsync(ticketId, cancellationToken);
         if (request.AgreedAmount <= 0) throw new InvalidOperationException("Enter the agreed property amount before qualification.");
+        var listingCurrency = Currency(property.Currency);
+        if (!string.IsNullOrWhiteSpace(request.Currency)
+            && !string.Equals(Currency(request.Currency), listingCurrency, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Qualification currency must match the listed property currency ({listingCurrency}).");
 
         var source = await ResolveSaleableSourceAsync(property, cancellationToken);
         var policy = await db.Set<EhcPropertyProspectDepositPolicy>().AsNoTracking()
@@ -87,6 +91,7 @@ public sealed class PropertyEnquiryProspectService(
         lead.LeadStatus = "Qualified";
         lead.QualificationScore = request.QualificationScore;
         lead.EstimatedValue = request.AgreedAmount;
+        lead.LeadSource = "Website";
         lead.LastContactDate ??= now;
         if (!string.IsNullOrWhiteSpace(request.Notes)) lead.Notes = AppendNote(lead.Notes, request.Notes);
         lead.UpdatedAt = now;
@@ -97,7 +102,7 @@ public sealed class PropertyEnquiryProspectService(
         prospect.QualifiedAt = now;
         prospect.QualifiedById = ActorId;
         prospect.AgreedAmount = request.AgreedAmount;
-        prospect.Currency = Currency(request.Currency);
+        prospect.Currency = listingCurrency;
         // Qualification and opportunity creation remain available before Finance setup. If no
         // source policy exists yet, the conservative captured rule is full payment. Money cannot
         // be recorded or cleared until RecordDepositAsync finds an active policy and posting accounts.
@@ -157,9 +162,44 @@ public sealed class PropertyEnquiryProspectService(
         if (request.ExpectedCloseDate.Date < DateTime.UtcNow.Date)
             throw new InvalidOperationException("Expected close date cannot be in the past.");
         var prospectCurrency = Currency(prospect.Currency);
-        var requestCurrency = Currency(request.Currency);
-        if (!string.Equals(requestCurrency, prospectCurrency, StringComparison.Ordinal))
-            throw new InvalidOperationException($"Opportunity currency must match the qualified prospect currency ({prospectCurrency}).");
+        var listingCurrency = Currency(property.Currency);
+        if (!string.Equals(prospectCurrency, listingCurrency, StringComparison.Ordinal))
+            throw new InvalidOperationException($"The qualified prospect currency must match the listed property currency ({listingCurrency}). Requalify the enquiry before creating an opportunity.");
+        if (!string.IsNullOrWhiteSpace(request.Currency)
+            && !string.Equals(Currency(request.Currency), prospectCurrency, StringComparison.Ordinal))
+            throw new InvalidOperationException($"Opportunity currency must match the listed property currency ({listingCurrency}).");
+
+        if (!prospect.BusinessPartnerId.HasValue && property.PublicContactId.HasValue)
+        {
+            // The public flow verifies the selected email or phone before the ticket is created.
+            // Only a unique exact Customer match is safe to link without a Sales choice.
+            var matches = await FindBusinessPartnerMatchesAsync(ticketId, cancellationToken);
+            if (matches.Count == 1 && matches[0].IsActive
+                && string.Equals(matches[0].ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase))
+            {
+                prospect.BusinessPartnerId = matches[0].Id;
+                prospect.BusinessPartnerLinkedAt = DateTime.UtcNow;
+                prospect.BusinessPartnerLinkedById = ActorId;
+                await AddAuditAsync(ticket, "ExistingBusinessPartnerAutoLinked",
+                    "Existing Customer Business Partner matched to verified public contact",
+                    $"Approved Customer Business Partner {matches[0].PartnerCode} was linked from the verified public enquiry contact before opportunity creation.",
+                    cancellationToken);
+            }
+        }
+
+        Guid? customerBusinessPartnerId = null;
+        if (prospect.BusinessPartnerId.HasValue)
+        {
+            var customer = await db.BusinessPartners.AsNoTracking().Include(x => x.Roles)
+                .SingleOrDefaultAsync(x => x.Id == prospect.BusinessPartnerId.Value
+                    && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("The linked Customer Business Partner could not be found for this tenant.");
+            if (!customer.IsActive || !string.Equals(customer.ApprovalStatus, "Approved", StringComparison.OrdinalIgnoreCase)
+                || (!BusinessPartnerRoles.HasCustomer(customer.PartnerType)
+                    && !customer.Roles.Any(x => !x.IsDeleted && x.RoleType == BusinessPartnerRoleType.Customer)))
+                throw new InvalidOperationException("The linked Business Partner must be an approved, active Customer before it can be used as the opportunity account.");
+            customerBusinessPartnerId = customer.Id;
+        }
 
         if (ticket.CrmOpportunityId.HasValue && prospect.OpportunityId.HasValue
             && ticket.CrmOpportunityId.Value != prospect.OpportunityId.Value)
@@ -169,13 +209,19 @@ public sealed class PropertyEnquiryProspectService(
         Opportunity? linkedOpportunity = null;
         if (linkedOpportunityId.HasValue)
         {
-            linkedOpportunity = await db.Opportunities.AsNoTracking().SingleOrDefaultAsync(x =>
+            linkedOpportunity = await db.Opportunities.SingleOrDefaultAsync(x =>
                 x.Id == linkedOpportunityId.Value && x.TenantId == TenantId && !x.IsDeleted, cancellationToken)
                 ?? throw new InvalidOperationException("The linked Sales opportunity could not be found for this tenant.");
             if (linkedOpportunity.LeadId != lead.Id)
                 throw new InvalidOperationException("The linked Sales opportunity does not belong to this prospect lead.");
             if (!string.Equals(Currency(linkedOpportunity.Currency), prospectCurrency, StringComparison.Ordinal))
                 throw new InvalidOperationException("The linked Sales opportunity currency does not match the qualified prospect currency. Reconcile the Sales lineage before continuing.");
+            if (customerBusinessPartnerId.HasValue)
+            {
+                if (linkedOpportunity.CustomerId.HasValue && linkedOpportunity.CustomerId != customerBusinessPartnerId)
+                    throw new InvalidOperationException("The linked Sales opportunity belongs to a different Customer Business Partner.");
+                linkedOpportunity.CustomerId ??= customerBusinessPartnerId;
+            }
         }
 
         if (prospect.Status == EhcPropertyProspectStatuses.Opportunity
@@ -183,7 +229,10 @@ public sealed class PropertyEnquiryProspectService(
             && ticket.CrmOpportunityId == linkedOpportunity.Id
             && prospect.OpportunityId == linkedOpportunity.Id
             && (!request.ReserveProperty || prospect.SalesAllocationId.HasValue))
+        {
+            await db.SaveChangesAsync(cancellationToken);
             return await ToDtoAsync(prospect, cancellationToken);
+        }
 
         SalesSaleableSource? source = null;
         string? sourceItemId = null;
@@ -205,14 +254,12 @@ public sealed class PropertyEnquiryProspectService(
                 Name = Clip($"Property enquiry: {property.ListingName}", 200)!,
                 Description = Clip($"Originating enquiry {ticket.TicketNumber}. Property {property.ListingReference}: {property.ListingName}.", 2000),
                 LeadId = lead.Id,
-                CustomerId = null,
-                Stage = "Qualification",
-                Probability = 20,
+                CustomerId = customerBusinessPartnerId,
                 Amount = request.Amount,
                 Currency = prospectCurrency,
                 ExpectedCloseDate = request.ExpectedCloseDate,
-                LeadSource = "Public Property Listing",
-                OpportunityType = "New Business",
+                LeadSource = "Website",
+                OpportunityType = customerBusinessPartnerId.HasValue ? "Existing Customer" : "New Business",
                 AssignedToId = ticket.AssignedToUserId,
                 Notes = Clip($"Originating EHC ticket: {ticket.TicketNumber}. {request.Notes}", 2000)
             });
@@ -710,6 +757,15 @@ public sealed class PropertyEnquiryProspectService(
 
     private async Task LinkAndTransferAsync(EhcTicket ticket, EhcPropertyEnquiryProspect prospect, Guid businessPartnerId, CancellationToken cancellationToken)
     {
+        var opportunity = await db.Opportunities.Include(x => x.StageDefinition).SingleAsync(x => x.Id == prospect.OpportunityId
+            && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
+        if (ticket.CrmOpportunityId != opportunity.Id || opportunity.LeadId != prospect.LeadId)
+            throw new InvalidOperationException("The enquiry, prospect and CRM opportunity are not linked consistently.");
+        if (opportunity.CustomerId.HasValue && opportunity.CustomerId != businessPartnerId)
+            throw new InvalidOperationException("The CRM opportunity is linked to another customer.");
+        if (opportunity.StageDefinition?.IsLost == true)
+            throw new InvalidOperationException("A lost CRM opportunity cannot be converted to a customer.");
+
         var receipts = await db.Set<ProspectDepositReceipt>().Where(x => x.TenantId == TenantId && x.ProspectId == prospect.Id
             && !x.IsDeleted && x.Status == ProspectDepositReceiptStatuses.Cleared && !x.TransferredToCustomerAdvanceAt.HasValue)
             .OrderBy(x => x.ReceivedAt).ToListAsync(cancellationToken);
@@ -731,6 +787,39 @@ public sealed class PropertyEnquiryProspectService(
         var lead = await db.Leads.SingleAsync(x => x.Id == prospect.LeadId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         lead.LeadStatus = "Converted";
         lead.ConvertedDate = DateTime.UtcNow;
+        opportunity.CustomerId = businessPartnerId;
+        if (opportunity.StageDefinition?.IsWon != true)
+        {
+            var wonStages = await db.OpportunityStageDefinitions
+                .Where(stage => stage.TenantId == TenantId && !stage.IsDeleted && stage.IsActive
+                    && stage.IsClosed && stage.IsWon)
+                .OrderBy(stage => stage.SortOrder)
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (wonStages.Count != 1)
+                throw new InvalidOperationException(
+                    "Configure exactly one active Won opportunity stage before finalizing customer conversion.");
+
+            var wonStage = wonStages[0];
+            var now = DateTime.UtcNow;
+            opportunity.StageDefinitionId = wonStage.Id;
+            opportunity.Stage = wonStage.Name;
+            opportunity.Probability = wonStage.DefaultProbability ?? 100;
+            opportunity.ActualCloseDate = now;
+            db.OpportunityStageHistories.Add(new OpportunityStageHistory
+            {
+                TenantId = TenantId,
+                OpportunityId = opportunity.Id,
+                StageDefinitionId = wonStage.Id,
+                EnteredAt = now,
+                AmountSnapshot = opportunity.Amount,
+                CurrencySnapshot = Currency(opportunity.Currency),
+                ProbabilitySnapshot = Math.Clamp(opportunity.Probability, 0, 100),
+                IsLegacySnapshot = false,
+                CreatedBy = currentUser.UserName,
+                CreatedById = ActorId
+            });
+        }
         // ConvertedCustomerId is the legacy Finance Customer FK, not the canonical BusinessPartner id.
         // The durable BP relationship is EhcPropertyEnquiryProspect.BusinessPartnerId.
         if (prospect.SalesAllocationId.HasValue)
@@ -743,7 +832,7 @@ public sealed class PropertyEnquiryProspectService(
                 Notes = $"Converted public prospect from enquiry {ticket.TicketNumber}."
             });
         await AddAuditAsync(ticket, "BusinessPartnerLinked", "Qualified prospect linked to Customer Business Partner",
-            $"Business Partner {businessPartnerId} was linked after the cleared deposit threshold was met. Cash was not posted a second time; cleared receipts were transferred to customer advances.", cancellationToken);
+            $"Business Partner {businessPartnerId} was linked after the cleared deposit threshold was met. CRM opportunity {opportunity.Id} was closed as Won. Cash was not posted a second time; cleared receipts were transferred to customer advances.", cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 
@@ -768,7 +857,7 @@ public sealed class PropertyEnquiryProspectService(
                 CompanyName = Clip(property.BusinessPartnerName, 100),
                 Email = Clip(property.ContactEmail, 100),
                 Phone = Clip(property.ContactPhone, 20),
-                LeadSource = "Public Property Listing",
+                LeadSource = "Website",
                 LeadStatus = "New",
                 EstimatedValue = property.Price ?? 0m,
                 AssignedToId = ticket.AssignedToUserId,

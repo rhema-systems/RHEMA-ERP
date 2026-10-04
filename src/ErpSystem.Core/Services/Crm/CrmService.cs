@@ -81,7 +81,7 @@ public class CrmService : ICrmService
                 .ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var leadLookup = leads.ToDictionary(x => x.Id);
@@ -134,7 +134,7 @@ public class CrmService : ICrmService
             .GroupBy(x => x.BusinessPartnerId!.Value)
             .ToDictionary(x => x.Key, x => x.Select(y => y.Quote).ToList());
 
-        var accounts = businessPartners
+        var accountSummaries = businessPartners
             .Select(partner =>
             {
                 var partnerProjects = projectsByPartnerId.GetValueOrDefault(partner.Id) ?? new List<Project>();
@@ -159,8 +159,10 @@ public class CrmService : ICrmService
                     contractWindow);
             })
             .Where(IsCrmRelevantAccount)
-            .OrderByDescending(x => x.ContractValue + x.ProjectValue + x.TenderAwardedValue)
-            .ThenByDescending(x => x.ActiveProjectCount + x.ActiveContractCount)
+            .ToList();
+        var accounts = accountSummaries
+            .OrderByDescending(x => x.ActiveProjectCount + x.ActiveContractCount)
+            .ThenByDescending(x => x.TenderAwardCount)
             .ThenBy(x => x.PartnerName)
             .Take(take)
             .ToList();
@@ -196,13 +198,23 @@ public class CrmService : ICrmService
             OpenOpportunityCount = openOpportunities.Count,
             OpenOpportunityValue = decimal.Round(openOpportunities.Sum(x => x.Amount), 2),
             WeightedPipelineValue = decimal.Round(openOpportunities.Sum(x => x.Amount * x.Probability / 100m), 2),
+            OpenOpportunityValuesByCurrency = GroupAmountsByCurrency(openOpportunities,
+                x => x.Currency, x => x.Amount),
+            WeightedPipelineValuesByCurrency = GroupAmountsByCurrency(openOpportunities,
+                x => x.Currency, x => x.Amount * x.Probability / 100m),
+            OpenOpportunitiesWithoutCurrencyCount = openOpportunities.Count(x => x.Amount != 0m
+                && TryNormalizeCurrencyCode(x.Currency) is null),
             ActiveQuoteCount = activeQuotes.Count,
             ActiveQuoteValue = decimal.Round(activeQuotes.Sum(ResolveQuoteValue), 2),
-            ActiveAccountCount = accounts.Count,
-            AtRiskAccountCount = accounts.Count(x => x.IsAtRisk),
-            AverageAccountHealthScore = accounts.Count == 0
+            ActiveQuoteValuesByCurrency = GroupAmountsByCurrency(activeQuotes,
+                x => x.Currency, ResolveQuoteValue),
+            ActiveQuotesWithoutCurrencyCount = activeQuotes.Count(x => ResolveQuoteValue(x) != 0m
+                && TryNormalizeCurrencyCode(x.Currency) is null),
+            ActiveAccountCount = accountSummaries.Count,
+            AtRiskAccountCount = accountSummaries.Count(x => x.IsAtRisk),
+            AverageAccountHealthScore = accountSummaries.Count == 0
                 ? 0m
-                : decimal.Round((decimal)accounts.Average(x => x.HealthScore), 1),
+                : decimal.Round((decimal)accountSummaries.Average(x => x.HealthScore), 1),
             ActiveProjectCount = projects.Count(IsActiveProject),
             ActiveContractCount = contracts.Count(IsActiveContract),
             ExpiringContractCount = contracts.Count(x => IsActiveContract(x) && x.EndDate.HasValue && x.EndDate.Value <= contractWindow),
@@ -362,7 +374,7 @@ public class CrmService : ICrmService
                 .ToDictionary(x => x.Id);
 
         var activeQuotes = relatedQuotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
-        var openOpportunities = relatedOpportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = relatedOpportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var relatedLeads = leadLookup.Values
             .OrderBy(x => x.NextFollowUpDate ?? DateTime.MaxValue)
             .ThenByDescending(x => x.CreatedAt)
@@ -582,7 +594,7 @@ public class CrmService : ICrmService
         var quotes = (await quoteRepository.FindAsync(x => x.TenantId == tenantId)).ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -766,7 +778,7 @@ public class CrmService : ICrmService
         var quotes = (await quoteRepository.FindAsync(x => x.TenantId == tenantId)).ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -968,7 +980,7 @@ public class CrmService : ICrmService
         var quotes = (await quoteRepository.FindAsync(x => x.TenantId == tenantId)).ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -1159,7 +1171,7 @@ public class CrmService : ICrmService
                     || opportunityIds.Contains(x.OpportunityId))))
             .ToList();
 
-        var openOpportunities = opportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = opportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var activeQuotes = quotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
         var convertedLeadIdsByPartnerId = leads
             .Where(x => x.ConvertedCustomerId.HasValue)
@@ -1345,7 +1357,7 @@ public class CrmService : ICrmService
                 .ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -1569,7 +1581,7 @@ public class CrmService : ICrmService
                 && x.BusinessPartnerId == businessPartnerId))
             .ToList();
 
-        var openOpportunities = opportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = opportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var activeQuotes = quotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
         var convertedLeadIdsByPartnerId = leads
             .Where(x => x.ConvertedCustomerId.HasValue)
@@ -1770,7 +1782,7 @@ public class CrmService : ICrmService
                 .ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -2002,7 +2014,7 @@ public class CrmService : ICrmService
         var resolvedProjects = projects
             .Where(x => ResolveProjectBusinessPartnerId(x, contractLookup) == businessPartnerId)
             .ToList();
-        var openOpportunities = opportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = opportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var activeQuotes = quotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
         var convertedLeadIdsByPartnerId = leads
             .Where(x => x.ConvertedCustomerId.HasValue)
@@ -2210,7 +2222,7 @@ public class CrmService : ICrmService
                 .ToList();
 
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var activeQuotes = quotes
@@ -2470,7 +2482,7 @@ public class CrmService : ICrmService
         var resolvedProjects = projects
             .Where(x => ResolveProjectBusinessPartnerId(x, contractLookup) == businessPartnerId)
             .ToList();
-        var openOpportunities = opportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = opportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var activeQuotes = quotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
         var convertedLeadIdsByPartnerId = leads
             .Where(x => x.ConvertedCustomerId.HasValue)
@@ -2798,6 +2810,117 @@ public class CrmService : ICrmService
         await _unitOfWork.SaveChangesAsync();
     }
 
+    public async Task<IReadOnlyList<CrmOpportunityStageDefinitionDto>> GetOpportunityStagesAsync(
+        bool includeInactive = false)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var stages = await _unitOfWork.Repository<OpportunityStageDefinition>().FindAsync(stage =>
+            stage.TenantId == tenantId && (includeInactive || stage.IsActive));
+
+        return stages
+            .OrderBy(stage => stage.SortOrder)
+            .ThenBy(stage => stage.Name)
+            .Select(MapOpportunityStage)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<CrmOpportunityStageDefinitionDto>> UpdateOpportunityStagesAsync(
+        UpdateCrmOpportunityStagesDto dto)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        var normalized = dto.Stages
+            .Select(stage => new
+            {
+                Source = stage,
+                Code = NormalizeStageCode(stage.Code),
+                Name = stage.Name.Trim()
+            })
+            .ToList();
+
+        if (normalized.Any(stage => string.IsNullOrWhiteSpace(stage.Code) || string.IsNullOrWhiteSpace(stage.Name)))
+            throw new InvalidOperationException("Every opportunity stage requires a code and name.");
+        if (normalized.GroupBy(stage => stage.Code, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Opportunity stage codes must be unique.");
+        if (normalized.GroupBy(stage => stage.Source.SortOrder).Any(group => group.Count() > 1))
+            throw new InvalidOperationException("Opportunity stage order values must be unique.");
+        if (normalized.Any(stage => stage.Source.IsWon && stage.Source.IsLost))
+            throw new InvalidOperationException("An opportunity stage cannot be both won and lost.");
+        if (normalized.Any(stage => (stage.Source.IsWon || stage.Source.IsLost) && !stage.Source.IsClosed))
+            throw new InvalidOperationException("Won and lost stages must be marked closed.");
+        if (normalized.Count(stage => stage.Source.IsWon && stage.Source.IsActive) != 1)
+            throw new InvalidOperationException("Exactly one active won stage is required.");
+        if (normalized.Count(stage => stage.Source.IsLost && stage.Source.IsActive) != 1)
+            throw new InvalidOperationException("Exactly one active lost stage is required.");
+
+        var repository = _unitOfWork.Repository<OpportunityStageDefinition>();
+        var existing = (await repository.FindAsync(stage => stage.TenantId == tenantId)).ToList();
+        var existingById = existing.ToDictionary(stage => stage.Id);
+        var submittedIds = normalized
+            .Where(stage => stage.Source.StageId.HasValue)
+            .Select(stage => stage.Source.StageId!.Value)
+            .ToHashSet();
+
+        foreach (var item in normalized)
+        {
+            OpportunityStageDefinition entity;
+            if (item.Source.StageId.HasValue)
+            {
+                if (!existingById.TryGetValue(item.Source.StageId.Value, out entity!))
+                    throw new InvalidOperationException($"Opportunity stage {item.Source.StageId} was not found in this tenant.");
+            }
+            else
+            {
+                entity = new OpportunityStageDefinition
+                {
+                    TenantId = tenantId,
+                    CreatedById = _currentUserProvider.UserId,
+                    CreatedBy = _currentUserProvider.Username
+                };
+                await repository.AddAsync(entity);
+            }
+
+            entity.Code = item.Code;
+            entity.Name = item.Name;
+            entity.SortOrder = item.Source.SortOrder;
+            entity.IsActive = item.Source.IsActive;
+            entity.IsClosed = item.Source.IsClosed;
+            entity.IsWon = item.Source.IsWon;
+            entity.IsLost = item.Source.IsLost;
+            entity.DefaultProbability = item.Source.DefaultProbability;
+            entity.LastModifiedById = _currentUserProvider.UserId;
+            entity.UpdatedBy = _currentUserProvider.Username;
+
+            if (item.Source.StageId.HasValue)
+                await repository.UpdateAsync(entity);
+        }
+
+        var omittedActiveIds = existing
+            .Where(stage => stage.IsActive && !submittedIds.Contains(stage.Id))
+            .Select(stage => stage.Id)
+            .ToHashSet();
+        if (omittedActiveIds.Count > 0)
+        {
+            var usedStageIds = (await _unitOfWork.Repository<Opportunity>().FindAsync(opportunity =>
+                    opportunity.TenantId == tenantId && opportunity.StageDefinitionId.HasValue
+                    && omittedActiveIds.Contains(opportunity.StageDefinitionId.Value)))
+                .Select(opportunity => opportunity.StageDefinitionId!.Value)
+                .ToHashSet();
+            if (usedStageIds.Count > 0)
+                throw new InvalidOperationException("Stages used by opportunities must be retained and may be marked inactive instead.");
+
+            foreach (var omittedStage in existing.Where(stage => omittedActiveIds.Contains(stage.Id)))
+            {
+                omittedStage.IsActive = false;
+                omittedStage.LastModifiedById = _currentUserProvider.UserId;
+                omittedStage.UpdatedBy = _currentUserProvider.Username;
+                await repository.UpdateAsync(omittedStage);
+            }
+        }
+
+        await _unitOfWork.SaveChangesAsync();
+        return await GetOpportunityStagesAsync(includeInactive: true);
+    }
+
     public async Task<PagedResult<CrmOpportunityListItemDto>> GetOpportunitiesAsync(
         int page = 1,
         int pageSize = 25,
@@ -2805,7 +2928,11 @@ public class CrmService : ICrmService
         string? stage = null,
         Guid? businessPartnerId = null,
         Guid? leadId = null,
-        string? opportunityType = null)
+        string? opportunityType = null,
+        Guid? stageDefinitionId = null,
+        Guid? reachedStageDefinitionId = null,
+        DateTime? stageEnteredFrom = null,
+        DateTime? stageEnteredTo = null)
     {
         page = Math.Max(page, 1);
         pageSize = ClampPageSize(pageSize);
@@ -2830,6 +2957,24 @@ public class CrmService : ICrmService
         if (!string.IsNullOrWhiteSpace(stage))
         {
             filtered = filtered.Where(x => string.Equals(x.Stage, stage, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (stageDefinitionId.HasValue)
+        {
+            filtered = filtered.Where(x => x.StageDefinitionId == stageDefinitionId.Value);
+        }
+
+        if (reachedStageDefinitionId.HasValue)
+        {
+            var matchingOpportunityIds = (await _unitOfWork.Repository<OpportunityStageHistory>().FindAsync(history =>
+                    history.TenantId == tenantId
+                    && !history.IsLegacySnapshot
+                    && history.StageDefinitionId == reachedStageDefinitionId.Value
+                    && (!stageEnteredFrom.HasValue || history.EnteredAt >= stageEnteredFrom.Value)
+                    && (!stageEnteredTo.HasValue || history.EnteredAt < stageEnteredTo.Value)))
+                .Select(history => history.OpportunityId)
+                .ToHashSet();
+            filtered = filtered.Where(opportunity => matchingOpportunityIds.Contains(opportunity.Id));
         }
 
         if (!string.IsNullOrWhiteSpace(opportunityType))
@@ -2951,6 +3096,7 @@ public class CrmService : ICrmService
         {
             OpportunityId = listItem.OpportunityId,
             Name = listItem.Name,
+            StageDefinitionId = listItem.StageDefinitionId,
             Stage = listItem.Stage,
             Amount = listItem.Amount,
             Currency = listItem.Currency,
@@ -3010,6 +3156,7 @@ public class CrmService : ICrmService
 
         var linkedLead = await ResolveLeadAsync(dto.LeadId, tenantId);
         var resolvedBusinessPartnerId = await ResolveBusinessPartnerIdAsync(dto.BusinessPartnerId, linkedLead, tenantId);
+        var stage = await ResolveOpportunityStageAsync(dto.StageDefinitionId, dto.Stage, tenantId);
 
         var opportunity = new Opportunity
         {
@@ -3019,12 +3166,13 @@ public class CrmService : ICrmService
             // CRM accounts currently use the existing customer foreign key slot.
             CustomerId = resolvedBusinessPartnerId,
             LeadId = linkedLead?.Id,
-            Stage = CleanRequiredText(dto.Stage, "Prospecting"),
+            StageDefinitionId = stage.Id,
+            Stage = stage.Name,
             Probability = Math.Clamp(dto.Probability, 0, 100),
             Amount = Math.Max(dto.Amount, 0m),
             Currency = NormalizeCurrencyCode(dto.Currency, "USD"),
             ExpectedCloseDate = dto.ExpectedCloseDate,
-            ActualCloseDate = ResolveActualCloseDate(dto.Stage, dto.ActualCloseDate, now),
+            ActualCloseDate = stage.IsClosed ? dto.ActualCloseDate ?? now : null,
             LeadSource = ResolveLeadSource(dto.LeadSource, linkedLead),
             OpportunityType = CleanRequiredText(dto.OpportunityType, "New Business"),
             AssignedToId = dto.AssignedToId,
@@ -3036,6 +3184,7 @@ public class CrmService : ICrmService
         };
 
         await opportunityRepository.AddAsync(opportunity);
+        await _unitOfWork.Repository<OpportunityStageHistory>().AddAsync(CreateStageHistory(opportunity, stage, now));
         await _unitOfWork.SaveChangesAsync();
 
         return (await GetOpportunityByIdAsync(opportunity.Id))!;
@@ -3055,17 +3204,20 @@ public class CrmService : ICrmService
 
         var linkedLead = await ResolveLeadAsync(dto.LeadId, tenantId);
         var resolvedBusinessPartnerId = await ResolveBusinessPartnerIdAsync(dto.BusinessPartnerId, linkedLead, tenantId);
+        var stage = await ResolveOpportunityStageAsync(dto.StageDefinitionId, dto.Stage, tenantId);
+        var stageChanged = opportunity.StageDefinitionId != stage.Id;
 
         opportunity.Name = dto.Name.Trim();
         opportunity.Description = CleanNullable(dto.Description);
         opportunity.CustomerId = resolvedBusinessPartnerId;
         opportunity.LeadId = linkedLead?.Id;
-        opportunity.Stage = CleanRequiredText(dto.Stage, opportunity.Stage);
+        opportunity.StageDefinitionId = stage.Id;
+        opportunity.Stage = stage.Name;
         opportunity.Probability = Math.Clamp(dto.Probability, 0, 100);
         opportunity.Amount = Math.Max(dto.Amount, 0m);
         opportunity.Currency = NormalizeCurrencyCode(dto.Currency, opportunity.Currency);
         opportunity.ExpectedCloseDate = dto.ExpectedCloseDate;
-        opportunity.ActualCloseDate = ResolveActualCloseDate(dto.Stage, dto.ActualCloseDate, now);
+        opportunity.ActualCloseDate = stage.IsClosed ? dto.ActualCloseDate ?? opportunity.ActualCloseDate ?? now : null;
         opportunity.LeadSource = ResolveLeadSource(dto.LeadSource, linkedLead);
         opportunity.OpportunityType = CleanRequiredText(dto.OpportunityType, opportunity.OpportunityType);
         opportunity.AssignedToId = dto.AssignedToId;
@@ -3076,6 +3228,8 @@ public class CrmService : ICrmService
         opportunity.UpdatedBy = _currentUserProvider.Username;
 
         await opportunityRepository.UpdateAsync(opportunity);
+        if (stageChanged)
+            await _unitOfWork.Repository<OpportunityStageHistory>().AddAsync(CreateStageHistory(opportunity, stage, now));
         await _unitOfWork.SaveChangesAsync();
 
         return (await GetOpportunityByIdAsync(opportunity.Id))!;
@@ -4312,7 +4466,7 @@ public class CrmService : ICrmService
             now,
             endingWindow);
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .OrderByDescending(x => x.Amount * x.Probability / 100m)
             .ThenBy(x => x.ExpectedCloseDate)
             .ToList();
@@ -4620,7 +4774,7 @@ public class CrmService : ICrmService
         var campaignMemberRepository = _unitOfWork.Repository<CampaignMember>();
 
         var openOpportunities = (await opportunityRepository.FindAsync(x => x.TenantId == tenantId))
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var leadIds = openOpportunities
             .Where(x => x.LeadId.HasValue)
@@ -5052,14 +5206,15 @@ public class CrmService : ICrmService
                         LeadId = opportunity.LeadId,
                         LeadName = lead == null ? null : GetLeadFullName(lead),
                         Amount = opportunity.Amount,
-                        Currency = NormalizeCurrencyCode(opportunity.Currency, "USD"),
+                        Currency = TryNormalizeCurrencyCode(opportunity.Currency) ?? string.Empty,
                         WeightedValue = decimal.Round(opportunity.Amount * opportunity.Probability / 100m, 2),
                         ExpectedCloseDate = opportunity.ExpectedCloseDate,
                         QuoteCount = relatedQuotes.Count,
                         ContractCount = relatedContracts.Count,
                         ProjectCount = relatedProjects.Count,
                         CoverageStatus = ResolveConversionCoverageStatus(
-                            opportunity.Stage,
+                            opportunity.ActualCloseDate.HasValue,
+                            opportunity.ActualCloseDate.HasValue && !string.IsNullOrWhiteSpace(opportunity.LossReason),
                             relatedQuotes.Count,
                             relatedContracts.Count,
                             relatedProjects.Count),
@@ -5122,7 +5277,7 @@ public class CrmService : ICrmService
                 BusinessPartnerId = x.Journey.BusinessPartnerId,
                 BusinessPartnerName = x.Journey.BusinessPartnerName,
                 Amount = x.Opportunity.Amount,
-                Currency = NormalizeCurrencyCode(x.Opportunity.Currency, "USD"),
+                Currency = TryNormalizeCurrencyCode(x.Opportunity.Currency),
                 ReferenceDate = x.Opportunity.ExpectedCloseDate
             });
 
@@ -5157,8 +5312,15 @@ public class CrmService : ICrmService
                 : decimal.Round(projectBackedOpportunityCount * 100m / horizonOpportunities.Count, 1),
             TotalOpportunityValue = decimal.Round(horizonOpportunities.Sum(x => x.Amount), 2),
             WeightedPipelineValue = decimal.Round(horizonOpportunities
-                .Where(x => !IsClosedOpportunityStage(x.Stage))
+                .Where(x => !x.ActualCloseDate.HasValue)
                 .Sum(x => x.Amount * x.Probability / 100m), 2),
+            TotalOpportunityValuesByCurrency = GroupAmountsByCurrency(horizonOpportunities,
+                x => x.Currency, x => x.Amount),
+            WeightedPipelineValuesByCurrency = GroupAmountsByCurrency(
+                horizonOpportunities.Where(x => !x.ActualCloseDate.HasValue),
+                x => x.Currency, x => x.Amount * x.Probability / 100m),
+            OpportunitiesWithoutCurrencyCount = horizonOpportunities.Count(x => x.Amount != 0m
+                && TryNormalizeCurrencyCode(x.Currency) is null),
             Funnel =
             {
                 new CrmConversionStageMetricDto
@@ -5167,6 +5329,7 @@ public class CrmService : ICrmService
                     EntityCount = relevantLeads.Count,
                     RelatedOpportunityCount = leadWithOpportunityCount,
                     TotalValue = decimal.Round(relevantLeads.Sum(x => x.EstimatedValue), 2),
+                    UnspecifiedCurrencyCount = relevantLeads.Count(x => x.EstimatedValue != 0m),
                     ConversionRate = relevantLeads.Count == 0
                         ? 0m
                         : decimal.Round(leadWithOpportunityCount * 100m / relevantLeads.Count, 1)
@@ -5177,6 +5340,9 @@ public class CrmService : ICrmService
                     EntityCount = horizonOpportunities.Count,
                     RelatedOpportunityCount = horizonOpportunities.Count,
                     TotalValue = decimal.Round(horizonOpportunities.Sum(x => x.Amount), 2),
+                    ValuesByCurrency = GroupAmountsByCurrency(horizonOpportunities,
+                        x => x.Currency, x => x.Amount),
+                    UnspecifiedCurrencyCount = horizonOpportunities.Count(x => x.Amount != 0m && TryNormalizeCurrencyCode(x.Currency) is null),
                     ConversionRate = horizonOpportunities.Count == 0 ? 0m : 100m
                 },
                 new CrmConversionStageMetricDto
@@ -5185,6 +5351,9 @@ public class CrmService : ICrmService
                     EntityCount = quotes.Count,
                     RelatedOpportunityCount = quotedOpportunityCount,
                     TotalValue = decimal.Round(quotes.Sum(ResolveQuoteValue), 2),
+                    ValuesByCurrency = GroupAmountsByCurrency(quotes,
+                        x => x.Currency, ResolveQuoteValue),
+                    UnspecifiedCurrencyCount = quotes.Count(x => ResolveQuoteValue(x) != 0m && TryNormalizeCurrencyCode(x.Currency) is null),
                     ConversionRate = horizonOpportunities.Count == 0
                         ? 0m
                         : decimal.Round(quotedOpportunityCount * 100m / horizonOpportunities.Count, 1)
@@ -5195,6 +5364,9 @@ public class CrmService : ICrmService
                     EntityCount = contracts.Count,
                     RelatedOpportunityCount = contractBackedOpportunityCount,
                     TotalValue = decimal.Round(contracts.Sum(x => x.ContractValue), 2),
+                    ValuesByCurrency = GroupAmountsByCurrency(contracts,
+                        x => x.Currency, x => x.ContractValue),
+                    UnspecifiedCurrencyCount = contracts.Count(x => x.ContractValue != 0m && TryNormalizeCurrencyCode(x.Currency) is null),
                     ConversionRate = horizonOpportunities.Count == 0
                         ? 0m
                         : decimal.Round(contractBackedOpportunityCount * 100m / horizonOpportunities.Count, 1)
@@ -5205,6 +5377,10 @@ public class CrmService : ICrmService
                     EntityCount = projects.Count,
                     RelatedOpportunityCount = projectBackedOpportunityCount,
                     TotalValue = decimal.Round(projects.Sum(x => x.ApprovedBudget ?? x.EstimatedBudget ?? 0m), 2),
+                    ValuesByCurrency = GroupAmountsByCurrency(projects,
+                        x => x.BaseCurrencyCode, x => x.ApprovedBudget ?? x.EstimatedBudget ?? 0m),
+                    UnspecifiedCurrencyCount = projects.Count(x => (x.ApprovedBudget ?? x.EstimatedBudget ?? 0m) != 0m
+                        && TryNormalizeCurrencyCode(x.BaseCurrencyCode) is null),
                     ConversionRate = horizonOpportunities.Count == 0
                         ? 0m
                         : decimal.Round(projectBackedOpportunityCount * 100m / horizonOpportunities.Count, 1)
@@ -5247,7 +5423,7 @@ public class CrmService : ICrmService
         var leadLookup = leads.ToDictionary(x => x.Id);
         var opportunityLookup = opportunities.ToDictionary(x => x.Id);
         var businessPartnerLookup = businessPartners.ToDictionary(x => x.Id, x => x.PartnerName);
-        var openOpportunities = opportunities.Where(x => !IsClosedOpportunityStage(x.Stage)).ToList();
+        var openOpportunities = opportunities.Where(x => !x.ActualCloseDate.HasValue).ToList();
         var activeQuotes = quotes.Where(x => !IsClosedQuoteStatus(x.QuoteStatus)).ToList();
         var acceptedQuotes = quotes.Where(x => string.Equals(x.QuoteStatus, "Accepted", StringComparison.OrdinalIgnoreCase)).ToList();
         var convertedLeadIdsByPartnerId = leads
@@ -5532,13 +5708,25 @@ public class CrmService : ICrmService
             TotalProjectCount = projects.Count,
             ActiveProjectCount = activeProjectCount,
             ProjectValue = projectValue,
+            ProjectValuesByCurrency = GroupAmountsByCurrency(projects,
+                x => x.BaseCurrencyCode, x => x.ApprovedBudget ?? x.EstimatedBudget ?? 0m),
+            ProjectsWithoutCurrencyCount = projects.Count(x => (x.ApprovedBudget ?? x.EstimatedBudget ?? 0m) != 0m
+                && TryNormalizeCurrencyCode(x.BaseCurrencyCode) is null),
             TotalContractCount = contracts.Count,
             ActiveContractCount = activeContractCount,
             ContractValue = contractValue,
+            ContractValuesByCurrency = GroupAmountsByCurrency(contracts,
+                x => x.Currency, x => x.ContractValue),
+            ContractsWithoutCurrencyCount = contracts.Count(x => x.ContractValue != 0m
+                && TryNormalizeCurrencyCode(x.Currency) is null),
             TenderInvitationCount = tenderInvitations.Count,
             TenderBidCount = tenderBids.Count,
             TenderAwardCount = tenderAwards.Count,
             TenderAwardedValue = awardedValue,
+            TenderAwardedValuesByCurrency = GroupAmountsByCurrency(tenderAwards,
+                x => x.Currency, x => x.AwardedAmount),
+            TenderAwardsWithoutCurrencyCount = tenderAwards.Count(x => x.AwardedAmount != 0m
+                && TryNormalizeCurrencyCode(x.Currency) is null),
             HasOpenFollowUp = health.HasOpenFollowUp,
             IsAtRisk = health.IsAtRisk,
             HealthScore = health.Score,
@@ -6903,9 +7091,10 @@ public class CrmService : ICrmService
         {
             OpportunityId = opportunity.Id,
             Name = opportunity.Name,
+            StageDefinitionId = opportunity.StageDefinitionId,
             Stage = opportunity.Stage,
             Amount = opportunity.Amount,
-            Currency = NormalizeCurrencyCode(opportunity.Currency, "USD"),
+            Currency = TryNormalizeCurrencyCode(opportunity.Currency) ?? string.Empty,
             Probability = opportunity.Probability,
             WeightedValue = decimal.Round(opportunity.Amount * opportunity.Probability / 100m, 2),
             ExpectedCloseDate = opportunity.ExpectedCloseDate,
@@ -6931,6 +7120,7 @@ public class CrmService : ICrmService
         {
             OpportunityId = overview.OpportunityId,
             Name = overview.Name,
+            StageDefinitionId = overview.StageDefinitionId,
             Stage = overview.Stage,
             Amount = overview.Amount,
             Currency = overview.Currency,
@@ -6945,7 +7135,7 @@ public class CrmService : ICrmService
             LeadId = overview.LeadId,
             LeadName = overview.LeadName,
             ActualCloseDate = opportunity.ActualCloseDate,
-            IsClosingSoon = !IsClosedOpportunityStage(opportunity.Stage)
+            IsClosingSoon = !opportunity.ActualCloseDate.HasValue
                 && opportunity.ExpectedCloseDate <= DateTime.UtcNow.AddDays(30),
             CreatedAt = opportunity.CreatedAt
         };
@@ -8148,7 +8338,7 @@ public class CrmService : ICrmService
             .Select(x => x.First())
             .ToList();
         var openOpportunities = relatedOpportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var memberCount = members.Count;
         var respondedMemberCount = members.Count(IsRespondedCampaignMember);
@@ -8211,7 +8401,7 @@ public class CrmService : ICrmService
             ? new List<Opportunity>()
             : (opportunitiesByLeadId.GetValueOrDefault(lead.Id) ?? new List<Opportunity>());
         var openOpportunities = opportunities
-            .Where(x => !IsClosedOpportunityStage(x.Stage))
+            .Where(x => !x.ActualCloseDate.HasValue)
             .ToList();
         var convertedBusinessPartnerId = lead?.ConvertedCustomerId ?? member.CustomerId;
 
@@ -8345,9 +8535,68 @@ public class CrmService : ICrmService
         => string.Equals(status, "Converted", StringComparison.OrdinalIgnoreCase)
             || string.Equals(status, "Unqualified", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsClosedOpportunityStage(string? stage)
-        => string.Equals(stage, "Closed Won", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(stage, "Closed Lost", StringComparison.OrdinalIgnoreCase);
+    private async Task<OpportunityStageDefinition> ResolveOpportunityStageAsync(
+        Guid? stageDefinitionId,
+        string? legacyStageName,
+        Guid tenantId)
+    {
+        var stages = (await _unitOfWork.Repository<OpportunityStageDefinition>().FindAsync(stage =>
+                stage.TenantId == tenantId && stage.IsActive))
+            .OrderBy(stage => stage.SortOrder)
+            .ToList();
+
+        var requestedName = legacyStageName?.Trim();
+        var stage = stageDefinitionId.HasValue
+            ? stages.FirstOrDefault(value => value.Id == stageDefinitionId.Value)
+            : string.IsNullOrWhiteSpace(requestedName)
+                ? stages.FirstOrDefault(value => !value.IsClosed)
+                : stages.FirstOrDefault(value =>
+                    string.Equals(value.Code, requestedName, StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(value.Name, requestedName, StringComparison.OrdinalIgnoreCase));
+
+        return stage ?? throw new InvalidOperationException(
+            stageDefinitionId.HasValue
+                ? "The selected opportunity stage is not active for this tenant."
+                : "Select a configured opportunity stage.");
+    }
+
+    private static OpportunityStageHistory CreateStageHistory(
+        Opportunity opportunity,
+        OpportunityStageDefinition stage,
+        DateTime enteredAt) => new()
+    {
+        TenantId = opportunity.TenantId,
+        OpportunityId = opportunity.Id,
+        StageDefinitionId = stage.Id,
+        EnteredAt = enteredAt,
+        AmountSnapshot = opportunity.Amount,
+        CurrencySnapshot = TryNormalizeCurrencyCode(opportunity.Currency),
+        ProbabilitySnapshot = opportunity.Probability,
+        CreatedById = opportunity.LastModifiedById ?? opportunity.CreatedById,
+        CreatedBy = opportunity.UpdatedBy ?? opportunity.CreatedBy
+    };
+
+    private static CrmOpportunityStageDefinitionDto MapOpportunityStage(
+        OpportunityStageDefinition stage) => new()
+    {
+        StageId = stage.Id,
+        Code = stage.Code,
+        Name = stage.Name,
+        SortOrder = stage.SortOrder,
+        IsActive = stage.IsActive,
+        IsClosed = stage.IsClosed,
+        IsWon = stage.IsWon,
+        IsLost = stage.IsLost,
+        DefaultProbability = stage.DefaultProbability
+    };
+
+    private static string NormalizeStageCode(string value)
+    {
+        var characters = value.Trim().ToUpperInvariant()
+            .Select(character => char.IsLetterOrDigit(character) ? character : '_')
+            .ToArray();
+        return new string(characters).Trim('_');
+    }
 
     private static bool IsClosedActivityStatus(string? status)
         => string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)
@@ -8411,7 +8660,8 @@ public class CrmService : ICrmService
     }
 
     private static string ResolveConversionCoverageStatus(
-        string? stage,
+        bool isClosed,
+        bool isLost,
         int quoteCount,
         int contractCount,
         int projectCount)
@@ -8423,12 +8673,12 @@ public class CrmService : ICrmService
 
         if (contractCount > 0)
         {
-            return string.Equals(stage, "Closed Won", StringComparison.OrdinalIgnoreCase)
+            return isClosed && !isLost
                 ? "Closed Won"
                 : "Contract Ready";
         }
 
-        if (string.Equals(stage, "Closed Lost", StringComparison.OrdinalIgnoreCase))
+        if (isClosed && isLost)
         {
             return "Closed Lost";
         }
@@ -8448,15 +8698,16 @@ public class CrmService : ICrmService
         int projectCount,
         DateTime now)
     {
-        if (string.Equals(opportunity.Stage, "Closed Lost", StringComparison.OrdinalIgnoreCase))
+        var isClosed = opportunity.ActualCloseDate.HasValue;
+        var isLost = isClosed && !string.IsNullOrWhiteSpace(opportunity.LossReason);
+        if (isLost)
         {
             return string.IsNullOrWhiteSpace(opportunity.LossReason)
                 ? "Opportunity was closed lost before downstream conversion."
                 : $"Closed lost: {opportunity.LossReason}";
         }
 
-        if (string.Equals(opportunity.Stage, "Closed Won", StringComparison.OrdinalIgnoreCase)
-            && contractCount == 0)
+        if (isClosed && !isLost && contractCount == 0)
         {
             return "Closed-won opportunity has not been converted into a contract yet.";
         }
@@ -8466,14 +8717,14 @@ public class CrmService : ICrmService
             return "Contract exists, but no delivery project is linked yet.";
         }
 
-        if (!IsClosedOpportunityStage(opportunity.Stage)
+        if (!opportunity.ActualCloseDate.HasValue
             && opportunity.ExpectedCloseDate <= now.AddDays(21)
             && quoteCount == 0)
         {
             return "Expected close is approaching, but no quote has been issued yet.";
         }
 
-        if (!IsClosedOpportunityStage(opportunity.Stage)
+        if (!opportunity.ActualCloseDate.HasValue
             && opportunity.ExpectedCloseDate <= now.AddDays(21)
             && quoteCount > 0
             && contractCount == 0)
@@ -8538,6 +8789,22 @@ public class CrmService : ICrmService
     private static string NormalizeCurrencyCode(string? value, string fallback)
         => TryNormalizeCurrencyCode(value) ?? TryNormalizeCurrencyCode(fallback) ?? "USD";
 
+    private static List<CrmCurrencyAmountDto> GroupAmountsByCurrency<T>(
+        IEnumerable<T> records,
+        Func<T, string?> currency,
+        Func<T, decimal> amount)
+        => records
+            .Select(record => new { Currency = TryNormalizeCurrencyCode(currency(record)), Amount = amount(record) })
+            .Where(record => record.Currency is not null)
+            .GroupBy(record => record.Currency!)
+            .OrderBy(group => group.Key)
+            .Select(group => new CrmCurrencyAmountDto
+            {
+                Currency = group.Key,
+                Amount = decimal.Round(group.Sum(record => record.Amount), 2)
+            })
+            .ToList();
+
     private static string ResolveCurrencyCode(string? primary, IEnumerable<string?>? fallbacks = null)
     {
         var normalizedPrimary = TryNormalizeCurrencyCode(primary);
@@ -8567,16 +8834,6 @@ public class CrmService : ICrmService
         return normalized is { Length: 3 } && normalized.All(char.IsLetter)
             ? normalized
             : null;
-    }
-
-    private static DateTime? ResolveActualCloseDate(string? stage, DateTime? actualCloseDate, DateTime now)
-    {
-        if (actualCloseDate.HasValue)
-        {
-            return actualCloseDate;
-        }
-
-        return IsClosedOpportunityStage(stage) ? now : null;
     }
 
     private static string ResolveLeadSource(string? leadSource, Lead? lead)

@@ -69,8 +69,11 @@ public sealed class TenantEmailSender : ITenantEmailSender
             }
             catch (Exception ex)
             {
-                // Preserve compatibility with legacy rows that predate encrypted settings.
-                _logger.LogWarning(ex, "Could not decrypt the SMTP password for tenant {TenantId}; trying the stored legacy value", tenantId);
+                // CryptoService already returns legacy plain-text values unchanged. A failure
+                // here means an encrypted credential cannot be read with the configured key.
+                _logger.LogError(ex, "Could not decrypt the SMTP password for tenant {TenantId}", tenantId);
+                throw new InvalidOperationException(
+                    "The tenant SMTP password could not be decrypted. Check Security:EncryptionKey or save the password again.", ex);
             }
         }
 

@@ -114,7 +114,8 @@ export interface EhcTicketAuditEvent {
 
 export interface PropertyListingContext {
   source: string; listingId: string; listingReference: string; listingName: string;
-  listingType: string; currency: string; location?: string | null; price?: number | null;
+  listingType: string; assetType?: 'Land' | 'Property' | 'Facility' | string | null;
+  currency: string; location?: string | null; price?: number | null;
   parentAssetId: string; demarcationId?: string | null; businessPartnerId?: string | null;
   businessPartnerName: string; contactName?: string | null; contactEmail?: string | null; contactPhone?: string | null; contactReference?: string | null;
   alternativePhoneNumber?: string | null; preferredContactMethod?: string | null;

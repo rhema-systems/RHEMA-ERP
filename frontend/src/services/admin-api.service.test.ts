@@ -75,7 +75,7 @@ describe('admin SMS settings API', () => {
     });
   });
 
-  it('can test the same OTP delivery mode used by public property enquiries', async () => {
+  it('can send a sample verification message through the property enquiry delivery path', async () => {
     api.request.mockResolvedValue({ success: true, message: 'Test verification SMS sent successfully.' });
 
     await adminApiService.sendTestSms('+233241234567', true);

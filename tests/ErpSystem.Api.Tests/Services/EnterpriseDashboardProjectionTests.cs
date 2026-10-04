@@ -96,10 +96,39 @@ public sealed class EnterpriseDashboardProjectionTests
     }
 
     [Fact]
-    public async Task Crm_projection_uses_tenant_date_and_configured_stage_values_without_summing_currencies()
+    public async Task SuperAdmin_dashboard_inventory_counts_all_requisitions_only_in_the_validated_tenant()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var warehouseId = Guid.NewGuid();
+        var locationId = Guid.NewGuid();
+        await using var context = CreateContext();
+        context.InventoryRequisitions.AddRange(
+            Requisition(tenantId, warehouseId, locationId, Guid.NewGuid(), "REQ-PENDING", RequisitionStatus.Submitted),
+            Requisition(tenantId, warehouseId, locationId, Guid.NewGuid(), "REQ-ISSUE", RequisitionStatus.Approved),
+            Requisition(Guid.NewGuid(), warehouseId, locationId, Guid.NewGuid(), "REQ-OTHER-TENANT", RequisitionStatus.Approved));
+        await context.SaveChangesAsync();
+        var access = new Mock<IProcurementAccessControlService>(MockBehavior.Strict);
+        var service = CreateService(context, tenantId, userId, access.Object);
+
+        var result = await service.GetInventoryQueuesAsync(
+            new DateTime(2026, 7, 1), new DateTime(2026, 8, 1),
+            includeAllTenantRequisitions: true);
+
+        Assert.Equal(1, result.PendingInventoryApprovalCount);
+        Assert.Equal(1, result.PendingInventoryIssueCount);
+        access.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Crm_projection_uses_configured_stage_order_current_pipeline_and_historical_transitions()
     {
         var tenantId = Guid.NewGuid();
         await using var context = CreateContext();
+        var intake = Stage(tenantId, "INTAKE", "Customer Intake", 10, probability: 10);
+        var review = Stage(tenantId, "REVIEW", "Technical Review", 20, probability: 50);
+        var signed = Stage(tenantId, "SIGNED", "Agreement Signed", 30, isClosed: true, isWon: true, probability: 100);
+        var declined = Stage(tenantId, "DECLINED", "Declined", 40, isClosed: true, isLost: true);
         var lead = new Lead
         {
             Id = Guid.NewGuid(), TenantId = tenantId, FirstName = "Ama", LastName = "Mensah",
@@ -109,11 +138,15 @@ public sealed class EnterpriseDashboardProjectionTests
         var opportunity = new Opportunity
         {
             Id = Guid.NewGuid(), TenantId = tenantId, LeadId = lead.Id, Name = "Airport Plot",
-            Stage = "Technical Review", Currency = "GHS", Amount = 100m, Probability = 50,
+            StageDefinitionId = review.Id, Stage = review.Name, Currency = "GHS", Amount = 100m, Probability = 50,
             CreatedAt = new DateTime(2026, 7, 3), ExpectedCloseDate = new DateTime(2026, 7, 31)
         };
+        context.OpportunityStageDefinitions.AddRange(intake, review, signed, declined);
         context.Leads.Add(lead);
         context.Opportunities.Add(opportunity);
+        context.OpportunityStageHistories.AddRange(
+            History(tenantId, opportunity.Id, intake.Id, new DateTime(2026, 7, 3), 80m, "GHS", 10),
+            History(tenantId, opportunity.Id, review.Id, new DateTime(2026, 7, 10), 100m, "GHS", 50));
         context.Quotes.Add(new Quote
         {
             Id = Guid.NewGuid(), TenantId = tenantId, OpportunityId = opportunity.Id,
@@ -124,7 +157,7 @@ public sealed class EnterpriseDashboardProjectionTests
         var otherTenantOpportunity = new Opportunity
         {
             Id = Guid.NewGuid(), TenantId = Guid.NewGuid(), Name = "Other tenant",
-            Stage = "Technical Review", Currency = "USD", Amount = 999m, Probability = 90,
+            Stage = "Other tenant stage", Currency = "USD", Amount = 999m, Probability = 90,
             CreatedAt = new DateTime(2026, 7, 3), ExpectedCloseDate = new DateTime(2026, 7, 31)
         };
         context.Opportunities.Add(otherTenantOpportunity);
@@ -144,11 +177,123 @@ public sealed class EnterpriseDashboardProjectionTests
         Assert.Equal(1, result.QualifiedLeadCount);
         Assert.Equal(1, result.LeadsNeedingFollowUpCount);
         Assert.Equal(1, result.OpenOpportunityCount);
-        var stage = Assert.Single(result.PipelineByStage);
-        Assert.Equal("Technical Review", stage.Stage);
+        Assert.Equal(new[] { "Customer Intake", "Technical Review", "Agreement Signed" },
+            result.PipelineByStage.Select(stage => stage.Stage));
+        var stage = result.PipelineByStage[1];
         Assert.Equal(1, stage.OpportunityCount);
         Assert.Equal(1, stage.QuoteCount);
+        Assert.Equal("GHS", Assert.Single(stage.AmountsByCurrency).Currency);
+        Assert.Equal(100m, Assert.Single(stage.AmountsByCurrency).Amount);
+        Assert.Equal(50m, Assert.Single(stage.WeightedAmountsByCurrency).Amount);
+        Assert.Equal(new[] { "Customer Intake", "Technical Review", "Agreement Signed" },
+            result.ConversionFunnel.Select(point => point.Stage));
+        Assert.Equal(new[] { 1, 1, 0 }, result.ConversionFunnel.Select(point => point.Count));
+        Assert.Equal(80m, Assert.Single(result.ConversionFunnel[0].AmountsByCurrency).Amount);
+        Assert.Equal("StageTransitionHistory", result.FunnelModel);
     }
+
+    [Fact]
+    public async Task Crm_funnel_deduplicates_reentry_tracks_skipped_and_lost_paths_and_excludes_legacy_snapshots()
+    {
+        var tenantId = Guid.NewGuid();
+        var rangeStart = new DateTime(2026, 7, 1);
+        var rangeEnd = new DateTime(2026, 8, 1);
+        await using var context = CreateContext();
+        var captured = Stage(tenantId, "CAPTURED", "Captured", 10, probability: 10);
+        var assessed = Stage(tenantId, "ASSESSED", "Assessed", 20, probability: 35);
+        var offer = Stage(tenantId, "OFFER", "Offer Issued", 30, probability: 70);
+        var agreed = Stage(tenantId, "AGREED", "Agreement Signed", 40, isClosed: true, isWon: true, probability: 100);
+        var declined = Stage(tenantId, "DECLINED", "Declined", 50, isClosed: true, isLost: true);
+        context.OpportunityStageDefinitions.AddRange(captured, assessed, offer, agreed, declined);
+        var lead = new Lead { Id = Guid.NewGuid(), TenantId = tenantId, FirstName = "Ama", LastName = "Mensah", LeadStatus = "Qualified" };
+        context.Leads.Add(lead);
+        var won = Opportunity(tenantId, lead.Id, agreed, "Won deal", "GHS", 120m, 100, new DateTime(2026, 7, 15));
+        var skipped = Opportunity(tenantId, lead.Id, offer, "Skipped assessment", "USD", 50m, 70);
+        var lost = Opportunity(tenantId, lead.Id, declined, "Lost deal", "GHS", 80m, 0, new DateTime(2026, 7, 18));
+        var legacy = Opportunity(tenantId, lead.Id, captured, "Legacy snapshot", "GHS", 30m, 10);
+        context.Opportunities.AddRange(won, skipped, lost, legacy);
+        context.OpportunityStageHistories.AddRange(
+            History(tenantId, won.Id, captured.Id, new DateTime(2026, 7, 2), 100m, "GHS", 10),
+            History(tenantId, won.Id, assessed.Id, new DateTime(2026, 7, 3), 100m, "GHS", 35),
+            History(tenantId, won.Id, offer.Id, new DateTime(2026, 7, 4), 100m, "GHS", 70),
+            History(tenantId, won.Id, assessed.Id, new DateTime(2026, 7, 5), 110m, "GHS", 35),
+            History(tenantId, won.Id, offer.Id, new DateTime(2026, 7, 6), 110m, "GHS", 70),
+            History(tenantId, won.Id, agreed.Id, new DateTime(2026, 7, 7), 120m, "GHS", 100),
+            History(tenantId, skipped.Id, captured.Id, new DateTime(2026, 7, 8), 50m, "USD", 10),
+            History(tenantId, skipped.Id, offer.Id, new DateTime(2026, 7, 9), 50m, "USD", 70),
+            History(tenantId, lost.Id, captured.Id, new DateTime(2026, 7, 10), 80m, "GHS", 10),
+            History(tenantId, lost.Id, assessed.Id, new DateTime(2026, 7, 11), 80m, "GHS", 35),
+            History(tenantId, lost.Id, declined.Id, new DateTime(2026, 7, 12), 80m, "GHS", 0),
+            History(tenantId, legacy.Id, captured.Id, new DateTime(2026, 6, 1), 30m, "GHS", 10, isLegacy: true));
+        await context.SaveChangesAsync();
+
+        var result = await CreateService(context, tenantId).GetCrmAsync(rangeStart, rangeEnd);
+
+        Assert.Equal(2, result.OpenOpportunityCount);
+        Assert.Equal(new[] { "Captured", "Assessed", "Offer Issued", "Agreement Signed" },
+            result.PipelineByStage.Select(stage => stage.Stage));
+        Assert.Equal(new[] { 1, 0, 1, 1 }, result.PipelineByStage.Select(stage => stage.OpportunityCount));
+        Assert.Equal("USD", Assert.Single(result.PipelineByStage[2].AmountsByCurrency).Currency);
+        Assert.Equal(50m, Assert.Single(result.PipelineByStage[2].AmountsByCurrency).Amount);
+        Assert.Equal(new[] { "Captured", "Assessed", "Offer Issued", "Agreement Signed" },
+            result.ConversionFunnel.Select(point => point.Stage));
+        Assert.Equal(new[] { 3, 2, 2, 1 }, result.ConversionFunnel.Select(point => point.Count));
+        Assert.Equal(1, result.LostOpportunityCount);
+        Assert.Equal(1, result.LegacyHistorySnapshotCount);
+        Assert.Contains(result.DataQualityIssues, issue => issue.Contains("snapshot-only stage history"));
+        Assert.Contains(result.ConversionFunnel[0].AmountsByCurrency, value => value.Currency == "GHS" && value.Amount == 180m);
+        Assert.Contains(result.ConversionFunnel[0].AmountsByCurrency, value => value.Currency == "USD" && value.Amount == 50m);
+        Assert.Contains(result.ConversionFunnel[2].AmountsByCurrency, value => value.Currency == "GHS" && value.Amount == 100m);
+        Assert.Contains(result.ConversionFunnel[2].AmountsByCurrency, value => value.Currency == "USD" && value.Amount == 50m);
+        Assert.Equal(50m, result.ConversionFunnel[3].ConversionRate);
+        Assert.Equal(33.33m, result.ConversionFunnel[3].OverallConversionRate);
+    }
+
+    private static OpportunityStageDefinition Stage(
+        Guid tenantId,
+        string code,
+        string name,
+        int order,
+        bool isClosed = false,
+        bool isWon = false,
+        bool isLost = false,
+        int probability = 0) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, Code = code, Name = name, SortOrder = order,
+        IsActive = true, IsClosed = isClosed, IsWon = isWon, IsLost = isLost,
+        DefaultProbability = probability
+    };
+
+    private static Opportunity Opportunity(
+        Guid tenantId,
+        Guid leadId,
+        OpportunityStageDefinition stage,
+        string name,
+        string currency,
+        decimal amount,
+        int probability,
+        DateTime? actualCloseDate = null) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, LeadId = leadId, Name = name,
+        StageDefinitionId = stage.Id, Stage = stage.Name, Currency = currency,
+        Amount = amount, Probability = probability, ExpectedCloseDate = new DateTime(2026, 7, 31),
+        ActualCloseDate = actualCloseDate
+    };
+
+    private static OpportunityStageHistory History(
+        Guid tenantId,
+        Guid opportunityId,
+        Guid stageId,
+        DateTime enteredAt,
+        decimal amount,
+        string currency,
+        int probability,
+        bool isLegacy = false) => new()
+    {
+        Id = Guid.NewGuid(), TenantId = tenantId, OpportunityId = opportunityId,
+        StageDefinitionId = stageId, EnteredAt = enteredAt, AmountSnapshot = amount,
+        CurrencySnapshot = currency, ProbabilitySnapshot = probability, IsLegacySnapshot = isLegacy
+    };
 
     private static ApplicationDbContext CreateContext() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()

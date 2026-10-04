@@ -255,6 +255,69 @@ describe('Property enquiry dialog', () => {
     expect(publicPayload).not.toHaveProperty('captchaToken');
   }, 10_000);
 
+  it('preserves the entered name when a new public contact has no saved profile name', async () => {
+    vi.mocked(
+      externalEstateListingsService.requestPublicEnquiryContactChallenge
+    ).mockResolvedValue({
+      channel: 'Email',
+      maskedContact: 'm***@example.com',
+      expiresInSeconds: 600,
+    });
+    vi.mocked(
+      externalEstateListingsService.verifyPublicEnquiryContact
+    ).mockResolvedValue({
+      verificationToken: 'new-contact-token',
+      expiresAtUtc: '2026-10-02T10:10:00Z',
+      profile: {
+        contactName: null,
+        contactEmail: 'michael@example.com',
+        contactPhone: null,
+        requiresPortalLogin: false,
+        externalPortalPath: null,
+      },
+    });
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <PropertyEnquiryDialog
+          listing={listing}
+          onCreated={vi.fn()}
+          onClose={vi.fn()}
+          publicMode
+        />
+      </QueryClientProvider>
+    );
+
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Michael Owusu' },
+    });
+    fireEvent.change(screen.getByLabelText('Email', { selector: 'input' }), {
+      target: { value: 'michael@example.com' },
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Send verification code' })
+      ).toBeEnabled()
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Send verification code' })
+    );
+    await screen.findByLabelText('Verification code');
+    fireEvent.change(screen.getByLabelText('Verification code'), {
+      target: { value: '123456' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Verify contact' }));
+    await screen.findByText('Contact verified');
+    expect(screen.getByLabelText('Name')).toHaveValue('Michael Owusu');
+    fireEvent.change(screen.getByLabelText('Your enquiry'), {
+      target: { value: 'Please send the viewing details.' },
+    });
+    expect(screen.getByRole('button', { name: 'Send enquiry' })).toBeEnabled();
+  });
+
   it('enables the phone input only when Phone is selected and accepts an international number', async () => {
     render(
       <QueryClientProvider
