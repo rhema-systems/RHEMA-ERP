@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   editRecurringJournalLine,
+  formatRecurringJournalAmount,
   newEditableRecurringJournalLine,
   summarizeRecurringJournalLines,
   toRecurringJournalLineInputs,
@@ -64,5 +65,12 @@ describe('Recurring journal multiline editor', () => {
     expect(grid).toContain('Total credit');
     expect(grid).toContain('Difference');
     expect(create).toContain('disabled={saving || !canSubmit}');
+  });
+
+  it('renders totals safely while the functional currency is still loading', () => {
+    expect(() => formatRecurringJournalAmount(1234.5, '')).not.toThrow();
+    expect(() => formatRecurringJournalAmount(1234.5, '—')).not.toThrow();
+    expect(formatRecurringJournalAmount(1234.5, '')).toContain('1,234.50');
+    expect(formatRecurringJournalAmount(1234.5, 'GHS')).toContain('GH₵');
   });
 });

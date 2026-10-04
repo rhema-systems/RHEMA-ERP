@@ -18,6 +18,8 @@ public class CashTransactionDto
     public Guid? TransferPairId { get; set; }
     public BankTransferLeg? TransferLeg { get; set; }
     public decimal Amount { get; set; }
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
     public string Currency { get; set; } = string.Empty;
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }

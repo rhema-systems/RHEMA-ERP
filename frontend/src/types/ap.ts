@@ -85,6 +85,8 @@ export interface VendorInvoice {
     taxAmount: number;
     discountAmount: number;
     totalAmount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     paidAmount: number;
     balanceAmount: number;
     currencyCode: string;
@@ -488,6 +490,8 @@ export interface VendorPayment {
     totalAmount: number;
     allocatedAmount: number;
     unallocatedAmount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     paymentMethod: VendorPaymentMethod;
     paymentMethodId?: string;
     paymentMethodName?: string;

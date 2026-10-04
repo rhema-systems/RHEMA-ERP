@@ -220,6 +220,7 @@
     <Compile Include="Services\Finance\FinanceBudgetSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\InvoiceCashRoundingPostingAdapterTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\FinanceAccountProvisioningTransactionTests.cs" />
     <Compile Include="Services\Finance\DatabaseSeedFinanceProvisioningIsolationTests.cs" />

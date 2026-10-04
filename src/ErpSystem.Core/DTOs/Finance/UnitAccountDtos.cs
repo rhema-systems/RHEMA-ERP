@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ErpSystem.Core.DTOs.Finance;
 
 // ========================================================================
@@ -40,10 +42,21 @@ public class CreateUnitTypeDto
 /// </summary>
 public class UpdateUnitTypeDto
 {
+    private decimal? _roundingIncrement;
     public string? Name { get; set; }
     public string? Description { get; set; }
     public int? DecimalPlaces { get; set; }
-    public decimal? RoundingIncrement { get; set; }
+    public decimal? RoundingIncrement
+    {
+        get => _roundingIncrement;
+        set
+        {
+            _roundingIncrement = value;
+            RoundingIncrementSpecified = true;
+        }
+    }
+    [JsonIgnore]
+    public bool RoundingIncrementSpecified { get; private set; }
     public bool? IsActive { get; set; }
 }
 

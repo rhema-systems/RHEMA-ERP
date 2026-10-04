@@ -35,6 +35,7 @@ public class CustomerDto
     public string? TaxId { get; set; }
     public decimal CreditLimit { get; set; }
     public decimal OutstandingBalance { get; set; }
+    public decimal CustomerCreditBalance { get; set; }
     public int PaymentTermsDays { get; set; }
     public Guid? PaymentTermId { get; set; }
     public string? PriceGroup { get; set; }

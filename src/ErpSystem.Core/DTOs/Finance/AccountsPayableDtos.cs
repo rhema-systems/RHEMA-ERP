@@ -46,6 +46,8 @@ public class VendorInvoiceDto
     public decimal TaxAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal BalanceAmount { get; set; }
 
@@ -616,6 +618,8 @@ public class VendorPaymentDto
     public decimal TotalAmount { get; set; }
     public decimal AllocatedAmount { get; set; }
     public decimal UnallocatedAmount { get; set; }
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
     public VendorPaymentMethod PaymentMethod { get; set; }
     public Guid? PaymentMethodId { get; set; }
     public string? PaymentMethodName { get; set; }

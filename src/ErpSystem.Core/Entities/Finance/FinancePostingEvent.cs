@@ -29,6 +29,7 @@ public class FinancePostingEvent : TenantEntity
 
     [MaxLength(450)]
     public string? IdempotencyKey { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
 
     /// <summary>
     /// Versioned canonical fingerprint of the complete normalized posting command. Historical

@@ -152,7 +152,7 @@ public class SalesOrder : DocumentEntity
 /// Individual line item on a Sales Order.
 /// Can reference a Product (from Sales catalog) or an InventoryItem for stock fulfillment.
 /// </summary>
-public class SalesOrderLine : BaseEntity
+public class SalesOrderLine : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid SalesOrderId { get; set; }
@@ -225,6 +225,10 @@ public class SalesOrderLine : BaseEntity
 
     [MaxLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // ── Stock Reservation ───────────────────────────────────────────────
 

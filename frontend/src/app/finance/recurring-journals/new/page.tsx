@@ -151,7 +151,7 @@ export default function NewRecurringJournalPage() {
         <div><Label htmlFor="currency">Functional currency</Label><Input id="currency" value={currencyCode} readOnly aria-readonly="true" /></div>
         <div><Label htmlFor="timezone">Schedule time zone</Label><Input id="timezone" value={timeZoneId} onChange={event => setTimeZoneId(event.target.value)} placeholder="Africa/Accra" /></div>
       </div>
-      <RecurringJournalLineGrid accounts={accounts} currencyCode={currencyCode || '—'} lines={lines} onChange={setLines} />
+      <RecurringJournalLineGrid accounts={accounts} currencyCode={currencyCode} lines={lines} onChange={setLines} />
     </CardContent></Card>
 
     <Card><CardHeader><CardTitle>Schedule, reversal and submission</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">

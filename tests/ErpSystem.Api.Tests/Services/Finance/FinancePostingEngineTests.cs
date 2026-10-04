@@ -4,8 +4,10 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
@@ -1006,6 +1008,210 @@ public sealed class FinancePostingEngineTests
         (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
     }
 
+    [Fact]
+    [Trait("Category", "FinanceRounding")]
+    public async Task Rounded_invoice_replay_and_exact_reversal_preserve_one_frozen_evidence_record()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var ar = SeedAccount(db, tenantId, "1200", AccountType.Asset);
+        var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var gain = SeedAccount(db, tenantId, "4099", AccountType.Revenue);
+        var loss = SeedAccount(db, tenantId, "6099", AccountType.Expense);
+        var sourceId = Guid.NewGuid();
+        db.Invoices.Add(new Invoice
+        {
+            Id = sourceId, TenantId = tenantId, InvoiceNumber = "ROUND-ENGINE-1",
+            CustomerName = "Rounding customer", BusinessPartnerId = Guid.NewGuid(),
+            CurrencyCode = "GHS", ExchangeRate = 1m, TotalAmount = 10.03m,
+            BaseCurrencyAmount = 10.03m, InvoiceDate = new DateTime(2026, 7, 4)
+        });
+        var settings = db.FinanceSettings.Local.Single(x => x.TenantId == tenantId);
+        settings.InvoiceRoundingEnabled = true;
+        settings.InvoiceRoundingIncrement = 0.05m;
+        settings.InvoiceRoundingMethod = GovernedRoundingMethod.Nearest;
+        settings.InvoiceRoundingGainAccountId = gain.Id;
+        settings.InvoiceRoundingLossAccountId = loss.Id;
+        await db.SaveChangesAsync();
+        FinancePostingRequestV2Dto Request() => new()
+        {
+            SourceModule = "AR", SourceDocumentType = "CustomerInvoice", SourceDocumentId = sourceId,
+            SourceDocumentTenantId = tenantId, PostingAction = "Post", SourceDocumentReference = "ROUND-ENGINE-1",
+            Description = "Rounded invoice", PostingDate = new DateTime(2026, 7, 4), JournalType = "AR Invoice",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"AR:CustomerInvoice:{tenantId:N}:{sourceId:N}:Post", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = ar.Id, DebitAmount = 10.03m,
+                    TransactionCurrency = "GHS", TransactionDebitAmount = 10.03m,
+                    TransactionTag = "AR-Control", LineNumber = 1 },
+                new FinancePostingLineDto { AccountId = revenue.Id, CreditAmount = 10.03m,
+                    TransactionCurrency = "GHS", TransactionCreditAmount = 10.03m,
+                    TransactionTag = "AR-Revenue", LineNumber = 2 }
+            ]
+        };
+        var engine = CreateService(db, tenantId);
+        var producer = new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice);
+
+        var original = await engine.PostAsync(Request(), producer);
+        var originalEvent = await db.FinancePostingEvents.SingleAsync(x => x.Id == original.PostingEventId);
+        var evidenceId = originalEvent.FinanceRoundingEvidenceId;
+        evidenceId.Should().NotBeNull();
+        settings.InvoiceRoundingIncrement = 1m;
+        settings.InvoiceRoundingMethod = GovernedRoundingMethod.Down;
+        await db.SaveChangesAsync();
+
+        var replay = await engine.PostAsync(Request(), producer);
+        replay.WasDuplicate.Should().BeTrue();
+        replay.JournalEntryId.Should().Be(original.JournalEntryId);
+        (await db.FinanceRoundingEvidence.CountAsync()).Should().Be(1);
+        (await db.Invoices.SingleAsync(x => x.Id == sourceId)).TotalAmount.Should().Be(10.05m);
+
+        var reversal = await engine.ReverseAsync(original.PostingEventId,
+            "Reverse frozen rounded invoice", new DateTime(2026, 7, 5));
+        var duplicateReversal = await engine.ReverseAsync(original.PostingEventId,
+            "Reverse frozen rounded invoice", new DateTime(2026, 7, 5));
+        duplicateReversal.WasDuplicate.Should().BeTrue();
+        duplicateReversal.JournalEntryId.Should().Be(reversal.JournalEntryId);
+        var events = await db.FinancePostingEvents.OrderBy(x => x.PostingAction).ToListAsync();
+        events.Should().HaveCount(2).And.OnlyContain(x => x.FinanceRoundingEvidenceId == evidenceId);
+        var originalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == original.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        var reversalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == reversal.JournalEntryId)
+            .OrderBy(x => x.LineNumber).ToListAsync();
+        reversalLines.Should().HaveSameCount(originalLines);
+        for (var index = 0; index < originalLines.Count; index++)
+        {
+            reversalLines[index].AccountId.Should().Be(originalLines[index].AccountId);
+            reversalLines[index].DebitAmount.Should().Be(originalLines[index].CreditAmount);
+            reversalLines[index].CreditAmount.Should().Be(originalLines[index].DebitAmount);
+            reversalLines[index].TransactionDebitAmount.Should().Be(originalLines[index].TransactionCreditAmount);
+            reversalLines[index].TransactionCreditAmount.Should().Be(originalLines[index].TransactionDebitAmount);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "TaxPrecision")]
+    public async Task SupplierDebitNoteExactReversal_ShouldCloneSignedPrecisionEvidence_AndReplayIdempotently()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.SourceModule = "AP";
+        request.OriginModuleCode = "FIN";
+        request.SourceDocumentType = "SupplierDebitNote";
+        request.IdempotencyKey = $"AP:SupplierDebitNote:{tenantId:N}:{request.SourceDocumentId:N}:Post";
+        var original = await service.PostAsync(request);
+        var taxId = Guid.NewGuid();
+        var sourceLineId = Guid.NewGuid();
+        db.Set<TaxCalculation>().Add(new TaxCalculation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            DocumentType = request.SourceDocumentType,
+            DocumentId = request.SourceDocumentId,
+            DocumentLineId = sourceLineId,
+            TaxId = taxId,
+            PostingAccountId = credit.Id,
+            CurrencyCode = "X04",
+            CurrencyDecimalPlaces = 4,
+            BaseAmount = 100m,
+            TaxableAmount = 100m,
+            TaxRate = 15m,
+            TaxAmount = 15m,
+            RawTaxAmount = 15.004m,
+            RoundingAdjustment = -0.004m,
+            AllocationSequence = 1,
+            TaxRoundingScope = TaxRoundingScope.Document,
+            TaxRoundingMethod = GovernedRoundingMethod.Up,
+            TaxRoundingIncrement = 0.0001m,
+            CompoundBasis = CompoundBasis.BaseOnly,
+            CalculationOrder = 1,
+            CalculationDate = request.PostingDate
+        });
+        await db.SaveChangesAsync();
+
+        var reversalDate = new DateTime(2026, 7, 5);
+        var reversal = await service.ReverseAsync(original.PostingEventId, "Correct tax posting", reversalDate);
+        var duplicate = await service.ReverseAsync(original.PostingEventId, "Correct tax posting", reversalDate);
+
+        reversal.WasDuplicate.Should().BeFalse();
+        duplicate.WasDuplicate.Should().BeTrue();
+        var evidence = await db.Set<TaxCalculation>()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentType == "FinancePostingEventReversal"
+                && item.DocumentId == original.PostingEventId)
+            .ToListAsync();
+        evidence.Should().ContainSingle();
+        evidence[0].DocumentLineId.Should().Be(sourceLineId);
+        evidence[0].TaxId.Should().Be(taxId);
+        evidence[0].BaseAmount.Should().Be(-100m);
+        evidence[0].TaxableAmount.Should().Be(-100m);
+        evidence[0].TaxRate.Should().Be(15m);
+        evidence[0].TaxAmount.Should().Be(-15m);
+        evidence[0].RawTaxAmount.Should().Be(-15.004m);
+        evidence[0].RoundingAdjustment.Should().Be(0.004m);
+        evidence[0].CurrencyCode.Should().Be("X04");
+        evidence[0].CurrencyDecimalPlaces.Should().Be(4);
+        evidence[0].AllocationSequence.Should().Be(1);
+        evidence[0].TaxRoundingScope.Should().Be(TaxRoundingScope.Document);
+        evidence[0].TaxRoundingMethod.Should().Be(GovernedRoundingMethod.Up);
+        evidence[0].TaxRoundingIncrement.Should().Be(0.0001m);
+        evidence[0].CalculationDate.Should().Be(reversalDate);
+    }
+
+    [Fact]
+    [Trait("Category", "TaxPrecision")]
+    public void PrecisionMigrations_TargetPhysicalInvoiceTables_AndPreserveUnknownLegacyEvidence()
+    {
+        var migration = new FinanceTaxPrecisionCompletion();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(FinanceTaxPrecisionCompletion)
+            .GetMethod("Up", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .Invoke(migration, [builder]);
+
+        var alteredTables = builder.Operations.OfType<AlterColumnOperation>()
+            .Select(operation => operation.Table)
+            .ToArray();
+        alteredTables.Should().Contain(["Invoices", "InvoiceLineItem", "VendorInvoice", "VendorInvoiceLineItem"]);
+        alteredTables.Should().NotContain(["InvoiceLineItems", "VendorInvoices", "VendorInvoiceLineItems"]);
+
+        var evidenceColumns = builder.Operations.OfType<AddColumnOperation>()
+            .Where(operation => operation.Table == "TaxCalculations")
+            .ToDictionary(operation => operation.Name);
+        foreach (var column in new[]
+                 {
+                     "CurrencyCode", "CurrencyDecimalPlaces", "RawTaxAmount", "RoundingAdjustment",
+                     "AllocationSequence", "TaxRoundingScope", "TaxRoundingMethod", "TaxRoundingIncrement"
+                 })
+        {
+            evidenceColumns.Should().ContainKey(column);
+            evidenceColumns[column].IsNullable.Should().BeTrue();
+            evidenceColumns[column].DefaultValue.Should().BeNull();
+        }
+
+        builder.Operations.OfType<AddCheckConstraintOperation>()
+            .Should().ContainSingle(operation =>
+                operation.Name == "CK_TaxCalculations_PrecisionEvidence"
+                && operation.Sql.Contains("[RawTaxAmount] IS NULL")
+                && operation.Sql.Contains("[TaxRoundingIncrement] > 0"));
+
+        using var discoveryContext = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=FinancePrecisionMigrationDiscovery;Trusted_Connection=True")
+            .Options);
+        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should().Contain([
+            "20261002183000_FinanceTaxPrecisionCompletion",
+            "20261002213000_FinancePrecisionStorageCorrections"]);
+    }
+
     public static TheoryData<string> ExactReversalMutationCases => new()
     {
         { "account" },
@@ -1216,7 +1422,12 @@ public sealed class FinancePostingEngineTests
                         DocumentType = "Invoice", DocumentId = retry.SourceDocumentId,
                         TaxId = Guid.NewGuid(), BaseAmount = 100m, TaxableAmount = 100m,
                         TaxRate = 0.15m, TaxAmount = 15m, CalculationOrder = 1,
-                        CalculationDate = retry.PostingDate
+                        CalculationDate = retry.PostingDate, CurrencyCode = "GHS",
+                        CurrencyDecimalPlaces = 2, RawTaxAmount = 15m,
+                        RoundingAdjustment = 0m, AllocationSequence = 0,
+                        TaxRoundingScope = ErpSystem.Core.Finance.TaxRoundingScope.Line,
+                        TaxRoundingMethod = ErpSystem.Core.Finance.GovernedRoundingMethod.Nearest,
+                        TaxRoundingIncrement = 0.01m
                     }
                 ]; break;
         }

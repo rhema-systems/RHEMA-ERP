@@ -52,7 +52,9 @@ export default function UnitsOfMeasurePage() {
     symbol: '',
     category: 'Quantity',
     isBaseUnit: false,
-    sortOrder: 0
+    sortOrder: 0,
+    decimalPlaces: 4,
+    roundingIncrement: null
   });
 
   const [conversionForm, setConversionForm] = useState<CreateUnitOfMeasureConversionDto>({
@@ -127,7 +129,9 @@ export default function UnitsOfMeasurePage() {
       symbol: unit.symbol || '',
       category: unit.category || 'Quantity',
       isBaseUnit: unit.isBaseUnit,
-      sortOrder: unit.sortOrder
+      sortOrder: unit.sortOrder,
+      decimalPlaces: unit.decimalPlaces,
+      roundingIncrement: unit.roundingIncrement
     });
     setIsEditDialogOpen(true);
   };
@@ -141,7 +145,9 @@ export default function UnitsOfMeasurePage() {
         category: formData.category,
         isBaseUnit: formData.isBaseUnit,
         isActive: selectedUnit.isActive,
-        sortOrder: formData.sortOrder
+        sortOrder: formData.sortOrder,
+        decimalPlaces: formData.decimalPlaces,
+        roundingIncrement: formData.roundingIncrement
       };
       const updated = await inventoryManagementService.updateUnitOfMeasure(selectedUnit.id, updateData);
       setUnits(prev => prev.map(u => u.id === selectedUnit.id ? updated : u));
@@ -171,7 +177,9 @@ export default function UnitsOfMeasurePage() {
       symbol: '',
       category: 'Quantity',
       isBaseUnit: false,
-      sortOrder: 0
+      sortOrder: 0,
+      decimalPlaces: 4,
+      roundingIncrement: null
     });
     setSelectedUnit(null);
   };
@@ -260,6 +268,10 @@ export default function UnitsOfMeasurePage() {
               <div className="flex items-center space-x-2">
                 <Switch id="isBaseUnit" checked={formData.isBaseUnit} onCheckedChange={(v) => setFormData({...formData, isBaseUnit: v})} />
                 <Label htmlFor="isBaseUnit">Base Unit (for this category)</Label>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2"><Label htmlFor="decimalPlaces">Quantity decimals</Label><Input id="decimalPlaces" type="number" min={0} max={6} value={formData.decimalPlaces} onChange={(e) => setFormData({...formData, decimalPlaces: Number(e.target.value)})} /></div>
+                <div className="space-y-2"><Label htmlFor="roundingIncrement">Quantity increment</Label><Input id="roundingIncrement" type="number" min="0.000001" step="0.000001" value={formData.roundingIncrement ?? ''} placeholder="Optional" onChange={(e) => setFormData({...formData, roundingIncrement: e.target.value === '' ? null : Number(e.target.value)})} /></div>
               </div>
             </div>
             <DialogFooter>
@@ -443,6 +455,10 @@ export default function UnitsOfMeasurePage() {
             <div className="flex items-center space-x-2">
               <Switch checked={formData.isBaseUnit} onCheckedChange={(v) => setFormData({...formData, isBaseUnit: v})} />
               <Label>Base Unit</Label>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2"><Label>Quantity decimals</Label><Input type="number" min={0} max={6} value={formData.decimalPlaces} onChange={(e) => setFormData({...formData, decimalPlaces: Number(e.target.value)})} /></div>
+              <div className="space-y-2"><Label>Quantity increment</Label><Input type="number" min="0.000001" step="0.000001" value={formData.roundingIncrement ?? ''} placeholder="Optional" onChange={(e) => setFormData({...formData, roundingIncrement: e.target.value === '' ? null : Number(e.target.value)})} /></div>
             </div>
           </div>
           <DialogFooter>

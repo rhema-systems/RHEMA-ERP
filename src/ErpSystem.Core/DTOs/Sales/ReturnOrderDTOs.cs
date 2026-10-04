@@ -42,6 +42,10 @@ public class ReturnOrderLineDto
     public string Description { get; set; } = string.Empty;
     public string? ProductCode { get; set; }
     public decimal QuantityReturned { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public decimal UnitPrice { get; set; }
     public decimal LineTotal { get; set; }
     public ReturnReasonCode ReasonCode { get; set; }
@@ -67,6 +71,8 @@ public class CreateReturnOrderLineDto
     public string Description { get; set; } = string.Empty;
     public string? ProductCode { get; set; }
     public decimal QuantityReturned { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? Unit { get; set; }
     public decimal UnitPrice { get; set; }
     public ReturnReasonCode ReasonCode { get; set; }
     public string? Condition { get; set; }

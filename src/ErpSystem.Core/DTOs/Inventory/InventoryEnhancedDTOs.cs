@@ -16,6 +16,8 @@ public class UnitOfMeasureDto
     public bool IsBaseUnit { get; set; }
     public bool IsActive { get; set; }
     public int SortOrder { get; set; }
+    public int DecimalPlaces { get; set; }
+    public decimal? RoundingIncrement { get; set; }
 }
 
 public class CreateUnitOfMeasureDto
@@ -36,6 +38,8 @@ public class CreateUnitOfMeasureDto
 
     public bool IsBaseUnit { get; set; }
     public int SortOrder { get; set; }
+    [Range(0, 6)] public int DecimalPlaces { get; set; } = 4;
+    [Range(typeof(decimal), "0.000001", "999999999999.999999")] public decimal? RoundingIncrement { get; set; }
 }
 
 public class UpdateUnitOfMeasureDto
@@ -53,6 +57,8 @@ public class UpdateUnitOfMeasureDto
     public bool IsBaseUnit { get; set; }
     public bool IsActive { get; set; }
     public int SortOrder { get; set; }
+    [Range(0, 6)] public int DecimalPlaces { get; set; } = 4;
+    [Range(typeof(decimal), "0.000001", "999999999999.999999")] public decimal? RoundingIncrement { get; set; }
 }
 
 public class UnitOfMeasureConversionDto

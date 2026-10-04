@@ -3722,12 +3722,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("VerificationAttemptCount")
+                        .HasColumnType("int");
+
                     b.Property<string>("VerificationTokenHash")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
-
-                    b.Property<int>("VerificationAttemptCount")
-                        .HasColumnType("int");
 
                     b.Property<DateTime?>("VerifiedAtUtc")
                         .HasColumnType("datetime2");
@@ -9972,6 +9972,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<int?>("CommercialQuantityDecimalPlaces")
+                        .HasColumnType("int");
+
+                    b.Property<decimal?>("CommercialQuantityRoundingIncrement")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<string>("CommercialUnitOfMeasureCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("CommercialUnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 
@@ -13580,6 +13593,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("GLAccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -13656,6 +13672,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ReversedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<Guid?>("SourceBookAuthorityId")
                         .HasColumnType("uniqueidentifier");
 
@@ -13730,6 +13749,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "ApprovalStatus");
 
                     b.HasIndex("TenantId", "ExchangeRateId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "JournalEntryId");
 
@@ -14421,6 +14442,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("ExpirationDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsCreditNote")
                         .HasColumnType("bit");
 
@@ -14509,6 +14533,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ReversedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<Guid?>("SourceBookAuthorityId")
                         .HasColumnType("uniqueidentifier");
 
@@ -14593,6 +14620,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("WithholdingTaxAccountId");
 
                     b.HasIndex("WithholdingTaxId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "OpeningBalanceBatchId")
                         .HasFilter("[OpeningBalanceBatchId] IS NOT NULL");
@@ -17599,6 +17628,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FunctionalCurrencyCode")
                         .IsRequired()
                         .HasMaxLength(3)
@@ -17706,6 +17738,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PrimaryExchangeRateId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "HasForeignCurrencyLines");
 
@@ -18109,6 +18143,151 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("FinancePurchaseOrderReceiptItems", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("DecimalPlaces")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("DeltaAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<int>("Eligibility")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ExchangeRate")
+                        .HasColumnType("decimal(18,10)");
+
+                    b.Property<DateTime?>("ExchangeRateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ExchangeRateSource")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("FunctionalCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int>("FunctionalDecimalPlaces")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("FunctionalDeltaAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<Guid>("GainAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("Increment")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("LossAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("OriginalAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<decimal>("OriginalFunctionalAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("PostingIdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<decimal>("RoundedAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<decimal>("RoundedFunctionalAmount")
+                        .HasColumnType("decimal(20,6)");
+
+                    b.Property<Guid>("SourceDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("SourceModule")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ExchangeRateId");
+
+                    b.HasIndex("TenantId", "GainAccountId");
+
+                    b.HasIndex("TenantId", "LossAccountId");
+
+                    b.HasIndex("TenantId", "PostingIdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SourceModule", "SourceDocumentType", "SourceDocumentId", "PostingAction");
+
+                    b.ToTable("FinanceRoundingEvidence", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Amounts", "[OriginalAmount] > 0 AND [RoundedAmount] > 0 AND [DeltaAmount] = [RoundedAmount] - [OriginalAmount]");
+
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Increment", "[Increment] > 0");
+
+                            t.HasCheckConstraint("CK_FinanceRoundingEvidence_Places", "[DecimalPlaces] BETWEEN 0 AND 4 AND [FunctionalDecimalPlaces] BETWEEN 0 AND 4");
+                        });
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettings", b =>
                 {
                     b.Property<Guid>("Id")
@@ -18510,9 +18689,9 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
 
-                            t.HasCheckConstraint("CK_FinanceSettings_InvoiceRoundingReadiness", "[InvoiceRoundingEnabled] = 0");
+                            t.HasCheckConstraint("CK_FinanceSettings_InvoiceRoundingReadiness", "[InvoiceRoundingEnabled] = 0 OR ([InvoiceRoundingIncrement] IS NOT NULL AND [InvoiceRoundingIncrement] > 0 AND [InvoiceRoundingGainAccountId] IS NOT NULL AND [InvoiceRoundingLossAccountId] IS NOT NULL)");
 
-                            t.HasCheckConstraint("CK_FinanceSettings_PrecisionGovernance", "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 4 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] = 0 AND [InvoiceRoundingMethod] IN (0, 1, 2)");
+                            t.HasCheckConstraint("CK_FinanceSettings_PrecisionGovernance", "[UnitPriceDecimalPlaces] BETWEEN 0 AND 6 AND [ExchangeRateInputDecimalPlaces] BETWEEN 6 AND 10 AND [ExchangeRateDisplayDecimalPlaces] BETWEEN 6 AND 10 AND [TaxPercentageDecimalPlaces] BETWEEN 0 AND 6 AND [ReportDisplayDecimalPlaces] BETWEEN 0 AND 4 AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingScope] IN (0, 1, 2) AND [InvoiceRoundingMethod] IN (0, 1, 2)");
 
                             t.HasCheckConstraint("CK_FinanceSettings_RoundingIncrements", "([TaxRoundingIncrement] IS NULL OR [TaxRoundingIncrement] > 0) AND ([InvoiceRoundingIncrement] IS NULL OR [InvoiceRoundingIncrement] > 0)");
 
@@ -24300,7 +24479,7 @@ namespace ErpSystem.Data.Migrations
                         .HasDefaultValue(true);
 
                     b.Property<decimal>("BaseCurrencyAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid>("BusinessPartnerArProfileVersionId")
                         .HasColumnType("uniqueidentifier");
@@ -24334,7 +24513,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("CreditedAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("CurrencyCode")
                         .IsRequired()
@@ -24361,7 +24540,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("DiscountReason")
                         .HasMaxLength(500)
@@ -24371,7 +24550,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("EarlyPaymentDiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("EarlyPaymentDiscountDueDate")
                         .HasColumnType("datetime2");
@@ -24383,6 +24562,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("InvoiceDate")
@@ -24410,7 +24592,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("PaidAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("PaymentTermId")
                         .HasColumnType("uniqueidentifier");
@@ -24422,6 +24604,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<Guid?>("SourceBookAuthorityId")
                         .HasColumnType("uniqueidentifier");
 
@@ -24429,10 +24614,10 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal>("SubTotal")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -24441,7 +24626,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -24467,6 +24652,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId", "ExchangeRateId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "SourceBookAuthorityId");
 
@@ -24510,7 +24697,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("DiscountPercentage")
                         .HasColumnType("decimal(18,4)");
@@ -24554,7 +24741,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
@@ -24564,7 +24751,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<int>("TaxTreatment")
                         .ValueGeneratedOnAdd()
@@ -24581,8 +24768,21 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("UnitCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -24606,6 +24806,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -29055,7 +29257,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("BaseCurrencyAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("BusinessPartnerApProfileVersionId")
                         .HasColumnType("uniqueidentifier");
@@ -29110,7 +29312,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("DirectInvoiceAppliedAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("DirectInvoiceAppliedAt")
                         .HasColumnType("datetime2");
@@ -29119,7 +29321,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("ExchangeRate")
                         .HasColumnType("decimal(18,6)");
@@ -29195,7 +29397,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal>("SubTotal")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("SubmittedAt")
                         .HasColumnType("datetime2");
@@ -29211,13 +29413,13 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -29427,7 +29629,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("DiscountPercentage")
                         .HasColumnType("decimal(18,4)");
@@ -29450,7 +29652,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(20)");
 
                     b.Property<decimal>("LineTotal")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("OriginalAccountTransactionId")
                         .HasColumnType("uniqueidentifier");
@@ -29471,19 +29673,19 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -29524,8 +29726,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("AllocationSequence")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("BaseAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<int>("CalculationOrder")
                         .HasColumnType("int");
@@ -29541,6 +29746,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int?>("CurrencyDecimalPlaces")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
@@ -29560,14 +29772,20 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("OriginalTaxCalculationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("RawTaxAmount")
+                        .HasColumnType("decimal(20,10)");
+
                     b.Property<Guid>("ResolvedCreditAccountId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("RoundingAdjustment")
+                        .HasColumnType("decimal(20,10)");
 
                     b.Property<Guid>("SupplierDebitNoteLineItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -29576,10 +29794,19 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal?>("TaxRoundingIncrement")
+                        .HasColumnType("decimal(20,4)");
+
+                    b.Property<int?>("TaxRoundingMethod")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TaxRoundingScope")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("TaxableAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,10)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -29607,7 +29834,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "SupplierDebitNoteLineItemId", "CalculationOrder", "TaxId")
                         .IsUnique();
 
-                    b.ToTable("SupplierDebitNoteTaxComponents", (string)null);
+                    b.ToTable("SupplierDebitNoteTaxComponents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_SupplierDebitNoteTaxComponents_PrecisionEvidence", "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierReturn", b =>
@@ -29851,7 +30081,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid?>("TaxPayableAccountId")
                         .HasColumnType("uniqueidentifier");
@@ -29884,8 +30114,11 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("AllocationSequence")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("BaseAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime>("CalculationDate")
                         .HasColumnType("datetime2");
@@ -29904,6 +30137,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<int?>("CurrencyDecimalPlaces")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
@@ -29938,8 +30178,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("PostingAccountId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("RawTaxAmount")
+                        .HasColumnType("decimal(20,10)");
+
+                    b.Property<decimal?>("RoundingAdjustment")
+                        .HasColumnType("decimal(20,10)");
+
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("TaxGroupId")
                         .HasColumnType("uniqueidentifier");
@@ -29948,10 +30194,19 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<decimal?>("TaxRoundingIncrement")
+                        .HasColumnType("decimal(20,4)");
+
+                    b.Property<int?>("TaxRoundingMethod")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TaxRoundingScope")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("TaxableAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,10)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -29973,7 +30228,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "DocumentType", "DocumentId", "DocumentLineId", "TaxId", "TaxGroupId")
                         .HasDatabaseName("IX_TaxCalculations_Document_Line_Tax");
 
-                    b.ToTable("TaxCalculations");
+                    b.ToTable("TaxCalculations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_TaxCalculations_PrecisionEvidence", "([CurrencyCode] IS NULL AND [CurrencyDecimalPlaces] IS NULL AND [RawTaxAmount] IS NULL AND [RoundingAdjustment] IS NULL AND [AllocationSequence] IS NULL AND [TaxRoundingScope] IS NULL AND [TaxRoundingMethod] IS NULL AND [TaxRoundingIncrement] IS NULL) OR ([CurrencyCode] IS NOT NULL AND LEN([CurrencyCode]) = 3 AND [CurrencyDecimalPlaces] BETWEEN 0 AND 4 AND [RawTaxAmount] IS NOT NULL AND [RoundingAdjustment] IS NOT NULL AND [AllocationSequence] IS NOT NULL AND [TaxRoundingScope] IN (0, 1, 2) AND [TaxRoundingMethod] IN (0, 1, 2) AND [TaxRoundingIncrement] > 0)");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.TaxConfigurationVersion", b =>
@@ -30037,7 +30295,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(200)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TaxId")
                         .HasColumnType("uniqueidentifier");
@@ -30247,7 +30505,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("Rate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<Guid>("TaxId")
                         .HasColumnType("uniqueidentifier");
@@ -31031,7 +31289,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("BaseCurrencyAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("BusinessPartnerApProfileVersionId")
                         .HasColumnType("uniqueidentifier");
@@ -31080,7 +31338,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("DistributionDraftJson")
                         .HasColumnType("nvarchar(max)");
@@ -31089,7 +31347,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("datetime2");
 
                     b.Property<decimal>("EarlyPaymentDiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("EarlyPaymentDiscountDueDate")
                         .HasColumnType("datetime2");
@@ -31110,6 +31368,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ExpenseAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("InvoiceDate")
@@ -31180,7 +31441,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("PaidAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("PaymentTermId")
                         .HasColumnType("uniqueidentifier");
@@ -31201,6 +31462,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ReplacesLeaseVendorInvoiceId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
+
                     b.Property<Guid?>("SourceBookAuthorityId")
                         .HasColumnType("uniqueidentifier");
 
@@ -31208,7 +31472,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("int");
 
                     b.Property<decimal>("SubTotal")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("SubmittedById")
                         .HasColumnType("uniqueidentifier");
@@ -31229,13 +31493,13 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TotalAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -31266,7 +31530,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("WithholdingTaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<Guid?>("WithholdingTaxId")
                         .HasColumnType("uniqueidentifier");
@@ -31310,6 +31574,8 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[AutoInvoiceRequestId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "ExchangeRateId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "LeaseAccountingBookId");
 
@@ -31418,7 +31684,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(500)");
 
                     b.Property<decimal>("DiscountAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<decimal>("DiscountPercentage")
                         .HasColumnType("decimal(18,4)");
@@ -31470,7 +31736,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(100)");
 
                     b.Property<decimal>("TaxAmount")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,4)");
 
                     b.Property<string>("TaxCode")
                         .HasMaxLength(50)
@@ -31480,7 +31746,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("TaxRate")
-                        .HasColumnType("decimal(18,4)");
+                        .HasColumnType("decimal(18,6)");
 
                     b.Property<int>("TaxTreatment")
                         .ValueGeneratedOnAdd()
@@ -31494,8 +31760,21 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
-                        .HasColumnType("decimal(18,2)");
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -31528,6 +31807,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PurchaseOrderItemId");
 
                     b.HasIndex("TaxGroupId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("VendorInvoiceId");
 
@@ -32618,6 +32899,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("ExchangeRateId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("FinanceRoundingEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("FunctionalCurrencyCode")
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
@@ -32699,6 +32983,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("ReversedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("RoundingAdjustmentAmount")
+                        .HasColumnType("decimal(20,6)");
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -32792,6 +33079,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("WorkflowInstanceId");
 
                     b.HasIndex("TenantId", "AccountingBookId");
+
+                    b.HasIndex("TenantId", "FinanceRoundingEvidenceId");
 
                     b.HasIndex("TenantId", "InvoicePaymentSodControlEventId");
 
@@ -101072,6 +101361,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal?>("UnitWeightKg")
                         .HasColumnType("decimal(22,6)");
 
@@ -101095,6 +101397,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("InventoryItemId");
 
                     b.HasIndex("StorageLocationId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "PurchaseOrderItemId", "GoodsReceiptNoteId")
                         .IsUnique()
@@ -102693,6 +102997,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("UnitCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -102706,6 +103023,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("InventoryDisposalCaseId", "InventoryItemId", "LocationId");
 
@@ -103435,6 +103754,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -103453,6 +103785,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("InventoryRequisitionItemId");
 
                     b.HasIndex("LocationId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -103796,6 +104130,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("UnitOfMeasureScheduleId")
                         .HasColumnType("uniqueidentifier");
 
@@ -103874,6 +104211,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("Status");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("UnitOfMeasureScheduleId");
 
@@ -105446,6 +105785,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -105461,6 +105813,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("InventoryRequisitionItems");
                 });
@@ -107216,6 +107570,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -107233,6 +107600,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("SourceLocationId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("InventoryTransferItems", null, t =>
                         {
@@ -109139,6 +109508,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -109174,6 +109556,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("SupersededByPhysicalCountId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("PhysicalCountItems", null, t =>
                         {
@@ -110081,6 +110465,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("UnitCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -110115,6 +110512,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TransferDispatchAllocationId");
 
                     b.HasIndex("TransferReceiptAllocationId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -110165,6 +110564,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("DecimalPlaces")
+                        .HasColumnType("int");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -110191,6 +110593,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<decimal?>("RoundingIncrement")
+                        .HasColumnType("decimal(18,4)");
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
@@ -133840,6 +134245,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -133860,6 +134278,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PurchaseOrderItemId");
 
                     b.HasIndex("PurchaseRequisitionItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "PurchaseOrderItemId")
                         .IsUnique();
@@ -133950,6 +134370,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -133964,6 +134397,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("AgreementId");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "AgreementId", "InventoryItemId")
                         .IsUnique()
@@ -135504,6 +135939,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -135531,6 +135979,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ProcurementPlanId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "ReferenceNumber")
                         .IsUnique();
@@ -139019,6 +139469,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -139030,6 +139493,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("InspectionCaseId");
 
                     b.HasIndex("PurchaseOrderReceiptItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "InspectionCaseId", "PurchaseOrderReceiptItemId")
                         .IsUnique();
@@ -146828,6 +147293,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -146849,6 +147327,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PurchaseOrderId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -147282,6 +147762,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal?>("UnitWeightKg")
                         .HasColumnType("decimal(22,6)");
 
@@ -147305,6 +147798,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("PurchaseOrderItemId");
 
                     b.HasIndex("ReceiptId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "PurchaseOrderItemId", "ReceiptId")
                         .IsUnique()
@@ -147725,6 +148220,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -147742,6 +148250,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("RequisitionId");
 
                     b.HasIndex("SourcePlanItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "SourcePlanItemId");
 
@@ -148211,6 +148721,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -148224,6 +148747,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("RfqId");
 
                     b.HasIndex("SourcePurchaseRequisitionItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "RfqId", "LineNumber")
                         .IsUnique();
@@ -148338,6 +148863,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -148352,6 +148880,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("QuoteId");
 
                     b.HasIndex("RfqItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("TenantId", "QuoteId", "RfqItemId")
                         .IsUnique()
@@ -151005,6 +151535,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -151018,6 +151561,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("TenderId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("TenderItems");
                 });
@@ -151286,6 +151831,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -151299,6 +151857,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId");
 
                     b.HasIndex("TenderBidItemId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("TenderNegotiationItems", (string)null);
                 });
@@ -180766,6 +181326,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -180791,6 +181364,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -181656,6 +182231,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -181672,6 +182260,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("QuoteLineItems", (string)null);
                 });
@@ -182086,6 +182676,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -182102,6 +182705,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("SalesOrderLineId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("ReturnOrderLines", (string)null);
                 });
@@ -182488,6 +183093,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<DateTime?>("UpdatedAt")
                         .HasColumnType("datetime2");
 
@@ -182504,6 +183122,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("SalesAgreementId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.ToTable("SalesAgreementLines");
                 });
@@ -182916,6 +183536,197 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("SalesAllocationHistories", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesForecast", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ApprovedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ApprovedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("OwnerId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("OwnerName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("PeriodEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("PeriodStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("SubmittedDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TotalActualAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("TotalForecastAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("SalesForecasts");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesForecastLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("ActualAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ActualQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<string>("Category")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("ForecastAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("ForecastQuantity")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid?>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProductName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("SalesForecastId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SalesRepId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("SalesRepName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Unit")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SalesForecastId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
+
+                    b.ToTable("SalesForecastLines");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesOrder", b =>
                 {
                     b.Property<Guid>("Id")
@@ -183298,6 +184109,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("UnitCost")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("UnitOfMeasureCodeSnapshot")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<int?>("UnitOfMeasureDecimalPlacesSnapshot")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("UnitOfMeasureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("UnitOfMeasureRoundingIncrementSnapshot")
+                        .HasColumnType("decimal(18,6)");
+
                     b.Property<decimal>("UnitPrice")
                         .HasColumnType("decimal(18,2)");
 
@@ -183325,6 +184149,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TaxGroupId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UnitOfMeasureId");
 
                     b.HasIndex("WarehouseId");
 
@@ -190410,6 +191236,12 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("ToBankAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceSourceBookAuthority", "SourceBookAuthority")
                         .WithMany()
                         .HasForeignKey("TenantId", "SourceBookAuthorityId")
@@ -190619,6 +191451,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.Tax", "WithholdingTax")
                         .WithMany()
                         .HasForeignKey("WithholdingTaxId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceSourceBookAuthority", "SourceBookAuthority")
@@ -191332,6 +192170,12 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
                         .WithMany()
                         .HasForeignKey("TenantId", "JournalEntryId", "AccountingBookId")
@@ -191464,6 +192308,37 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("FinancePurchaseOrderItem");
 
                     b.Navigation("FinancePurchaseOrderReceipt");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ExchangeRateId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "GainAccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "LossAccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -193680,6 +194555,12 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceSourceBookAuthority", "SourceBookAuthority")
                         .WithMany()
                         .HasForeignKey("TenantId", "SourceBookAuthorityId")
@@ -193736,6 +194617,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
                         .WithMany()
@@ -195560,6 +196446,12 @@ namespace ErpSystem.Data.Migrations
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "LeaseAccountingBookId")
@@ -195662,6 +196554,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", "VendorInvoice")
                         .WithMany("LineItems")
@@ -196139,6 +197036,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", null)
                         .WithMany()
                         .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceRoundingEvidence", null)
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinanceRoundingEvidenceId")
                         .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict);
 
@@ -216768,6 +217671,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("GoodsReceiptNote");
 
                     b.Navigation("InventoryItem");
@@ -217245,6 +218153,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("InventoryDisposalCase");
 
                     b.Navigation("InventoryItem");
@@ -217475,6 +218388,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -217613,6 +218531,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasureSchedule", "UnitOfMeasureSchedule")
                         .WithMany("Items")
@@ -218111,6 +219034,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("InventoryItem");
 
@@ -218705,6 +219633,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("DestinationLocation");
 
@@ -219376,6 +220309,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("CountedBy");
 
                     b.Navigation("InventoryItem");
@@ -219643,6 +220581,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryTransferReceiptAllocation", "TransferReceiptAllocation")
                         .WithMany()
                         .HasForeignKey("TransferReceiptAllocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
@@ -225536,6 +226479,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AgreementPriceLine");
 
                     b.Navigation("CallOff");
@@ -225568,6 +226516,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Agreement");
 
@@ -225925,6 +226878,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("InventoryItem");
 
@@ -226715,6 +227673,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("InspectionCase");
 
@@ -228885,6 +229848,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId");
@@ -228995,6 +229963,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("PurchaseOrderItem");
 
@@ -229132,6 +230105,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("InventoryItem");
 
@@ -229312,6 +230290,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("InventoryItem");
 
                     b.Navigation("Rfq");
@@ -229365,6 +230348,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Quote");
 
@@ -230210,6 +231198,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Lot");
 
                     b.Navigation("Tenant");
@@ -230318,6 +231311,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenderBidItemId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Negotiation");
 
@@ -239161,6 +240159,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
                         .WithMany()
                         .HasForeignKey("WarehouseId")
@@ -239323,6 +240326,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Quote");
 
                     b.Navigation("TaxGroup");
@@ -239444,6 +240452,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("ReturnOrder");
 
                     b.Navigation("SalesOrderLine");
@@ -239530,6 +240543,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Product");
 
@@ -239637,6 +240655,41 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("SalesAllocation");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesForecast", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesForecastLine", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Sales.SalesForecast", "SalesForecast")
+                        .WithMany("Lines")
+                        .HasForeignKey("SalesForecastId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SalesForecast");
 
                     b.Navigation("Tenant");
                 });
@@ -239749,6 +240802,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.UnitOfMeasure", null)
+                        .WithMany()
+                        .HasForeignKey("UnitOfMeasureId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.Warehouse", "Warehouse")
                         .WithMany()
@@ -244844,6 +245902,11 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesAllocation", b =>
                 {
                     b.Navigation("History");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesForecast", b =>
+                {
+                    b.Navigation("Lines");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Sales.SalesOrder", b =>

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.Entities.Finance;
 
@@ -122,7 +123,7 @@ public class SupplierDebitNote : TenantEntity
     public Guid? ReturnDispatchPostingEventId { get; set; }
     public Guid? ReturnDispatchJournalEntryId { get; set; }
     /// <summary>Audited whole-note credit-only settlement of OriginalVendorInvoiceId; never a fabricated payment.</summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DirectInvoiceAppliedAmount { get; set; }
     public DateTime? DirectInvoiceAppliedAt { get; set; }
     public Guid? DirectInvoiceAppliedById { get; set; }
@@ -183,19 +184,19 @@ public class SupplierDebitNote : TenantEntity
     [Column(TypeName = "decimal(18,6)")]
     public decimal ExchangeRate { get; set; } = 1m;
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal SubTotal { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal BaseCurrencyAmount { get; set; }
 
     public SupplierDebitNoteStatus Status { get; set; } = SupplierDebitNoteStatus.Draft;
@@ -271,7 +272,7 @@ public class SupplierDebitNoteLineItem : TenantEntity
     [Column(TypeName = "decimal(18,4)")]
     public decimal Quantity { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,6)")]
     public decimal UnitPrice { get; set; }
 
     public Guid? TaxGroupId { get; set; }
@@ -279,16 +280,16 @@ public class SupplierDebitNoteLineItem : TenantEntity
     [Column(TypeName = "decimal(18,4)")]
     public decimal TaxRate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal DiscountPercentage { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal LineTotal { get; set; }
 
     public virtual ICollection<SupplierDebitNoteTaxComponent> TaxComponents { get; set; }
@@ -315,17 +316,34 @@ public class SupplierDebitNoteTaxComponent : TenantEntity
     [Required]
     public Guid ResolvedCreditAccountId { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal BaseAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,10)")]
     public decimal TaxableAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,4)")]
+    [Column(TypeName = "decimal(18,6)")]
     public decimal TaxRate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
+
+    [MaxLength(3)]
+    public string? CurrencyCode { get; set; }
+    public int? CurrencyDecimalPlaces { get; set; }
+
+    [Column(TypeName = "decimal(20,10)")]
+    public decimal? RawTaxAmount { get; set; }
+
+    [Column(TypeName = "decimal(20,10)")]
+    public decimal? RoundingAdjustment { get; set; }
+
+    public int? AllocationSequence { get; set; }
+    public TaxRoundingScope? TaxRoundingScope { get; set; }
+    public GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+
+    [Column(TypeName = "decimal(20,4)")]
+    public decimal? TaxRoundingIncrement { get; set; }
 
     public ErpSystem.Core.Enums.CompoundBasis CompoundBasis { get; set; }
     public int CalculationOrder { get; set; }

@@ -117,6 +117,8 @@ export interface CashTransaction {
     transferPairId?: string;
     transferLeg?: 'Outgoing' | 'Incoming';
     amount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     currency: string;
     exchangeRate?: number;
     exchangeRateId?: string;

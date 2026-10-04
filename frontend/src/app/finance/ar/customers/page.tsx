@@ -112,7 +112,8 @@ export default function CustomersPage() {
                                 <TableRow>
                                     <TableHead>Customer</TableHead>
                                     <TableHead>Contact Info</TableHead>
-                                    <TableHead className="text-right">Outstanding Balance</TableHead>
+                                    <TableHead className="text-right">Receivable</TableHead>
+                                    <TableHead className="text-right">Customer Credit</TableHead>
                                     <TableHead className="text-right">Credit Limit</TableHead>
                                     <TableHead>Status</TableHead>
                                     <TableHead className="w-[70px]"></TableHead>
@@ -126,13 +127,14 @@ export default function CustomersPage() {
                                             <TableCell><Skeleton className="h-4 w-[150px]" /></TableCell>
                                             <TableCell><Skeleton className="h-4 w-[100px] ml-auto" /></TableCell>
                                             <TableCell><Skeleton className="h-4 w-[100px] ml-auto" /></TableCell>
+                                            <TableCell><Skeleton className="h-4 w-[100px] ml-auto" /></TableCell>
                                             <TableCell><Skeleton className="h-4 w-[80px]" /></TableCell>
                                             <TableCell><Skeleton className="h-8 w-8" /></TableCell>
                                         </TableRow>
                                     ))
                                 ) : customersData?.items?.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={6} className="h-24 text-center">
+                                        <TableCell colSpan={7} className="h-24 text-center">
                                             No customers found.
                                         </TableCell>
                                     </TableRow>
@@ -162,6 +164,11 @@ export default function CustomersPage() {
                                             <TableCell className="text-right font-medium">
                                                 <span className={customer.outstandingBalance > 0 ? "text-red-600" : "text-green-600"}>
                                                     {formatCurrency(customer.outstandingBalance, customer.currencyCode)}
+                                                </span>
+                                            </TableCell>
+                                            <TableCell className="text-right font-medium">
+                                                <span className={customer.customerCreditBalance > 0 ? "text-blue-600" : "text-muted-foreground"}>
+                                                    {formatCurrency(customer.customerCreditBalance, customer.currencyCode)}
                                                 </span>
                                             </TableCell>
                                             <TableCell className="text-right text-muted-foreground">

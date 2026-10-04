@@ -264,6 +264,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
+        if (validation.ReversalOfJournalEntryId.HasValue)
+        {
+            AddReversalTaxSnapshots(
+                tenantId,
+                request.TaxCalculationSnapshots ?? Array.Empty<FinanceTaxCalculationSnapshotDto>(),
+                validation.SourceDocumentId,
+                now,
+                postedByUserId);
+        }
         foreach (var replica in parallelReplicas)
         {
             _context.JournalEntries.Add(replica.JournalEntry);
@@ -354,10 +363,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             Description = $"Exact AccountingEvent reversal of {journal.JournalEntryNumber}: {reason.Trim()}",
             PostingDate = reversalDate.Date, JournalType = "System Generated",
             AccountingBookCode = original.BookClassification, FunctionalCurrencyCode = original.FunctionalCurrencyCode,
-            IdempotencyKey = idempotencyKey, ReturnExistingOnDuplicate = true,
+            IdempotencyKey = idempotencyKey, FinanceRoundingEvidenceId = original.FinanceRoundingEvidenceId,
+            ReturnExistingOnDuplicate = true,
             Lines = journal.Transactions.OrderBy(item => item.LineNumber).Select(item => new FinancePostingLineDto
             {
                 AccountId = item.AccountId, SourceDocumentLineId = item.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = item.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = item.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = item.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = item.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {item.Description}", DebitAmount = item.CreditAmount,
                 CreditAmount = item.DebitAmount, TransactionCurrency = item.TransactionCurrency,
                 ForeignCurrencyAmount = item.ForeignCurrencyAmount, ExchangeRate = item.ExchangeRate,
@@ -480,6 +494,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 AccountId = t.AccountId,
                 SourceDocumentLineId = t.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = t.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = t.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = t.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = t.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {t.Description}",
                 DebitAmount = t.CreditAmount,
                 CreditAmount = t.DebitAmount,
@@ -501,6 +519,43 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             .ToList();
         var resolvedReversalDate = reversalDate?.Date
             ?? await ResolveDefaultReversalDateAsync(tenantId, cancellationToken);
+        var taxSnapshots = await _context.Set<TaxCalculation>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentType == postingEvent.SourceDocumentType
+                && item.DocumentId == postingEvent.SourceDocumentId
+                && !item.IsDeleted)
+            .OrderBy(item => item.AllocationSequence)
+            .ThenBy(item => item.DocumentLineId)
+            .ThenBy(item => item.CalculationOrder)
+            .ThenBy(item => item.TaxId)
+            .Select(item => new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = item.DocumentType,
+                DocumentId = item.DocumentId,
+                DocumentLineId = item.DocumentLineId,
+                TaxId = item.TaxId,
+                TaxGroupId = item.TaxGroupId,
+                PostingAccountId = item.PostingAccountId,
+                CurrencyCode = item.CurrencyCode,
+                CurrencyDecimalPlaces = item.CurrencyDecimalPlaces,
+                BaseAmount = -item.BaseAmount,
+                TaxableAmount = -item.TaxableAmount,
+                TaxRate = item.TaxRate,
+                TaxAmount = -item.TaxAmount,
+                RawTaxAmount = -item.RawTaxAmount,
+                RoundingAdjustment = -item.RoundingAdjustment,
+                AllocationSequence = item.AllocationSequence,
+                TaxRoundingScope = item.TaxRoundingScope,
+                TaxRoundingMethod = item.TaxRoundingMethod,
+                TaxRoundingIncrement = item.TaxRoundingIncrement,
+                CompoundBasis = item.CompoundBasis,
+                CalculationOrder = item.CalculationOrder,
+                CalculationDate = resolvedReversalDate,
+                IsManualOverride = item.IsManualOverride,
+                OverrideReason = item.OverrideReason
+            })
+            .ToListAsync(cancellationToken);
 
         return new FinanceReversalPlanDto
         {
@@ -510,7 +565,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             PostingAction = "Reverse",
             ReversalDate = resolvedReversalDate,
             Reason = reason.Trim(),
-            ReversalLines = lines
+            ReversalLines = lines,
+            ReversalTaxCalculationSnapshots = taxSnapshots
         };
     }
 
@@ -545,14 +601,99 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             AccountingBookCode = original.BookClassification,
             FunctionalCurrencyCode = original.FunctionalCurrencyCode,
             IdempotencyKey = $"exact-reversal:{postingEventId:N}",
+            FinanceRoundingEvidenceId = original.FinanceRoundingEvidenceId,
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines
+            Lines = plan.ReversalLines,
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                "FinancePostingEventReversal",
+                postingEventId)
         };
         // Only this server-derived command can admit inactive historical book mappings. Ordinary
         // V2 requests cannot set or influence the exception.
         return await PostCoreAsync(request, request.AccountingBookCode, producerContext: null,
             allowHistoricalMappingException: true, cancellationToken);
     }
+
+    private void AddReversalTaxSnapshots(
+        Guid tenantId,
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        Guid sourceDocumentId,
+        DateTime now,
+        Guid? actorId)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.DocumentType)
+                || snapshot.DocumentId != sourceDocumentId)
+            {
+                throw new InvalidOperationException(
+                    "Reversal tax evidence must be bound to the reversal source document.");
+            }
+
+            _context.Set<TaxCalculation>().Add(new TaxCalculation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                DocumentType = snapshot.DocumentType,
+                DocumentId = snapshot.DocumentId,
+                DocumentLineId = snapshot.DocumentLineId,
+                TaxId = snapshot.TaxId,
+                TaxGroupId = snapshot.TaxGroupId,
+                PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                BaseAmount = snapshot.BaseAmount,
+                TaxableAmount = snapshot.TaxableAmount,
+                TaxRate = snapshot.TaxRate,
+                TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+                CompoundBasis = snapshot.CompoundBasis,
+                CalculationOrder = snapshot.CalculationOrder,
+                CalculationDate = snapshot.CalculationDate,
+                IsManualOverride = snapshot.IsManualOverride,
+                OverrideReason = snapshot.OverrideReason,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName,
+                CreatedById = actorId
+            });
+        }
+    }
+
+    private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        string documentType,
+        Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = documentType,
+            DocumentId = documentId,
+            DocumentLineId = snapshot.DocumentLineId,
+            TaxId = snapshot.TaxId,
+            TaxGroupId = snapshot.TaxGroupId,
+            PostingAccountId = snapshot.PostingAccountId,
+            CurrencyCode = snapshot.CurrencyCode,
+            CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+            BaseAmount = snapshot.BaseAmount,
+            TaxableAmount = snapshot.TaxableAmount,
+            TaxRate = snapshot.TaxRate,
+            TaxAmount = snapshot.TaxAmount,
+            RawTaxAmount = snapshot.RawTaxAmount,
+            RoundingAdjustment = snapshot.RoundingAdjustment,
+            AllocationSequence = snapshot.AllocationSequence,
+            TaxRoundingScope = snapshot.TaxRoundingScope,
+            TaxRoundingMethod = snapshot.TaxRoundingMethod,
+            TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+            CompoundBasis = snapshot.CompoundBasis,
+            CalculationOrder = snapshot.CalculationOrder,
+            CalculationDate = snapshot.CalculationDate,
+            IsManualOverride = snapshot.IsManualOverride,
+            OverrideReason = snapshot.OverrideReason
+        }).ToArray();
 
     private async Task<DateTime> ResolveDefaultReversalDateAsync(
         Guid tenantId,
@@ -670,6 +811,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             transaction.SourceModule = validation.SourceModule;
             transaction.SourceDocumentId = validation.SourceDocumentId;
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
+            transaction.CommercialUnitOfMeasureId = requestLine.CommercialUnitOfMeasureId;
+            transaction.CommercialUnitOfMeasureCode = requestLine.CommercialUnitOfMeasureCode;
+            transaction.CommercialQuantityDecimalPlaces = requestLine.CommercialQuantityDecimalPlaces;
+            transaction.CommercialQuantityRoundingIncrement = requestLine.CommercialQuantityRoundingIncrement;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.Description = requestLine.Description ?? validation.Description;
             transaction.SourceReferenceNumber = requestLine.SourceReferenceNumber ?? validation.SourceDocumentReference;
@@ -752,6 +897,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 TenantId = tenantId,
                 AccountId = line.AccountId,
                 SourceDocumentLineId = line.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = line.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = line.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = line.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = line.CommercialQuantityRoundingIncrement,
                 JournalEntryId = journalEntry.Id,
                 TransactionDate = validation.PostingDate,
                 Description = line.Description ?? validation.Description,
@@ -870,6 +1019,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 || a.ForeignCurrencyAmount != b.ForeignCurrencyAmount || a.ExchangeRateId != b.ExchangeRateId
                 || a.ExchangeRate != b.ExchangeRate || a.ExchangeRateDate != b.ExchangeRateDate
                 || a.SourceDocumentLineId != b.SourceDocumentLineId
+                || a.CommercialUnitOfMeasureId != b.CommercialUnitOfMeasureId
+                || a.CommercialQuantityDecimalPlaces != b.CommercialQuantityDecimalPlaces
+                || a.CommercialQuantityRoundingIncrement != b.CommercialQuantityRoundingIncrement
+                || !string.Equals(a.CommercialUnitOfMeasureCode, b.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.ExchangeRateSource, b.ExchangeRateSource, StringComparison.Ordinal)
                 || !string.Equals(a.TransactionCurrency, b.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.SourceReferenceNumber, b.SourceReferenceNumber, StringComparison.Ordinal)
@@ -936,6 +1089,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             PostingAction = validation.PostingAction,
             SourceDocumentReference = validation.SourceDocumentReference,
             IdempotencyKey = validation.IdempotencyKey,
+            FinanceRoundingEvidenceId = validation.FinanceRoundingEvidenceId,
             RequestFingerprintVersion = validation.RequestFingerprintVersion,
             RequestFingerprint = validation.RequestFingerprint,
             JournalEntryId = journalEntryId,
@@ -1057,6 +1211,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     FinanceDimensionSnapshotId = replicaSnapshot?.Id,
                     SourceModule = source.SourceModule, SourceDocumentId = source.SourceDocumentId,
                     SourceDocumentLineId = source.SourceDocumentLineId,
+                    CommercialUnitOfMeasureId = source.CommercialUnitOfMeasureId,
+                    CommercialUnitOfMeasureCode = source.CommercialUnitOfMeasureCode,
+                    CommercialQuantityDecimalPlaces = source.CommercialQuantityDecimalPlaces,
+                    CommercialQuantityRoundingIncrement = source.CommercialQuantityRoundingIncrement,
                     SourceDocumentType = source.SourceDocumentType,
                     SourceReferenceNumber = source.SourceReferenceNumber,
                     BookClassification = book.Code, AccountingBookId = book.Id,
@@ -1156,6 +1314,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 SourceDocumentType = validation.SourceDocumentType, SourceDocumentId = validation.SourceDocumentId,
                 PostingAction = validation.PostingAction, SourceDocumentReference = validation.SourceDocumentReference,
                 IdempotencyKey = ParallelIdempotencyKey(validation.IdempotencyKey, book.Code),
+                FinanceRoundingEvidenceId = validation.FinanceRoundingEvidenceId,
                 RequestFingerprintVersion = "FINPOST-PARALLEL-V1", RequestFingerprint = fingerprint,
                 JournalEntryId = journal.Id, PostingStatus = PostedStatus,
                 PostingDate = validation.PostingDate, RequestedAt = now, PostedAt = now,
@@ -1460,6 +1619,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             sourceModule,
             request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
+        ValidateTaxCalculationSnapshots(request.TaxCalculationSnapshots);
         if (yearEndCycle == null && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
             || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("Year-end postings must use the governed book-close cycle workflow.");
@@ -1654,6 +1814,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 $"Future-dated posting is not allowed for fiscal period '{fiscalPeriod.PeriodCode}'.");
         }
 
+        await InvoiceCashRoundingPostingAdapter.ApplyAsync(
+            _context, tenantId, request, functionalCurrency, functionalDecimalPlaces, cancellationToken);
+
         var requestedLines = request.Lines?.ToList() ?? new List<FinancePostingLineDto>();
         if (requestedLines.Count == 0)
         {
@@ -1806,9 +1969,25 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 credit,
                 cancellationToken);
 
+            var carriesCommercialUomEvidence = line.CommercialUnitOfMeasureId.HasValue ||
+                !string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                line.CommercialQuantityDecimalPlaces.HasValue ||
+                line.CommercialQuantityRoundingIncrement.HasValue;
+            if (carriesCommercialUomEvidence && (!line.CommercialUnitOfMeasureId.HasValue ||
+                string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                !line.CommercialQuantityDecimalPlaces.HasValue))
+                throw new InvalidOperationException("Commercial UOM posting evidence must include stable ID, code, and decimal precision together.");
+            if (carriesCommercialUomEvidence)
+                ErpSystem.Core.Inventory.CommercialQuantityPolicy.ValidateConfiguration(
+                    line.CommercialQuantityDecimalPlaces!.Value, line.CommercialQuantityRoundingIncrement);
+
             normalizedLines.Add(new ValidatedPostingLine(
                 line.AccountId,
                 line.SourceDocumentLineId,
+                line.CommercialUnitOfMeasureId,
+                NormalizeOptional(line.CommercialUnitOfMeasureCode, 20, "Commercial UOM code"),
+                line.CommercialQuantityDecimalPlaces,
+                line.CommercialQuantityRoundingIncrement,
                 NormalizeOptional(line.Description, 500, "Line description"),
                 debit,
                 credit,
@@ -2018,11 +2197,39 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"),
             request.ExchangeRateOverrideApprovedByUserId,
             request.ExchangeRateOverrideApprovedAt,
+            request.FinanceRoundingEvidenceId,
             budgetReservationIds,
             budgetReservationSourceDocumentType,
             RequestFingerprintVersion,
             requestFingerprint,
             allowHistoricalMappingException);
+    }
+
+    private static void ValidateTaxCalculationSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.CurrencyCode)
+                || !snapshot.CurrencyDecimalPlaces.HasValue
+                || !snapshot.RawTaxAmount.HasValue
+                || !snapshot.RoundingAdjustment.HasValue
+                || !snapshot.AllocationSequence.HasValue
+                || !snapshot.TaxRoundingScope.HasValue
+                || !snapshot.TaxRoundingMethod.HasValue
+                || !snapshot.TaxRoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "FINANCE_TAX_EVIDENCE_INCOMPLETE: posting tax evidence must include currency precision, signed raw/rounded delta, allocation sequence, and rounding policy.");
+
+            var currencyCode = snapshot.CurrencyCode.Trim().ToUpperInvariant();
+            if (currencyCode.Length != 3)
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence currency code must contain three characters.");
+            CurrencyMinorUnitPolicy.Validate(currencyCode, snapshot.CurrencyDecimalPlaces.Value);
+            if (snapshot.TaxRoundingIncrement.Value <= 0m
+                || !Enum.IsDefined(snapshot.TaxRoundingScope.Value)
+                || !Enum.IsDefined(snapshot.TaxRoundingMethod.Value))
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence rounding policy is invalid.");
+        }
     }
 
     private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
@@ -2739,6 +2946,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var requested = requestedLines[index];
             if (stored.AccountId != requested.AccountId
                 || stored.SourceDocumentLineId != requested.SourceDocumentLineId
+                || stored.CommercialUnitOfMeasureId != requested.CommercialUnitOfMeasureId
+                || stored.CommercialQuantityDecimalPlaces != requested.CommercialQuantityDecimalPlaces
+                || stored.CommercialQuantityRoundingIncrement != requested.CommercialQuantityRoundingIncrement
+                || !string.Equals(stored.CommercialUnitOfMeasureCode, requested.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || stored.DebitAmount != requested.DebitAmount
                 || stored.CreditAmount != requested.CreditAmount
                 || stored.TransactionDebitAmount != requested.TransactionDebitAmount
@@ -3297,6 +3508,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var prefix = $"line[{lineIndex}]";
             AddGuid($"{prefix}.accountId", line.AccountId);
             AddGuid($"{prefix}.sourceDocumentLineId", line.SourceDocumentLineId);
+            AddGuid($"{prefix}.commercialUnitOfMeasureId", line.CommercialUnitOfMeasureId);
+            Add($"{prefix}.commercialUnitOfMeasureCode", line.CommercialUnitOfMeasureCode);
+            Add($"{prefix}.commercialQuantityDecimalPlaces", line.CommercialQuantityDecimalPlaces?.ToString(CultureInfo.InvariantCulture));
+            AddDecimal($"{prefix}.commercialQuantityRoundingIncrement", line.CommercialQuantityRoundingIncrement);
             Add($"{prefix}.description", line.Description);
             AddDecimal($"{prefix}.debitAmount", line.DebitAmount);
             AddDecimal($"{prefix}.creditAmount", line.CreditAmount);
@@ -3359,10 +3574,18 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             AddGuid($"{prefix}.taxId", item.TaxId);
             AddGuid($"{prefix}.taxGroupId", item.TaxGroupId);
             AddGuid($"{prefix}.postingAccountId", item.PostingAccountId);
+            Add($"{prefix}.currencyCode", item.CurrencyCode?.Trim().ToUpperInvariant());
+            AddInt($"{prefix}.currencyDecimalPlaces", item.CurrencyDecimalPlaces);
             AddDecimal($"{prefix}.baseAmount", item.BaseAmount);
             AddDecimal($"{prefix}.taxableAmount", item.TaxableAmount);
             AddDecimal($"{prefix}.taxRate", item.TaxRate);
             AddDecimal($"{prefix}.taxAmount", item.TaxAmount);
+            AddDecimal($"{prefix}.rawTaxAmount", item.RawTaxAmount);
+            AddDecimal($"{prefix}.roundingAdjustment", item.RoundingAdjustment);
+            AddInt($"{prefix}.allocationSequence", item.AllocationSequence);
+            AddInt($"{prefix}.taxRoundingScope", item.TaxRoundingScope.HasValue ? (int)item.TaxRoundingScope.Value : null);
+            AddInt($"{prefix}.taxRoundingMethod", item.TaxRoundingMethod.HasValue ? (int)item.TaxRoundingMethod.Value : null);
+            AddDecimal($"{prefix}.taxRoundingIncrement", item.TaxRoundingIncrement);
             AddInt($"{prefix}.compoundBasis", (int)item.CompoundBasis);
             AddInt($"{prefix}.calculationOrder", item.CalculationOrder);
             AddDate($"{prefix}.calculationDate", item.CalculationDate);
@@ -3940,6 +4163,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string? ExchangeRateOverrideReason,
         Guid? ExchangeRateOverrideApprovedByUserId,
         DateTime? ExchangeRateOverrideApprovedAt,
+        Guid? FinanceRoundingEvidenceId,
         IReadOnlyList<Guid> BudgetReservationIds,
         string? BudgetReservationSourceDocumentType,
         string RequestFingerprintVersion,
@@ -3949,6 +4173,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
     private sealed record ValidatedPostingLine(
         Guid AccountId,
         Guid? SourceDocumentLineId,
+        Guid? CommercialUnitOfMeasureId,
+        string? CommercialUnitOfMeasureCode,
+        int? CommercialQuantityDecimalPlaces,
+        decimal? CommercialQuantityRoundingIncrement,
         string? Description,
         decimal DebitAmount,
         decimal CreditAmount,

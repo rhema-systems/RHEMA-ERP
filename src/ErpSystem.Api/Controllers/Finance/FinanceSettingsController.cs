@@ -117,6 +117,7 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="401">Not authenticated or session has expired.</response>
         /// <response code="500">An unexpected error occurred while updating settings.</response>
         [HttpPut("settings")]
+        [HttpPatch("settings")]
         [Authorize(Policy = FinancePermissions.AdministerFinance)]
         public async Task<IActionResult> UpdateSettings([FromBody] UpdateFinanceSettingsDto dto)
         {

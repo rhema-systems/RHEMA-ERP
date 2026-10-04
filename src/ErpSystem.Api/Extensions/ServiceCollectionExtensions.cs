@@ -986,6 +986,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IOpeningBalanceService, ErpSystem.Api.Services.Finance.Migration.OpeningBalanceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IMigrationSignOffService, ErpSystem.Api.Services.Finance.Migration.MigrationSignOffService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceQuantityPrecisionAdapter, ErpSystem.Api.Services.Finance.UnitAccounting.FinanceQuantityPrecisionAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityPolicyValidator, ErpSystem.Api.Services.Inventory.CommercialQuantityPolicyValidator>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitJournalEntryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitBudgetService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitBudgetService>();

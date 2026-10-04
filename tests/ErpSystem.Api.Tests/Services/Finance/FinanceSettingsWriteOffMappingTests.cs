@@ -116,6 +116,51 @@ public sealed class FinanceSettingsWriteOffMappingTests
         fixture.Audits.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Precision_patch_distinguishes_omitted_fields_from_explicit_null_and_audits_clear()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Settings.TaxRoundingIncrement = 0.05m;
+        fixture.Settings.InvoiceRoundingIncrement = 0.10m;
+        fixture.Settings.InvoiceRoundingGainAccountId = fixture.Recovery.Id;
+        fixture.Settings.InvoiceRoundingLossAccountId = fixture.Expense.Id;
+        await fixture.Context.SaveChangesAsync();
+
+        var omitted = JsonSerializer.Deserialize<UpdateFinanceSettingsDto>(
+            "{}",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        omitted.TaxRoundingIncrementSpecified.Should().BeFalse();
+        omitted.InvoiceRoundingIncrementSpecified.Should().BeFalse();
+        omitted.InvoiceRoundingGainAccountIdSpecified.Should().BeFalse();
+        omitted.InvoiceRoundingLossAccountIdSpecified.Should().BeFalse();
+
+        var preserved = await fixture.Service.UpdateSettingsAsync(omitted);
+        preserved.TaxRoundingIncrement.Should().Be(0.05m);
+        preserved.InvoiceRoundingIncrement.Should().Be(0.10m);
+        preserved.InvoiceRoundingGainAccountId.Should().Be(fixture.Recovery.Id);
+        preserved.InvoiceRoundingLossAccountId.Should().Be(fixture.Expense.Id);
+        fixture.Audits.Should().BeEmpty();
+
+        var clear = JsonSerializer.Deserialize<UpdateFinanceSettingsDto>(
+            """{"taxRoundingIncrement":null,"invoiceRoundingIncrement":null,"invoiceRoundingGainAccountId":null,"invoiceRoundingLossAccountId":null}""",
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+        clear.TaxRoundingIncrementSpecified.Should().BeTrue();
+        clear.InvoiceRoundingIncrementSpecified.Should().BeTrue();
+        clear.InvoiceRoundingGainAccountIdSpecified.Should().BeTrue();
+        clear.InvoiceRoundingLossAccountIdSpecified.Should().BeTrue();
+
+        var cleared = await fixture.Service.UpdateSettingsAsync(clear);
+        cleared.TaxRoundingIncrement.Should().BeNull();
+        cleared.InvoiceRoundingIncrement.Should().BeNull();
+        cleared.InvoiceRoundingGainAccountId.Should().BeNull();
+        cleared.InvoiceRoundingLossAccountId.Should().BeNull();
+
+        var audit = fixture.Audits.Should().ContainSingle().Which;
+        audit.EventType.Should().Be(FinanceAuditEvents.FinanceControlPolicyChanged);
+        JsonSerializer.Serialize(audit.BeforeValues).Should().Contain("0.05").And.Contain("0.10");
+        JsonSerializer.Serialize(audit.AfterValues).Should().Contain("null");
+    }
+
     [Theory]
     [InlineData("expense", "foreign-tenant")]
     [InlineData("expense", "deleted")]
@@ -183,12 +228,65 @@ public sealed class FinanceSettingsWriteOffMappingTests
         fixture.Audits.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Invoice_rounding_activation_requires_and_exposes_valid_direct_posting_accounts()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+
+        var result = await fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto
+        {
+            InvoiceRoundingEnabled = true,
+            InvoiceRoundingIncrement = 0.05m,
+            InvoiceRoundingGainAccountId = fixture.Recovery.Id,
+            InvoiceRoundingLossAccountId = fixture.Expense.Id
+        });
+
+        result.InvoiceRoundingEnabled.Should().BeTrue();
+        result.InvoiceRoundingIncrement.Should().Be(0.05m);
+        result.InvoiceRoundingGainAccountId.Should().Be(fixture.Recovery.Id);
+        result.InvoiceRoundingLossAccountId.Should().Be(fixture.Expense.Id);
+
+        fixture.Recovery.AllowDirectPosting = false;
+        await fixture.Context.SaveChangesAsync();
+        await FluentActions.Awaiting(() => fixture.Service.UpdateSettingsAsync(
+                new UpdateFinanceSettingsDto { InvoiceRoundingEnabled = true }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*rounding gain account*active*Revenue*");
+    }
+
+    [Fact]
+    public async Task Invoice_rounding_policy_cannot_be_activated_after_posted_accounting_activity()
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        fixture.Context.JournalEntries.Add(new JournalEntry
+        {
+            TenantId = fixture.TenantId,
+            AccountingBookId = fixture.Book.Id,
+            JournalEntryNumber = "LOCK-1",
+            Description = "Precision lifecycle lock",
+            PostingStatus = "Posted"
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var action = () => fixture.Service.UpdateSettingsAsync(new UpdateFinanceSettingsDto
+        {
+            InvoiceRoundingEnabled = true,
+            InvoiceRoundingIncrement = 0.05m,
+            InvoiceRoundingGainAccountId = fixture.Recovery.Id,
+            InvoiceRoundingLossAccountId = fixture.Expense.Id
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*cannot be changed after posted usage*");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         public Guid TenantId { get; } = Guid.NewGuid();
         public ApplicationDbContext Context { get; } = new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
         public FinanceSettings Settings { get; private set; } = null!;
+        public AccountingBook Book { get; private set; } = null!;
         public Account Expense { get; private set; } = null!;
         public Account Recovery { get; private set; } = null!;
         public FinanceSettingsService Service { get; private set; } = null!;
@@ -202,9 +300,21 @@ public sealed class FinanceSettingsWriteOffMappingTests
                 TenantId = fixture.TenantId, BaseCurrency = "GHS", CoaType = "Segmented", AccountSeparator = "-",
                 ControlAccountInventoryId = Guid.NewGuid(), ApInvoicePriceTolerancePercent = 3m
             };
+            fixture.Book = new AccountingBook
+            {
+                TenantId = fixture.TenantId,
+                Code = "IFRS",
+                Name = "IFRS Primary",
+                BookType = AccountingBookType.PrimaryFull,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS",
+                IsDefault = true,
+                IsActive = true,
+                AllowsPosting = true
+            };
             fixture.Expense = fixture.Account("LOSS", AccountType.Expense);
             fixture.Recovery = fixture.Account("RECOVERY", AccountType.Revenue);
-            fixture.Context.AddRange(fixture.Settings, fixture.Expense, fixture.Recovery);
+            fixture.Context.AddRange(fixture.Settings, fixture.Book, fixture.Expense, fixture.Recovery);
             await fixture.Context.SaveChangesAsync();
             var currentUser = new Mock<ICurrentUserService>();
             currentUser.SetupGet(user => user.TenantId).Returns(fixture.TenantId);

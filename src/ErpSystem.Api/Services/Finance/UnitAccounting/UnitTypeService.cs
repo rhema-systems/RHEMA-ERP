@@ -75,9 +75,6 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> CreateAsync(CreateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
-            if (dto.RoundingIncrement.HasValue)
-                throw new InvalidOperationException(
-                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
             PrecisionRoundingPolicy.ValidateQuantity(0m, dto.DecimalPlaces, dto.RoundingIncrement);
             // Check for duplicate code
             var exists = await _unitOfWork.Repository<UnitType>()
@@ -112,9 +109,6 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
 
         public async Task<UnitTypeDto> UpdateAsync(Guid id, UpdateUnitTypeDto dto, CancellationToken cancellationToken = default)
         {
-            if (dto.RoundingIncrement.HasValue)
-                throw new InvalidOperationException(
-                    "UOM rounding increments cannot be activated until all quantity write and posting adapters enforce them.");
             var unitType = await _unitOfWork.Repository<UnitType>()
                 .FirstOrDefaultAsync(ut => ut.Id == id && ut.TenantId == TenantId && !ut.IsDeleted);
 
@@ -125,10 +119,22 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 unitType.Name = dto.Name;
             if (!string.IsNullOrEmpty(dto.Description))
                 unitType.Description = dto.Description;
-            if (dto.DecimalPlaces.HasValue)
-                unitType.DecimalPlaces = dto.DecimalPlaces.Value;
-            if (dto.RoundingIncrement.HasValue)
-                unitType.RoundingIncrement = dto.RoundingIncrement.Value;
+            var nextDecimalPlaces = dto.DecimalPlaces ?? unitType.DecimalPlaces;
+            var nextRoundingIncrement = dto.RoundingIncrementSpecified
+                ? dto.RoundingIncrement
+                : unitType.RoundingIncrement;
+            PrecisionRoundingPolicy.ValidateQuantity(0m, nextDecimalPlaces, nextRoundingIncrement);
+
+            if ((nextDecimalPlaces != unitType.DecimalPlaces || nextRoundingIncrement != unitType.RoundingIncrement)
+                && await HasPostedOrBudgetUsageAsync(unitType.Id, cancellationToken))
+            {
+                throw new InvalidOperationException(
+                    $"Quantity precision for unit type '{unitType.Code}' cannot change after posted journal or budget usage. Create a new Unit Type for the new precision policy.");
+            }
+
+            unitType.DecimalPlaces = nextDecimalPlaces;
+            if (dto.RoundingIncrementSpecified)
+                unitType.RoundingIncrement = dto.RoundingIncrement;
 
             PrecisionRoundingPolicy.ValidateQuantity(0m, unitType.DecimalPlaces, unitType.RoundingIncrement);
 
@@ -141,6 +147,40 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             _logger.LogInformation("Unit type {Code} updated by {User}", unitType.Code, UserName);
 
             return MapToDto(unitType);
+        }
+
+        private async Task<bool> HasPostedOrBudgetUsageAsync(Guid unitTypeId, CancellationToken cancellationToken)
+        {
+            var accountIds = await _unitOfWork.Repository<UnitAccount>()
+                .GetQueryable(account =>
+                    account.TenantId == TenantId &&
+                    account.UnitTypeId == unitTypeId &&
+                    !account.IsDeleted)
+                .Select(account => account.Id)
+                .ToListAsync(cancellationToken);
+
+            if (accountIds.Count == 0)
+                return false;
+
+            var postedJournalUsage = await _unitOfWork.Repository<UnitJournalEntryLine>()
+                .GetQueryable(line =>
+                    line.TenantId == TenantId &&
+                    accountIds.Contains(line.UnitAccountId) &&
+                    !line.IsDeleted &&
+                    line.UnitJournalEntry != null &&
+                    (line.UnitJournalEntry.Status == UnitJournalEntryStatus.Posted ||
+                     line.UnitJournalEntry.Status == UnitJournalEntryStatus.Reversed))
+                .AnyAsync(cancellationToken);
+
+            if (postedJournalUsage)
+                return true;
+
+            return await _unitOfWork.Repository<UnitAccountBudget>()
+                .GetQueryable(budget =>
+                    budget.TenantId == TenantId &&
+                    accountIds.Contains(budget.UnitAccountId) &&
+                    !budget.IsDeleted)
+                .AnyAsync(cancellationToken);
         }
 
         public async Task ActivateAsync(Guid id, CancellationToken cancellationToken = default)

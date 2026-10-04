@@ -80,6 +80,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TotalAmount { get; set; }
         public decimal AllocatedAmount { get; set; }
         public decimal UnallocatedAmount { get; set; }
+        public decimal RoundingAdjustmentAmount { get; set; }
+        public Guid? FinanceRoundingEvidenceId { get; set; }
         public string PaymentMethod { get; set; } = string.Empty;
         public Guid? PaymentMethodId { get; set; }
         public string? PaymentMethodName { get; set; }

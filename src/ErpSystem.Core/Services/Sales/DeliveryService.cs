@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Sales;
+using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +22,7 @@ public class DeliveryService : IDeliveryService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<DeliveryService> _logger;
     private readonly IDocumentNumberingService _documentNumberingService;
+    private readonly ICommercialQuantityPolicyValidator? _commercialQuantityValidator;
 
     public DeliveryService(
         IGenericRepository<DeliveryNote> deliveryRepo,
@@ -31,7 +33,8 @@ public class DeliveryService : IDeliveryService
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<DeliveryService> logger,
-        IDocumentNumberingService documentNumberingService)
+        IDocumentNumberingService documentNumberingService,
+        ICommercialQuantityPolicyValidator? commercialQuantityValidator = null)
     {
         _deliveryRepo = deliveryRepo;
         _lineRepo = lineRepo;
@@ -42,6 +45,7 @@ public class DeliveryService : IDeliveryService
         _currentUserProvider = currentUserProvider;
         _logger = logger;
         _documentNumberingService = documentNumberingService;
+        _commercialQuantityValidator = commercialQuantityValidator;
     }
 
     #region CRUD
@@ -110,6 +114,10 @@ public class DeliveryService : IDeliveryService
                     ProductCode = soLine.ProductCode,
                     DispatchedQuantity = lineDto.DispatchedQuantity,
                     Unit = soLine.Unit,
+                    UnitOfMeasureId = soLine.UnitOfMeasureId,
+                    UnitOfMeasureCodeSnapshot = soLine.UnitOfMeasureCodeSnapshot,
+                    UnitOfMeasureDecimalPlacesSnapshot = soLine.UnitOfMeasureDecimalPlacesSnapshot,
+                    UnitOfMeasureRoundingIncrementSnapshot = soLine.UnitOfMeasureRoundingIncrementSnapshot,
                     WarehouseId = lineDto.WarehouseId ?? soLine.WarehouseId,
                     LocationId = lineDto.LocationId ?? soLine.LocationId,
                     SerialNumber = lineDto.SerialNumber ?? soLine.SerialNumber,
@@ -123,6 +131,8 @@ public class DeliveryService : IDeliveryService
                     TaxAmount = soLine.TaxAmount,
                     TaxGroupId = soLine.TaxGroupId
                 };
+
+                await ValidateLineQuantityAsync(line, line.DispatchedQuantity, "Delivery create");
 
                 await _lineRepo.AddAsync(line);
             }
@@ -219,7 +229,7 @@ public class DeliveryService : IDeliveryService
     {
         try
         {
-            var dn = await _deliveryRepo.GetByIdAsync(id)
+            var dn = await _deliveryRepo.GetByIdAsync(id, delivery => delivery.Lines)
                 ?? throw new InvalidOperationException($"Delivery Note {id} not found");
 
             if (dn.DeliveryStatus != DeliveryNoteStatus.Draft)
@@ -250,6 +260,9 @@ public class DeliveryService : IDeliveryService
 
             if (dn.DeliveryStatus != DeliveryNoteStatus.Packed && dn.DeliveryStatus != DeliveryNoteStatus.Draft)
                 throw new InvalidOperationException($"Cannot ship Delivery Note in {dn.DeliveryStatus} status");
+
+            foreach (var line in dn.Lines.Where(line => !line.IsDeleted))
+                await ValidateLineQuantityAsync(line, line.DispatchedQuantity, "Delivery ship");
 
             dn.DeliveryStatus = DeliveryNoteStatus.Shipped;
             dn.ShippedDate = DateTime.UtcNow;
@@ -310,6 +323,9 @@ public class DeliveryService : IDeliveryService
                     line.DamageNotes = lineConfirmation.DamageNotes;
                     line.IsStockDeducted = invoiceOwnsStock;
 
+                    await ValidateLineQuantityAsync(line, line.DeliveredQuantity, "Delivery confirm delivered");
+                    await ValidateLineQuantityAsync(line, line.DamagedQuantity, "Delivery confirm damaged");
+
                     await _lineRepo.UpdateAsync(line);
 
                     // Update SO line delivered quantity
@@ -330,6 +346,7 @@ public class DeliveryService : IDeliveryService
                 {
                     line.DeliveredQuantity = line.DispatchedQuantity;
                     line.IsStockDeducted = invoiceOwnsStock;
+                    await ValidateLineQuantityAsync(line, line.DeliveredQuantity, "Delivery confirm delivered");
                     await _lineRepo.UpdateAsync(line);
 
                     var soLine = await _soLineRepo.GetByIdAsync(line.SalesOrderLineId);
@@ -513,6 +530,10 @@ public class DeliveryService : IDeliveryService
             DeliveredQuantity = l.DeliveredQuantity,
             DamagedQuantity = l.DamagedQuantity,
             Unit = l.Unit,
+            UnitOfMeasureId = l.UnitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = l.UnitOfMeasureCodeSnapshot,
+            UnitOfMeasureDecimalPlacesSnapshot = l.UnitOfMeasureDecimalPlacesSnapshot,
+            UnitOfMeasureRoundingIncrementSnapshot = l.UnitOfMeasureRoundingIncrementSnapshot,
             WarehouseId = l.WarehouseId,
             LocationId = l.LocationId,
             SerialNumber = l.SerialNumber,
@@ -528,6 +549,14 @@ public class DeliveryService : IDeliveryService
             TaxGroupId = l.TaxGroupId
         }).ToList() ?? new()
     };
+
+    private Task ValidateLineQuantityAsync(DeliveryNoteLine line, decimal quantity, string boundary)
+    {
+        var validator = _commercialQuantityValidator
+            ?? throw new InvalidOperationException("Commercial quantity policy validation is not configured for Sales delivery.");
+        return SalesCommercialQuantityEvidence.ValidateAndFreezeAsync(
+            validator, line, line.Unit, quantity, $"{boundary} line {line.LineNumber}");
+    }
 
     #endregion
 }

@@ -1,14 +1,17 @@
 namespace ErpSystem.Api.Services.Finance;
 
+using ErpSystem.Core.Finance;
+
 internal static class InvoiceTradeDiscountPolicy
 {
     internal static decimal CalculateLineDiscount(
         decimal grossAmount,
         decimal discountPercentage,
-        string documentLabel)
+        string documentLabel,
+        int currencyDecimalPlaces = 2)
     {
         ValidatePercentage(discountPercentage, documentLabel);
-        return RoundMoney(RoundMoney(grossAmount) * discountPercentage / 100m);
+        return RoundMoney(RoundMoney(grossAmount, currencyDecimalPlaces) * discountPercentage / 100m, currencyDecimalPlaces);
     }
 
     internal static void ValidatePercentage(decimal discountPercentage, string documentLabel)
@@ -23,9 +26,10 @@ internal static class InvoiceTradeDiscountPolicy
     internal static IReadOnlyDictionary<Guid, decimal> AllocateDocumentDiscount(
         decimal documentDiscount,
         IEnumerable<(Guid SourceLineId, decimal NetLineAmount)> sourceLines,
-        string documentLabel)
+        string documentLabel,
+        int currencyDecimalPlaces = 2)
     {
-        var roundedDiscount = RoundMoney(documentDiscount);
+        var roundedDiscount = RoundMoney(documentDiscount, currencyDecimalPlaces);
         if (roundedDiscount < 0m)
             throw new InvalidOperationException($"{documentLabel} document trade discount cannot be negative.");
         if (roundedDiscount == 0m)
@@ -35,7 +39,7 @@ internal static class InvoiceTradeDiscountPolicy
             .Select(line => new
             {
                 line.SourceLineId,
-                Basis = RoundMoney(Math.Max(0m, line.NetLineAmount))
+                Basis = RoundMoney(Math.Max(0m, line.NetLineAmount), currencyDecimalPlaces)
             })
             .Where(line => line.Basis > 0m)
             .OrderBy(line => line.SourceLineId.ToString("D"), StringComparer.Ordinal)
@@ -53,7 +57,7 @@ internal static class InvoiceTradeDiscountPolicy
         {
             var allocation = index == eligible.Count - 1
                 ? roundedDiscount - allocated
-                : RoundMoney(roundedDiscount * eligible[index].Basis / totalBasis);
+                : RoundMoney(roundedDiscount * eligible[index].Basis / totalBasis, currencyDecimalPlaces);
             allocations[eligible[index].SourceLineId] = allocation;
             allocated += allocation;
         }
@@ -61,6 +65,6 @@ internal static class InvoiceTradeDiscountPolicy
         return allocations;
     }
 
-    private static decimal RoundMoney(decimal amount) =>
-        decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+    private static decimal RoundMoney(decimal amount, int currencyDecimalPlaces) =>
+        CurrencyMinorUnitPolicy.Round(amount, currencyDecimalPlaces);
 }

@@ -72,6 +72,10 @@ export default function CustomerDetailsPage() {
         );
     }
 
+    const customerStatus = !customer.isActive
+        ? 'Inactive'
+        : customer.isBlacklisted ? 'Blacklisted' : 'Active';
+
     return (
         <div className="space-y-8 p-8 max-w-[1600px] mx-auto">
             {/* Header */}
@@ -87,10 +91,10 @@ export default function CustomerDetailsPage() {
                                 {customer.customerCode}
                             </span>
                             <Badge variant={
-                                customer.status === 'Active' ? 'default' :
-                                    customer.status === 'OnHold' ? 'destructive' : 'secondary'
+                                customerStatus === 'Active' ? 'default' :
+                                    customerStatus === 'Blacklisted' ? 'destructive' : 'secondary'
                             }>
-                                {customer.status}
+                                {customerStatus}
                             </Badge>
                         </div>
                     </div>
@@ -158,15 +162,21 @@ export default function CustomerDetailsPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <div className="space-y-1">
-                            <p className="text-sm font-medium text-muted-foreground">Outstanding Balance (Base: ₵)</p>
+                            <p className="text-sm font-medium text-muted-foreground">Receivable</p>
                             <p className={`text-2xl font-bold ${customer.outstandingBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                                {formatCurrency(customer.outstandingBalance, 'GHS')}
+                                {formatCurrency(customer.outstandingBalance, customer.currencyCode)}
+                            </p>
+                        </div>
+                        <div className="space-y-1">
+                            <p className="text-sm font-medium text-muted-foreground">Customer Credit</p>
+                            <p className={`text-xl font-semibold ${customer.customerCreditBalance > 0 ? 'text-blue-600' : 'text-muted-foreground'}`}>
+                                {formatCurrency(customer.customerCreditBalance, customer.currencyCode)}
                             </p>
                         </div>
                         <div className="space-y-1">
                             <p className="text-sm font-medium text-muted-foreground">Credit Limit (Base: ₵)</p>
                             <p className="text-lg font-semibold">
-                                {formatCurrency(customer.creditLimit, 'GHS')}
+                                {formatCurrency(customer.creditLimit, customer.currencyCode)}
                             </p>
                             <div className="h-2 w-full bg-secondary rounded-full overflow-hidden">
                                 <div

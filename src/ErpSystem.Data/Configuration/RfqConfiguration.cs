@@ -138,6 +138,15 @@ public class RequestForQuotationQuoteItemConfiguration : IEntityTypeConfiguratio
             .WithMany()
             .HasForeignKey(i => i.RfqItemId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // Preserve the existing database column and snapshot relationship even though the
+        // legacy quote-item CLR type does not expose UOM identity directly. Removing this
+        // shadow mapping would scaffold an unintended destructive column drop.
+        builder.Property<Guid?>("UnitOfMeasureId");
+        builder.HasOne<ErpSystem.Core.Entities.Inventory.UnitOfMeasure>()
+            .WithMany()
+            .HasForeignKey("UnitOfMeasureId")
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 

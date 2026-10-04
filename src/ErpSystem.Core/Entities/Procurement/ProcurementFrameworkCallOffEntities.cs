@@ -80,7 +80,7 @@ public sealed class ProcurementFrameworkCallOff : TenantEntity
 }
 
 [Table("ProcurementFrameworkCallOffLines")]
-public sealed class ProcurementFrameworkCallOffLine : TenantEntity
+public sealed class ProcurementFrameworkCallOffLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid CallOffId { get; set; }
     public Guid AgreementPriceLineId { get; set; }
@@ -90,6 +90,10 @@ public sealed class ProcurementFrameworkCallOffLine : TenantEntity
     [Required, StringLength(100)] public string ItemCode { get; set; } = string.Empty;
     [Required, StringLength(200)] public string ItemName { get; set; } = string.Empty;
     [Required, StringLength(20)] public string UnitOfMeasure { get; set; } = string.Empty;
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal Quantity { get; set; }
     [Column(TypeName = "decimal(18,4)")] public decimal UnitPrice { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal LineTotal { get; set; }
