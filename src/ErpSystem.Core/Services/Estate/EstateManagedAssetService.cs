@@ -304,6 +304,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalMonthlyRent = null;
         asset.ExternalGroundRentRequired = null;
         asset.ExternalPremiumChargeRequired = null;
+        asset.ExternalPremiumChargeAmount = null;
         asset.ExternalLeaseTermMonths = null;
         asset.ExternalListingNotes = null;
         asset.ExternalPublishedAt = null;
@@ -1015,6 +1016,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
         if (publishToCustomerPortal
             && includesRecurringCharge
+            && request.ExternalPremiumChargeRequired == true
+            && request.ExternalPremiumChargeAmount is not > 0m)
+        {
+            throw new InvalidOperationException("Enter the premium charge amount before publishing this listing.");
+        }
+        if (publishToCustomerPortal
+            && includesRecurringCharge
             && asset.AssetType == EstateManagedAssetType.Land
             && request.ExternalGroundRentRequired is null)
         {
@@ -1037,6 +1045,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         demarcation.ExternalMonthlyRent = recurringCharge;
         demarcation.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
         demarcation.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
+        demarcation.ExternalPremiumChargeAmount = includesRecurringCharge && request.ExternalPremiumChargeRequired == true
+            ? request.ExternalPremiumChargeAmount
+            : null;
         demarcation.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
@@ -1712,6 +1723,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             if (request.ExternalPremiumChargeRequired is null)
                 throw new InvalidOperationException("Select whether a premium charge is required before publishing this listing.");
+            if (request.ExternalPremiumChargeRequired == true && request.ExternalPremiumChargeAmount is not > 0m)
+                throw new InvalidOperationException("Enter the premium charge amount before publishing this listing.");
             if (isLeaseListing && leaseAmount is not > 0m)
             {
                 throw new InvalidOperationException("Enter the full-term lease amount before publishing a lease listing.");
@@ -1738,6 +1751,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalMonthlyRent = recurringCharge;
         asset.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
         asset.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
+        asset.ExternalPremiumChargeAmount = includesRecurringCharge && request.ExternalPremiumChargeRequired == true
+            ? request.ExternalPremiumChargeAmount
+            : null;
         asset.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
@@ -2726,6 +2742,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
         ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
         ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
+        ExternalPremiumChargeAmount = demarcation.ExternalPremiumChargeAmount,
         ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
         ExternalListingCurrency = demarcation.ExternalListingCurrency,
         ExternalListingNotes = demarcation.ExternalListingNotes,
@@ -2803,6 +2820,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
             ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
             ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
+            ExternalPremiumChargeAmount = demarcation.ExternalPremiumChargeAmount,
             ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
             ExternalListingCurrency = demarcation.ExternalListingCurrency,
             ExternalListingNotes = demarcation.ExternalListingNotes,
@@ -2890,6 +2908,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalMonthlyRent = asset.ExternalMonthlyRent,
         ExternalGroundRentRequired = asset.ExternalGroundRentRequired,
         ExternalPremiumChargeRequired = asset.ExternalPremiumChargeRequired,
+        ExternalPremiumChargeAmount = asset.ExternalPremiumChargeAmount,
         RentBillingActivatedAt = asset.RentBillingActivatedAt,
         NextRentBillingDate = asset.NextRentBillingDate,
         LastRentInvoiceId = asset.LastRentInvoiceId,

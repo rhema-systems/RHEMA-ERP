@@ -11054,6 +11054,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
             entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
             entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalPremiumChargeAmount).HasPrecision(18, 2);
             entity.HasMany(item => item.Documents)
                 .WithOne(item => item.EstateManagedAsset)
                 .HasForeignKey(item => item.EstateManagedAssetId)
@@ -11088,6 +11089,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
             entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
             entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalPremiumChargeAmount).HasPrecision(18, 2);
             entity.HasOne(item => item.ParentDemarcation)
                 .WithMany(item => item.ChildDemarcations)
                 .HasForeignKey(item => item.ParentDemarcationId)

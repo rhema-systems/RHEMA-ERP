@@ -84,6 +84,17 @@ const SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS = new Set([
   'finalSignedAgreementReference',
 ]);
 
+const SYSTEM_MANAGED_PREMIUM_FIELD_KEYS = new Set([
+  'premiumChargeRequired',
+  'premiumChargeAmount',
+  'premiumChargeInvoiceId',
+  'premiumChargeInvoiceReference',
+  'premiumChargeInvoiceStatus',
+  'premiumChargePaidAmount',
+  'premiumChargeBalance',
+  'premiumChargePaymentStatus',
+]);
+
 const ProcedurePdfViewer = dynamic(
   () => import('@/components/procedures/ProcedurePdfViewer'),
   {
@@ -357,13 +368,17 @@ const isDecisionStage = (procedureCase: ProcedureCaseDetail) => {
 const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
   const keys = new Set(
     procedureCase.currentStageFieldKeys.filter(
-      (key) => !SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS.has(key)
+      (key) =>
+        !SYSTEM_MANAGED_AGREEMENT_FIELD_KEYS.has(key) &&
+        !SYSTEM_MANAGED_PREMIUM_FIELD_KEYS.has(key)
     )
   );
   if (isDecisionStage(procedureCase)) {
     keys.add('decisionStatus');
     if (isRentalApplication(procedureCase)) {
       keys.add('moveInDate');
+    }
+    if (isLeaseApplication(procedureCase)) {
       keys.add('requestedLeaseTerm');
     }
   }
@@ -378,10 +393,12 @@ const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
     case 0:
       return ['customerValidationStatus', 'listingValidationStatus'];
     case 1:
-      return ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus', 'premiumChargeRequired'];
+      return ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus'];
     case 2:
       return rental && approved
-        ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
+        ? isLeaseApplication(procedureCase)
+          ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
+          : ['decisionStatus', 'moveInDate']
         : ['decisionStatus'];
     case 3:
       return ['legalAgreementReviewStatus'];
@@ -940,11 +957,11 @@ export function ListingApplicationWorkspace() {
     if (
       stageName === 'estate decision and agreement' &&
       approved &&
-      isRentalApplication(selectedCase) &&
+      isLeaseApplication(selectedCase) &&
       !caseFieldValue(selectedCase, 'requestedLeaseTerm')
     ) {
       setError(
-        'Set the approved rental term before generating the agreement.'
+        'Set the approved lease term before generating the agreement.'
       );
       return;
     }
@@ -1128,6 +1145,7 @@ export function ListingApplicationWorkspace() {
     }
 
     const rentalApplication = isRentalApplication(selectedCase);
+    const leaseApplication = isLeaseApplication(selectedCase);
     const moveInDate = caseFieldValue(selectedCase, 'moveInDate');
     const requestedLeaseTerm = caseFieldValue(
       selectedCase,
@@ -1139,9 +1157,9 @@ export function ListingApplicationWorkspace() {
       );
       return;
     }
-    if (rentalApplication && !requestedLeaseTerm) {
+    if (leaseApplication && !requestedLeaseTerm) {
       setError(
-        'Set the approved rental term before generating the rental agreement.'
+        'Set the approved lease term before generating the lease agreement.'
       );
       return;
     }
@@ -1530,7 +1548,8 @@ export function ListingApplicationWorkspace() {
   }
 
   const summaryFields = selectedCase?.fields.filter((field) =>
-    SUMMARY_FIELD_KEYS.includes(field.key)
+    SUMMARY_FIELD_KEYS.includes(field.key) &&
+    (field.key !== 'requestedLeaseTerm' || isLeaseApplication(selectedCase))
   );
   const editableFields = selectedCase
     ? selectedCase.fields.filter(
@@ -1585,7 +1604,7 @@ export function ListingApplicationWorkspace() {
   const missingApprovedRentTerm = Boolean(
     selectedCase &&
       approvedDecision &&
-      rentalApplication &&
+      leaseApplication &&
       completionRequirements.requiresApprovedRentTerms &&
       !caseFieldValue(selectedCase, 'requestedLeaseTerm')
   );
@@ -1653,7 +1672,7 @@ export function ListingApplicationWorkspace() {
   );
   const legalAgreementReviewSubmitting =
     pendingLegalMatterType === 'agreementReview';
-  const legalAgreementSignedByHeadOfLegal =
+  const legalAgreementReleasedForCustomer =
     isLegalAgreementReviewSigned(legalAgreementReviewStatus);
   const customerAgreementAccepted = Boolean(
     selectedCase &&
@@ -1664,7 +1683,7 @@ export function ListingApplicationWorkspace() {
     selectedCase &&
       approvedDecision &&
       completionRequirements.requiresLegalAgreementReview &&
-      !legalAgreementSignedByHeadOfLegal
+      !legalAgreementReleasedForCustomer
   );
   const fullyExecuted = Boolean(
     selectedCase &&
@@ -2502,7 +2521,7 @@ export function ListingApplicationWorkspace() {
                         <div>
                           <div className="flex items-center gap-2 font-medium">
                             <Gavel className="h-4 w-4" />
-                            Legal review and Head of Legal signature
+                            Legal review and customer release
                           </div>
                           <p className="mt-1 text-sm text-muted-foreground">
                             {legalAgreementReviewSubmitting
@@ -2514,14 +2533,14 @@ export function ListingApplicationWorkspace() {
                         <Button
                           type="button"
                           variant={
-                            legalAgreementSignedByHeadOfLegal ? 'outline' : 'default'
+                            legalAgreementReleasedForCustomer ? 'outline' : 'default'
                           }
                           className="gap-2"
                           disabled={
                             isSaving ||
                             legalAgreementReviewSubmitting ||
                             legalAgreementReviewStarted ||
-                            legalAgreementSignedByHeadOfLegal
+                            legalAgreementReleasedForCustomer
                           }
                           onClick={() =>
                             void lodgeLegalMatter('agreementReview')
@@ -2529,15 +2548,15 @@ export function ListingApplicationWorkspace() {
                         >
                           {legalAgreementReviewSubmitting ? (
                             <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : legalAgreementSignedByHeadOfLegal ? (
+                          ) : legalAgreementReleasedForCustomer ? (
                             <CheckCircle2 className="h-4 w-4" />
                           ) : (
                             <Send className="h-4 w-4" />
                           )}
                           {legalAgreementReviewSubmitting
                             ? 'Submitting to Legal...'
-                            : legalAgreementSignedByHeadOfLegal
-                              ? 'Signed by Head of Legal'
+                            : legalAgreementReleasedForCustomer
+                              ? 'Released to customer'
                               : legalAgreementReviewStarted
                                 ? 'Under Legal review'
                                 : 'Submit draft to Legal'}
@@ -2548,7 +2567,7 @@ export function ListingApplicationWorkspace() {
                 </Card>
               ) : null}
 
-              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal ? (
+              {agreementAlreadyGenerated && legalAgreementReleasedForCustomer ? (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
@@ -2557,8 +2576,8 @@ export function ListingApplicationWorkspace() {
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
                       {rentalApplication ? 'Rent and lease' : 'Sale'} agreements
-                      follow the same signed Legal, customer, internal execution,
-                      and conveyance process.
+                      follow the Legal release, customer signature, final Legal
+                      signature, and conveyance process.
                     </p>
                   </CardHeader>
                   <CardContent className="space-y-4">
@@ -2567,10 +2586,10 @@ export function ListingApplicationWorkspace() {
                         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium">
-                            Head of Legal signature
+                            Legal release for customer signature
                           </p>
                           <p className="text-sm text-muted-foreground">
-                            The agreement is signed and sent to the customer portal.
+                            Legal approved the draft and sent it to the customer portal.
                           </p>
                         </div>
                         <Badge variant="outline">Complete</Badge>
@@ -2613,13 +2632,13 @@ export function ListingApplicationWorkspace() {
                         )}
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium">
-                            Internal approval and digital signature
+                            Final Legal signature and internal execution
                           </p>
                           <p className="text-sm text-muted-foreground">
                             {fullyExecuted
                               ? 'The final agreement is internally approved and digitally signed.'
                               : hasActiveCustomerSignedAgreement
-                                ? 'Continue below with DMS approval and the authorised digital signature.'
+                                ? 'Complete the final Legal signature, then continue with DMS approval and the authorised digital signature.'
                                 : 'This begins after the customer returns the signed agreement.'}
                           </p>
                         </div>
@@ -2795,7 +2814,7 @@ export function ListingApplicationWorkspace() {
                 </Card>
               ) : null}
 
-              {agreementAlreadyGenerated && legalAgreementSignedByHeadOfLegal && (!rentalApplication || leaseApplication) ? (
+              {agreementAlreadyGenerated && legalAgreementReleasedForCustomer && (!rentalApplication || leaseApplication) ? (
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-base">
@@ -3143,8 +3162,8 @@ export function ListingApplicationWorkspace() {
                   ) : null}
                   {missingLegalAgreementReview && !missingApprovedAgreement ? (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                      Submit the generated agreement to Legal and wait for the
-                      Head of Legal signature before routing this stage forward.
+                      Submit the generated agreement to Legal and wait for Legal
+                      release to customer signature before routing this stage forward.
                     </p>
                   ) : null}
                   {missingApprovedAgreement ? (

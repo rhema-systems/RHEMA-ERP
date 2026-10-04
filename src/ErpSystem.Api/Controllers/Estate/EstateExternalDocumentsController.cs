@@ -1371,7 +1371,37 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .FirstOrDefaultAsync(cancellationToken);
         if (signedLegalAgreement is null || string.IsNullOrWhiteSpace(signedLegalAgreement.FileUrl))
         {
-            return Conflict(new { success = false, message = "The Head of Legal signed PDF is not yet available for the customer." });
+            var generatedReference = FieldValue(fields, "generatedAgreementReference");
+            if (string.IsNullOrWhiteSpace(generatedReference))
+            {
+                return Conflict(new { success = false, message = "The generated agreement is not yet available for the customer." });
+            }
+
+            var generatedRecord = await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .Include(item => item.Versions.Where(version => !version.IsDeleted))
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.DocumentReference == generatedReference)
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            var generatedVersion = generatedRecord is null
+                ? null
+                : ResolveCurrentDocumentVersion(generatedRecord);
+            var generatedPath = generatedVersion is null
+                ? null
+                : FirstNonBlank(generatedVersion.RenditionPath, generatedVersion.RepositoryPath);
+            if (generatedRecord is null || generatedVersion is null || string.IsNullOrWhiteSpace(generatedPath))
+            {
+                return Conflict(new { success = false, message = "The generated agreement file is not yet available for the customer." });
+            }
+
+            var generatedStream = await _fileStorageService.DownloadFileAsync(
+                generatedPath,
+                !string.IsNullOrWhiteSpace(generatedVersion.RenditionPath)
+                    ? generatedRecord.Id
+                    : generatedVersion.FileUploadRecordId ?? generatedRecord.Id);
+            return File(generatedStream, "application/pdf", SafeDownloadFileName(generatedVersion.FileName, "property-agreement.pdf"));
         }
         var signedStream = await _fileStorageService.DownloadFileAsync(
             signedLegalAgreement.FileUrl,
@@ -1477,6 +1507,49 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         procedureCase.LastActionById = userId.Value;
         procedureCase.UpdatedAt = now;
         procedureCase.LastModifiedById = userId.Value;
+
+        var linkedLegalCase = await _db.ProcedureCases
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EntityType == "LegalPropertyAgreementReview"
+                && item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "sourceProcedureCaseId"
+                    && field.Value == procedureCase.Id.ToString()),
+                cancellationToken);
+        if (linkedLegalCase is not null)
+        {
+            var legalDocument = linkedLegalCase.Documents.FirstOrDefault(document =>
+                string.Equals(document.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase));
+            if (legalDocument is null)
+            {
+                legalDocument = new ProcedureCaseDocument
+                {
+                    TenantId = tenantId,
+                    ProcedureCaseId = linkedLegalCase.Id,
+                    Name = "Customer signed agreement",
+                    RequiredFrom = "Head of Legal Signature",
+                    ProvidedBy = "Customer",
+                    IsMandatory = true,
+                    CreatedAt = now,
+                    CreatedById = userId.Value
+                };
+                linkedLegalCase.Documents.Add(legalDocument);
+            }
+
+            legalDocument.FileName = upload.OriginalFileName;
+            legalDocument.FileUrl = upload.FilePath;
+            legalDocument.Notes = string.IsNullOrWhiteSpace(notes)
+                ? $"Uploaded by customer for {procedureCase.ReferenceNumber ?? procedureCase.Title}."
+                : notes.Trim();
+            legalDocument.UploadedById = userId.Value;
+            legalDocument.UploadedAt = now;
+            legalDocument.UpdatedAt = now;
+            legalDocument.LastModifiedById = userId.Value;
+            linkedLegalCase.LastActionById = userId.Value;
+            linkedLegalCase.UpdatedAt = now;
+            linkedLegalCase.LastModifiedById = userId.Value;
+        }
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -2254,6 +2327,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
             ["groundRentRequired"] = (demarcationListing?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
             ["premiumChargeRequired"] = (demarcationListing?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
+            ["premiumChargeAmount"] = (demarcationListing?.ExternalPremiumChargeAmount ?? asset.ExternalPremiumChargeAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
             ["salesAmountPaid"] = "0.00",
             ["estateRemainingAmount"] = (requestType == "Purchase" ? request.OfferAmount : publishedAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
             ["salePaymentStatus"] = requestType is "Purchase" or "Lease" ? "Pending Estate payment" : null,
@@ -3663,6 +3737,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.ExternalMonthlyRent,
             asset.ExternalGroundRentRequired,
             asset.ExternalPremiumChargeRequired,
+            asset.ExternalPremiumChargeAmount,
             asset.ExternalLeaseTermMonths,
             asset.GroundRentPayable,
             asset.GroundRentRatePerAcre,
@@ -3724,6 +3799,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcation.ExternalMonthlyRent,
             demarcation.ExternalGroundRentRequired,
             demarcation.ExternalPremiumChargeRequired,
+            demarcation.ExternalPremiumChargeAmount,
             demarcation.ExternalLeaseTermMonths,
             demarcation.GroundRentPayable,
             demarcation.GroundRentRatePerAcre,
@@ -4099,8 +4175,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     {
         var reviewStatus = FieldValue(fields, "legalAgreementReviewStatus");
         if (!string.IsNullOrWhiteSpace(reviewStatus)
-            && reviewStatus.Contains("head of legal", StringComparison.OrdinalIgnoreCase)
-            && reviewStatus.Contains("signed", StringComparison.OrdinalIgnoreCase))
+            && ((reviewStatus.Contains("head of legal", StringComparison.OrdinalIgnoreCase)
+                    && reviewStatus.Contains("signed", StringComparison.OrdinalIgnoreCase))
+                || (reviewStatus.Contains("approved by legal", StringComparison.OrdinalIgnoreCase)
+                    && reviewStatus.Contains("customer signature", StringComparison.OrdinalIgnoreCase))))
         {
             return true;
         }
@@ -4584,6 +4662,16 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private static CentralDocumentVersion? ResolveCurrentDocumentVersion(CentralDocumentRecord record)
+        => record.Versions
+            .Where(version => !version.IsDeleted)
+            .OrderByDescending(version =>
+                string.Equals(version.VersionNumber, record.CurrentVersion, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version =>
+                string.Equals(version.Status, "Current", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version => version.PublishedAt ?? version.CreatedAt)
+            .FirstOrDefault();
 
     private static string BuildExternalReference(string prefix)
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();

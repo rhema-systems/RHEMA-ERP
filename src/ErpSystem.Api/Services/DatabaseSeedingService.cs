@@ -875,7 +875,7 @@ namespace ErpSystem.Web.Services
                         ["customerValidationStatus", "listingValidationStatus", "salesPaymentReference"]),
                     Stage("Commercial and availability review", WorkflowStepType.Manual, "Property Management Supervisor",
                         ["Current unit availability and competing requests are reviewed", "Price, rent, lease term, and commercial exceptions are recorded"],
-                        ["availabilityCheck", "commercialReviewStatus", "premiumChargeAmount"]),
+                        ["availabilityCheck", "commercialReviewStatus"]),
                     Stage("Management decision", WorkflowStepType.Manual, "Property Manager",
                         ["Decision outcome, date, reason, and conditions are recorded", "Reservation requirement is confirmed only for an approved request"],
                         ["decisionStatus", "decisionDate", "decisionReason", "reservationStatus"]),
@@ -2010,7 +2010,7 @@ namespace ErpSystem.Web.Services
                             [
                                 "Verify parties and property",
                                 "Review clauses and schedules",
-                                "Approve or return for correction"
+                                "Release vetted agreement to customer or return for correction"
                             ],
                             [
                                 "Legal review note"
@@ -2020,11 +2020,12 @@ namespace ErpSystem.Web.Services
                             WorkflowStepType.Approval,
                             "Head of Legal",
                             [
-                                "Confirm Legal Officer recommendation",
-                                "Record Head of Legal signature",
-                                "Dispatch signed agreement to the customer portal"
+                                "Confirm customer signed agreement",
+                                "Apply Head of Legal signature",
+                                "Return final signed agreement to Property Management"
                             ],
                             [
+                                "Customer signed agreement",
                                 "Head of Legal signed agreement"
                             ])
                     ])

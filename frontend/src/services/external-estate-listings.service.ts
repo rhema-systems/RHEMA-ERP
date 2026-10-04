@@ -24,6 +24,7 @@ export interface ExternalEstateListing {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   groundRentPayable?: number | null;
   groundRentRatePerAcre?: number | null;

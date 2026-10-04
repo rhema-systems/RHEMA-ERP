@@ -136,7 +136,11 @@ function isApprovedStatus(value: string) {
 
 function isLegalAgreementReleased(request: ExternalEstateServiceRequest) {
   const status = fieldValue(request, 'legalAgreementReviewStatus').toLowerCase();
-  return status.includes('head of legal') && status.includes('signed');
+  return (
+    (status.includes('head of legal') && status.includes('signed')) ||
+    (status.includes('approved by legal') &&
+      status.includes('customer signature'))
+  );
 }
 
 function isPropertyListingRequest(request: ExternalEstateServiceRequest) {

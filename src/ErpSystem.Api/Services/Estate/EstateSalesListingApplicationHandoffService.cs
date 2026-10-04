@@ -198,6 +198,7 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["listingType"] = demarcation?.ExternalListingType ?? asset.ExternalListingType,
             ["groundRentRequired"] = (demarcation?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
             ["premiumChargeRequired"] = (demarcation?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
+            ["premiumChargeAmount"] = (demarcation?.ExternalPremiumChargeAmount ?? asset.ExternalPremiumChargeAmount)?.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
             ["requestType"] = requestLabel,
             ["listingPrice"] = amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             ["offerAmount"] = requestType == "Purchase" ? amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,

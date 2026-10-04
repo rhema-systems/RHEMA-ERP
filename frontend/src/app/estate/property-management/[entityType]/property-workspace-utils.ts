@@ -88,6 +88,8 @@ export function isLegalAgreementReviewSigned(status?: string | null) {
   const normalized = status?.trim().toLowerCase() || '';
   return (
     (normalized.includes('head of legal') && normalized.includes('signed')) ||
+    (normalized.includes('approved by legal') &&
+      normalized.includes('customer signature')) ||
     normalized.includes('fully signed')
   );
 }
