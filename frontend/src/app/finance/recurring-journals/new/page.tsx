@@ -13,12 +13,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import {
-  recurringJournalDataService,
-  type BusinessDayConvention,
-  type CreateRecurringJournalTemplate,
-  type RecurrenceFrequency,
-} from '@/services/finance/recurring-journal-data.service';
+import { recurringJournalDataService, type CreateRecurringJournalTemplate } from '@/services/finance/recurring-journal-data.service';
 import type { Account, AccountingBook } from '@/types/finance';
 import { RecurringJournalLineGrid } from '../recurring-journal-line-grid';
 import {
@@ -27,8 +22,8 @@ import {
   toRecurringJournalLineInputs,
   type EditableRecurringJournalLine,
 } from '../recurring-journal-lines';
-
-type ScheduleChoice = 'month-end' | 'day-one' | 'semi-monthly';
+import { buildRecurringJournalSchedule, recurringJournalWeekdays, type ScheduleChoice } from '../recurring-journal-schedule';
+import { TimeZoneCombobox } from '../time-zone-combobox';
 
 export default function NewRecurringJournalPage() {
   const router = useRouter();
@@ -47,6 +42,9 @@ export default function NewRecurringJournalPage() {
   ]);
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [schedule, setSchedule] = useState<ScheduleChoice>('month-end');
+  const [scheduleInterval, setScheduleInterval] = useState(1);
+  const [scheduleWeekday, setScheduleWeekday] = useState(1);
+  const [scheduleDayOfMonth, setScheduleDayOfMonth] = useState(1);
   const [autoReverse, setAutoReverse] = useState(false);
   const [submissionReason, setSubmissionReason] = useState('Configured for independent Finance review and controlled activation.');
 
@@ -60,38 +58,21 @@ export default function NewRecurringJournalPage() {
       .then(([accountItems, settings, accountingBooks]) => {
         setAccounts(accountItems.filter(item => item.allowDirectPosting && !item.isControlAccount));
         setCurrencyCode(settings.baseCurrency);
-        const supportedCodes = new Set(['IFRS', 'LOCAL_STATUTORY', 'MANAGEMENT']);
-        const eligibleBooks = accountingBooks.filter(book =>
-          book.isActive && book.allowsPosting && supportedCodes.has(book.code.toUpperCase()));
+        const eligibleBooks = accountingBooks.filter(book => book.isActive && book.allowsPosting);
         setBooks(eligibleBooks);
-        const preferred = eligibleBooks.find(book => book.isDefault) ?? eligibleBooks[0];
+        const preferred = eligibleBooks.find(book => book.isDefault)
+          ?? eligibleBooks.find(book => book.code.toUpperCase() === 'BASE')
+          ?? eligibleBooks.find(book => book.bookType === 'PrimaryFull')
+          ?? eligibleBooks[0];
         if (preferred)
-          setBookClassification(preferred.code.toUpperCase() as CreateRecurringJournalTemplate['bookClassification']);
+          setBookClassification(preferred.code.toUpperCase());
       })
       .catch(error => toast({ title: 'Chart of accounts could not be loaded', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' }));
   }, [toast]);
 
-  const scheduleDefinition = useMemo((): {
-    frequency: RecurrenceFrequency;
-    recurrenceRuleJson: string;
-    convention: BusinessDayConvention;
-    label: string;
-  } => {
-    if (schedule === 'day-one') return {
-      frequency: 'Monthly', recurrenceRuleJson: JSON.stringify({ daysOfMonth: [1] }),
-      convention: 'NextBusinessDay', label: 'First business day of each month',
-    };
-    if (schedule === 'semi-monthly') return {
-      frequency: 'SemiMonthly', recurrenceRuleJson: JSON.stringify({ daysOfMonth: [15, 31] }),
-      convention: 'PreviousBusinessDay', label: '15th and month-end, adjusted backward',
-    };
-    // Month-end schedules move backward so a weekend/holiday never pushes an
-    // accrual into the next fiscal period.
-    return {
-      frequency: 'Monthly', recurrenceRuleJson: JSON.stringify({ lastCalendarDay: true }),
-      convention: 'PreviousBusinessDay', label: 'Last business day of each month',
-    };
-  }, [schedule]);
+  const scheduleDefinition = useMemo(() => buildRecurringJournalSchedule({
+    choice: schedule, interval: scheduleInterval, weekday: scheduleWeekday, dayOfMonth: scheduleDayOfMonth,
+  }), [schedule, scheduleDayOfMonth, scheduleInterval, scheduleWeekday]);
 
   const lineSummary = useMemo(() => summarizeRecurringJournalLines(lines), [lines]);
   const canSubmit = !!name.trim() && !!effectiveFrom && !!bookClassification && !!currencyCode && !!timeZoneId.trim() && submissionReason.trim().length >= 10 && lineSummary.isValid;
@@ -111,7 +92,7 @@ export default function NewRecurringJournalPage() {
       journalType: 'Recurring', bookClassification, currencyCode,
       referencePattern: referencePattern.trim() || undefined,
       effectiveFrom, timeZoneId: timeZoneId.trim(), frequency: scheduleDefinition.frequency,
-      interval: 1, recurrenceRuleJson: scheduleDefinition.recurrenceRuleJson,
+      interval: scheduleDefinition.interval, recurrenceRuleJson: scheduleDefinition.recurrenceRuleJson,
       businessDayConvention: scheduleDefinition.convention,
       autoReverse, reversalRule: autoReverse ? 'FirstDayOfNextFiscalPeriod' : 'None',
       lines: toRecurringJournalLineInputs(lines).map(line => ({
@@ -147,16 +128,19 @@ export default function NewRecurringJournalPage() {
 
     <Card><CardHeader><CardTitle>Balanced journal definition</CardTitle></CardHeader><CardContent className="space-y-5">
       <div className="grid gap-4 md:grid-cols-3">
-        <div><Label>Accounting book</Label><Select value={bookClassification} onValueChange={value => setBookClassification(value as CreateRecurringJournalTemplate['bookClassification'])}><SelectTrigger><SelectValue placeholder="Select an active posting book" /></SelectTrigger><SelectContent>{books.map(book => <SelectItem key={book.id} value={book.code.toUpperCase()}>{book.name}</SelectItem>)}</SelectContent></Select>{books.length === 0 && <p className="mt-1 text-xs text-destructive">No supported active posting book is configured.</p>}</div>
+        <div><Label>Accounting book</Label><Select value={bookClassification} onValueChange={setBookClassification}><SelectTrigger><SelectValue placeholder="Select an active posting book" /></SelectTrigger><SelectContent>{books.map(book => <SelectItem key={book.id} value={book.code.toUpperCase()}>{book.code} · {book.name}{book.isDefault ? ' (Primary)' : ''}</SelectItem>)}</SelectContent></Select>{books.length === 0 && <p className="mt-1 text-xs text-destructive">No active accounting book that allows posting is configured.</p>}</div>
         <div><Label htmlFor="currency">Functional currency</Label><Input id="currency" value={currencyCode} readOnly aria-readonly="true" /></div>
-        <div><Label htmlFor="timezone">Schedule time zone</Label><Input id="timezone" value={timeZoneId} onChange={event => setTimeZoneId(event.target.value)} placeholder="Africa/Accra" /></div>
+        <div><Label htmlFor="timezone">Schedule time zone</Label><TimeZoneCombobox value={timeZoneId} onChange={setTimeZoneId} /></div>
       </div>
       <RecurringJournalLineGrid accounts={accounts} currencyCode={currencyCode} lines={lines} onChange={setLines} />
     </CardContent></Card>
 
     <Card><CardHeader><CardTitle>Schedule, reversal and submission</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">
-      <div><Label>Schedule</Label><Select value={schedule} onValueChange={value => setSchedule(value as ScheduleChoice)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="month-end">Last business day monthly</SelectItem><SelectItem value="day-one">First business day monthly</SelectItem><SelectItem value="semi-monthly">15th and month-end</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{scheduleDefinition.label}</p></div>
+      <div className="space-y-3"><Label>Schedule frequency</Label><Select value={schedule} onValueChange={value => setSchedule(value as ScheduleChoice)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="daily">Daily</SelectItem><SelectItem value="weekly">Weekly</SelectItem><SelectItem value="semi-monthly">15th and month-end</SelectItem><SelectItem value="monthly">Monthly on a day</SelectItem><SelectItem value="month-end">Last business day monthly</SelectItem><SelectItem value="quarterly">Quarterly</SelectItem><SelectItem value="annually">Annually</SelectItem></SelectContent></Select><p className="text-xs text-muted-foreground">{scheduleDefinition.label}</p></div>
       <div><Label htmlFor="effective">Effective from</Label><Input id="effective" type="date" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} /></div>
+      {schedule !== 'month-end' && <div><Label htmlFor="schedule-interval">Repeat interval</Label><Input id="schedule-interval" type="number" min="1" max="366" value={scheduleInterval} onChange={event => setScheduleInterval(Number(event.target.value))} /></div>}
+      {schedule === 'weekly' && <div><Label>Weekday</Label><Select value={String(scheduleWeekday)} onValueChange={value => setScheduleWeekday(Number(value))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{recurringJournalWeekdays.map((day, index) => <SelectItem key={day} value={String(index)}>{day}</SelectItem>)}</SelectContent></Select></div>}
+      {(schedule === 'monthly' || schedule === 'quarterly' || schedule === 'annually') && <div><Label htmlFor="schedule-day">Day of month</Label><Input id="schedule-day" type="number" min="1" max="31" value={scheduleDayOfMonth} onChange={event => setScheduleDayOfMonth(Number(event.target.value))} /></div>}
       <div className="flex items-center justify-between rounded-lg border p-4 md:col-span-2"><div><p className="font-medium">Automatic reversal</p><p className="text-sm text-muted-foreground">When the occurrence is approved, the checker also authorizes its exact reversing journal to post automatically on the first day of the next tenant fiscal period.</p></div><Switch checked={autoReverse} onCheckedChange={setAutoReverse} /></div>
       <div className="md:col-span-2"><Label htmlFor="reason">Submission reason</Label><Textarea id="reason" value={submissionReason} onChange={event => setSubmissionReason(event.target.value)} /></div>
       <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 md:col-span-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Submitting does not activate or post the template. A different user must approve the standing instruction; every generated occurrence receives a separate approval. For automatic reversal, that occurrence approval explicitly authorizes both the original and its immutable scheduled negation.</p></div>

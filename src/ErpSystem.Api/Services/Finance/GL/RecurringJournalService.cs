@@ -697,7 +697,14 @@ public sealed class RecurringJournalService : IRecurringJournalService
         if (!string.Equals(functionalCurrency, requestedCurrency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("This recurring-journal slice supports the tenant functional currency only. Foreign-currency templates require rate-snapshot rules.");
 
-        _ = NormalizeBook(request.BookClassification);
+        var requestedBookCode = NormalizeBook(request.BookClassification);
+        var requestedBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(book =>
+            book.TenantId == tenantId && !book.IsDeleted && book.Code == requestedBookCode,
+            cancellationToken);
+        if (requestedBook == null)
+            throw new InvalidOperationException($"Accounting book '{requestedBookCode}' does not belong to the current tenant.");
+        if (!requestedBook.IsActive || !requestedBook.AllowsPosting)
+            throw new InvalidOperationException($"Accounting book '{requestedBookCode}' must be active and allow posting.");
         _ = RecurringJournalRecurrenceCalculator.ParseRule(request.RecurrenceRuleJson);
         foreach (var line in request.Lines) ValidateDimensionJson(line.DimensionValuesJson);
         if (request.AutoReverse && request.ReversalRule == RecurringJournalReversalRule.None)
@@ -984,9 +991,9 @@ public sealed class RecurringJournalService : IRecurringJournalService
 
     private static string NormalizeBook(string value)
     {
-        var normalized = string.IsNullOrWhiteSpace(value) ? "IFRS" : value.Trim().ToUpperInvariant();
-        if (normalized is not ("IFRS" or "LOCAL_STATUTORY" or "MANAGEMENT"))
-            throw new InvalidOperationException("Recurring journals require one explicit IFRS, LOCAL_STATUTORY, or MANAGEMENT book.");
+        var normalized = value?.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 20)
+            throw new InvalidOperationException("A valid accounting book code is required.");
         return normalized;
     }
 
