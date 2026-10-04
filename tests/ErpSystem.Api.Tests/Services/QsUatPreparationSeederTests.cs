@@ -123,6 +123,99 @@ public sealed class QsUatPreparationSeederTests
         refs.Should().NotContainKey("ExpenseAccount");
     }
 
+    [Fact]
+    public void FinanceSelectors_ResolveSeededNaturalAccountNumbers()
+    {
+        var expense = Guid.NewGuid();
+        var payable = Guid.NewGuid();
+        var lookup = new Dictionary<string, IReadOnlyList<QuantitySurveyLookupOptionDto>>
+        {
+            ["postingExpenseAccounts"] = [
+                new() { Value = expense.ToString(), Label = "5000 - Cost of Goods Sold" },
+                new() { Value = Guid.NewGuid().ToString(), Label = "5100 - Administrative Expenses" }],
+            ["accountsPayableAccounts"] = [
+                new() { Value = payable.ToString(), Label = "2000 - Accounts Payable" },
+                new() { Value = Guid.NewGuid().ToString(), Label = "2100 - Accrued Liabilities" }]
+        };
+
+        var refs = QsUatPreparationSeeder.ResolveReferences(lookup, new Dictionary<string, Guid>(),
+            new Dictionary<string, Guid>(), new Dictionary<string, Guid>(), new DateTime(2026, 9, 28));
+
+        refs["ExpenseAccount"].Should().Be(expense.ToString());
+        refs["ApAccount"].Should().Be(payable.ToString());
+    }
+
+    [Fact]
+    public void FinanceSelectors_ResolveCanonicalPurchaseTaxGroup()
+    {
+        var taxGroup = Guid.NewGuid();
+        var lookup = new Dictionary<string, IReadOnlyList<QuantitySurveyLookupOptionDto>>
+        {
+            ["supplierTaxGroups"] = [
+                new() { Value = taxGroup.ToString(), Label = "VAT-STD-PURCHASES - Purchase VAT Standard Scheme" },
+                new() { Value = Guid.NewGuid().ToString(), Label = "WHT-SERVICES - Withholding services" }]
+        };
+
+        var refs = QsUatPreparationSeeder.ResolveReferences(lookup, new Dictionary<string, Guid>(),
+            new Dictionary<string, Guid>(), new Dictionary<string, Guid>(), new DateTime(2026, 9, 28));
+
+        refs["TaxGroup"].Should().Be(taxGroup.ToString());
+    }
+
+    [Fact]
+    public void SeedReconciliation_RequiresUntouchedBootstrapOwnership()
+    {
+        static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+        var decision = new QuantitySurveyDecisionDto
+        {
+            DecisionKey = "QS-DEC-007", SourceLineage = QsUatPreparationSeeder.SeedMarker,
+            Status = QuantitySurveyConfigurationDecisionStatus.Draft,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Pending,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Missing,
+            Value = Json("{\"effectiveFrom\":\"2026-09-28\"}")
+        };
+
+        QsUatPreparationSeeder.CanReconcileSeedDecision(decision, true).Should().BeTrue();
+        QsUatPreparationSeeder.CanReconcileSeedDecision(decision, false).Should().BeFalse();
+        QsUatPreparationSeeder.CanReconcileSeedDecision(new QuantitySurveyDecisionDto
+        {
+            SourceLineage = "Manual edit", Status = decision.Status, ApprovalStatus = decision.ApprovalStatus,
+            EvidenceStatus = decision.EvidenceStatus, Value = decision.Value
+        }, true).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ExplicitDraftReconciliation_OnlyAllowsUnapprovedEvidenceFreeDraft()
+    {
+        static JsonElement Json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+        var draft = new QuantitySurveyDecisionDto
+        {
+            SourceLineage = "Manual preparation", Status = QuantitySurveyConfigurationDecisionStatus.Draft,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Pending,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Missing,
+            Value = Json("{\"requireContractorSignature\":false}")
+        };
+
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(draft, true).Should().BeTrue();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(draft, false).Should().BeFalse();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(new QuantitySurveyDecisionDto
+        {
+            Status = QuantitySurveyConfigurationDecisionStatus.Approved,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Approved,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Verified,
+            ApprovedById = Guid.NewGuid(), ApprovedAt = DateTime.UtcNow, ApprovalReference = "reviewed",
+            Value = draft.Value
+        }, true).Should().BeFalse();
+        QsUatPreparationSeeder.CanReconcileUnapprovedDraftDecision(new QuantitySurveyDecisionDto
+        {
+            Status = QuantitySurveyConfigurationDecisionStatus.Draft,
+            ApprovalStatus = QuantitySurveyConfigurationApprovalStatus.Pending,
+            EvidenceStatus = QuantitySurveyConfigurationEvidenceStatus.Attached,
+            Evidence = [new QuantitySurveyEvidenceDto { Id = Guid.NewGuid() }],
+            Value = draft.Value
+        }, true).Should().BeFalse();
+    }
+
     [Theory]
     [InlineData("valid")]
     [InlineData("missing")]

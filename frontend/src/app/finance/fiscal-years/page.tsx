@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,8 +11,8 @@ import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Calendar, Plus, ChevronDown, ChevronRight, Lock, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from '@/components/ui/use-toast';
-import { financeDataService } from '@/services/finance/finance-data.service';
-import { Account, FiscalYear, FiscalPeriod, PeriodType, CreateFiscalYearDto } from '@/types/finance';
+import { financeDataService, YearEndBookCloseCycle } from '@/services/finance/finance-data.service';
+import { Account, AccountingBook, FiscalYear, FiscalPeriod, PeriodType, CreateFiscalYearDto } from '@/types/finance';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useAuth } from '@/hooks/use-auth';
@@ -37,7 +37,15 @@ export default function FiscalYearsPage() {
         endDate: '',
         periodType: 'Monthly' as keyof typeof PeriodType,
     });
+    const [establishedPeriodType, setEstablishedPeriodType] = useState<keyof typeof PeriodType | null>(null);
     const [equityAccounts, setEquityAccounts] = useState<Account[]>([]);
+    const [books, setBooks] = useState<AccountingBook[]>([]);
+    const [accountingBookId, setAccountingBookId] = useState('');
+    const [closeCycles, setCloseCycles] = useState<Record<string, YearEndBookCloseCycle[]>>({});
+    const closeKeys = useRef<Record<string, string>>({});
+    const selectedBook = books.find(book => book.id === accountingBookId);
+    const activeClose = (yearId: string) => closeCycles[yearId]?.find(cycle =>
+        cycle.accountingBookId === accountingBookId && cycle.status === 'Closed');
     // Only one close/reopen dialog is open at a time, so shared selection state is safe.
     const [retainedEarningsAccountId, setRetainedEarningsAccountId] = useState<string>('default');
     const [closingNotes, setClosingNotes] = useState('');
@@ -66,6 +74,17 @@ export default function FiscalYearsPage() {
         try {
             setIsLoading(true);
             const data = await financeDataService.getFiscalYears();
+            if (!administrationMode) {
+                const [availableBooks, cycles] = await Promise.all([
+                    financeDataService.getAccountingBooks(true),
+                    Promise.all(data.map(async year => [year.id, await financeDataService.getYearEndCloseCycles(year.id)] as const)),
+                ]);
+                setBooks(availableBooks);
+                setAccountingBookId(current => current || availableBooks.find(book =>
+                    book.bookType === 'PrimaryFull' && book.isDefault && book.lifecycleStatus === 'Active'
+                    && book.isActive && book.allowsPosting)?.id || '');
+                setCloseCycles(Object.fromEntries(cycles));
+            }
             setFiscalYears(data);
 
             // Auto expand the most recent open year
@@ -163,7 +182,7 @@ export default function FiscalYearsPage() {
             });
 
             setIsCreateDialogOpen(false);
-            resetForm();
+            void resetForm();
             loadData();
         } catch (error: any) {
             console.error('Failed to create fiscal year:', error?.message || error);
@@ -176,9 +195,14 @@ export default function FiscalYearsPage() {
     };
 
     const handleCloseYear = async (yearId: string) => {
+        if (!accountingBookId) return;
         setIsClosingYear(true);
         try {
+            const keyScope = `${yearId}:${accountingBookId}`;
+            closeKeys.current[keyScope] ??= crypto.randomUUID();
             const result = await financeDataService.closeFiscalYear(yearId, {
+                accountingBookId,
+                idempotencyKey: closeKeys.current[keyScope],
                 retainedEarningsAccountId: retainedEarningsAccountId === 'default' ? undefined : retainedEarningsAccountId,
                 closingNotes: closingNotes.trim() || undefined,
             });
@@ -188,6 +212,7 @@ export default function FiscalYearsPage() {
             });
             setClosingNotes('');
             setRetainedEarningsAccountId('default');
+            delete closeKeys.current[keyScope];
             loadData();
         } catch (error: any) {
             console.error('Failed to close fiscal year:', error?.message || error);
@@ -206,10 +231,11 @@ export default function FiscalYearsPage() {
     };
 
     const handleReopenYear = async (yearId: string) => {
-        if (!reopenReason.trim()) {
+        const cycle = activeClose(yearId);
+        if (!cycle || reopenReason.trim().length < 20 || reopenReason.trim().length > 500) {
             toast({
                 title: 'Validation Error',
-                description: 'A reason is required to reopen a fiscal year.',
+                description: 'Select a closed book cycle and enter a reason of 20 to 500 characters.',
                 variant: 'destructive',
             });
             return;
@@ -217,7 +243,9 @@ export default function FiscalYearsPage() {
 
         setIsReopeningYear(true);
         try {
-            const result = await financeDataService.reopenFiscalYear(yearId, reopenReason.trim());
+            const result = await financeDataService.reopenFiscalYear(yearId, {
+                accountingBookId: cycle.accountingBookId, bookCloseCycleId: cycle.id, reason: reopenReason.trim(),
+            });
             toast({
                 title: 'Success',
                 description: result.message || 'Fiscal year reopened. The closing entry was reversed.',
@@ -255,8 +283,37 @@ export default function FiscalYearsPage() {
         }
     };
 
-    const resetForm = () => {
+    const resetForm = async () => {
+        const latestYear = [...fiscalYears].sort((a, b) =>
+            new Date(b.endDate).getTime() - new Date(a.endDate).getTime())[0];
+        if (latestYear) {
+            const nextStart = new Date(latestYear.endDate);
+            nextStart.setUTCDate(nextStart.getUTCDate() + 1);
+            const nextEnd = new Date(nextStart);
+            nextEnd.setUTCFullYear(nextEnd.getUTCFullYear() + 1);
+            nextEnd.setUTCDate(nextEnd.getUTCDate() - 1);
+            const periods = periodsByYear[latestYear.id] ?? await financeDataService.getFiscalPeriods(latestYear.id);
+            if (!periodsByYear[latestYear.id]) {
+                setPeriodsByYear(previous => ({ ...previous, [latestYear.id]: periods }));
+            }
+            const rawPeriodType = periods[0]?.periodType as PeriodType | keyof typeof PeriodType | undefined;
+            const periodType = typeof rawPeriodType === 'string'
+                ? rawPeriodType
+                : rawPeriodType
+                    ? PeriodType[rawPeriodType] as keyof typeof PeriodType
+                    : 'Monthly';
+            setEstablishedPeriodType(periodType);
+            setFormData({
+                year: latestYear.year + 1,
+                startDate: nextStart.toISOString().slice(0, 10),
+                endDate: nextEnd.toISOString().slice(0, 10),
+                periodType,
+            });
+            return;
+        }
+
         const currentYear = new Date().getFullYear();
+        setEstablishedPeriodType(null);
         setFormData({
             year: currentYear,
             startDate: `${currentYear}-01-01`,
@@ -286,12 +343,24 @@ export default function FiscalYearsPage() {
 
     return (
         <div className="space-y-6">
+            {!administrationMode && (
+                <div className="max-w-md space-y-2">
+                    <Label htmlFor="year-end-accounting-book">Accounting book</Label>
+                    <Select value={accountingBookId} onValueChange={setAccountingBookId} disabled={isClosingYear || isReopeningYear}>
+                        <SelectTrigger id="year-end-accounting-book"><SelectValue placeholder="Select an accounting book" /></SelectTrigger>
+                        <SelectContent>
+                            {books.map(book => <SelectItem key={book.id} value={book.id}>{book.code} — {book.name}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                    <p className="text-sm text-muted-foreground">Year-end status and retained earnings transfers apply to the selected book.</p>
+                </div>
+            )}
             {/* Page Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <Calendar className="h-8 w-8" />
-                        {administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}
+                        {administrationMode ? 'Fiscal Calendar' : 'Fiscal Years'}
                     </h1>
                     <p className="text-muted-foreground">
                         {administrationMode
@@ -306,7 +375,7 @@ export default function FiscalYearsPage() {
                     {administrationMode && canAdminister && (
                     <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                         <DialogTrigger asChild>
-                            <Button onClick={resetForm}>
+                            <Button onClick={() => void resetForm()}>
                                 <Plus className="mr-2 h-4 w-4" />
                                 Create Fiscal Year
                             </Button>
@@ -325,6 +394,7 @@ export default function FiscalYearsPage() {
                                         id="year"
                                         type="number"
                                         value={formData.year}
+                                        disabled={fiscalYears.length > 0}
                                         onChange={(e) => setFormData({ ...formData, year: parseInt(e.target.value) || new Date().getFullYear() })}
                                     />
                                 </div>
@@ -335,6 +405,7 @@ export default function FiscalYearsPage() {
                                             id="startDate"
                                             type="date"
                                             value={formData.startDate}
+                                            disabled={fiscalYears.length > 0}
                                             onChange={(e) => setFormData({ ...formData, startDate: e.target.value })}
                                         />
                                     </div>
@@ -344,6 +415,7 @@ export default function FiscalYearsPage() {
                                             id="endDate"
                                             type="date"
                                             value={formData.endDate}
+                                            disabled={fiscalYears.length > 0}
                                             onChange={(e) => setFormData({ ...formData, endDate: e.target.value })}
                                         />
                                     </div>
@@ -353,6 +425,7 @@ export default function FiscalYearsPage() {
                                     <Select
                                         value={formData.periodType}
                                         onValueChange={(value: any) => setFormData({ ...formData, periodType: value })}
+                                        disabled={establishedPeriodType !== null}
                                     >
                                         <SelectTrigger id="periodType">
                                             <SelectValue />
@@ -364,6 +437,11 @@ export default function FiscalYearsPage() {
                                             <SelectItem value="Daily">Daily (365-366 periods)</SelectItem>
                                         </SelectContent>
                                     </Select>
+                                    {establishedPeriodType && (
+                                        <p className="text-xs text-muted-foreground">
+                                            Locked to {establishedPeriodType} because the tenant&apos;s fiscal calendar already uses this period structure.
+                                        </p>
+                                    )}
                                 </div>
                                 <div className="text-sm text-muted-foreground bg-blue-50 p-3 rounded">
                                     <p className="font-semibold mb-1">Auto-generation:</p>
@@ -398,7 +476,7 @@ export default function FiscalYearsPage() {
                     </BreadcrumbItem>
                     <BreadcrumbSeparator />
                     <BreadcrumbItem>
-                        <BreadcrumbPage>{administrationMode ? 'Fiscal Calendar Setup' : 'Fiscal Years'}</BreadcrumbPage>
+                        <BreadcrumbPage>{administrationMode ? 'Fiscal Calendar' : 'Fiscal Years'}</BreadcrumbPage>
                     </BreadcrumbItem>
                 </BreadcrumbList>
             </Breadcrumb>
@@ -437,10 +515,10 @@ export default function FiscalYearsPage() {
                                             <div>
                                                 <div className="flex items-center gap-2">
                                                     <h3 className="font-semibold text-lg">{year.fiscalYearName} ({year.fiscalYearCode})</h3>
-                                                    {year.isClosed && (
+                                                    {(year.isClosed || activeClose(year.id)) && (
                                                         <Badge variant="secondary">
                                                             <Lock className="h-3 w-3 mr-1" />
-                                                            Closed
+                                                            {year.isClosed ? 'Legacy close: reconciliation required' : `${selectedBook?.code} closed`}
                                                         </Badge>
                                                     )}
                                                 </div>
@@ -452,7 +530,8 @@ export default function FiscalYearsPage() {
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            {!administrationMode && canClose && !year.isClosed && (
+                                            {!administrationMode && canClose && !year.isClosed && !activeClose(year.id)
+                                                && selectedBook?.isActive && selectedBook.allowsPosting && (
                                                 <Dialog>
                                                     <DialogTrigger asChild>
                                                         <Button variant="outline" size="sm">
@@ -463,7 +542,7 @@ export default function FiscalYearsPage() {
                                                         <DialogHeader>
                                                             <DialogTitle>Close Fiscal Year {year.year}?</DialogTitle>
                                                             <DialogDescription>
-                                                                Revenue and expense balances are transferred to retained earnings and the year is marked closed. This action can be reversed.
+                                                                Revenue and expense balances in {selectedBook?.code} are transferred to retained earnings. A separate closing cycle records this book's year-end status.
                                                             </DialogDescription>
                                                         </DialogHeader>
                                                         <div className="space-y-4 py-4">
@@ -473,7 +552,7 @@ export default function FiscalYearsPage() {
                                                                 </p>
                                                                 <ul className="list-disc list-inside space-y-1 mt-2 text-sm">
                                                                     <li>All journal entries are posted</li>
-                                                                    <li>All periods are closed</li>
+                                                                    <li>All periods for this book have an approved close</li>
                                                                     <li>Year-end adjustments are complete</li>
                                                                 </ul>
                                                             </div>
@@ -519,7 +598,7 @@ export default function FiscalYearsPage() {
                                                     </DialogContent>
                                                 </Dialog>
                                             )}
-                                            {!administrationMode && canReopen && year.isClosed && (
+                                            {!administrationMode && canReopen && !year.isClosed && activeClose(year.id) && (
                                                 <Dialog>
                                                     <DialogTrigger asChild>
                                                         <Button variant="outline" size="sm">
@@ -530,7 +609,7 @@ export default function FiscalYearsPage() {
                                                         <DialogHeader>
                                                             <DialogTitle>Reopen Fiscal Year {year.year}?</DialogTitle>
                                                             <DialogDescription>
-                                                                The year-end closing entry is reversed through the posting engine and the year is marked open again. A reason is required for the audit trail.
+                                                                The closing entry for {selectedBook?.code}, cycle {activeClose(year.id)?.cycleNumber}, will be reversed. Periods remain subject to their governed opening workflow.
                                                             </DialogDescription>
                                                         </DialogHeader>
                                                         <div className="space-y-2 py-4">
@@ -539,6 +618,7 @@ export default function FiscalYearsPage() {
                                                                 id={`reopen-reason-${year.id}`}
                                                                 value={reopenReason}
                                                                 onChange={(e) => setReopenReason(e.target.value)}
+                                                                maxLength={500}
                                                                 placeholder="Why is this fiscal year being reopened?"
                                                                 rows={3}
                                                             />

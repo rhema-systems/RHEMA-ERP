@@ -447,6 +447,9 @@ public sealed class AccountingBookService : IAccountingBookService
         // The base graph is mutable while a request waits for approval. Revalidate it under the
         // serializable writer boundary before advancing the workflow or recording approval evidence.
         if (action == "Approve") await ValidateGovernedTransitionAsync(book, book.PendingLifecycleStatus.Value, ct);
+        var isReactivation = action == "Approve"
+            && book.LifecycleStatus == AccountingBookLifecycleStatus.Suspended
+            && book.PendingLifecycleStatus == AccountingBookLifecycleStatus.Active;
         var before = Snapshot(book);
         var result = await workflow.ProcessApprovalStepAsync(WorkflowEntityType, book.Id, actor, action, request.Reason.Trim());
         if (!result.Success) throw new InvalidOperationException(result.Message ?? $"The transition {action.ToLowerInvariant()} action failed.");
@@ -457,7 +460,8 @@ public sealed class AccountingBookService : IAccountingBookService
         {
             var target = book.PendingLifecycleStatus!.Value;
             if (target == AccountingBookLifecycleStatus.Active
-                && book.BookType == AccountingBookType.ParallelFull)
+                && book.BookType == AccountingBookType.ParallelFull
+                && !isReactivation)
             {
                 if (_initialization == null)
                     throw new InvalidOperationException("Parallel opening initialization is unavailable.");
@@ -473,9 +477,16 @@ public sealed class AccountingBookService : IAccountingBookService
             {
                 if (_initialization == null)
                     throw new InvalidOperationException("Derived-book structure provisioning is unavailable.");
-                await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
+                // Configuration may already have frozen, independently reviewed initialization.
+                // Never mutate that structure as a side effect of the lifecycle decision.
+                var frozenInitialization = await _db.AccountingBookInitializations.AnyAsync(item => item.TenantId == TenantId
+                    && item.AccountingBookId == book.Id && !item.IsDeleted
+                    && (item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval || item.InitializationStatus == AccountingBookInitializationStatus.Approved), ct);
+                if (!frozenInitialization) await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
             }
             ApplyPostingFlags(book); ClearPending(book, true);
+            if (target == AccountingBookLifecycleStatus.Active)
+                await EnsurePostingPeriodAuthoritiesAsync(book, actor, ct);
             if (target is AccountingBookLifecycleStatus.Active or AccountingBookLifecycleStatus.Suspended)
             {
                 // Manifest mappings are prepared while inactive, executable only while the
@@ -489,10 +500,48 @@ public sealed class AccountingBookService : IAccountingBookService
         book.UpdatedAt = DateTime.UtcNow; book.UpdatedBy = ActorName();
         await _db.SaveChangesAsync(ct);
         var eventType = action == "Reject" ? FinanceAuditEvents.AccountingBookTransitionRejected
+            : completed && isReactivation ? FinanceAuditEvents.AccountingBookReactivated
             : completed ? FinanceAuditEvents.AccountingBookTransitionApproved : FinanceAuditEvents.AccountingBookTransitionApprovalStepCompleted;
         await AuditAsync(eventType, book, before, Snapshot(book), request.Reason, ct);
         return await LoadDtoAsync(book.Id, ct);
     }, ct);
+
+    private async Task EnsurePostingPeriodAuthoritiesAsync(AccountingBook book, Guid actor, CancellationToken ct)
+    {
+        var fiscalPeriods = await _db.FiscalPeriods
+            .Where(period => period.TenantId == TenantId && !period.IsDeleted)
+            .ToListAsync(ct);
+        if (fiscalPeriods.Count == 0) return;
+
+        var existingPeriodIds = await _db.AccountingBookPeriods
+            .Where(period => period.TenantId == TenantId
+                && period.AccountingBookId == book.Id
+                && !period.IsDeleted)
+            .Select(period => period.FiscalPeriodId)
+            .ToListAsync(ct);
+        var existing = existingPeriodIds.ToHashSet();
+        var now = DateTime.UtcNow;
+        var missing = fiscalPeriods
+            .Where(period => !existing.Contains(period.Id))
+            .Select(period => new AccountingBookPeriod
+            {
+                TenantId = TenantId,
+                AccountingBookId = book.Id,
+                FiscalPeriodId = period.Id,
+                PeriodStatus = period.IsLocked
+                    ? AccountingBookPeriodStatus.Locked
+                    : period.IsClosed
+                        ? AccountingBookPeriodStatus.Closed
+                        : period.IsOpen
+                            ? AccountingBookPeriodStatus.Open
+                            : AccountingBookPeriodStatus.Future,
+                CreatedAt = now,
+                CreatedBy = "System (accounting-book activation)",
+                CreatedById = actor
+            })
+            .ToList();
+        if (missing.Count > 0) await _db.AccountingBookPeriods.AddRangeAsync(missing, ct);
+    }
 
     private async Task<ValidatedBookStructure> ValidateStructureAsync(CreateAccountingBookDto request, AccountingBook? currentBook, CancellationToken ct)
     {

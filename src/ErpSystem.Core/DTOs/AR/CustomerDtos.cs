@@ -35,11 +35,16 @@ public class CustomerDto
     public string? TaxId { get; set; }
     public decimal CreditLimit { get; set; }
     public decimal OutstandingBalance { get; set; }
+    public decimal CustomerCreditBalance { get; set; }
     public int PaymentTermsDays { get; set; }
     public Guid? PaymentTermId { get; set; }
     public string? PriceGroup { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
     public bool IsActive { get; set; }
+    public bool IsBlacklisted { get; set; }
+    public bool IsTransactionReady { get; set; }
+    public string ReadinessCode { get; set; } = string.Empty;
+    public string ReadinessMessage { get; set; } = string.Empty;
     public DateTime? LastOrderDate { get; set; }
     public DateTime? LastPaymentDate { get; set; }
     public string? Notes { get; set; }
@@ -96,6 +101,8 @@ public class CustomerQueryDto
     public string? SearchTerm { get; set; }
     public string? CustomerType { get; set; }
     public bool? IsActive { get; set; }
+    public bool IncludeBalances { get; set; }
+    public string? TransactionReadiness { get; set; }
     public string? City { get; set; }
     public string? Country { get; set; }
     public int PageNumber { get; set; } = 1;

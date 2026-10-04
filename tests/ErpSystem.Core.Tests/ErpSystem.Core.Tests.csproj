@@ -151,13 +151,17 @@
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
+    <Compile Include="Services\Sales\SalesCanonicalPartnerQueryTests.cs" />
     <Compile Include="Services\Ehc\EhcExternalTicketPolicyTests.cs" />
     <Compile Include="Services\Crm\**\*.cs" />
     <Compile Include="Services\Deployment\**\*.cs" />
     <Compile Include="Services\Procurement\**\*.cs" />
     <Compile Include="Services\Projects\**\*.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
+    <Compile Include="Services\Sales\SalesPropertyRegisterSourceTests.cs" />
+    <Compile Include="Services\Sales\SalesOrderTaxSelectionTests.cs" />
     <Compile Include="Services\Security\**\*.cs" />
+    <Compile Include="Services\Settings\SettingsServiceTenantTests.cs" />
     <Compile Include="Services\Workflow\**\*.cs" />
     <Compile Include="Services\Inventory\InventoryItemIdentifierServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryTrackingControlServiceTests.cs" />
@@ -195,6 +199,7 @@
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.Recovery.cs" />
     <Compile Include="Services\Inventory\PhysicalCountPostingEligibilityTests.cs" />
     <Compile Include="Services\Inventory\InventoryOptionalApprovalTests.cs" />
+    <Compile Include="Services\Estate\EstatePropertyPortalSourceTests.cs" />
     <Compile Include="Services\Inventory\PurchaseReturnLifecycleTests.cs" />
     <Compile Include="Services\Inventory\WarehouseDefaultLocationServiceTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentLocationValuationTests.cs" />
@@ -203,7 +208,11 @@
     <Compile Include="Services\Inventory\StockAdjustmentTrackedStateTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
+    <Compile Include="Services\Inventory\CommercialQuantityPolicyTests.cs" />
+    <Compile Include="Services\Sales\SalesCommercialQuantityEvidenceTests.cs" />
+    <Compile Include="Services\Inventory\CommercialQuantityEvidencePersistenceTests.cs" />
     <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
+    <Compile Include="Finance\PrecisionRoundingPolicyTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

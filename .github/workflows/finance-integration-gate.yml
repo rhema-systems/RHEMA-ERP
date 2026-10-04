@@ -156,6 +156,7 @@ jobs:
             /p:BuildProjectReferences=false \
             /p:TdcFocusedTestBuild=true \
             /p:TdcFocusedTestFile=Services/Inventory/E2E012CycleCountFinanceLifecycleTests.cs \
+            /p:TdcFocusedTestSupportFile=Services/Inventory/E2E012CycleCountFinanceLifecycleTests.Recovery.cs \
             /p:UseSharedCompilation=false \
             /p:RunAnalyzers=false \
             /p:RunAnalyzersDuringBuild=false

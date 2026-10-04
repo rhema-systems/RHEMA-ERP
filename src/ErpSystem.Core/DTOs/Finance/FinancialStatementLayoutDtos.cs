@@ -343,6 +343,10 @@ public sealed class FinancialStatementLayoutApprovalQueueItemDto
 
 public sealed class FinancialStatementLayoutValidationResultDto
 {
+    public string Message => IsValid ? "Layout validation passed." : string.Join(" ", Issues
+        .Where(issue => issue.Severity == FinancialStatementLayoutValidationSeverity.Error)
+        .Select(issue => string.IsNullOrWhiteSpace(issue.RowCode) ? issue.Message : $"{issue.RowCode}: {issue.Message}"));
+
     public bool IsValid => Issues.All(issue =>
         issue.Severity != FinancialStatementLayoutValidationSeverity.Error);
 

@@ -18,12 +18,14 @@ import {
   Ruler,
   Search,
   Send,
+  ZoomIn,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import {
   Select,
@@ -89,6 +91,15 @@ function listingTypeLabel(value: string) {
   return value;
 }
 
+function listingTypeBadgeClass(value: string) {
+  if (value === 'Sale') return 'border-emerald-200 bg-emerald-100 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200';
+  if (value === 'Rent') return 'border-blue-200 bg-blue-100 text-blue-900 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200';
+  if (value === 'Lease') return 'border-amber-200 bg-amber-100 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200';
+  if (value === 'SaleAndRent') return 'border-cyan-200 bg-cyan-100 text-cyan-900 dark:border-cyan-800 dark:bg-cyan-950 dark:text-cyan-200';
+  if (value === 'SaleAndLease') return 'border-violet-200 bg-violet-100 text-violet-900 dark:border-violet-800 dark:bg-violet-950 dark:text-violet-200';
+  return 'border-border bg-muted text-foreground';
+}
+
 function areaLabel(listing: ExternalEstateListing) {
   if (listing.areaSquareMeters) {
     return `${listing.areaSquareMeters.toLocaleString(undefined, {
@@ -139,8 +150,13 @@ function parsePriceFilter(value: string) {
     : undefined;
 }
 
-function ListingImage({ listing }: { listing: ExternalEstateListing }) {
+function ListingImage({ listing, onSelect, onEnquiry }: {
+  listing: ExternalEstateListing;
+  onSelect: () => void;
+  onEnquiry: () => void;
+}) {
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
+  const [previewOpen, setPreviewOpen] = React.useState(false);
 
   React.useEffect(() => {
     let active = true;
@@ -166,27 +182,45 @@ function ListingImage({ listing }: { listing: ExternalEstateListing }) {
     };
   }, [listing]);
 
-  if (!imageUrl) {
-    return (
-      <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
-        <img
-          src={listingFallbackImage(listing)}
-          alt=""
-          className="h-full w-full object-cover"
-        />
-        <div className="absolute right-3 top-3 rounded-md bg-white/90 p-2 text-slate-500 shadow-sm">
-          <ImageIcon className="h-4 w-4" />
-        </div>
-      </div>
-    );
-  }
+  const previewUrl = imageUrl || listingFallbackImage(listing);
 
   return (
-    <img
-      src={imageUrl}
-      alt={listing.name}
-      className="aspect-[4/3] w-full object-cover"
-    />
+    <>
+      <button
+        type="button"
+        className="relative block w-full overflow-hidden bg-slate-100"
+        aria-label={`Preview image for ${listing.name}`}
+        onClick={() => { onSelect(); setPreviewOpen(true); }}
+      >
+        <img
+          src={previewUrl}
+          alt={listing.name}
+          className="aspect-[4/3] w-full object-cover"
+        />
+        <span className="absolute bottom-3 right-3 rounded-md bg-white/95 p-2 text-slate-900 shadow-sm">
+          {imageUrl ? <ZoomIn className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}
+        </span>
+      </button>
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="w-[min(96vw,1100px)] max-w-none bg-background p-4 text-foreground">
+          <DialogHeader className="pr-8">
+            <DialogTitle>{listing.name}</DialogTitle>
+            <DialogDescription>{locationLabel(listing)}</DialogDescription>
+          </DialogHeader>
+          <img
+            src={previewUrl}
+            alt={listing.name}
+            className="max-h-[70dvh] w-full object-contain"
+          />
+          <div className="flex justify-end">
+            <Button onClick={() => { setPreviewOpen(false); onEnquiry(); }}>
+              <Send className="mr-2 h-4 w-4" />
+              Enquiry
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -415,12 +449,16 @@ export default function ExternalPropertyListingsPage() {
                     active ? 'border-blue-600 ring-2 ring-blue-100' : ''
                   }`}
                 >
+                  <ListingImage
+                    listing={listing}
+                    onSelect={() => setSelectedId(listing.id)}
+                    onEnquiry={() => setEnquiryListing(listing)}
+                  />
                   <button
                     type="button"
                     onClick={() => setSelectedId(listing.id)}
                     className="block w-full text-left"
                   >
-                    <ListingImage listing={listing} />
                     <div className="space-y-3 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -431,7 +469,7 @@ export default function ExternalPropertyListingsPage() {
                             {listing.assetCode}
                           </div>
                         </div>
-                        <Badge variant="secondary">
+                        <Badge variant="outline" className={listingTypeBadgeClass(listing.externalListingType)}>
                           {listingTypeLabel(listing.externalListingType)}
                         </Badge>
                       </div>
@@ -447,6 +485,18 @@ export default function ExternalPropertyListingsPage() {
                       </div>
                     </div>
                   </button>
+                  {active ? (
+                    <div className="px-4 pb-4 xl:hidden">
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        onClick={() => setEnquiryListing(listing)}
+                      >
+                        <Send className="mr-2 h-4 w-4" />
+                        Enquiry
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -481,11 +531,17 @@ export default function ExternalPropertyListingsPage() {
           ) : null}
         </div>
 
-        <Card className="h-fit">
-          <CardHeader>
+        <Card className="h-fit xl:sticky xl:top-4 xl:flex xl:max-h-[calc(100dvh-2rem)] xl:flex-col">
+          <CardHeader className="shrink-0 space-y-3">
             <CardTitle className="text-base">Property values</CardTitle>
+            {selected ? (
+              <Button className="w-full" onClick={() => setEnquiryListing(selected)}>
+                <Send className="mr-2 h-4 w-4" />
+                Enquiry
+              </Button>
+            ) : null}
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-5 xl:min-h-0 xl:overflow-y-auto">
             {selected ? (
               <>
                 <div className="space-y-4">
@@ -498,10 +554,10 @@ export default function ExternalPropertyListingsPage() {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <h2 className="truncate font-semibold text-slate-900">
+                      <h2 className="truncate font-semibold text-foreground">
                         {selected.name}
                       </h2>
-                      <p className="mt-1 text-sm text-slate-500">
+                      <p className="mt-1 text-sm text-muted-foreground">
                         {selected.sourceLabel}
                       </p>
                     </div>
@@ -567,25 +623,22 @@ export default function ExternalPropertyListingsPage() {
                     ) : null}
                     {selected.externalPremiumChargeRequired ? (
                       <div className="mt-1 text-sm text-slate-600">
-                        Premium charge applies; Sales will confirm the amount.
+                        Premium charge:{' '}
+                        {formatMoney(
+                          selected.externalPremiumChargeAmount,
+                          selected.externalListingCurrency
+                        )}
                       </div>
                     ) : null}
                   </div>
 
                   {selected.externalListingNotes ? (
-                    <p className="text-sm leading-6 text-slate-600">
+                    <p className="text-sm leading-6 text-foreground">
                       {selected.externalListingNotes}
                     </p>
                   ) : null}
                 </div>
 
-                <Button
-                  className="w-full"
-                  onClick={() => setEnquiryListing(selected)}
-                >
-                  <Send className="mr-2 h-4 w-4" />
-                  Enquiry
-                </Button>
               </>
             ) : (
               <div className="rounded-md border border-dashed p-8 text-center text-sm text-slate-500">

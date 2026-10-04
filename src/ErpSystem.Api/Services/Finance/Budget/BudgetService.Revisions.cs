@@ -570,6 +570,7 @@ public partial class BudgetService
                 TenantId = TenantId,
                 BudgetScenarioId = successor.Id,
                 SegmentValueId = sourceReturn.SegmentValueId,
+                DistributionDimensionValueId = sourceReturn.DistributionDimensionValueId,
                 AssignedToUserId = sourceReturn.AssignedToUserId,
                 ApproverUserId = sourceReturn.ApproverUserId,
                 Status = ApprovedStatus,

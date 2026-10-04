@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 
 namespace ErpSystem.Core.Entities.Sales;
@@ -96,6 +97,66 @@ public class Lead : BusinessEntity
 }
 
 /// <summary>
+/// Tenant-owned definition of an opportunity stage. Dashboard analytics and
+/// opportunity editing use this ordered configuration instead of maintaining
+/// separate stage-name lists.
+/// </summary>
+public class OpportunityStageDefinition : TenantEntity
+{
+    [Required]
+    [StringLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool IsClosed { get; set; }
+    public bool IsWon { get; set; }
+    public bool IsLost { get; set; }
+
+    [Range(0, 100)]
+    public int? DefaultProbability { get; set; }
+
+    public virtual ICollection<Opportunity> Opportunities { get; set; } = new List<Opportunity>();
+    public virtual ICollection<OpportunityStageHistory> History { get; set; } = new List<OpportunityStageHistory>();
+}
+
+/// <summary>
+/// Immutable evidence that an opportunity entered a configured stage. Amount,
+/// currency and probability are captured so historical funnel value does not
+/// change when the opportunity is edited later.
+/// </summary>
+public class OpportunityStageHistory : TenantEntity
+{
+    public Guid OpportunityId { get; set; }
+    public virtual Opportunity Opportunity { get; set; } = null!;
+
+    public Guid StageDefinitionId { get; set; }
+    public virtual OpportunityStageDefinition StageDefinition { get; set; } = null!;
+
+    public DateTime EnteredAt { get; set; } = DateTime.UtcNow;
+
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal AmountSnapshot { get; set; }
+
+    [StringLength(3)]
+    public string? CurrencySnapshot { get; set; }
+
+    [Range(0, 100)]
+    public int ProbabilitySnapshot { get; set; }
+
+    /// <summary>
+    /// True only for the one-time migration row created from a legacy current
+    /// stage. These rows support current-state age while exposing limited
+    /// historical coverage to analytics consumers.
+    /// </summary>
+    public bool IsLegacySnapshot { get; set; }
+}
+
+/// <summary>
 /// Opportunity entity for sales deals
 /// </summary>
 public class Opportunity : BusinessEntity
@@ -107,16 +168,21 @@ public class Opportunity : BusinessEntity
     [StringLength(2000)]
     public string? Description { get; set; }
 
-    // Customer/Lead association
+    // CRM keeps the historical CustomerId column/API name; its value is the canonical BusinessPartner.Id.
     public Guid? CustomerId { get; set; }
-    public virtual Customer? Customer { get; set; }
+    public virtual BusinessPartner? BusinessPartner { get; set; }
 
     public Guid? LeadId { get; set; }
     public virtual Lead? Lead { get; set; }
 
     // Opportunity details
+    public Guid? StageDefinitionId { get; set; }
+    public virtual OpportunityStageDefinition? StageDefinition { get; set; }
+
+    // Retained as a denormalized display snapshot for compatibility with
+    // existing reports and integrations. StageDefinition is authoritative.
     [StringLength(50)]
-    public string Stage { get; set; } = "Prospecting"; // Prospecting, Qualification, Proposal, Negotiation, Closed Won, Closed Lost
+    public string Stage { get; set; } = string.Empty;
 
     [Range(0, 100)]
     public int Probability { get; set; } = 10; // Win probability percentage
@@ -157,6 +223,7 @@ public class Opportunity : BusinessEntity
     // Navigation properties
     public virtual ICollection<Activity> Activities { get; set; } = new List<Activity>();
     public virtual ICollection<Quote> Quotes { get; set; } = new List<Quote>();
+    public virtual ICollection<OpportunityStageHistory> StageHistory { get; set; } = new List<OpportunityStageHistory>();
 }
 
 /// <summary>
@@ -212,7 +279,7 @@ public class Quote : DocumentEntity
 /// <summary>
 /// Quote line items
 /// </summary>
-public class QuoteLineItem : BaseEntity
+public class QuoteLineItem : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid QuoteId { get; set; }
     public virtual Quote Quote { get; set; } = null!;
@@ -235,6 +302,10 @@ public class QuoteLineItem : BaseEntity
 
     [StringLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [StringLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(5,2)")]
     public decimal DiscountPercentage { get; set; }

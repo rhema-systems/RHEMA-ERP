@@ -13,6 +13,7 @@ function loadServiceWorker() {
   const cache = {
     match: vi.fn(),
     put: vi.fn(),
+    delete: vi.fn(),
   };
   const caches = {
     keys: vi.fn().mockResolvedValue([]),
@@ -80,5 +81,41 @@ describe('service-worker authenticated API cache policy', () => {
     expect(worker.caches.open).not.toHaveBeenCalled();
     expect(worker.cache.match).not.toHaveBeenCalled();
     expect(worker.cache.put).not.toHaveBeenCalled();
+  });
+
+  it('does not poison the static cache with a failed deployment-time response', async () => {
+    const worker = loadServiceWorker();
+    worker.fetch.mockResolvedValueOnce(
+      new Response('temporarily unavailable', { status: 404 })
+    );
+    const respondWith = vi.fn();
+    const request = new Request(
+      'https://erp.company.com/_next/static/chunks/app/release.js'
+    );
+
+    worker.fetchListener({ request, respondWith });
+    const response = await respondWith.mock.calls[0][0];
+
+    expect(response.status).toBe(404);
+    expect(worker.cache.put).not.toHaveBeenCalled();
+  });
+
+  it('removes a previously cached failed static response and retries the network', async () => {
+    const worker = loadServiceWorker();
+    worker.cache.match.mockResolvedValueOnce(
+      new Response('cached failure', { status: 404 })
+    );
+    const respondWith = vi.fn();
+    const request = new Request(
+      'https://erp.company.com/_next/static/chunks/app/recovered.js'
+    );
+
+    worker.fetchListener({ request, respondWith });
+    const response = await respondWith.mock.calls[0][0];
+
+    expect(response.ok).toBe(true);
+    expect(worker.cache.delete).toHaveBeenCalledWith(request);
+    expect(worker.fetch).toHaveBeenCalledWith(request);
+    expect(worker.cache.put).toHaveBeenCalledOnce();
   });
 });

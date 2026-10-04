@@ -28,6 +28,24 @@ public class SalesSaleableSourceDto
     public DateTime? UpdatedAt { get; set; }
 }
 
+public sealed class SalesSaleableSourceAdapterDefinitionDto
+{
+    public string AdapterKey { get; set; } = string.Empty;
+    public IReadOnlyCollection<SalesSaleableSourceFilterDefinitionDto> Filters { get; set; }
+        = Array.Empty<SalesSaleableSourceFilterDefinitionDto>();
+}
+
+public sealed class SalesSaleableSourceFilterDefinitionDto
+{
+    public string Field { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string ValueType { get; set; } = "text";
+    public bool IsRequired { get; set; }
+    public string? DefaultValue { get; set; }
+    public string? HelpText { get; set; }
+    public IReadOnlyCollection<string> Options { get; set; } = Array.Empty<string>();
+}
+
 public class SalesSaleableItemDto
 {
     public Guid SourceId { get; set; }
@@ -47,6 +65,7 @@ public class SalesSaleableItemDto
     public decimal? AreaSquareMeters { get; set; }
     public string? PropertyReference { get; set; }
     public bool CanCreateSalesOrder { get; set; }
+    public string? SalesOrderIneligibilityReason { get; set; }
     public bool CanCreateSalesAgreement { get; set; }
     public bool CanCreateLeaseAgreement { get; set; }
     public string? SuggestedOrderType { get; set; }
@@ -72,6 +91,9 @@ public class SalesSaleableItemDto
     public Guid? ActiveAllocationId { get; set; }
     public string? ActiveAllocationStatus { get; set; }
     public DateTime? ActiveAllocationReservedUntil { get; set; }
+    public Guid? ActiveAllocationBusinessPartnerId { get; set; }
+    public Guid? ActiveAllocationOpportunityId { get; set; }
+    public Guid? ActiveAllocationSalesOrderId { get; set; }
     public string? ActiveAllocationCustomerName { get; set; }
     public bool HasActiveAllocation { get; set; }
 }

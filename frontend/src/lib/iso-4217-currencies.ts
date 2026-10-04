@@ -9,6 +9,7 @@ export interface ISO4217Currency {
     name: string;
     symbol: string;
     decimalPlaces: number;
+    countryName?: string;
 }
 
 export const ISO_4217_CURRENCIES: ISO4217Currency[] = [

@@ -41,7 +41,7 @@ describe('Sidebar collapsed hover behavior', () => {
     expect(sidebar).toBeInTheDocument();
 
     fireEvent.mouseEnter(sidebar);
-    expect(sidebar).toHaveClass('w-64');
+    expect(sidebar).toHaveClass('w-52');
     expect(screen.getByText('Dashboard')).toBeInTheDocument();
 
     fireEvent.mouseLeave(sidebar);
@@ -55,11 +55,11 @@ describe('Sidebar collapsed hover behavior', () => {
 
     fireEvent.mouseEnter(sidebar);
     fireEvent.click(screen.getByRole('button', { name: 'Keep sidebar expanded' }));
-    expect(sidebar).toHaveClass('w-64');
+    expect(sidebar).toHaveClass('w-52');
 
     fireEvent.mouseLeave(sidebar);
     act(() => vi.advanceTimersByTime(421));
-    expect(sidebar).toHaveClass('w-64');
+    expect(sidebar).toHaveClass('w-52');
     expect(screen.getByRole('button', { name: 'Collapse sidebar' })).toBeInTheDocument();
   });
 });

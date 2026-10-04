@@ -1,21 +1,25 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import {
   Building2,
   Database,
+  Ellipsis,
+  Eye,
   Globe2,
   Loader2,
   MapPin,
   RefreshCw,
   Search,
+  Settings2,
   Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -24,7 +28,22 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -32,6 +51,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Table,
   TableBody,
@@ -75,6 +95,11 @@ const sourceLabels: Record<EstateManagedAssetSourceType, string> = {
   [EstateManagedAssetSourceType.ProjectUnit]: 'Project unit',
   [EstateManagedAssetSourceType.Imported]: 'Excel import',
 };
+
+const statusOptions = Object.entries(statusLabels).map(([value, label]) => ({
+  value: Number(value) as EstateManagedAssetStatus,
+  label,
+}));
 
 function formatArea(asset: EstateManagedAsset) {
   if (asset.areaValue != null) {
@@ -128,7 +153,6 @@ function getCurrentLesseeOrOwner(asset: EstateManagedAsset) {
 }
 
 export function PropertyUnitRegister() {
-  const router = useRouter();
   const [searchDraft, setSearchDraft] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [typeFilter, setTypeFilter] = React.useState('all');
@@ -137,9 +161,25 @@ export function PropertyUnitRegister() {
     null
   );
   const [importOpen, setImportOpen] = React.useState(false);
+  const [viewAsset, setViewAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [statusAsset, setStatusAsset] = React.useState<EstateManagedAsset | null>(null);
+  const [nextStatus, setNextStatus] = React.useState<EstateManagedAssetStatus>(
+    EstateManagedAssetStatus.Available
+  );
+  const [leaseAvailable, setLeaseAvailable] = React.useState(false);
+  const [saleAvailable, setSaleAvailable] = React.useState(false);
+  const [releaseOccupant, setReleaseOccupant] = React.useState(false);
+  const [actualDate, setActualDate] = React.useState('');
+  const [statusNotes, setStatusNotes] = React.useState('');
+  const [statusSavingId, setStatusSavingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    if (new URLSearchParams(window.location.search).get('import') === 'land') setImportOpen(true);
+    const importType = new URLSearchParams(window.location.search).get(
+      'import'
+    );
+    if (importType === 'land' || importType === 'property') {
+      setImportOpen(true);
+    }
   }, []);
   const {
     assets,
@@ -153,6 +193,7 @@ export function PropertyUnitRegister() {
     totalItems,
   } = useManagedAssetsPage({
     search: search || undefined,
+    includeLandDemarcations: true,
     assetType:
       typeFilter === 'all'
         ? undefined
@@ -172,16 +213,89 @@ export function PropertyUnitRegister() {
     setStatusFilter('all');
   };
 
+  const openStatusDialog = (asset: EstateManagedAsset) => {
+    setStatusAsset(asset);
+    setNextStatus(asset.status);
+    setLeaseAvailable(asset.isAvailableForLease);
+    setSaleAvailable(asset.isAvailableForSale);
+    setReleaseOccupant(false);
+    setActualDate('');
+    setStatusNotes('');
+  };
+
+  const saveStatus = async () => {
+    if (!statusAsset) return;
+
+    try {
+      setStatusSavingId(statusAsset.id);
+      await estateLandManagementService.updateOccupancy(statusAsset.id, {
+        status: nextStatus,
+        actualDate: actualDate || null,
+        releaseOccupant:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? releaseOccupant
+            : false,
+        isAvailableForLease:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? leaseAvailable
+            : false,
+        isAvailableForSale:
+          nextStatus === EstateManagedAssetStatus.Available
+            ? saleAvailable
+            : false,
+        isPublishedToExternalPortal:
+          nextStatus === EstateManagedAssetStatus.Available ? null : false,
+        notes: statusNotes.trim() || null,
+      });
+      toast.success('Property status updated.');
+      setStatusAsset(null);
+      await loadAssets();
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error ? error.message : 'Unable to update property status.'
+      );
+    } finally {
+      setStatusSavingId(null);
+    }
+  };
+
   const sendProjectPropertyToPortalListings = async (
     asset: EstateManagedAsset
   ) => {
     try {
       setSendingListingId(asset.id);
-      if (asset.externalListingType === 'None') {
-        const listingType =
-          asset.isAvailableForSale
-              ? 'Sale'
-              : 'Rent';
+      if (asset.externalListingType !== 'None') {
+        toast.info('This property is already in Portal Listings.');
+        return;
+      }
+
+      if (asset.listingScope === 'demarcation') {
+        if (!asset.parentAssetId) {
+          throw new Error('Parent land reference is missing for this demarcation.');
+        }
+
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          asset.parentAssetId,
+          asset.id,
+          {
+            isReadyForProjectManagement: false,
+            isPublishedToExternalPortal: true,
+            externalListingType: 'Sale',
+            externalListingStatus: 'Draft',
+            externalListingPrice: null,
+            externalSalePrice:
+              asset.externalSalePrice ??
+              asset.externalListingPrice ??
+              asset.targetSalePrice ??
+              null,
+            externalMonthlyRent: null,
+            externalLeaseTermMonths: null,
+            externalListingCurrency: asset.currency || 'GHS',
+            externalListingNotes: null,
+          }
+        );
+      } else {
+        const listingType = asset.isAvailableForSale ? 'Sale' : 'Rent';
         await estateLandManagementService.updateExternalListing(asset.id, {
           isPublishedToExternalPortal: false,
           externalListingType: listingType,
@@ -193,18 +307,66 @@ export function PropertyUnitRegister() {
           externalListingCurrency: asset.currency || 'GHS',
           externalListingNotes: null,
         });
-        toast.success(
-          'Project-handoff property sent to Portal Listings for commercial setup.'
-        );
       }
-      router.push(
-        `/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`
+      toast.success(
+        'Property sent to Portal Listings for commercial setup.'
       );
+      await loadAssets();
     } catch (error: unknown) {
       toast.error(
         error instanceof Error
           ? error.message
           : 'Unable to send the property to Portal Listings.'
+      );
+    } finally {
+      setSendingListingId(null);
+    }
+  };
+
+  const recallFromPortalListings = async (asset: EstateManagedAsset) => {
+    try {
+      setSendingListingId(asset.id);
+      if (asset.listingScope === 'demarcation') {
+        if (!asset.parentAssetId) {
+          throw new Error('Parent land reference is missing for this demarcation.');
+        }
+
+        await estateLandManagementService.updateLandDemarcationDisposition(
+          asset.parentAssetId,
+          asset.id,
+          {
+            isReadyForProjectManagement: false,
+            isPublishedToExternalPortal: false,
+            externalListingType: 'None',
+            externalListingStatus: 'Draft',
+            externalListingPrice: null,
+            externalSalePrice: null,
+            externalMonthlyRent: null,
+            externalLeaseTermMonths: null,
+            externalListingCurrency: asset.currency || 'GHS',
+            externalListingNotes: null,
+          }
+        );
+      } else {
+        await estateLandManagementService.updateExternalListing(asset.id, {
+          isPublishedToExternalPortal: false,
+          externalListingType: 'None',
+          externalListingStatus: 'Draft',
+          externalListingPrice: null,
+          externalSalePrice: null,
+          externalMonthlyRent: null,
+          externalLeaseTermMonths: null,
+          externalListingCurrency: asset.currency || 'GHS',
+          externalListingNotes: null,
+        });
+      }
+      toast.success('Property recalled from Portal Listings.');
+      await loadAssets();
+    } catch (error: unknown) {
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Unable to recall the property from Portal Listings.'
       );
     } finally {
       setSendingListingId(null);
@@ -257,14 +419,14 @@ export function PropertyUnitRegister() {
             </div>
             <div className="flex items-center gap-2">
               <Button type="button" onClick={() => setImportOpen(true)}>
-                <Upload className="mr-2 h-4 w-4" /> Import Excel
+                <Upload className="mr-2 h-4 w-4" /> Import Property
               </Button>
               <Badge variant="outline">Estates Records</Badge>
             </div>
           </div>
 
           <form
-            className="grid gap-2 lg:grid-cols-[minmax(16rem,1fr)_13rem_13rem_auto]"
+            className="grid gap-2 sm:grid-cols-2 xl:grid-cols-[minmax(12rem,1fr)_11rem_11rem_auto]"
             onSubmit={(event) => {
               event.preventDefault();
               setPage(1);
@@ -346,141 +508,123 @@ export function PropertyUnitRegister() {
 
           {!isLoading && !loadError && assets.length > 0 ? (
             <div className="rounded-md border">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Property no.</TableHead>
-                    <TableHead>Property / unit</TableHead>
-                    <TableHead>Location</TableHead>
-                    <TableHead>Use</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Lessee / owner</TableHead>
-                    <TableHead>Lease record</TableHead>
-                    <TableHead>File reference</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Source</TableHead>
-                    <TableHead className="text-right">Routing</TableHead>
+                    <TableHead className="w-[50%] sm:w-[38%] md:w-[32%]">Property / unit</TableHead>
+                    <TableHead className="hidden md:table-cell md:w-[28%]">Location</TableHead>
+                    <TableHead className="w-[34%] sm:w-[22%] md:w-[17%]">Status</TableHead>
+                    <TableHead className="hidden sm:table-cell sm:w-[26%] md:w-[17%]">Portal</TableHead>
+                    <TableHead className="w-[16%] text-right sm:w-[14%] md:w-[6%]">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {assets.map((asset) => {
-                    const lesseeOrOwner = getCurrentLesseeOrOwner(asset);
                     const isPortalListing =
                       asset.externalListingType !== 'None';
-                    const canSendProjectProperty =
-                      (asset.sourceType === EstateManagedAssetSourceType.Imported ||
-                        (asset.sourceType === EstateManagedAssetSourceType.ProjectUnit &&
-                          asset.isPublishedFromProject)) &&
-                      asset.status === EstateManagedAssetStatus.Available &&
-                      (asset.assetType === EstateManagedAssetType.Property ||
-                        asset.assetType === EstateManagedAssetType.Facility);
+                    const isDemarcationRow =
+                      asset.listingScope === 'demarcation';
+                    const portalSendUnavailableReason =
+                      asset.assetType === EstateManagedAssetType.Land && !isDemarcationRow
+                        ? 'List land through a demarcation.'
+                        : isDemarcationRow && !asset.boundaryVerified
+                          ? 'Verify this demarcation first.'
+                          : isDemarcationRow && asset.isReadyForProjectManagement
+                            ? 'Move this demarcation back to internal before sending it to Portal Listings.'
+                        : asset.status !== EstateManagedAssetStatus.Available
+                          ? 'Set the property status to Available first.'
+                          : asset.sourceType !== EstateManagedAssetSourceType.Manual &&
+                              asset.sourceType !== EstateManagedAssetSourceType.Imported &&
+                              (asset.sourceType !== EstateManagedAssetSourceType.ProjectUnit ||
+                                !asset.isPublishedFromProject)
+                            ? 'Register or import the property, or publish it from Projects first.'
+                            : null;
 
                     return (
-                      <TableRow key={asset.id}>
-                        <TableCell className="font-medium">
-                          <div>{asset.assetCode}</div>
-                          {asset.projectUnitCode &&
-                          asset.projectUnitCode !== asset.assetCode ? (
-                            <div className="text-xs text-muted-foreground">
-                              Unit {asset.projectUnitCode}
-                            </div>
-                          ) : null}
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-48 font-medium">
+                      <TableRow key={`${asset.listingScope || 'asset'}:${asset.id}`}>
+                        <TableCell className="min-w-0">
+                          <div className="truncate font-medium" title={getPropertyName(asset)}>
                             {getPropertyName(asset)}
                           </div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            {asset.unitType || typeLabels[asset.assetType]}
+                          <div className="truncate text-xs text-muted-foreground" title={asset.assetCode}>
+                            {asset.assetCode} · {asset.unitType || typeLabels[asset.assetType]}
+                          </div>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          <div className="flex min-w-0 items-center gap-1.5" title={getLocation(asset) || 'Not recorded'}>
+                            <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            <span className="truncate">{getLocation(asset) || 'Not recorded'}</span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex min-w-40 items-start gap-1.5">
-                            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            <span>{getLocation(asset) || 'Not recorded'}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {asset.purpose ||
-                            asset.zoningClassification ||
-                            'Not recorded'}
-                        </TableCell>
-                        <TableCell className="whitespace-nowrap">
-                          {formatArea(asset)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-36">
-                            {lesseeOrOwner || 'Not linked'}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-44 space-y-0.5 text-xs">
-                            {asset.dateOfTenancy ? (
-                              <div>
-                                Tenancy: {formatDate(asset.dateOfTenancy)}
-                              </div>
-                            ) : null}
-                            {asset.leaseTermYears ? (
-                              <div>Lease: {asset.leaseTermYears} years</div>
-                            ) : null}
-                            {asset.groundRentPayable != null ? (
-                              <div>
-                                Ground rent payable: {formatGroundRent(asset)}
-                              </div>
-                            ) : null}
-                            {!asset.dateOfTenancy &&
-                            !asset.leaseTermYears &&
-                            asset.groundRentPayable == null ? (
-                              <span className="text-muted-foreground">
-                                Not recorded
-                              </span>
-                            ) : null}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="min-w-32">
-                            {asset.propertyFileReference || 'Not recorded'}
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary">
+                          <Badge variant="secondary" className="max-w-full whitespace-normal text-center">
                             {statusLabels[asset.status]}
                           </Badge>
                         </TableCell>
-                        <TableCell>
-                          <div className="min-w-32">
-                            {sourceLabels[asset.sourceType]}
-                          </div>
-                          {asset.projectCode ? (
-                            <div className="mt-1 text-xs text-muted-foreground">
-                              {asset.projectCode}
-                            </div>
-                          ) : null}
+                        <TableCell className="hidden sm:table-cell">
+                          <Badge variant="outline" className="max-w-full whitespace-normal text-center">
+                            {isPortalListing ? asset.externalListingStatus || 'Draft' : 'Not sent'}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {isPortalListing || canSendProjectProperty ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              disabled={sendingListingId === asset.id}
-                              onClick={() =>
-                                void sendProjectPropertyToPortalListings(asset)
-                              }
-                            >
-                              {sendingListingId === asset.id ? (
-                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" variant="ghost" size="icon" aria-label={`Actions for ${asset.name}`} title="Actions" disabled={sendingListingId === asset.id}>
+                                {sendingListingId === asset.id
+                                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                                  : <Ellipsis className="h-4 w-4" />}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => setViewAsset(asset)}>
+                                <Eye className="mr-2 h-4 w-4" /> View details
+                              </DropdownMenuItem>
+                              {isDemarcationRow ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href="/estate/land-management">
+                                    <Settings2 className="mr-2 h-4 w-4" /> Open land management
+                                  </Link>
+                                </DropdownMenuItem>
                               ) : (
-                                <Globe2 className="mr-2 h-3.5 w-3.5" />
+                                <>
+                                  <DropdownMenuItem onSelect={() => openStatusDialog(asset)}>
+                                    <Settings2 className="mr-2 h-4 w-4" /> Change status
+                                  </DropdownMenuItem>
+                                  <DropdownMenuItem asChild>
+                                    <Link href={`/estate/property-management/EstatePropertyManagementOccupancyAvailability?assetId=${encodeURIComponent(asset.id)}`}>
+                                      <Settings2 className="mr-2 h-4 w-4" /> Open status board
+                                    </Link>
+                                  </DropdownMenuItem>
+                                </>
                               )}
-                              {isPortalListing
-                                ? 'View listing'
-                                : 'Send to portal'}
-                            </Button>
-                          ) : (
-                            <span className="px-3 text-muted-foreground">
-                              —
-                            </span>
-                          )}
+                              {isPortalListing && asset.status === EstateManagedAssetStatus.Available ? (
+                                <DropdownMenuItem asChild>
+                                  <Link href={`/estate/property-management/listings?assetId=${encodeURIComponent(asset.id)}`}>
+                                    <Globe2 className="mr-2 h-4 w-4" /> Open listing
+                                  </Link>
+                                </DropdownMenuItem>
+                              ) : null}
+                              {isPortalListing ? (
+                                <DropdownMenuItem onSelect={() => void recallFromPortalListings(asset)}>
+                                  <Globe2 className="mr-2 h-4 w-4" /> Recall from portal
+                                </DropdownMenuItem>
+                              ) : (
+                                <>
+                                  <DropdownMenuItem
+                                    disabled={Boolean(portalSendUnavailableReason)}
+                                    onSelect={() => void sendProjectPropertyToPortalListings(asset)}
+                                  >
+                                    <Globe2 className="mr-2 h-4 w-4" /> Send to portal
+                                  </DropdownMenuItem>
+                                  {portalSendUnavailableReason ? (
+                                    <DropdownMenuLabel className="max-w-56 whitespace-normal text-xs font-normal text-muted-foreground">
+                                      {portalSendUnavailableReason}
+                                    </DropdownMenuLabel>
+                                  ) : null}
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     );
@@ -492,6 +636,174 @@ export function PropertyUnitRegister() {
           {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
         </CardContent>
       </Card>
+      <Dialog open={Boolean(viewAsset)} onOpenChange={(open) => { if (!open) setViewAsset(null); }}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{viewAsset?.name || 'Property details'}</DialogTitle>
+            <DialogDescription className="sr-only">Managed asset details</DialogDescription>
+          </DialogHeader>
+          {viewAsset ? (
+            <dl className="grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+              {[
+                ['Property no.', viewAsset.assetCode],
+                ['Asset type', typeLabels[viewAsset.assetType]],
+                ['Location', getLocation(viewAsset) || 'Not recorded'],
+                ['Use', viewAsset.purpose || viewAsset.zoningClassification || 'Not recorded'],
+                ['Size', formatArea(viewAsset)],
+                ['Lessee / owner', getCurrentLesseeOrOwner(viewAsset) || 'Not linked'],
+                ['Tenancy date', formatDate(viewAsset.dateOfTenancy) || 'Not recorded'],
+                ['Lease term', viewAsset.leaseTermYears ? `${viewAsset.leaseTermYears} years` : 'Not recorded'],
+                ['Ground rent payable', formatGroundRent(viewAsset) || 'Not recorded'],
+                ['File reference', viewAsset.propertyFileReference || 'Not recorded'],
+                ['Source', sourceLabels[viewAsset.sourceType]],
+                ['Project code', viewAsset.projectCode || 'Not recorded'],
+                ['Status', statusLabels[viewAsset.status]],
+                ['Portal listing', viewAsset.externalListingType !== 'None' ? viewAsset.externalListingStatus || 'Draft' : 'Not sent'],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 border-b pb-2">
+                  <dt className="text-xs text-muted-foreground">{label}</dt>
+                  <dd className="mt-1 break-words font-medium">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(statusAsset)} onOpenChange={(open) => { if (!open) setStatusAsset(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Change property status</DialogTitle>
+            <DialogDescription>
+              {statusAsset
+                ? `${getPropertyName(statusAsset)} is currently ${statusLabels[statusAsset.status]}.`
+                : 'Update property status.'}
+            </DialogDescription>
+          </DialogHeader>
+          {statusAsset ? (
+            <div className="space-y-4">
+              <div className="grid gap-2">
+                <Label htmlFor="property-status">Status</Label>
+                <Select
+                  value={String(nextStatus)}
+                  onValueChange={(value) => {
+                    const status = Number(value) as EstateManagedAssetStatus;
+                    setNextStatus(status);
+                    if (status !== EstateManagedAssetStatus.Available) {
+                      setLeaseAvailable(false);
+                      setSaleAvailable(false);
+                    }
+                    if (status !== EstateManagedAssetStatus.Available) {
+                      setReleaseOccupant(false);
+                    }
+                  }}
+                >
+                  <SelectTrigger id="property-status">
+                    <SelectValue placeholder="Select status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {statusOptions
+                      .filter((option) =>
+                        option.value !== EstateManagedAssetStatus.LandBank ||
+                        statusAsset.assetType === EstateManagedAssetType.Land
+                      )
+                      .map((option) => (
+                        <SelectItem key={option.value} value={String(option.value)}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {nextStatus === EstateManagedAssetStatus.Available ? (
+                <div className="space-y-3 rounded-md border p-3">
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="lease-available"
+                      checked={leaseAvailable}
+                      onCheckedChange={(checked) => setLeaseAvailable(Boolean(checked))}
+                    />
+                    <Label htmlFor="lease-available">Available for lease</Label>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="sale-available"
+                      checked={saleAvailable}
+                      onCheckedChange={(checked) => setSaleAvailable(Boolean(checked))}
+                    />
+                    <Label htmlFor="sale-available">Available for sale</Label>
+                  </div>
+                  {statusAsset.status === EstateManagedAssetStatus.Leased ||
+                  statusAsset.status === EstateManagedAssetStatus.Occupied ||
+                  statusAsset.lesseeName ? (
+                    <div className="space-y-3 border-t pt-3">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          id="release-occupant"
+                          checked={releaseOccupant}
+                          onCheckedChange={(checked) => setReleaseOccupant(Boolean(checked))}
+                        />
+                        <Label htmlFor="release-occupant">Release current occupant</Label>
+                      </div>
+                      {releaseOccupant ? (
+                        <div className="grid gap-2">
+                          <Label htmlFor="actual-date">Actual move-out date</Label>
+                          <Input
+                            id="actual-date"
+                            type="date"
+                            value={actualDate}
+                            onChange={(event) => setActualDate(event.target.value)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : nextStatus === EstateManagedAssetStatus.Occupied ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="actual-date">Actual possession date</Label>
+                  <Input
+                    id="actual-date"
+                    type="date"
+                    value={actualDate}
+                    onChange={(event) => setActualDate(event.target.value)}
+                  />
+                </div>
+              ) : null}
+
+              <div className="grid gap-2">
+                <Label htmlFor="status-notes">Notes</Label>
+                <Textarea
+                  id="status-notes"
+                  value={statusNotes}
+                  onChange={(event) => setStatusNotes(event.target.value)}
+                  rows={3}
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setStatusAsset(null)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  disabled={statusSavingId === statusAsset.id}
+                  onClick={() => void saveStatus()}
+                >
+                  {statusSavingId === statusAsset.id ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : null}
+                  Save status
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <EstateAssetImportDialog open={importOpen} onOpenChange={setImportOpen} onImported={() => void loadAssets()} />
     </div>
   );

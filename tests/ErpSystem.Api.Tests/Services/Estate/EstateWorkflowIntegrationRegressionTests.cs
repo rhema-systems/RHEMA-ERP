@@ -355,8 +355,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "private async Task EnsureStampDutyPayableAsync",
             "private async Task EnsureOtherAcquisitionCostsPayableAsync");
 
-        method.Should().Contain("payment.AccountsPayableSupplierId = invoice.SupplierId;");
-        method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.SupplierId");
+        method.Should().Contain("payment.AccountsPayableSupplierId = invoice.BusinessPartnerId;");
+        method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.BusinessPartnerId");
         method.Should().NotContain("payment.AccountsPayableSupplierId = payee.Id;");
         method.Should().NotContain("[\"accountsPayableSupplierId\"] = payee.Id");
     }
@@ -652,7 +652,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         updateMethod.Should().Contain(
             "MapDemarcationToDto(demarcation, asset.AssetCode)");
         mapper.Should().Contain(
-            "LandReference = EstateLandDemarcationReference.Build(");
+            "LandReference = EstateLandDemarcationReference.DisplayReference(");
     }
 
     [Fact]
@@ -838,6 +838,32 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void LandAcquisitionWorkspace_SaveAndDocumentAccess_AreConstrainedToTheRequestedStage()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "LandAcquisitionsController.cs");
+        var saveWorkspace = Slice(
+            source,
+            "public async Task<ActionResult<LandAcquisitionWorkspaceResponse>> SaveWorkspace(",
+            "[HttpGet(\"{id:guid}/workspace/{procedureId:int}\")]");
+        var documentAccess = Slice(
+            source,
+            "[HttpGet(\"{id:guid}/documents/{documentId:guid}/download\")]",
+            "[HttpPost(\"workflow-action\")]");
+
+        saveWorkspace.Should().Contain("stageDefinition.WorkspaceKind");
+        saveWorkspace.Should().Contain("Workspace values are required.");
+        saveWorkspace.Should().Contain("ValidateWorkspacePayload(request.Values)");
+        saveWorkspace.Should().Contain("The workspace kind does not match the acquisition procedure.");
+        documentAccess.Should().Contain("CanViewStageAsync(acquisition, (int)document.Procedure");
+        documentAccess.Should().NotContain("CanAccessStageAsync(acquisition, acquisition.StageOrder");
+    }
+
+    [Fact]
     public void DemarcationEditors_ConfirmBeforeReplacingUnsavedDrafts()
     {
         var dialog = ReadSource(
@@ -975,7 +1001,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
-    public void RentBillingActivation_CreatesAnIdempotentFinanceArDraftFromLeaseTerms()
+    public void RentBillingActivation_SchedulesNextCycleAfterFirstMonthPayment()
     {
         var controller = ReadSource(
             "src",
@@ -999,9 +1025,8 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         activation.Should().Contain("asset.RentBillingActivatedAt.HasValue");
         activation.Should().Contain("Full-term leases use the one-time Estate balance invoice");
         activation.Should().Contain("asset.ExternalMonthlyRent ?? asset.ExternalListingPrice");
-        activation.Should().Contain("asset.CustomerBusinessPartnerId.Value");
-        activation.Should().Contain("BuildRentInvoiceReference(asset.AssetCode, billingStart)");
-        activation.Should().Contain("AccountCode == \"4110\"");
+        activation.Should().Contain("asset.NextRentBillingDate = billingStart.AddMonths(1);");
+        activation.Should().Contain("move-in month is covered by the Sales/Estate first month payment");
         workspace.Should().Contain("Activate billing");
         workspace.Should().Contain("asset.lastRentInvoiceId");
         workspace.Should().Contain("<ConfirmationDialog");
@@ -1211,10 +1236,12 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         var portfolio = Slice(portal,
             "public async Task<IActionResult> GetMyProperties",
             "public async Task<IActionResult> DownloadLegalTransferDraft");
-        portfolio.Should().Contain("customerIds.Contains(invoice.BusinessPartnerId)");
-        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Sent");
-        portfolio.Should().Contain("invoice.Status == InvoiceStatus.Paid");
-        portfolio.Should().Contain("invoice.Notes.Contains(\"Estate / Property Management\")");
+        portfolio.Should().Contain(".ForCustomerProperties(tenantId, customerIds)");
+        var invoiceScope = ReadSource("src", "ErpSystem.Api", "Services", "Estate", "EstateExternalInvoiceScope.cs");
+        invoiceScope.Should().Contain("ids.Contains(invoice.BusinessPartnerId)");
+        invoiceScope.Should().Contain("invoice.Status == InvoiceStatus.Sent");
+        invoiceScope.Should().Contain("invoice.Status == InvoiceStatus.Paid");
+        invoiceScope.Should().Contain("invoice.Notes.Contains(\"Estate / Property Management\")");
         portfolio.Should().Contain("_db.Set<PaymentAllocation>()");
         portfolio.Should().Contain("Receipts = receipts ?? new List<ExternalInvoiceReceiptDto>()");
         portfolio.Should().Contain("FullTermLeaseAmount");

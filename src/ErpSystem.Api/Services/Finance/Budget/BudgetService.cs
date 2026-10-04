@@ -408,6 +408,32 @@ public partial class BudgetService : IBudgetService
             throw new InvalidOperationException("Budget scenario not found for the current tenant.");
         EnsureScenarioCollecting(scenario);
 
+        var controlDimensionIds = await _context.BudgetScenarioControlDimensions
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && item.BudgetScenarioId == scenario.Id)
+            .Select(item => item.FinanceDimensionDefinitionId)
+            .ToListAsync();
+        FinanceDimensionValue? distributionValue = null;
+        if (controlDimensionIds.Count > 0 && !dto.DistributionDimensionValueId.HasValue)
+            throw new InvalidOperationException(
+                "Select a distribution value from one of this scenario's budget-control dimensions.");
+        if (dto.DistributionDimensionValueId.HasValue)
+        {
+            distributionValue = await _context.FinanceDimensionValues
+                .AsNoTracking()
+                .Include(value => value.FinanceDimensionDefinition)
+                .SingleOrDefaultAsync(value => value.TenantId == tenantId
+                    && value.Id == dto.DistributionDimensionValueId.Value
+                    && value.IsActive && !value.IsDeleted
+                    && value.FinanceDimensionDefinition.IsActive
+                    && !value.FinanceDimensionDefinition.IsDeleted);
+            if (distributionValue == null
+                || !controlDimensionIds.Contains(distributionValue.FinanceDimensionDefinitionId))
+                throw new InvalidOperationException(
+                    "The selected distribution value does not belong to this scenario's budget-control dimensions.");
+        }
+
         if (dto.SegmentValueId.HasValue)
         {
             var segmentExists = await _context.SegmentLookupValues
@@ -423,6 +449,7 @@ public partial class BudgetService : IBudgetService
             budgetReturn.TenantId == tenantId
             && budgetReturn.BudgetScenarioId == dto.BudgetScenarioId
             && budgetReturn.SegmentValueId == dto.SegmentValueId
+            && budgetReturn.DistributionDimensionValueId == dto.DistributionDimensionValueId
             && !budgetReturn.IsDeleted);
         if (duplicateReturn)
             throw new InvalidOperationException("A budget return already exists for this scenario and segment.");
@@ -443,6 +470,7 @@ public partial class BudgetService : IBudgetService
             TenantId = tenantId,
             BudgetScenarioId = dto.BudgetScenarioId,
             SegmentValueId = dto.SegmentValueId,
+            DistributionDimensionValueId = distributionValue?.Id,
             AssignedToUserId = dto.AssignedToUserId,
             ApproverUserId = dto.ApproverUserId,
             Status = DraftStatus,
@@ -462,6 +490,7 @@ public partial class BudgetService : IBudgetService
             {
                 budgetReturn.BudgetScenarioId,
                 budgetReturn.SegmentValueId,
+                budgetReturn.DistributionDimensionValueId,
                 budgetReturn.AssignedToUserId,
                 budgetReturn.ApproverUserId,
                 budgetReturn.Status
@@ -538,6 +567,7 @@ public partial class BudgetService : IBudgetService
             .AsNoTracking()
             .Include(r => r.BudgetScenario)
             .Include(r => r.SegmentValue)
+            .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
             .Where(r => r.TenantId == tenantId && r.AssignedToUserId == userId)
             .OrderByDescending(r => r.UpdatedAt ?? r.CreatedAt)
             .ToListAsync();
@@ -557,8 +587,9 @@ public partial class BudgetService : IBudgetService
             .AsNoTracking()
             .Include(r => r.BudgetScenario)
             .Include(r => r.SegmentValue)
+            .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
             .Where(r => r.TenantId == tenantId && r.BudgetScenarioId == scenarioId)
-            .OrderBy(r => r.SegmentValue!.SegmentValue)
+            .OrderBy(r => r.DistributionDimensionValue != null ? r.DistributionDimensionValue.Code : r.SegmentValue!.SegmentValue)
             .ToListAsync();
 
         return await MapToReturnDtosAsync(returns);
@@ -792,6 +823,11 @@ public partial class BudgetService : IBudgetService
         var resolvedEntries = new List<(BudgetEntrySaveDto Incoming, FinanceDimensionSet? Set)>();
         foreach (var incoming in dto.Entries)
         {
+            if (budgetReturn.DistributionDimensionValueId.HasValue
+                && !incoming.DimensionAssignments.Any(assignment =>
+                    assignment.FinanceDimensionValueId == budgetReturn.DistributionDimensionValueId.Value))
+                throw new InvalidOperationException(
+                    "Every worksheet entry must include the return's assigned distribution dimension value.");
             var set = await ResolveBudgetDimensionSetAsync(
                 tenantId, controlDimensionIds, incoming.DimensionAssignments,
                 periodById[incoming.FiscalPeriodId]);
@@ -998,6 +1034,7 @@ public partial class BudgetService : IBudgetService
         var budgetReturn = await _context.BudgetReturns
             .Include(r => r.BudgetScenario)
             .Include(r => r.SegmentValue)
+            .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
             .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id);
 
         if (budgetReturn == null)
@@ -1345,8 +1382,14 @@ public partial class BudgetService : IBudgetService
             BudgetScenarioId = budgetReturn.BudgetScenarioId,
             BudgetScenarioName = budgetReturn.BudgetScenario?.Name ?? string.Empty,
             SegmentValueId = budgetReturn.SegmentValueId,
-            SegmentValueName = budgetReturn.SegmentValue?.Description,
-            SegmentValueCode = budgetReturn.SegmentValue?.SegmentValue,
+            SegmentValueName = budgetReturn.DistributionDimensionValue?.Name
+                ?? budgetReturn.SegmentValue?.Description,
+            SegmentValueCode = budgetReturn.DistributionDimensionValue?.Code
+                ?? budgetReturn.SegmentValue?.SegmentValue,
+            DistributionDimensionValueId = budgetReturn.DistributionDimensionValueId,
+            DistributionDimensionDefinitionId = budgetReturn.DistributionDimensionValue?.FinanceDimensionDefinitionId,
+            DistributionDimensionCode = budgetReturn.DistributionDimensionValue?.Code,
+            DistributionDimensionName = budgetReturn.DistributionDimensionValue?.Name,
             AssignedToUserId = budgetReturn.AssignedToUserId,
             AssignedToUserName = budgetReturn.AssignedToUserId.HasValue
                 && userNames.TryGetValue(budgetReturn.AssignedToUserId.Value, out var assigneeName)

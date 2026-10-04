@@ -168,6 +168,7 @@ describe('Header layout', () => {
     const tenant = screen.getByText('Demo Organization');
     expect(tenant.closest('.ml-auto')).toHaveClass('shrink-0', 'items-center');
     expect(screen.getByRole('link', { name: 'Open settings' })).toHaveAttribute('href', '/settings');
+    expect(screen.queryByRole('group', { name: 'Interface style' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Session:/)).not.toBeInTheDocument();
   });
 

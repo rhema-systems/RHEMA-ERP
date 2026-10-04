@@ -1,5 +1,6 @@
 // Real API service that connects to the .NET backend
 import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
+import { browserSessionCoordinator } from './browser-session-coordinator';
 export interface ApiResponse<T> {
   data?: T;
   success: boolean;
@@ -319,17 +320,34 @@ class ApiService {
 
       // Create a proper error with the message from the API response
       // Only fall back to generic HTTP status message if no other message is available
-      const firstValidationError =
-        Array.isArray(errorData?.errors)
-          ? errorData.errors.find((e: unknown) => typeof e === 'string')
-          : (errorData?.errors && typeof errorData.errors === 'object'
-            ? Object.values(errorData.errors).flat().find((e: unknown) => typeof e === 'string')
-            : undefined);
+      const validationMessages = (() => {
+        if (Array.isArray(errorData?.errors)) {
+          return errorData.errors.filter((entry: unknown): entry is string =>
+            typeof entry === 'string' && entry.trim().length > 0);
+        }
+        if (!errorData?.errors || typeof errorData.errors !== 'object') return [] as string[];
 
-      const sourceErrorMessage = errorData.message ||
-        errorData.detail ||
-        errorData.title ||
-        firstValidationError ||
+        return Object.entries(errorData.errors).flatMap(([field, entries]) => {
+          const leaf = field.split('.').at(-1)?.replace(/^\$+/, '') || 'Request';
+          const label = leaf
+            .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+            .replace(/\bId\b/g, 'ID')
+            .replace(/^./, (value) => value.toUpperCase());
+          return (Array.isArray(entries) ? entries : [entries])
+            .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+            .map((entry) => `${label}: ${entry.trim()}`);
+        });
+      })();
+      const validationSummary = [...new Set(validationMessages)].join(' ');
+      const apiMessage = typeof errorData?.message === 'string' ? errorData.message.trim() : '';
+      const apiTitle = typeof errorData?.title === 'string' ? errorData.title.trim() : '';
+      const isGenericValidationMessage = (value: string) =>
+        /^one or more validation errors occurred\.?$/i.test(value);
+
+      const sourceErrorMessage = errorData.detail ||
+        (apiMessage && !isGenericValidationMessage(apiMessage) ? apiMessage : undefined) ||
+        validationSummary ||
+        (apiTitle && !isGenericValidationMessage(apiTitle) ? apiTitle : undefined) ||
         errorData.error ||
         `HTTP ${response.status}: ${response.statusText}`;
       const responsePath = (() => {
@@ -449,36 +467,81 @@ class ApiService {
       throw new Error('No tokens available for refresh');
     }
 
-    const response = await this.privateRequest<LoginResponse>('/auth/refresh', {
-      method: 'POST',
-      body: JSON.stringify({ token, refreshToken }),
+    const sessionVersion = browserSessionCoordinator.getSessionVersion();
+    const response = await browserSessionCoordinator.coordinateRefresh(sessionVersion, async () => {
+      const refreshed = await this.privateRequest<LoginResponse>('/auth/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ token, refreshToken }),
+      });
+
+      if (!this.isCurrentRequestSession(token) ||
+          (typeof window !== 'undefined' && localStorage.getItem('refreshToken') !== refreshToken)) {
+        throw new Error('The session changed while refreshing authentication. Please retry.');
+      }
+
+      if (refreshed.token) {
+        this.setToken(refreshed.token);
+      }
+
+      if (typeof window !== 'undefined') {
+        if (refreshed.refreshToken) {
+          localStorage.setItem('refreshToken', refreshed.refreshToken);
+        }
+        if (refreshed.expiresAt) {
+          localStorage.setItem('tokenExpiry', new Date(refreshed.expiresAt).getTime().toString());
+        }
+      }
+
+      browserSessionCoordinator.publish('token-refreshed');
+      return refreshed;
     });
 
-    if (!this.isCurrentRequestSession(token) ||
-        (typeof window !== 'undefined' && localStorage.getItem('refreshToken') !== refreshToken)) {
+    if (response) return response;
+
+    // Another tab completed the refresh while this tab waited for the shared lock. Tokens live
+    // in the existing shared storage, so return their current view without issuing another call.
+    this.syncTokenFromStorage();
+    const storedToken = this.token;
+    if (!storedToken || typeof window === 'undefined') {
       throw new Error('The session changed while refreshing authentication. Please retry.');
     }
 
-    if (response.token) {
-      this.setToken(response.token);
+    const storedUser = localStorage.getItem('user');
+    const storedExpiry = Number.parseInt(localStorage.getItem('tokenExpiry') || '', 10);
+    let user: UserInfo | undefined;
+    if (storedUser) {
+      try {
+        user = JSON.parse(storedUser) as UserInfo;
+      } catch {
+        // The refreshed credentials are still usable. The normal /auth/me path can repopulate
+        // a malformed cached user record without causing a second refresh request.
+      }
     }
-
-    if (response.refreshToken && typeof window !== 'undefined') {
-      localStorage.setItem('refreshToken', response.refreshToken);
-    }
-
-    return response;
+    return {
+      token: storedToken,
+      refreshToken: localStorage.getItem('refreshToken') || undefined,
+      expiresAt: Number.isFinite(storedExpiry) ? new Date(storedExpiry).toISOString() : undefined,
+      user,
+    };
   }
 
   public async logout(refreshToken?: string): Promise<void> {
+    this.syncTokenFromStorage();
+    const token = this.token;
+    const sessionRefreshToken = refreshToken ??
+      (typeof window !== 'undefined' ? localStorage.getItem('refreshToken') ?? undefined : undefined);
     try {
-      const body = refreshToken ? { refreshToken } : undefined;
+      const body = sessionRefreshToken ? { refreshToken: sessionRefreshToken } : undefined;
       await this.privateRequest('/auth/logout', {
         method: 'POST',
         body: body ? JSON.stringify(body) : undefined,
       });
     } finally {
-      this.clearToken();
+      // A slow logout from a stale tab must not erase a login or refresh completed elsewhere.
+      if (this.isCurrentRequestSession(token) &&
+          (typeof window === 'undefined' || localStorage.getItem('refreshToken') === sessionRefreshToken)) {
+        this.clearToken();
+      }
     }
   }
 
@@ -580,8 +643,9 @@ class ApiService {
       }
     }
 
+    const requestStartedAt = Date.now();
     try {
-      const startTime = Date.now();
+      const startTime = requestStartedAt;
       const response = await fetch(url, config);
       const endTime = Date.now();
       const duration = endTime - startTime;
@@ -609,7 +673,11 @@ class ApiService {
       const error = this.normalizeFetchError(caught, method, endpoint);
 
       // Handle 401 errors with token refresh attempt (only once)
-      if (error.status === 401 && includeAuth && retryCount === 0 && this.isCurrentRequestSession(requestToken)) {
+      const currentRequestSession = this.isCurrentRequestSession(requestToken);
+      const peerRefreshedThisRequest = !currentRequestSession &&
+        browserSessionCoordinator.wasTokenRefreshedAfter(requestStartedAt);
+
+      if (error.status === 401 && includeAuth && retryCount === 0 && (currentRequestSession || peerRefreshedThisRequest)) {
         // Don't retry for auth endpoints to avoid infinite loops
         const isAuthEndpoint = endpoint.includes('/auth/login') ||
           endpoint.includes('/auth/refresh') ||
@@ -622,7 +690,9 @@ class ApiService {
 
           try {
             // Attempt to refresh token
-            await this.refreshToken();
+            if (currentRequestSession) {
+              await this.refreshToken();
+            }
 
             if (!silent && this.enableApiDebugLogging) {
               console.log('✅ Token refreshed, retrying original request...');
@@ -640,6 +710,7 @@ class ApiService {
 
             // Clear tokens and trigger session blacklist event
             this.clearToken();
+            browserSessionCoordinator.publish('session-expired');
 
             // Trigger session blacklist event since token refresh failed
             if (typeof window !== 'undefined') {
@@ -678,6 +749,7 @@ class ApiService {
     const requestToken = new Headers(config.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
     const method = options.method || 'GET';
 
+    const requestStartedAt = Date.now();
     try {
       const response = await fetch(url, config);
 
@@ -692,15 +764,22 @@ class ApiService {
         error = e;
       }
 
-      if (error?.status === 401 && retryCount === 0 && this.isCurrentRequestSession(requestToken)) {
+      const currentRequestSession = this.isCurrentRequestSession(requestToken);
+      const peerRefreshedThisRequest = !currentRequestSession &&
+        browserSessionCoordinator.wasTokenRefreshedAfter(requestStartedAt);
+
+      if (error?.status === 401 && retryCount === 0 && (currentRequestSession || peerRefreshedThisRequest)) {
         try {
-          await this.refreshToken();
+          if (currentRequestSession) {
+            await this.refreshToken();
+          }
           return this.privateBlobRequest(endpoint, options, retryCount + 1);
         } catch {
           if (!this.isCurrentRequestSession(requestToken)) {
             throw error;
           }
           this.clearToken();
+          browserSessionCoordinator.publish('session-expired');
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('session-blacklisted', {
               detail: {

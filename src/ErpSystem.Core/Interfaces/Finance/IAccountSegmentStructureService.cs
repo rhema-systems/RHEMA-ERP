@@ -61,11 +61,7 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// <summary>
         /// Reorders segments according to the provided list of new positions.
         /// 
-        /// PROCESS:
-        /// 1. Validate new positions (must be sequential 1..N, no duplicates).
-        /// 2. Update SegmentStructure entities.
-        /// 3. Update existing AccountSegmentValue positions.
-        /// 4. Regenerate AccountNumber for all affected accounts.
+        /// Reordering is allowed only while every segment is Draft and no account identity exists.
         /// </summary>
         Task ReorderSegmentsAsync(List<ReorderSegmentDto> reorderList, CancellationToken cancellationToken = default);
 
@@ -78,9 +74,5 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// </summary>
         Task DeleteAsync(Guid id, AccountSegmentDeleteDto dto, CancellationToken cancellationToken = default);
 
-        /// <summary>
-        /// Forces regeneration of all account numbers based on current segment structure and positions.
-        /// </summary>
-        Task RegenerateAccountNumbersAsync(CancellationToken cancellationToken = default);
     }
 }

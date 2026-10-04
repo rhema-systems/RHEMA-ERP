@@ -18,6 +18,7 @@ using ErpSystem.Core.Models;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using ErpSystem.Api.Services.DocumentManagement;
+using ErpSystem.Api.Services.Estate;
 using ErpSystem.Api.Services.Notifications;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -1312,21 +1313,20 @@ public sealed class DocumentManagementController : ControllerBase
         {
             var customerCase = await _db.ProcedureCases
                 .AsNoTracking()
-                .Where(item => item.Id == record.SourceRecordId.Value
+                .FirstOrDefaultAsync(item => item.Id == record.SourceRecordId.Value
                     && item.TenantId == record.TenantId
                     && !item.IsDeleted
-                    && item.EntityType == "EstatePropertyManagementListingApplication")
-                .Select(item => new
-                {
-                    item.Id,
-                    item.OpenedById,
-                    item.ReferenceNumber
-                })
-                .FirstOrDefaultAsync(cancellationToken);
+                    && item.EntityType == "EstatePropertyManagementListingApplication",
+                    cancellationToken);
             if (customerCase is null)
             {
                 return;
             }
+            var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(
+                _db,
+                customerCase,
+                cancellationToken);
+            if (recipientIds.Count == 0) return;
 
             var returned = normalizedAction is "return" or "returnforaction";
             var customerTitle = returned
@@ -1336,23 +1336,26 @@ public sealed class DocumentManagementController : ControllerBase
                 ? $"Your agreement for {customerCase.ReferenceNumber ?? record.DocumentReference} was returned for correction. {TrimToNull(request.Notes) ?? "Please upload a corrected signed PDF."}"
                 : $"Your final signed agreement for {customerCase.ReferenceNumber ?? record.DocumentReference} is ready to view and download.";
 
-            await _notificationService.CreateInAppNotificationAsync(
-                customerCase.OpenedById,
-                customerTitle,
-                customerMessage,
-                returned
-                    ? "estate.property.agreement-correction-required"
-                    : "estate.property.final-agreement-ready",
-                new Dictionary<string, object>
-                {
-                    ["EntityType"] = "ProcedureCase",
-                    ["EntityId"] = customerCase.Id,
-                    ["ActionUrl"] = "/external-portal/my-property-requests",
-                    ["documentReference"] = record.DocumentReference,
-                    ["lifecycleStatus"] = record.LifecycleStatus,
-                    ["sourceModule"] = record.SourceModule
-                },
-                record.TenantId);
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateInAppNotificationAsync(
+                    recipientId,
+                    customerTitle,
+                    customerMessage,
+                    returned
+                        ? "estate.property.agreement-correction-required"
+                        : "estate.property.final-agreement-ready",
+                    new Dictionary<string, object>
+                    {
+                        ["EntityType"] = "ProcedureCase",
+                        ["EntityId"] = customerCase.Id,
+                        ["ActionUrl"] = $"/external-portal/my-property-requests/{customerCase.Id}",
+                        ["documentReference"] = record.DocumentReference,
+                        ["lifecycleStatus"] = record.LifecycleStatus,
+                        ["sourceModule"] = record.SourceModule
+                    },
+                    record.TenantId);
+            }
         }
         catch
         {

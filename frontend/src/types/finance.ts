@@ -39,7 +39,8 @@ export type ExchangeRateType =
   | 'YearEnd'
   | 'Budget'
   | 'Fixed'
-  | 'Spot';
+  | 'Spot'
+  | 'GhanaStatutory';
 export type ExchangeRateQuoteSide = 'Mid' | 'Buying' | 'Selling';
 export type PeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
 export type RevaluationFrequency =
@@ -132,6 +133,7 @@ export interface FiscalPeriod {
   periodNumber: number;
   periodCode: string;
   periodName: string;
+  periodType?: PeriodType;
   startDate: string;
   endDate: string;
   periodStatus: PeriodStatus;
@@ -698,6 +700,7 @@ export interface SegmentStructure {
   lifecycleStatus: 'Draft' | 'Active' | 'Frozen' | 'Retired';
   rowVersion: string;
   accountUsageCount: number;
+  totalAccountCount: number;
   canActivate: boolean;
   canFreeze: boolean;
   isSystemDefined: boolean;
@@ -1366,6 +1369,9 @@ export interface FinanceSettings {
   coaType: 'Standard' | 'Segmented';
   coaConfigurationLocked: boolean;
   baseCurrency: string;
+  baseCurrencyName?: string;
+  baseCurrencySymbol?: string;
+  baseCurrencyDecimalPlaces?: number;
   whtStatutoryYearStartMonth?: number;
   whtStatutoryYearStartDay?: number;
   accountSeparator?: string;
@@ -1417,6 +1423,22 @@ export interface FinanceSettings {
   minimumReversalReasonLength?: number;
   enforceFinanceAccessScopes?: boolean;
   requireDepreciationBeforePeriodClose?: boolean;
+  unitPriceDecimalPlaces?: number;
+  exchangeRateInputDecimalPlaces?: number;
+  exchangeRateDisplayDecimalPlaces?: number;
+  taxPercentageDecimalPlaces?: number;
+  taxRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  taxRoundingScope?: 'Line' | 'TaxCodeGroup' | 'Document';
+  taxRoundingIncrement?: number | null;
+  invoiceRoundingEnabled?: boolean;
+  invoiceRoundingIncrement?: number | null;
+  invoiceRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  invoiceRoundingGainAccountId?: string | null;
+  invoiceRoundingLossAccountId?: string | null;
+  settlementToleranceAmount?: number;
+  settlementTolerancePercentage?: number;
+  reportDisplayDecimalPlaces?: number;
+  precisionAccountingPolicyLocked?: boolean;
   apInvoicePriceTolerancePercent: number;
   apInvoiceQuantityTolerancePercent: number;
   /** True when posted transactions exist — base currency and control accounts become locked */
@@ -1424,6 +1446,8 @@ export interface FinanceSettings {
 }
 
 export interface UpdateFinanceSettingsDto {
+  supplierAdvanceAccountId?: string;
+  customerAdvanceAccountId?: string;
   coaType?: 'Standard' | 'Segmented';
   baseCurrency?: string;
   whtStatutoryYearStartMonth?: number;
@@ -1472,6 +1496,21 @@ export interface UpdateFinanceSettingsDto {
   minimumReversalReasonLength?: number;
   enforceFinanceAccessScopes?: boolean;
   requireDepreciationBeforePeriodClose?: boolean;
+  unitPriceDecimalPlaces?: number;
+  exchangeRateInputDecimalPlaces?: number;
+  exchangeRateDisplayDecimalPlaces?: number;
+  taxPercentageDecimalPlaces?: number;
+  taxRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  taxRoundingScope?: 'Line' | 'TaxCodeGroup' | 'Document';
+  taxRoundingIncrement?: number | null;
+  invoiceRoundingEnabled?: boolean;
+  invoiceRoundingIncrement?: number | null;
+  invoiceRoundingMethod?: 'Nearest' | 'Up' | 'Down';
+  invoiceRoundingGainAccountId?: string | null;
+  invoiceRoundingLossAccountId?: string | null;
+  settlementToleranceAmount?: number;
+  settlementTolerancePercentage?: number;
+  reportDisplayDecimalPlaces?: number;
   apInvoicePriceTolerancePercent?: number;
   apInvoiceQuantityTolerancePercent?: number;
 }
@@ -3078,6 +3117,8 @@ export interface RevaluationDetailDto {
 
 // Year End Close
 export interface YearEndCloseRequestDto {
+  accountingBookId: string;
+  idempotencyKey: string;
   fiscalYearId: string;
   retainedEarningsAccountId: string;
   closingNotes?: string;

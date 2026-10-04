@@ -70,7 +70,11 @@ function Invoke-RhemaFreshApiCli {
           [int]$TimeoutSeconds = 3600,
           [string]$OperationalUatPassword,
           [string]$ExpectedQsDatabase,
-          [switch]$AutoApproveQsUat)
+          [switch]$AutoApproveQsUat,
+          [switch]$ReconcileUnapprovedQsDrafts)
+    if ($ReconcileUnapprovedQsDrafts -and -not $AutoApproveQsUat) {
+        throw 'ReconcileUnapprovedQsDrafts requires AutoApproveQsUat.'
+    }
     if ($Command -eq 'seed-qs-uat') {
         $qsTarget = New-Object System.Data.SqlClient.SqlConnectionStringBuilder $ConnectionString
         if ($ExpectedQsDatabase -cnotmatch '^RhemaERP_(VpsTest|QsUatVerify)_[A-Za-z0-9_]+$' -or
@@ -112,6 +116,7 @@ function Invoke-RhemaFreshApiCli {
         $start.EnvironmentVariables['QsUat__Enabled']='true'
         $start.EnvironmentVariables['QsUat__ExpectedDatabase']=$ExpectedQsDatabase
         $start.EnvironmentVariables['QsUat__AutoApprove']= if($AutoApproveQsUat) { 'true' } else { 'false' }
+        $start.EnvironmentVariables['QsUat__ReconcileUnapprovedDrafts']= if($ReconcileUnapprovedQsDrafts) { 'true' } else { 'false' }
         $start.EnvironmentVariables['DOTNET_GCHeapHardLimit']='0x200000000'
     }
     if (-not [string]::IsNullOrWhiteSpace($OperationalUatPassword)) {
@@ -141,6 +146,7 @@ function Invoke-RhemaFreshApiCli {
             ExceptionTypes=@([regex]::Matches($raw,'\b(?:System|Microsoft)\.[A-Za-z.]+Exception\b') | ForEach-Object Value | Sort-Object -Unique);
             SqlErrorNumbers=@([regex]::Matches($raw,'Error Number:\s*(\d+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique);
             GuardCodes=@([regex]::Matches($raw,'\b(?:CANONICAL|C[1-8]|FINANCE|TDC|AP|AR|PROCUREMENT|ESTATE|QS)_[A-Z0-9_]{3,90}:') | ForEach-Object { $_.Value.TrimEnd(':') } | Sort-Object -Unique)
+            QsDecisionCodes=@([regex]::Matches($raw,'\bQS-DEC-[0-9]{3}\b') | ForEach-Object Value | Sort-Object -Unique)
             QsStages=@([regex]::Matches($raw,'QS_UAT_STAGE\|[A-Z_]+') | ForEach-Object Value)
             MissingServices=@([regex]::Matches($raw,"Unable to resolve service for type '([A-Za-z0-9_.`]+)'") | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
         }

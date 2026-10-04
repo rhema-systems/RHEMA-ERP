@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -51,6 +52,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private readonly IProcurementAcceptedSupplyService? _acceptedSupply;
         private readonly IFinanceBudgetCommitmentService? _budgetCommitments;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthorities;
         private readonly ErpSystem.Core.Interfaces.Inventory.ILandedCostService? _landedCosts;
         private readonly IProcurementAccessControlService? _receiptAccess;
 
@@ -72,7 +74,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IFinanceSourceDimensionService? sourceDimensions = null,
             ErpSystem.Core.Interfaces.Inventory.ILandedCostService? landedCosts = null,
             IWorkflowIntegrationService? workflowIntegration = null,
-            IProcurementAccessControlService? receiptAccess = null)
+            IProcurementAccessControlService? receiptAccess = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthorities = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -92,6 +95,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _acceptedSupply = acceptedSupply;
             _budgetCommitments = budgetCommitments;
             _sourceDimensions = sourceDimensions;
+            _sourceBookAuthorities = sourceBookAuthorities;
             _landedCosts = landedCosts;
             _receiptAccess = receiptAccess;
         }
@@ -316,6 +320,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken,
             bool deferSupplierWithholdingDecision = false)
         {
+            ValidateLeaseCreate(dto);
             if (dto.EstateAcquisitionId.HasValue && !_unitOfWork.HasActiveTransaction)
             {
                 var attempted = false;
@@ -354,11 +359,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.PurchaseOrderId,
                 acceptedSupply?.Kind,
                 dto.LineItems,
-                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue || HasLeaseSource(dto) ||
                 dto.LineItems.Any(line => line.LandedCostItemId.HasValue));
             var currencyOverrideReason = ResolveCurrencyOverrideReason(
                 dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
-                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue ||
+                dto.AutoInvoiceRequestId.HasValue || dto.EstateAcquisitionId.HasValue || HasLeaseSource(dto) ||
                 dto.LineItems.Any(line => line.LandedCostItemId.HasValue) || acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
             var capturedPartnerDefaults = await ApplyBusinessPartnerCreateDefaultsAsync(dto, supplier, cancellationToken);
@@ -411,6 +416,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Id = Guid.NewGuid(),
                 TenantId = TenantId,
                 InvoiceNumber = invoiceNumber,
+                LeaseScheduleLineId = dto.LeaseScheduleLineId,
+                ReplacesLeaseVendorInvoiceId = dto.ReplacesLeaseVendorInvoiceId,
+                LeaseAccountingBookId = dto.LeaseAccountingBookId,
+                LeaseAccountingBookCode = dto.LeaseAccountingBookCode,
+                LeaseFunctionalCurrencyCode = dto.LeaseFunctionalCurrencyCode,
                 AutoInvoiceRequestId = dto.AutoInvoiceRequestId, AutoInvoiceRequestHash = dto.AutoInvoiceRequestHash,
                 EstateAcquisitionId = dto.EstateAcquisitionId, EstatePayableKind = dto.EstatePayableKind,
                 SupplierInvoiceNumber = dto.SupplierInvoiceNumber,
@@ -463,6 +473,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 CreatedBy = UserName
             };
             ApplyAcceptedSupply(invoice, acceptedSupply);
+            var invoiceDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                invoice.CurrencyCode, cancellationToken);
+            var precisionSettings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                NormalizeCurrency(precisionSettings.BaseCurrency, "GHS"), cancellationToken);
 
             // ── Process line items ──────────────────────────────────────
             decimal subtotal = 0;
@@ -471,14 +486,15 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
-                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AP invoice line", cancellationToken);
+                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice, invoiceDecimalPlaces);
                 var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
                     lineGross,
                     lineDto.DiscountPercentage,
-                    "AP invoice line");
-                var lineNet = lineGross - lineDiscount;
-                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, supplier.Id, dto.IsOpeningBalance, cancellationToken);
-
+                    "AP invoice line",
+                    invoiceDecimalPlaces);
+                var lineNet = RoundMoney(lineGross - lineDiscount, invoiceDecimalPlaces);
                 var lineItem = new VendorInvoiceLineItem
                 {
                     Id = lineDto.Id is { } requestedLineId && requestedLineId != Guid.Empty
@@ -486,6 +502,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         : Guid.NewGuid(),
                     TenantId = TenantId,
                     VendorInvoiceId = invoice.Id,
+                    LeaseComponent = lineDto.LeaseComponent,
                     LandedCostItemId = lineDto.LandedCostItemId,
                     LineItemType = lineDto.LineItemType,
                     GLAccountId = lineDto.GLAccountId,
@@ -497,8 +514,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     UnitPrice = lineDto.UnitPrice,
                     TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId,
                     TaxTreatment = lineDto.TaxTreatment,
-                    TaxRate = lineTax.TaxRate,
-                    TaxAmount = lineTax.TaxAmount,
+                    TaxRate = lineDto.TaxRate,
+                    TaxAmount = 0m,
                     TaxCode = lineDto.TaxCode,
                     DiscountPercentage = lineDto.DiscountPercentage,
                     DiscountAmount = lineDiscount,
@@ -509,28 +526,31 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 invoice.LineItems.Add(lineItem);
                 subtotal += lineNet;
-                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
 
-            invoice.SubTotal = subtotal;
-            invoice.TaxAmount = totalTax;
-            invoice.DiscountAmount = totalDiscount;
-            invoice.TotalAmount = subtotal + totalTax;
+            totalTax = await RecalculateApDocumentTaxesAsync(invoice, dto.IsOpeningBalance, cancellationToken);
+
+            invoice.SubTotal = RoundMoney(subtotal, invoiceDecimalPlaces);
+            invoice.TaxAmount = RoundMoney(totalTax, invoiceDecimalPlaces);
+            invoice.DiscountAmount = RoundMoney(totalDiscount, invoiceDecimalPlaces);
+            invoice.TotalAmount = RoundMoney(subtotal + totalTax, invoiceDecimalPlaces);
             invoice.PaidAmount = 0;
-            invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
+            invoice.BaseCurrencyAmount = RoundMoney(
+                invoice.TotalAmount * invoice.ExchangeRate, functionalDecimalPlaces);
 
             // This is an invoice estimate only. The actual liability and annual threshold are
             // recalculated from allocations when the supplier payment is created.
-            invoice.WithholdingTaxAmount = decimal.Round(
+            invoice.WithholdingTaxAmount = RoundMoney(
                 invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
-                2,
-                MidpointRounding.AwayFromZero);
+                invoiceDecimalPlaces);
 
             // Early payment discount amount
             if (invoice.EarlyPaymentDiscountPercentage > 0)
             {
-                invoice.EarlyPaymentDiscountAmount = invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100);
+                invoice.EarlyPaymentDiscountAmount = RoundMoney(
+                    invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100m),
+                    invoiceDecimalPlaces);
             }
 
             if (producer is not null)
@@ -600,6 +620,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             ValidateLandedCostInvoiceUpdate(invoice, dto);
             ValidateAutoInvoiceUpdate(invoice, dto);
+            ValidateLeaseInvoiceUpdate(invoice, dto);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
 
             var previousBudgetKey = BuildVendorInvoiceBudgetMutationKey(invoice);
             var previouslyBudgetRelevant = invoice.LineItems.Any(line =>
@@ -640,11 +662,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.PurchaseOrderId,
                 acceptedSupply?.Kind,
                 dto.LineItems,
-                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue || invoice.LeaseScheduleLineId.HasValue ||
                 invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue));
             var currencyOverrideReason = ResolveCurrencyOverrideReason(
                 dto.CurrencyCode, supplier.Currency, dto.PurchaseOrderId, dto.CurrencyOverrideReason,
-                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue ||
+                invoice.AutoInvoiceRequestId.HasValue || invoice.EstateAcquisitionId.HasValue || invoice.LeaseScheduleLineId.HasValue ||
                 invoice.LineItems.Any(line => !line.IsDeleted && line.LandedCostItemId.HasValue) ||
                 acceptedSupply?.Kind == ProcurementAcceptedSupplyKind.WorksPaymentCertificate);
 
@@ -686,6 +708,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             InvalidateMatching(invoice, "Invoice content changed after its previous matching evaluation.");
             invoice.UpdatedAt = now;
             invoice.UpdatedBy = UserName;
+            var invoiceDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                invoice.CurrencyCode, cancellationToken);
+            var precisionSettings = await GetFinanceSettingsAsync(cancellationToken);
+            var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                NormalizeCurrency(precisionSettings.BaseCurrency, "GHS"), cancellationToken);
 
             // If rejected, reset back to draft
             if (invoice.Status == VendorInvoiceStatus.Rejected)
@@ -719,14 +746,15 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var lineDto in dto.LineItems)
             {
-                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice);
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, lineDto.Unit, lineDto.Quantity, "AP invoice line", cancellationToken);
+                var lineGross = RoundMoney(lineDto.Quantity * lineDto.UnitPrice, invoiceDecimalPlaces);
                 var lineDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
                     lineGross,
                     lineDto.DiscountPercentage,
-                    "AP invoice line");
-                var lineNet = lineGross - lineDiscount;
-                var lineTax = await ResolveApLineTaxAsync(lineDto, lineNet, dto.InvoiceDate, invoice.BusinessPartnerId, dto.IsOpeningBalance, cancellationToken);
-
+                    "AP invoice line",
+                    invoiceDecimalPlaces);
+                var lineNet = RoundMoney(lineGross - lineDiscount, invoiceDecimalPlaces);
                 VendorInvoiceLineItem? persistedLine = null;
                 var isExistingLine = lineDto.Id.HasValue
                     && existingLines.TryGetValue(lineDto.Id.Value, out persistedLine);
@@ -752,8 +780,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 lineItem.UnitPrice = lineDto.UnitPrice;
                 lineItem.TaxGroupId = dto.IsOpeningBalance ? null : lineDto.TaxGroupId;
                 lineItem.TaxTreatment = lineDto.TaxTreatment;
-                lineItem.TaxRate = lineTax.TaxRate;
-                lineItem.TaxAmount = lineTax.TaxAmount;
+                lineItem.TaxRate = lineDto.TaxRate;
+                lineItem.TaxAmount = 0m;
                 lineItem.TaxCode = lineDto.TaxCode;
                 lineItem.DiscountPercentage = lineDto.DiscountPercentage;
                 lineItem.DiscountAmount = lineDiscount;
@@ -766,25 +794,29 @@ namespace ErpSystem.Api.Services.Finance.AP
                     await _unitOfWork.Repository<VendorInvoiceLineItem>().AddAsync(lineItem);
                 }
                 subtotal += lineNet;
-                totalTax += lineTax.TaxAmount;
                 totalDiscount += lineDiscount;
             }
 
-            invoice.SubTotal = subtotal;
-            invoice.TaxAmount = totalTax;
-            invoice.DiscountAmount = totalDiscount;
-            invoice.TotalAmount = subtotal + totalTax;
-            invoice.BaseCurrencyAmount = invoice.TotalAmount * invoice.ExchangeRate;
+            totalTax = await RecalculateApDocumentTaxesAsync(invoice, dto.IsOpeningBalance, cancellationToken);
+
+            invoice.SubTotal = RoundMoney(subtotal, invoiceDecimalPlaces);
+            invoice.TaxAmount = RoundMoney(totalTax, invoiceDecimalPlaces);
+            invoice.DiscountAmount = RoundMoney(totalDiscount, invoiceDecimalPlaces);
+            invoice.TotalAmount = RoundMoney(subtotal + totalTax, invoiceDecimalPlaces);
+            invoice.BaseCurrencyAmount = RoundMoney(
+                invoice.TotalAmount * invoice.ExchangeRate, functionalDecimalPlaces);
 
             // Assign zero explicitly when WHT is removed so a draft edit cannot retain a stale
             // deduction from the invoice's previous configured category.
-            invoice.WithholdingTaxAmount = decimal.Round(
+            invoice.WithholdingTaxAmount = RoundMoney(
                 invoice.SubTotal * (invoice.WithholdingTaxRate / 100m),
-                2,
-                MidpointRounding.AwayFromZero);
+                invoiceDecimalPlaces);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
 
             if (invoice.EarlyPaymentDiscountPercentage > 0)
-                invoice.EarlyPaymentDiscountAmount = invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100);
+                invoice.EarlyPaymentDiscountAmount = RoundMoney(
+                    invoice.TotalAmount * (invoice.EarlyPaymentDiscountPercentage / 100m),
+                    invoiceDecimalPlaces);
 
             var currentBudgetKey = BuildVendorInvoiceBudgetMutationKey(invoice);
             var currentlyBudgetRelevant = invoice.LineItems.Any(line =>
@@ -845,6 +877,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("Only draft invoices can be deleted.");
 
             if (await DeleteLandedCostInvoiceDraftAsync(invoice, cancellationToken)) return;
+            if (await DeleteLeaseInvoiceDraftAsync(invoice, cancellationToken)) return;
 
             await _unitOfWork.Repository<VendorInvoice>().DeleteAsync(invoice);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -941,6 +974,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
 
             if (invoice.IsOpeningBalance || invoice.AutoInvoiceRequestId.HasValue)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -953,6 +988,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice = await LoadInvoiceForPostingAsync(invoice.Id, cancellationToken);
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
             var budgetRequest = await BuildVendorInvoiceBudgetRequestAsync(
                 invoice, "Submit", useSourceDimensions: producer is not null, cancellationToken);
             if (producer is not null)
@@ -990,7 +1027,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invalidDirectCompletion = !submission.ApprovalRequired &&
                 (submission.Outcome != WorkflowOutcome.Approved || workflowResult.WorkflowInstanceId.HasValue ||
                  invoice.ApprovedById.HasValue || invoice.ApprovedDate.HasValue);
-            if (!workflowResult.Success || invalidDirectCompletion)
+            var invalidLeaseWorkflow = invoice.LeaseScheduleLineId.HasValue &&
+                (!submission.ApprovalRequired || submission.Outcome != WorkflowOutcome.Pending ||
+                 !workflowResult.WorkflowInstanceId.HasValue);
+            if (!workflowResult.Success || invalidDirectCompletion || invalidLeaseWorkflow)
             {
                 await ReleaseVendorInvoiceBudgetAsync(
                     invoice.Id,
@@ -1014,10 +1054,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.UpdatedBy = UserName;
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                throw new InvalidOperationException(invalidDirectCompletion
+                throw new InvalidOperationException(invalidLeaseWorkflow
+                    ? "A governed lease supplier invoice requires an active maker/checker approval workflow."
+                    : invalidDirectCompletion
                     ? "The invoice cannot complete directly with an approval instance or recorded human approval."
                     : workflowResult.Message ?? "Unable to start vendor invoice approval workflow.");
             }
+            if (invoice.LeaseScheduleLineId.HasValue)
+                await FreezeLeaseInvoiceBookAuthorityAsync(
+                    invoice,
+                    workflowResult.WorkflowInstanceId!.Value,
+                    cancellationToken);
 
             invoice.ApprovalRequired = submission.ApprovalRequired;
             if (!submission.ApprovalRequired)
@@ -1119,6 +1166,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
 
             if (invoice.IsOpeningBalance || invoice.AutoInvoiceRequestId.HasValue)
                 await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -1232,9 +1281,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 return await PostInCurrentTransactionAsync(id, producer, cancellationToken);
             var scope = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(i =>
                 i.Id == id && i.TenantId == TenantId && !i.IsDeleted).AsNoTracking()
-                .Select(i => new { i.PurchaseOrderId, i.AutoInvoiceRequestId, i.AcceptedSupplyKind, i.EstateAcquisitionId, Landed = i.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue) })
+                .Select(i => new { i.PurchaseOrderId, i.AutoInvoiceRequestId, i.AcceptedSupplyKind, i.EstateAcquisitionId, i.LeaseScheduleLineId, Landed = i.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue) })
                 .SingleOrDefaultAsync(cancellationToken) ?? throw new KeyNotFoundException("Invoice not found.");
-            if (!scope.PurchaseOrderId.HasValue && !scope.AutoInvoiceRequestId.HasValue && !scope.AcceptedSupplyKind.HasValue && !scope.EstateAcquisitionId.HasValue && !scope.Landed)
+            if (!scope.PurchaseOrderId.HasValue && !scope.AutoInvoiceRequestId.HasValue && !scope.AcceptedSupplyKind.HasValue && !scope.EstateAcquisitionId.HasValue && !scope.LeaseScheduleLineId.HasValue && !scope.Landed)
                 return await PostInCurrentTransactionAsync(id, producer, cancellationToken);
             return await _unitOfWork.ExecuteInStrategyAsync(async () =>
             {
@@ -1268,11 +1317,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (_unitOfWork.HasActiveTransaction)
                 await _unitOfWork.AcquireTransactionLockAsync($"ap-invoice-post:{TenantId:N}:{id:N}", cancellationToken);
             var invoice = await LoadInvoiceForPostingAsync(id, cancellationToken);
+            foreach (var line in invoice.LineItems.Where(line => !line.IsDeleted))
+            {
+                await UnitAccounting.FinanceQuantityPrecisionAdapter.ValidateAsync(
+                    _unitOfWork, TenantId, line.Unit, line.Quantity, "AP invoice posting", cancellationToken);
+            }
             if ((RequiresProcurementMatch(invoice) || IsLandedCostInvoice(invoice)) && !_unitOfWork.HasActiveTransaction)
                 throw new InvalidOperationException("The invoice source changed. Refresh before posting.");
             try
             {
                 await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
+                EnsureLeaseTaxReviewed(invoice);
                 if (invoice.AutoInvoiceRequestId.HasValue && !invoice.JournalEntryId.HasValue)
                     await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
                 if (!invoice.JournalEntryId.HasValue && RequiresProcurementMatch(invoice))
@@ -1294,6 +1350,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         requireCurrentBudgetEvidence: invoice.LineItems.Any(line => line.BudgetEntryId.HasValue),
                         cancellationToken);
                 }
+                if (invoice.LeaseScheduleLineId.HasValue)
+                    await RequireLeaseInvoiceBookAuthorityForPostingAsync(invoice, cancellationToken);
                 var wasAlreadyLinked = invoice.JournalEntryId.HasValue;
                 // Procured assets are capitalized from the accepted receipt carrying value by
                 // FIN-INT-007. Their later supplier invoice clears GRV only, so treating those lines
@@ -1319,6 +1377,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var postingResult = producer is null
                     ? await _financePostingEngine.PostAsync(postingRequest, cancellationToken)
                     : await _financePostingEngine.PostAsync(postingRequest, producer, cancellationToken);
+                await BindLeaseInvoiceBookAuthorityAsync(invoice, postingResult, cancellationToken);
                 if (!postingResult.WasDuplicate && receiptCostPlans.Count > 0)
                     await PersistReceiptCostsAsync(invoice, receiptCostPlans, postingResult.PostingEventId,
                         postingResult.JournalEntryId, cancellationToken);
@@ -1335,6 +1394,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.UpdatedBy = UserName;
                     await _unitOfWork.SaveChangesAsync(cancellationToken);
                 }
+                await ApplyLeaseAccountingStatusAsync(invoice, posted: true, cancellationToken);
 
                 if (hasDirectApFixedAssetLines)
                 {
@@ -1624,12 +1684,22 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .FirstOrDefaultAsync(cancellationToken)
                     ?? throw new KeyNotFoundException($"Vendor invoice with Id '{id}' not found.");
                 await AcquireReceiptInvoiceLocksAsync(invoice, cancellationToken);
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
                 if (await _unitOfWork.Repository<InventorySupplierReturnAllocation>().GetQueryable(x => x.TenantId == TenantId &&
                     x.OriginalVendorInvoiceId == invoice.Id && !x.IsDeleted).AnyAsync(cancellationToken))
                     throw new InvalidOperationException("This invoice retains a dispatched supplier return. Complete its governed return credit lifecycle; voiding the original invoice cannot release its receipt claims.");
 
                 if (invoice.Status == VendorInvoiceStatus.Voided)
+                {
+                    if (invoice.LeaseScheduleLineId.HasValue && Math.Abs(RoundMoney(invoice.PaymentAllocations.Sum(
+                            allocation => allocation.AllocatedAmount + allocation.DiscountAmount +
+                                          allocation.WithholdingTaxAmount))) > 0.01m)
+                        throw new InvalidOperationException(
+                            "A voided lease invoice retains active settlement evidence. Finance must reconcile it before the instalment status can be reopened.");
+                    // A repeated void is idempotent. In particular, an older retained predecessor
+                    // must never reopen a schedule already posted by its governed replacement.
                     return await GetByIdAsync(invoice.Id, cancellationToken) ?? MapToDto(invoice);
+                }
 
                 if (invoice.JournalEntryId.HasValue && _financePostingEngine == null)
                     throw new InvalidOperationException(
@@ -1708,6 +1778,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 FinancePostingResultDto? reversal = null;
                 if (invoice.JournalEntryId.HasValue)
                 {
+                    var boundLeaseAuthority = await RequireLeaseInvoiceBoundAuthorityAsync(invoice, cancellationToken);
                     // AP-created fixed assets share the invoice journal. Validate the asset
                     // lifecycle before reversing that journal; otherwise a successful AP void
                     // could leave depreciation/valuation based on cost that no longer exists.
@@ -1717,6 +1788,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                         await _fixedAssetService.ValidateApInvoiceCapitalizationReversalAsync(invoice.Id, cancellationToken);
 
                     var originalEvent = await GetPostedInvoiceEventAsync(invoice, cancellationToken);
+                    if (boundLeaseAuthority != null &&
+                        boundLeaseAuthority.OriginalFinancePostingEventId != originalEvent.Id)
+                        throw new InvalidOperationException(
+                            "The posted lease invoice event differs from its bound source-book authority.");
                     var originalJournal = await _unitOfWork.Repository<JournalEntry>()
                         .GetQueryable(j =>
                             j.TenantId == TenantId &&
@@ -1827,6 +1902,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         reason: reason.Trim(),
                         comment: "AP invoice state and its balanced Finance reversal were committed atomically.",
                         cancellationToken: cancellationToken);
+                    await ApplyLeaseAccountingStatusAsync(invoice, posted: false, cancellationToken);
                 }
 
                 if (ownsTransaction)
@@ -2794,6 +2870,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             var candidateLines = new List<(VendorInvoiceLineItem Line, Account Account)>();
             foreach (var line in activeLines)
             {
+                if (invoice.LeaseScheduleLineId.HasValue &&
+                    line.LeaseComponent == LeaseInvoiceComponent.Principal)
+                {
+                    if (line.BudgetEntryId.HasValue)
+                        throw new InvalidOperationException(
+                            "A lease principal reduction cannot select an expense budget cell.");
+                    continue;
+                }
                 var directExpense = !IsFixedAssetLine(line)
                     && !string.Equals(line.LineItemType, "Inventory", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
@@ -2990,9 +3074,18 @@ namespace ErpSystem.Api.Services.Finance.AP
             IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions)
         {
             postingLine.SourceDocumentLineId = sourceLine.Id;
+            ApplyCommercialUomEvidence(postingLine, sourceLine);
             postingLine.Dimensions = sourceDimensions.TryGetValue(sourceLine.Id, out var values)
                 ? values
                 : Array.Empty<FinancePostingDimensionValueDto>();
+        }
+
+        private static void ApplyCommercialUomEvidence(FinancePostingLineDto postingLine, VendorInvoiceLineItem sourceLine)
+        {
+            postingLine.CommercialUnitOfMeasureId = sourceLine.UnitOfMeasureId;
+            postingLine.CommercialUnitOfMeasureCode = sourceLine.UnitOfMeasureCodeSnapshot;
+            postingLine.CommercialQuantityDecimalPlaces = sourceLine.UnitOfMeasureDecimalPlacesSnapshot;
+            postingLine.CommercialQuantityRoundingIncrement = sourceLine.UnitOfMeasureRoundingIncrementSnapshot;
         }
 
         private async Task<VendorInvoice> LoadInvoiceForPostingAsync(Guid id, CancellationToken cancellationToken)
@@ -3032,6 +3125,16 @@ namespace ErpSystem.Api.Services.Finance.AP
             {
                 var accounts = await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken);
                 return lines.Select(line => new FinanceSourceDocumentLineContext(line.Id, accounts[line.Id])).ToArray();
+            }
+            if (invoice.LeaseScheduleLineId.HasValue)
+            {
+                // Draft dimension presentation must remain available while Finance completes the
+                // mandatory tax/WHT review. Posting performs the stricter tax gate separately.
+                await ValidateLeaseSourceAsync(invoice, cancellationToken);
+                return lines.Select(line => new FinanceSourceDocumentLineContext(
+                    line.Id,
+                    line.GLAccountId ?? throw new InvalidOperationException("Lease instalment lines require a frozen posting account.")))
+                    .ToArray();
             }
             var settings = await GetFinanceSettingsAsync(cancellationToken);
             var accountCache = new Dictionary<Guid, Account>();
@@ -3085,6 +3188,8 @@ namespace ErpSystem.Api.Services.Finance.AP
         {
             await ValidateEstateSourceAsync(invoice, cancellationToken);
             EnsureLandedCostTaxReviewed(invoice);
+            await ValidateLeaseSourceAsync(invoice, cancellationToken);
+            EnsureLeaseTaxReviewed(invoice);
             var tenantId = TenantId;
             if (invoice.TenantId != tenantId)
                 throw new InvalidOperationException("Vendor invoice belongs to another tenant.");
@@ -3151,8 +3256,14 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var supplier = await ResolveInvoiceSupplierForPostingAsync(invoice, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
-            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var functionalCurrency = invoice.LeaseScheduleLineId.HasValue
+                ? NormalizeCurrency(invoice.LeaseFunctionalCurrencyCode, settings.BaseCurrency)
+                : NormalizeCurrency(settings.BaseCurrency, "GHS");
             var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, functionalCurrency);
+            var invoiceDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                invoiceCurrency, cancellationToken);
+            var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                functionalCurrency, cancellationToken);
             var exchangeRate = NormalizeExchangeRate(invoice.ExchangeRate);
             var accountCache = new Dictionary<Guid, Account>();
 
@@ -3171,6 +3282,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     exchangeRate,
                     accountCache,
                     sourceLineDimensions,
+                    invoiceDecimalPlaces,
+                    functionalDecimalPlaces,
                     cancellationToken);
             }
 
@@ -3183,6 +3296,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ? await ResolveProcurementAccrualAccountsAsync(invoice, cancellationToken) : null;
             var landedCostAccounts = IsLandedCostInvoice(invoice)
                 ? await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken)
+                : null;
+            var leaseAccounts = invoice.LeaseScheduleLineId.HasValue
+                ? await ResolveLeasePostingAccountsAsync(invoice, cancellationToken)
                 : null;
             var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
@@ -3198,7 +3314,23 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             foreach (var line in activeLines)
             {
-                var grossAmount = RoundMoney(line.Quantity * line.UnitPrice);
+                var grossAmount = RoundMoney(line.Quantity * line.UnitPrice, invoiceDecimalPlaces);
+                if (leaseAccounts != null)
+                {
+                    var leaseAccount = leaseAccounts[line.Id];
+                    var principal = line.LeaseComponent == LeaseInvoiceComponent.Principal;
+                    await ResolvePostingAccountAsync(leaseAccount.AccountId,
+                        principal ? "lease liability account" : "lease interest expense account",
+                        accountCache, allowControlAccount: principal, requireDirectPosting: !principal, cancellationToken);
+                    var leasePosting = BuildPostingLine(leaseAccount.AccountId,
+                        $"Lease instalment {invoice.InvoiceNumber} - {line.Description}", grossAmount, 0m,
+                        invoiceCurrency, functionalCurrency, exchangeRate, invoice.InvoiceDate,
+                        invoice.InvoiceNumber, lineNumber++, leaseAccount.Tag,
+                        functionalDecimalPlaces: functionalDecimalPlaces);
+                    ApplySourceDimensions(leasePosting, line, sourceLineDimensions);
+                    postingLines.Add(leasePosting);
+                    continue;
+                }
                 var lineCosts = receiptCostPlans.Where(x => x.Cost.VendorInvoiceLineItemId == line.Id).ToArray();
                 if (lineCosts.Length > 0)
                 {
@@ -3213,7 +3345,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         var costPosting = BuildPostingLine(costLine.AccountId,
                             $"{DistributionType(tag)} - {invoice.InvoiceNumber} - {line.Description}",
                             Math.Max(0, costLine.FunctionalAmount), Math.Max(0, -costLine.FunctionalAmount),
-                            functionalCurrency, functionalCurrency, 1m, invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, tag);
+                            functionalCurrency, functionalCurrency, 1m, invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, tag,
+                            functionalDecimalPlaces: functionalDecimalPlaces);
                         costPosting.Notes = $"Receipt cost {costPlan.Cost.SourceFingerprint}; policy {costPlan.Cost.Policy}";
                         ApplySourceDimensions(costPosting, line, sourceLineDimensions);
                         postingLines.Add(costPosting);
@@ -3228,7 +3361,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     var clearingLine = BuildPostingLine(account,
                         $"Clear landed-cost accrual - {invoice.InvoiceNumber} - {line.Description}",
                         grossAmount, 0m, invoiceCurrency, functionalCurrency, exchangeRate,
-                        invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, "AP-LANDED-COST-ACCRUAL");
+                        invoice.InvoiceDate, invoice.InvoiceNumber, lineNumber++, "AP-LANDED-COST-ACCRUAL",
+                        functionalDecimalPlaces: functionalDecimalPlaces);
                     ApplySourceDimensions(clearingLine, line, sourceLineDimensions);
                     postingLines.Add(clearingLine);
                     continue;
@@ -3244,8 +3378,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var expectedTradeDiscount = InvoiceTradeDiscountPolicy.CalculateLineDiscount(
                     line.Quantity * line.UnitPrice,
                     line.DiscountPercentage,
-                    "AP invoice line");
-                if (RoundMoney(line.DiscountAmount) != expectedTradeDiscount)
+                    "AP invoice line",
+                    invoiceDecimalPlaces);
+                if (RoundMoney(line.DiscountAmount, invoiceDecimalPlaces) != expectedTradeDiscount)
                     throw new InvalidOperationException("AP invoice line trade discount evidence does not match its percentage and gross amount.");
 
                 if (clearsGrv)
@@ -3255,7 +3390,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         throw new InvalidOperationException("Fixed asset capitalization from GRV accrual clearing is deferred until procurement receipt capitalization is modeled.");
                     }
 
-                    var lineNetAmount = RoundMoney(grossAmount - line.DiscountAmount);
+                    var lineNetAmount = RoundMoney(
+                        grossAmount - line.DiscountAmount, invoiceDecimalPlaces);
                     if (lineNetAmount <= 0m)
                     {
                         continue;
@@ -3281,7 +3417,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                             invoice.InvoiceDate,
                             invoice.InvoiceNumber,
                             lineNumber++,
-                            "AP-GRV");
+                            "AP-GRV",
+                            functionalDecimalPlaces: functionalDecimalPlaces);
                         ApplySourceDimensions(grvLine, line, sourceLineDimensions);
                         postingLines.Add(grvLine);
                     }
@@ -3290,7 +3427,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 if (IsFixedAssetLine(line))
                 {
-                    var lineNetAmount = RoundMoney(grossAmount - line.DiscountAmount);
+                    var lineNetAmount = RoundMoney(
+                        grossAmount - line.DiscountAmount, invoiceDecimalPlaces);
                     if (lineNetAmount <= 0m)
                     {
                         continue;
@@ -3315,7 +3453,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         invoice.InvoiceDate,
                         invoice.InvoiceNumber,
                         lineNumber++,
-                        "AP-FixedAsset");
+                        "AP-FixedAsset",
+                        functionalDecimalPlaces: functionalDecimalPlaces);
                     fixedAssetLine.Notes = BuildFixedAssetLineNotes(line);
                     ApplySourceDimensions(fixedAssetLine, line, sourceLineDimensions);
                     postingLines.Add(fixedAssetLine);
@@ -3330,7 +3469,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     accountCache,
                     cancellationToken);
 
-                var netDebitAmount = RoundMoney(grossAmount - line.DiscountAmount);
+                var netDebitAmount = RoundMoney(
+                    grossAmount - line.DiscountAmount, invoiceDecimalPlaces);
                 if (netDebitAmount <= 0m)
                 {
                     continue;
@@ -3347,8 +3487,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     lineNumber++,
-                    ResolveLineTag(line));
+                    ResolveLineTag(line),
+                    functionalDecimalPlaces: functionalDecimalPlaces);
                 expenseLine.SourceDocumentLineId = line.Id;
+                ApplyCommercialUomEvidence(expenseLine, line);
                 ApplySourceDimensions(expenseLine, line, sourceLineDimensions);
                 postingLines.Add(expenseLine);
             }
@@ -3364,6 +3506,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     exchangeRate,
                     accountCache,
                     lineNumber,
+                    invoiceDecimalPlaces,
+                    functionalDecimalPlaces,
                     cancellationToken);
 
                 postingLines.AddRange(taxBuild.Lines);
@@ -3371,10 +3515,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 lineNumber += taxBuild.Lines.Count;
             }
 
-            var debitFunctionalTotal = RoundMoney(postingLines.Sum(l => l.DebitAmount));
-            var creditFunctionalTotal = RoundMoney(postingLines.Sum(l => l.CreditAmount));
-            var apFunctionalAmount = RoundMoney(debitFunctionalTotal - creditFunctionalTotal);
-            var expectedFunctionalTotal = ToFunctionalAmount(invoice.TotalAmount, invoiceCurrency, functionalCurrency, exchangeRate);
+            var debitFunctionalTotal = RoundMoney(postingLines.Sum(l => l.DebitAmount), functionalDecimalPlaces);
+            var creditFunctionalTotal = RoundMoney(postingLines.Sum(l => l.CreditAmount), functionalDecimalPlaces);
+            var apFunctionalAmount = RoundMoney(
+                debitFunctionalTotal - creditFunctionalTotal, functionalDecimalPlaces);
+            var expectedFunctionalTotal = ToFunctionalAmount(
+                invoice.TotalAmount, invoiceCurrency, functionalCurrency, exchangeRate, functionalDecimalPlaces);
             if (apFunctionalAmount <= 0m)
             {
                 throw new InvalidOperationException($"Vendor invoice {invoice.InvoiceNumber} has no positive AP amount to post.");
@@ -3401,12 +3547,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 invoice.InvoiceDate,
                 invoice.InvoiceNumber,
                 1,
-                "AP-Control"));
+                "AP-Control",
+                functionalDecimalPlaces: functionalDecimalPlaces));
 
             for (var i = 0; i < postingLines.Count; i++)
             {
                 postingLines[i].LineNumber = i + 1;
             }
+
+            var accountingBookCode = invoice.LeaseScheduleLineId.HasValue
+                ? invoice.LeaseAccountingBookCode!
+                : await ResolvePrimaryAccountingBookCodeAsync(invoice.TenantId, cancellationToken);
 
             return new FinancePostingRequestV2Dto
             {
@@ -3419,7 +3570,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"Vendor invoice {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Invoice",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = accountingBookCode,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3441,6 +3592,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal exchangeRate,
             Dictionary<Guid, Account> accountCache,
             IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceLineDimensions,
+            int invoiceDecimalPlaces,
+            int functionalDecimalPlaces,
             CancellationToken cancellationToken)
         {
             var rateSnapshot = await RevalidateOpeningInvoiceExchangeRateAsync(invoice, cancellationToken);
@@ -3455,7 +3608,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 requireDirectPosting: true,
                 cancellationToken);
 
-            var openingAmount = RoundMoney(invoice.TotalAmount);
+            var openingAmount = RoundMoney(invoice.TotalAmount, invoiceDecimalPlaces);
             if (openingAmount <= 0m)
             {
                 throw new InvalidOperationException($"Opening-balance vendor invoice {invoice.InvoiceNumber} has no positive AP amount to post.");
@@ -3464,7 +3617,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 openingAmount,
                 invoiceCurrency,
                 functionalCurrency,
-                exchangeRate);
+                exchangeRate,
+                functionalDecimalPlaces);
 
             var postingLines = new List<FinancePostingLineDto>
             {
@@ -3481,7 +3635,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     2,
                     "AP-Control",
                     rateSnapshot.ExchangeRateId,
-                    rateSnapshot.Source)
+                    rateSnapshot.Source,
+                    functionalDecimalPlaces)
             };
 
             var activeLines = invoice.LineItems.Where(line => !line.IsDeleted)
@@ -3492,12 +3647,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .Select(line => new
                 {
                     Line = line,
-                    Amount = RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount + line.TaxAmount)
+                    Amount = RoundMoney(
+                        (line.Quantity * line.UnitPrice) - line.DiscountAmount + line.TaxAmount,
+                        invoiceDecimalPlaces)
                 })
                 .Where(item => item.Amount != 0m)
                 .ToList();
             if (sourceAmounts.Any(item => item.Amount < 0m)
-                || RoundMoney(sourceAmounts.Sum(item => item.Amount)) != openingAmount)
+                || RoundMoney(sourceAmounts.Sum(item => item.Amount), invoiceDecimalPlaces) != openingAmount)
                 throw new InvalidOperationException("AP opening-balance source lines do not reconcile to the invoice total.");
 
             var allocatedFunctional = 0m;
@@ -3506,7 +3663,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 var source = sourceAmounts[index];
                 var functionalAmount = index == sourceAmounts.Count - 1
                     ? functionalOpeningAmount - allocatedFunctional
-                    : ToFunctionalAmount(source.Amount, invoiceCurrency, functionalCurrency, exchangeRate);
+                    : ToFunctionalAmount(
+                        source.Amount, invoiceCurrency, functionalCurrency, exchangeRate, functionalDecimalPlaces);
                 var clearingLine = BuildPostingLine(
                     migrationClearingAccountId,
                     $"Migration clearing - AP opening balance {invoice.InvoiceNumber} - {source.Line.Description}",
@@ -3518,7 +3676,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     invoice.InvoiceDate,
                     invoice.InvoiceNumber,
                     index + 1,
-                    "AP-MigrationClearing");
+                    "AP-MigrationClearing",
+                    functionalDecimalPlaces: functionalDecimalPlaces);
                 ApplySourceDimensions(clearingLine, source.Line, sourceLineDimensions);
                 postingLines.Insert(index, clearingLine);
                 allocatedFunctional += functionalAmount;
@@ -3526,6 +3685,10 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             for (var index = 0; index < postingLines.Count; index++)
                 postingLines[index].LineNumber = index + 1;
+
+            var accountingBookCode = await ResolvePrimaryAccountingBookCodeAsync(
+                invoice.TenantId,
+                cancellationToken);
 
             return new FinancePostingRequestV2Dto
             {
@@ -3538,13 +3701,38 @@ namespace ErpSystem.Api.Services.Finance.AP
                 Description = $"AP opening balance {invoice.InvoiceNumber} - {invoice.SupplierName}",
                 PostingDate = invoice.InvoiceDate,
                 JournalType = "AP Opening Balance",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = accountingBookCode,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorInvoice:{invoice.TenantId:N}:{invoice.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines,
                 TaxCalculationSnapshots = Array.Empty<FinanceTaxCalculationSnapshotDto>()
             };
+        }
+
+        private async Task<string> ResolvePrimaryAccountingBookCodeAsync(
+            Guid tenantId,
+            CancellationToken cancellationToken)
+        {
+            var books = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(book =>
+                    book.TenantId == tenantId &&
+                    book.IsDefault &&
+                    book.IsActive &&
+                    book.AllowsPosting &&
+                    !book.IsDeleted &&
+                    book.BookType == AccountingBookType.PrimaryFull &&
+                    book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+                .AsNoTracking()
+                .Take(2)
+                .Select(book => new { book.Id, book.Code })
+                .ToListAsync(cancellationToken);
+
+            if (books.Count != 1)
+                throw new InvalidOperationException(
+                    "Exactly one active, posting-enabled default primary accounting book is required for AP invoice posting.");
+
+            return books[0].Code;
         }
 
         private async Task<BusinessPartner> ResolveInvoiceSupplierForPostingAsync(VendorInvoice invoice, CancellationToken cancellationToken)
@@ -3805,6 +3993,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal exchangeRate,
             Dictionary<Guid, Account> accountCache,
             int startingLineNumber,
+            int invoiceDecimalPlaces,
+            int functionalDecimalPlaces,
             CancellationToken cancellationToken)
         {
             var calculatedLines = new List<FinancePostingLineDto>();
@@ -3822,9 +4012,39 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (_taxEngine != null)
             {
-                foreach (var line in invoice.LineItems.Where(l => !l.IsDeleted).OrderBy(l => l.CreatedAt).ThenBy(l => l.Id))
+                var orderedSourceLines = invoice.LineItems
+                    .Where(line => !line.IsDeleted)
+                    .OrderBy(line => line.CreatedAt)
+                    .ThenBy(line => line.Id)
+                    .ToList();
+                var lineBases = orderedSourceLines.ToDictionary(
+                    line => line.Id,
+                    line => RoundMoney(
+                        (line.Quantity * line.UnitPrice) - line.DiscountAmount,
+                        invoiceDecimalPlaces));
+                var taxableLines = orderedSourceLines
+                    .Where(line => lineBases[line.Id] > 0m && !IsNoTaxTreatment(line.TaxTreatment))
+                    .Select(line => new TaxDocumentLineRequestDto
+                    {
+                        DocumentLineId = line.Id,
+                        BaseAmount = lineBases[line.Id],
+                        TaxGroupId = line.TaxGroupId,
+                        TransactionType = ResolveApTaxTransactionType(line)
+                    }).ToList();
+                var documentTaxResult = taxableLines.Count == 0
+                    ? new TaxCalculationResultDto { CurrencyCode = invoiceCurrency }
+                    : await _taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+                    {
+                        CurrencyCode = invoiceCurrency,
+                        TransactionDate = invoice.InvoiceDate,
+                        BusinessPartnerId = invoice.BusinessPartnerId,
+                        BusinessPartnerRole = BusinessPartnerRoleType.Supplier,
+                        Lines = taxableLines
+                    }, cancellationToken);
+
+                foreach (var line in orderedSourceLines)
                 {
-                    var lineBase = RoundMoney((line.Quantity * line.UnitPrice) - line.DiscountAmount);
+                    var lineBase = lineBases[line.Id];
                     if (lineBase <= 0m)
                     {
                         continue;
@@ -3832,7 +4052,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                     if (IsNoTaxTreatment(line.TaxTreatment))
                     {
-                        if (RoundMoney(line.TaxAmount) != 0m || RoundMoney(line.TaxRate) != 0m)
+                        if (RoundMoney(line.TaxAmount, invoiceDecimalPlaces) != 0m || line.TaxRate != 0m)
                         {
                             throw new InvalidOperationException($"AP invoice line '{line.Description}' is {line.TaxTreatment} but carries a tax amount or rate.");
                         }
@@ -3840,17 +4060,21 @@ namespace ErpSystem.Api.Services.Finance.AP
                         continue;
                     }
 
-                    var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+                    var taxResult = new TaxCalculationResultDto
                     {
                         BaseAmount = lineBase,
-                        TaxGroupId = line.TaxGroupId,
-                        TransactionDate = invoice.InvoiceDate,
-                        TransactionType = ResolveApTaxTransactionType(line),
-                        BusinessPartnerId = invoice.BusinessPartnerId,
-                        BusinessPartnerRole = BusinessPartnerRoleType.Supplier
-                    }, cancellationToken);
+                        CurrencyCode = documentTaxResult.CurrencyCode,
+                        CurrencyDecimalPlaces = documentTaxResult.CurrencyDecimalPlaces,
+                        TaxRoundingScope = documentTaxResult.TaxRoundingScope,
+                        TaxRoundingMethod = documentTaxResult.TaxRoundingMethod,
+                        TaxRoundingIncrement = documentTaxResult.TaxRoundingIncrement,
+                        TaxBreakdowns = documentTaxResult.TaxBreakdowns
+                            .Where(item => item.DocumentLineId == line.Id)
+                            .ToList()
+                    };
+                    taxResult.TotalTaxAmount = taxResult.TaxBreakdowns.Sum(item => item.TaxAmount);
 
-                    foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount > 0m))
+                    foreach (var breakdown in taxResult.TaxBreakdowns.Where(t => t.TaxAmount != 0m))
                     {
                         Guid? accountId;
                         if (breakdown.IsInputTaxDeductible)
@@ -3901,11 +4125,13 @@ namespace ErpSystem.Api.Services.Finance.AP
                             invoice.InvoiceDate,
                             invoice.InvoiceNumber,
                             startingLineNumber + calculatedLines.Count,
-                            $"AP-Tax-{breakdown.TaxCode}");
+                            $"AP-Tax-{breakdown.TaxCode}",
+                            functionalDecimalPlaces: functionalDecimalPlaces);
                         postingLine.SourceDocumentLineId = line.Id;
+                        ApplyCommercialUomEvidence(postingLine, line);
                         postingLine.Notes = IsFixedAssetLine(line)
-                            ? $"{BuildFixedAssetLineNotes(line)};TaxId={breakdown.TaxId};TaxGroupId={taxResult.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};Recoverable={breakdown.IsInputTaxDeductible}"
-                            : $"TaxId={breakdown.TaxId};TaxGroupId={taxResult.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount}";
+                            ? $"{BuildFixedAssetLineNotes(line)};TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};Recoverable={breakdown.IsInputTaxDeductible};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}"
+                            : $"TaxId={breakdown.TaxId};TaxGroupId={breakdown.TaxGroupId};TaxRate={breakdown.TaxRate};TaxableAmount={breakdown.TaxableAmount};RawTax={breakdown.RawTaxAmount};RoundingAdjustment={breakdown.RoundingAdjustment};AllocationSequence={breakdown.AllocationSequence}";
                         calculatedLines.Add(postingLine);
 
                         snapshots.Add(ToTaxSnapshot(
@@ -3913,14 +4139,22 @@ namespace ErpSystem.Api.Services.Finance.AP
                             invoice.Id,
                             line.Id,
                             accountId.Value,
-                            taxResult.TaxGroupId,
+                            breakdown.TaxGroupId,
                             lineBase,
                             breakdown,
-                            invoice.InvoiceDate));
+                            invoice.InvoiceDate,
+                            documentTaxResult.CurrencyCode,
+                            documentTaxResult.CurrencyDecimalPlaces,
+                            documentTaxResult.TaxRoundingScope,
+                            documentTaxResult.TaxRoundingMethod,
+                            documentTaxResult.TaxRoundingIncrement));
                     }
                 }
 
-                if (calculatedLines.Count > 0 && RoundMoney(calculatedLines.Sum(l => l.DebitAmount)) == ToFunctionalAmount(invoice.TaxAmount, invoiceCurrency, functionalCurrency, exchangeRate))
+                if (calculatedLines.Count > 0
+                    && RoundMoney(calculatedLines.Sum(l => l.DebitAmount), functionalDecimalPlaces)
+                        == ToFunctionalAmount(
+                            invoice.TaxAmount, invoiceCurrency, functionalCurrency, exchangeRate, functionalDecimalPlaces))
                 {
                     return new TaxPostingBuildResult(calculatedLines, snapshots);
                 }
@@ -3929,38 +4163,69 @@ namespace ErpSystem.Api.Services.Finance.AP
             throw new InvalidOperationException("AP invoice configured tax calculation does not reconcile to the invoice tax total.");
         }
 
-        private async Task<(decimal TaxRate, decimal TaxAmount)> ResolveApLineTaxAsync(
-            VendorInvoiceLineItemCreateDto lineDto,
-            decimal lineNet,
-            DateTime invoiceDate,
-            Guid supplierId,
+        private async Task<decimal> RecalculateApDocumentTaxesAsync(
+            VendorInvoice invoice,
             bool isOpeningBalance,
             CancellationToken cancellationToken)
         {
-            if (isOpeningBalance || lineDto.TaxTreatment != TaxTreatment.Standard || lineNet <= 0m)
+            var lines = invoice.LineItems
+                .Where(line => !line.IsDeleted)
+                .OrderBy(line => line.CreatedAt)
+                .ThenBy(line => line.Id)
+                .ToList();
+            var currencyDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                invoice.CurrencyCode, cancellationToken);
+            var bases = lines.ToDictionary(
+                line => line.Id,
+                line => RoundMoney(
+                    (line.Quantity * line.UnitPrice) - line.DiscountAmount,
+                    currencyDecimalPlaces));
+            foreach (var line in lines)
             {
-                return (0m, 0m);
+                line.TaxAmount = 0m;
+                if (isOpeningBalance || line.TaxTreatment != TaxTreatment.Standard || bases[line.Id] <= 0m)
+                    line.TaxRate = 0m;
             }
 
-            if (_taxEngine != null && lineDto.TaxGroupId.HasValue)
-            {
-                var taxResult = await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
+            if (isOpeningBalance)
+                return 0m;
+
+            var governedLines = lines
+                .Where(line => line.TaxTreatment == TaxTreatment.Standard
+                    && bases[line.Id] > 0m)
+                .Select(line => new TaxDocumentLineRequestDto
                 {
-                    BaseAmount = lineNet,
-                    TaxGroupId = lineDto.TaxGroupId,
-                    TransactionDate = invoiceDate,
-                    TransactionType = ResolveApTaxTransactionType(lineDto.LineItemType),
-                    BusinessPartnerId = supplierId,
-                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier
-                }, cancellationToken);
+                    DocumentLineId = line.Id,
+                    BaseAmount = bases[line.Id],
+                    TaxGroupId = line.TaxGroupId,
+                    TransactionType = ResolveApTaxTransactionType(line)
+                }).ToList();
 
-                return (
-                    taxResult.TotalTaxAmount > 0m ? taxResult.TotalTaxAmount / lineNet * 100m : 0m,
-                    taxResult.TotalTaxAmount);
+            if (governedLines.Count > 0)
+            {
+                if (_taxEngine == null)
+                    throw new InvalidOperationException("Effective-dated tax calculation is not configured for AP invoice taxes.");
+                var result = await _taxEngine.CalculateDocumentTaxesAsync(new TaxDocumentCalculationRequestDto
+                {
+                    CurrencyCode = invoice.CurrencyCode,
+                    TransactionDate = invoice.InvoiceDate,
+                    BusinessPartnerId = invoice.BusinessPartnerId,
+                    BusinessPartnerRole = BusinessPartnerRoleType.Supplier,
+                    Lines = governedLines
+                }, cancellationToken);
+                foreach (var line in lines.Where(line => line.TaxTreatment == TaxTreatment.Standard
+                    && bases[line.Id] > 0m))
+                {
+                    line.TaxAmount = result.TaxBreakdowns
+                        .Where(item => item.DocumentLineId == line.Id)
+                        .Sum(item => item.TaxAmount);
+                    line.TaxRate = line.TaxAmount != 0m
+                        ? line.TaxAmount / bases[line.Id] * 100m
+                        : 0m;
+                }
             }
 
-            var lineTaxRate = lineDto.TaxRate;
-            return (lineTaxRate, lineNet * (lineTaxRate / 100m));
+            return RoundMoney(lines.Sum(line => line.TaxAmount), currencyDecimalPlaces);
         }
 
         private static TaxTransactionType ResolveApTaxTransactionType(VendorInvoiceLineItem line)
@@ -3981,7 +4246,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             Guid? taxGroupId,
             decimal baseAmount,
             TaxBreakdownDto breakdown,
-            DateTime calculationDate)
+            DateTime calculationDate,
+            string currencyCode,
+            int currencyDecimalPlaces,
+            TaxRoundingScope taxRoundingScope,
+            GovernedRoundingMethod taxRoundingMethod,
+            decimal taxRoundingIncrement)
         {
             return new FinanceTaxCalculationSnapshotDto
             {
@@ -3991,10 +4261,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PostingAccountId = postingAccountId,
                 TaxId = breakdown.TaxId,
                 TaxGroupId = taxGroupId,
+                CurrencyCode = currencyCode,
+                CurrencyDecimalPlaces = currencyDecimalPlaces,
                 BaseAmount = baseAmount,
                 TaxableAmount = breakdown.TaxableAmount,
                 TaxRate = breakdown.TaxRate,
                 TaxAmount = breakdown.TaxAmount,
+                RawTaxAmount = breakdown.RawTaxAmount,
+                RoundingAdjustment = breakdown.RoundingAdjustment,
+                AllocationSequence = breakdown.AllocationSequence,
+                TaxRoundingScope = taxRoundingScope,
+                TaxRoundingMethod = taxRoundingMethod,
+                TaxRoundingIncrement = taxRoundingIncrement,
                 CompoundBasis = breakdown.CompoundBasis,
                 CalculationOrder = breakdown.CalculationOrder,
                 CalculationDate = calculationDate,
@@ -4015,11 +4293,14 @@ namespace ErpSystem.Api.Services.Finance.AP
             int lineNumber,
             string transactionTag,
             Guid? exchangeRateId = null,
-            string? exchangeRateSource = null)
+            string? exchangeRateSource = null,
+            int functionalDecimalPlaces = 2)
         {
             var isForeign = !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
-            var debitAmount = ToFunctionalAmount(debitForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate);
-            var creditAmount = ToFunctionalAmount(creditForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate);
+            var debitAmount = ToFunctionalAmount(
+                debitForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate, functionalDecimalPlaces);
+            var creditAmount = ToFunctionalAmount(
+                creditForeignAmount, invoiceCurrency, functionalCurrency, exchangeRate, functionalDecimalPlaces);
 
             return new FinancePostingLineDto
             {
@@ -4165,8 +4446,42 @@ namespace ErpSystem.Api.Services.Finance.AP
             ReversalType = "Controlled AP void",
             IdempotencyKey = idempotencyKey,
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines
+            Lines = plan.ReversalLines,
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                $"{sourceDocumentType}Reversal",
+                sourceDocumentId)
         };
+
+        private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+            IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+            string documentType,
+            Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = documentType,
+                DocumentId = documentId,
+                DocumentLineId = snapshot.DocumentLineId,
+                TaxId = snapshot.TaxId,
+                TaxGroupId = snapshot.TaxGroupId,
+                PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                BaseAmount = snapshot.BaseAmount,
+                TaxableAmount = snapshot.TaxableAmount,
+                TaxRate = snapshot.TaxRate,
+                TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+                CompoundBasis = snapshot.CompoundBasis,
+                CalculationOrder = snapshot.CalculationOrder,
+                CalculationDate = snapshot.CalculationDate,
+                IsManualOverride = snapshot.IsManualOverride,
+                OverrideReason = snapshot.OverrideReason
+            }).ToArray();
 
         private static string AppendLifecycleNote(string? notes, string entry) =>
             string.IsNullOrWhiteSpace(notes) ? entry : $"{notes.TrimEnd()}\n\n{entry}";
@@ -4209,10 +4524,18 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PostingAccountId = snapshot.PostingAccountId,
                     TaxId = snapshot.TaxId,
                     TaxGroupId = snapshot.TaxGroupId,
+                    CurrencyCode = snapshot.CurrencyCode,
+                    CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
                     BaseAmount = snapshot.BaseAmount,
                     TaxableAmount = snapshot.TaxableAmount,
                     TaxRate = snapshot.TaxRate,
                     TaxAmount = snapshot.TaxAmount,
+                    RawTaxAmount = snapshot.RawTaxAmount,
+                    RoundingAdjustment = snapshot.RoundingAdjustment,
+                    AllocationSequence = snapshot.AllocationSequence,
+                    TaxRoundingScope = snapshot.TaxRoundingScope,
+                    TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                    TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
                     CompoundBasis = snapshot.CompoundBasis,
                     CalculationOrder = snapshot.CalculationOrder,
                     CalculationDate = snapshot.CalculationDate,
@@ -4268,7 +4591,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal transactionAmount,
             string transactionCurrency,
             string functionalCurrency,
-            decimal exchangeRate)
+            decimal exchangeRate,
+            int functionalDecimalPlaces = 2)
         {
             if (transactionAmount == 0m)
             {
@@ -4277,8 +4601,8 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var normalizedRate = NormalizeExchangeRate(exchangeRate);
             return string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
-                ? RoundMoney(transactionAmount)
-                : RoundMoney(transactionAmount * normalizedRate);
+                ? RoundMoney(transactionAmount, functionalDecimalPlaces)
+                : RoundMoney(transactionAmount * normalizedRate, functionalDecimalPlaces);
         }
 
         private static decimal NormalizeExchangeRate(decimal exchangeRate)
@@ -4360,8 +4684,26 @@ namespace ErpSystem.Api.Services.Finance.AP
         private static decimal RoundRate(decimal amount)
             => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
 
-        private static decimal RoundMoney(decimal amount)
-            => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+        private static decimal RoundMoney(decimal amount, int currencyDecimalPlaces = 2)
+            => CurrencyMinorUnitPolicy.Round(amount, currencyDecimalPlaces);
+
+        private async Task<int> ResolveCurrencyDecimalPlacesAsync(
+            string currencyCode,
+            CancellationToken cancellationToken)
+        {
+            var normalized = NormalizeCurrency(currencyCode, "GHS");
+            var configured = await _unitOfWork.Repository<Currency>()
+                .GetQueryable(currency =>
+                    currency.TenantId == TenantId &&
+                    currency.CurrencyCode == normalized &&
+                    !currency.IsDeleted)
+                .Select(currency => (int?)currency.DecimalPlaces)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    $"Transaction currency '{normalized}' is missing from the tenant currency master.");
+            CurrencyMinorUnitPolicy.Validate(normalized, configured);
+            return configured;
+        }
 
         private static void ValidateSourceDrivenLineTypes(
             Guid? purchaseOrderId,
@@ -4389,9 +4731,15 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (!purchaseOrderId.HasValue)
             {
-                if (lines.Any(line => !Is(line, "Expense")))
+                static bool IsManualExpenseLine(VendorInvoiceLineItemCreateDto line) =>
+                    Is(line, "Expense") ||
+                    Is(line, "Freight") ||
+                    Is(line, "Miscellaneous") ||
+                    Is(line, "FinanceCharge");
+
+                if (lines.Any(line => !IsManualExpenseLine(line)))
                     throw new InvalidOperationException(
-                        "Manual non-PO invoices may contain only GL Account / Expense lines. Inventory and service lines must originate from their governed source modules.");
+                        "Manual non-PO invoices may contain only GL Account / Expense, Freight, Miscellaneous, or Finance Charge lines. Inventory, product, and service lines must originate from their governed source modules.");
                 return;
             }
 
@@ -4733,6 +5081,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             return new VendorInvoiceDto
             {
                 IsProcurementAutoInvoice = invoice.AutoInvoiceRequestId.HasValue,
+                LeaseScheduleLineId = invoice.LeaseScheduleLineId,
+                ReplacesLeaseVendorInvoiceId = invoice.ReplacesLeaseVendorInvoiceId,
+                LeaseAccountingBookId = invoice.LeaseAccountingBookId,
+                LeaseAccountingBookCode = invoice.LeaseAccountingBookCode,
+                LeaseFunctionalCurrencyCode = invoice.LeaseFunctionalCurrencyCode,
                 EstateAcquisitionId = invoice.EstateAcquisitionId, EstatePayableKind = invoice.EstatePayableKind,
                 Id = invoice.Id,
                 InvoiceNumber = invoice.InvoiceNumber,
@@ -4753,6 +5106,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TaxAmount = invoice.TaxAmount,
                 DiscountAmount = invoice.DiscountAmount,
                 TotalAmount = invoice.TotalAmount,
+                RoundingAdjustmentAmount = invoice.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = invoice.FinanceRoundingEvidenceId,
                 PaidAmount = invoice.PaidAmount,
                 BalanceAmount = invoice.BalanceAmount,
                 CurrencyCode = invoice.CurrencyCode,
@@ -4804,6 +5159,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 LineItems = invoice.LineItems.Select(li => new VendorInvoiceLineItemDto
                 {
                     Id = li.Id,
+                    LeaseComponent = li.LeaseComponent,
                     VendorInvoiceId = li.VendorInvoiceId,
                     LineItemType = li.LineItemType,
                     LandedCostItemId = li.LandedCostItemId,

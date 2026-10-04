@@ -10,6 +10,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Api.Services.Finance.Settings
 {
@@ -67,6 +68,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             // Validate both requested write-off mappings before mutating any settings. Omitted
             // values preserve the existing mapping, as with the other partial updates.
+            if (dto.CustomerAdvanceAccountId.HasValue)
+                await ValidateReturnAccountAsync(tenantId, dto.CustomerAdvanceAccountId.Value, AccountType.Liability, "Customer advance account");
             if (dto.WriteOffExpenseAccountId.HasValue)
                 await ValidateWriteOffAccountAsync(tenantId, dto.WriteOffExpenseAccountId.Value,
                     AccountType.Expense, "Write-off Expense Account");
@@ -77,6 +80,10 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 await ValidateReturnAccountAsync(tenantId, dto.ReturnToVendorClearingAccountId.Value, AccountType.Asset, "Return-to-vendor clearing account");
             if (dto.PurchaseReturnVarianceAccountId.HasValue)
                 await ValidateReturnAccountAsync(tenantId, dto.PurchaseReturnVarianceAccountId.Value, AccountType.Expense, "Purchase-return cost variance account");
+            if (dto.InvoiceRoundingGainAccountId.HasValue)
+                await ValidateWriteOffAccountAsync(tenantId, dto.InvoiceRoundingGainAccountId.Value, AccountType.Revenue, "Invoice rounding gain account");
+            if (dto.InvoiceRoundingLossAccountId.HasValue)
+                await ValidateWriteOffAccountAsync(tenantId, dto.InvoiceRoundingLossAccountId.Value, AccountType.Expense, "Invoice rounding loss account");
 
             var settings = await _context.FinanceSettings
                 .FirstOrDefaultAsync(s => s.TenantId == tenantId);
@@ -90,6 +97,26 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     TenantId = tenantId
                 };
                 _context.FinanceSettings.Add(settings);
+            }
+
+            var effectiveInvoiceRoundingEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
+            if (effectiveInvoiceRoundingEnabled)
+            {
+                var gainAccountId = dto.InvoiceRoundingGainAccountId ?? settings.InvoiceRoundingGainAccountId
+                    ?? throw new InvalidOperationException("Invoice rounding gain account is required before activation.");
+                var lossAccountId = dto.InvoiceRoundingLossAccountId ?? settings.InvoiceRoundingLossAccountId
+                    ?? throw new InvalidOperationException("Invoice rounding loss account is required before activation.");
+                await ValidateWriteOffAccountAsync(
+                    tenantId, gainAccountId, AccountType.Revenue, "Invoice rounding gain account");
+                await ValidateWriteOffAccountAsync(
+                    tenantId, lossAccountId, AccountType.Expense, "Invoice rounding loss account");
+            }
+
+            var accountingActivityExists = await HasAccountingActivityAsync(tenantId);
+            if (accountingActivityExists && HasPrecisionAccountingChange(dto, settings))
+            {
+                throw new InvalidOperationException(
+                    "Accounting precision and rounding policy cannot be changed after posted usage. Create a governed effective-dated policy transition; report display decimals may still be changed.");
             }
 
             var beforeFxMappings = new
@@ -117,11 +144,14 @@ namespace ErpSystem.Api.Services.Finance.Settings
             };
             var beforeControlPolicy = new
             {
+                settings.SupplierAdvanceAccountId,
+                settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
                 settings.EnforceFinanceAccessScopes,
                 settings.RequireDepreciationBeforePeriodClose
             };
+            var beforePrecisionPolicy = PrecisionPolicyAuditValues(settings);
 
             // Check if COA type can be changed
             if (dto.CoaType != null && dto.CoaType != settings.CoaType)
@@ -414,6 +444,20 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.ApInvoiceQuantityTolerancePercent = dto.ApInvoiceQuantityTolerancePercent.Value;
             }
 
+            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            ApplyPrecisionSettings(dto, settings, baseCurrency.DecimalPlaces);
+
+            var afterPrecisionPolicy = PrecisionPolicyAuditValues(settings);
+            var precisionPolicyChanged = !Equals(beforePrecisionPolicy, afterPrecisionPolicy);
+            if (precisionPolicyChanged && _financeAuditService == null)
+            {
+                throw new InvalidOperationException(
+                    "Finance precision and rounding changes require the Finance audit service.");
+            }
+
+            await using var precisionAuditTransaction = precisionPolicyChanged && _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync()
+                : null;
             await _context.SaveChangesAsync();
 
             var afterWriteOffMappings = new
@@ -478,6 +522,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var afterControlPolicy = new
             {
+                settings.SupplierAdvanceAccountId,
+                settings.CustomerAdvanceAccountId,
                 settings.ReversalDatePolicy,
                 settings.MinimumReversalReasonLength,
                 settings.EnforceFinanceAccessScopes,
@@ -494,7 +540,21 @@ namespace ErpSystem.Api.Services.Finance.Settings
                     afterValues: afterControlPolicy);
             }
 
-            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            if (precisionPolicyChanged)
+            {
+                await RecordFinanceSettingsAuditAsync(
+                    FinanceAuditEvents.FinanceControlPolicyChanged,
+                    tenantId,
+                    settings,
+                    beforeValues: beforePrecisionPolicy,
+                    afterValues: afterPrecisionPolicy,
+                    reason: "Finance precision and rounding governance changed.",
+                    sourceModule: "Finance");
+            }
+
+            if (precisionAuditTransaction != null)
+                await precisionAuditTransaction.CommitAsync();
+
             return MapToDto(settings, baseCurrency, await HasAccountingActivityAsync(tenantId));
         }
 
@@ -588,7 +648,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
         private async Task<bool> HasAccountingActivityAsync(Guid tenantId)
         {
             return await _context.FinancePostingEvents.AnyAsync(e => e.TenantId == tenantId && !e.IsDeleted)
-                || await _context.JournalEntries.AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted)
+                || await _context.JournalEntries.AnyAsync(j => j.TenantId == tenantId && !j.IsDeleted &&
+                    (j.PostingStatus == "Posted" || j.PostingStatus == "Reversed"))
                 || await _context.AccountTransactions.AnyAsync(t => t.TenantId == tenantId && !t.IsDeleted);
         }
 
@@ -720,10 +781,135 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 MinimumReversalReasonLength = settings.MinimumReversalReasonLength,
                 EnforceFinanceAccessScopes = settings.EnforceFinanceAccessScopes,
                 RequireDepreciationBeforePeriodClose = settings.RequireDepreciationBeforePeriodClose,
+                UnitPriceDecimalPlaces = settings.UnitPriceDecimalPlaces,
+                ExchangeRateInputDecimalPlaces = settings.ExchangeRateInputDecimalPlaces,
+                ExchangeRateDisplayDecimalPlaces = settings.ExchangeRateDisplayDecimalPlaces,
+                TaxPercentageDecimalPlaces = settings.TaxPercentageDecimalPlaces,
+                TaxRoundingMethod = settings.TaxRoundingMethod,
+                TaxRoundingScope = settings.TaxRoundingScope,
+                TaxRoundingIncrement = settings.TaxRoundingIncrement,
+                InvoiceRoundingEnabled = settings.InvoiceRoundingEnabled,
+                InvoiceRoundingIncrement = settings.InvoiceRoundingIncrement,
+                InvoiceRoundingMethod = settings.InvoiceRoundingMethod,
+                InvoiceRoundingGainAccountId = settings.InvoiceRoundingGainAccountId,
+                InvoiceRoundingLossAccountId = settings.InvoiceRoundingLossAccountId,
+                SettlementToleranceAmount = settings.SettlementToleranceAmount,
+                SettlementTolerancePercentage = settings.SettlementTolerancePercentage,
+                ReportDisplayDecimalPlaces = settings.ReportDisplayDecimalPlaces,
+                PrecisionAccountingPolicyLocked = transactionsExist,
                 ApInvoicePriceTolerancePercent = settings.ApInvoicePriceTolerancePercent,
                 ApInvoiceQuantityTolerancePercent = settings.ApInvoiceQuantityTolerancePercent,
                 TransactionsExist = transactionsExist
             };
         }
+
+        private static void ApplyPrecisionSettings(
+            UpdateFinanceSettingsDto dto,
+            FinanceSettings settings,
+            int currencyDecimalPlaces)
+        {
+            var unitPricePlaces = dto.UnitPriceDecimalPlaces ?? settings.UnitPriceDecimalPlaces;
+            _ = PrecisionRoundingPolicy.RoundUnitPrice(0m, unitPricePlaces);
+
+            var rateInputPlaces = dto.ExchangeRateInputDecimalPlaces ?? settings.ExchangeRateInputDecimalPlaces;
+            var rateDisplayPlaces = dto.ExchangeRateDisplayDecimalPlaces ?? settings.ExchangeRateDisplayDecimalPlaces;
+            _ = PrecisionRoundingPolicy.RoundExchangeRate(1m, rateInputPlaces);
+            _ = PrecisionRoundingPolicy.RoundExchangeRate(1m, rateDisplayPlaces);
+
+            var taxPercentagePlaces = dto.TaxPercentageDecimalPlaces ?? settings.TaxPercentageDecimalPlaces;
+            _ = PrecisionRoundingPolicy.RoundPercentage(0m, taxPercentagePlaces);
+
+            var reportPlaces = dto.ReportDisplayDecimalPlaces ?? settings.ReportDisplayDecimalPlaces;
+            if (reportPlaces is < 0 or > CurrencyMinorUnitPolicy.MaximumDecimalPlaces)
+                throw new InvalidOperationException("Report display precision must be between 0 and 4 decimal places.");
+
+            var taxIncrement = dto.TaxRoundingIncrementSpecified
+                ? dto.TaxRoundingIncrement
+                : settings.TaxRoundingIncrement;
+            if (taxIncrement.HasValue && taxIncrement.Value <= 0m)
+                throw new InvalidOperationException("Tax rounding increment must be greater than zero.");
+            var currencyMinorUnit = CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces);
+            if (taxIncrement.HasValue &&
+                (taxIncrement.Value < currencyMinorUnit || taxIncrement.Value % currencyMinorUnit != 0m))
+            {
+                throw new InvalidOperationException(
+                    $"Tax rounding increment must be a whole multiple of the currency minor unit {currencyMinorUnit}.");
+            }
+
+            var taxMethod = dto.TaxRoundingMethod ?? settings.TaxRoundingMethod;
+            var taxScope = dto.TaxRoundingScope ?? settings.TaxRoundingScope;
+            var invoiceMethod = dto.InvoiceRoundingMethod ?? settings.InvoiceRoundingMethod;
+            if (!Enum.IsDefined(taxMethod) || !Enum.IsDefined(taxScope) || !Enum.IsDefined(invoiceMethod))
+                throw new InvalidOperationException("Rounding method and scope values must be defined governance options.");
+            var invoiceEnabled = dto.InvoiceRoundingEnabled ?? settings.InvoiceRoundingEnabled;
+            if (invoiceEnabled)
+            {
+                var invoiceIncrement = dto.InvoiceRoundingIncrement ?? settings.InvoiceRoundingIncrement;
+                if (!invoiceIncrement.HasValue || invoiceIncrement.Value <= 0m)
+                    throw new InvalidOperationException(
+                        "Invoice/cash rounding requires a positive increment before activation.");
+                if (invoiceIncrement.Value < currencyMinorUnit || invoiceIncrement.Value % currencyMinorUnit != 0m)
+                    throw new InvalidOperationException(
+                        $"Invoice/cash rounding increment must be a whole multiple of the base-currency minor unit {currencyMinorUnit}.");
+                if (!(dto.InvoiceRoundingGainAccountId ?? settings.InvoiceRoundingGainAccountId).HasValue
+                    || !(dto.InvoiceRoundingLossAccountId ?? settings.InvoiceRoundingLossAccountId).HasValue)
+                    throw new InvalidOperationException(
+                        "Invoice/cash rounding requires both gain and loss accounts before activation.");
+            }
+
+            var settlementAmount = dto.SettlementToleranceAmount ?? settings.SettlementToleranceAmount;
+            var settlementPercentage = dto.SettlementTolerancePercentage ?? settings.SettlementTolerancePercentage;
+            _ = PrecisionRoundingPolicy.IsWithinSettlementTolerance(0m, 0m, settlementAmount, settlementPercentage);
+
+            settings.UnitPriceDecimalPlaces = unitPricePlaces;
+            settings.ExchangeRateInputDecimalPlaces = rateInputPlaces;
+            settings.ExchangeRateDisplayDecimalPlaces = rateDisplayPlaces;
+            settings.TaxPercentageDecimalPlaces = taxPercentagePlaces;
+            if (dto.TaxRoundingMethod.HasValue) settings.TaxRoundingMethod = dto.TaxRoundingMethod.Value;
+            if (dto.TaxRoundingScope.HasValue) settings.TaxRoundingScope = dto.TaxRoundingScope.Value;
+            if (dto.TaxRoundingIncrementSpecified) settings.TaxRoundingIncrement = dto.TaxRoundingIncrement;
+            settings.InvoiceRoundingEnabled = invoiceEnabled;
+            if (dto.InvoiceRoundingIncrementSpecified) settings.InvoiceRoundingIncrement = dto.InvoiceRoundingIncrement;
+            if (dto.InvoiceRoundingMethod.HasValue) settings.InvoiceRoundingMethod = dto.InvoiceRoundingMethod.Value;
+            if (dto.InvoiceRoundingGainAccountIdSpecified) settings.InvoiceRoundingGainAccountId = dto.InvoiceRoundingGainAccountId;
+            if (dto.InvoiceRoundingLossAccountIdSpecified) settings.InvoiceRoundingLossAccountId = dto.InvoiceRoundingLossAccountId;
+            settings.SettlementToleranceAmount = settlementAmount;
+            settings.SettlementTolerancePercentage = settlementPercentage;
+            settings.ReportDisplayDecimalPlaces = reportPlaces;
+        }
+
+        private static bool HasPrecisionAccountingChange(UpdateFinanceSettingsDto dto, FinanceSettings settings) =>
+            dto.UnitPriceDecimalPlaces.HasValue && dto.UnitPriceDecimalPlaces.Value != settings.UnitPriceDecimalPlaces ||
+            dto.ExchangeRateInputDecimalPlaces.HasValue && dto.ExchangeRateInputDecimalPlaces.Value != settings.ExchangeRateInputDecimalPlaces ||
+            dto.TaxPercentageDecimalPlaces.HasValue && dto.TaxPercentageDecimalPlaces.Value != settings.TaxPercentageDecimalPlaces ||
+            dto.TaxRoundingMethod.HasValue && dto.TaxRoundingMethod.Value != settings.TaxRoundingMethod ||
+            dto.TaxRoundingScope.HasValue && dto.TaxRoundingScope.Value != settings.TaxRoundingScope ||
+            dto.TaxRoundingIncrementSpecified && dto.TaxRoundingIncrement != settings.TaxRoundingIncrement ||
+            dto.InvoiceRoundingEnabled.HasValue && dto.InvoiceRoundingEnabled.Value != settings.InvoiceRoundingEnabled ||
+            dto.InvoiceRoundingIncrementSpecified && dto.InvoiceRoundingIncrement != settings.InvoiceRoundingIncrement ||
+            dto.InvoiceRoundingMethod.HasValue && dto.InvoiceRoundingMethod.Value != settings.InvoiceRoundingMethod ||
+            dto.InvoiceRoundingGainAccountIdSpecified && dto.InvoiceRoundingGainAccountId != settings.InvoiceRoundingGainAccountId ||
+            dto.InvoiceRoundingLossAccountIdSpecified && dto.InvoiceRoundingLossAccountId != settings.InvoiceRoundingLossAccountId ||
+            dto.SettlementToleranceAmount.HasValue && dto.SettlementToleranceAmount.Value != settings.SettlementToleranceAmount ||
+            dto.SettlementTolerancePercentage.HasValue && dto.SettlementTolerancePercentage.Value != settings.SettlementTolerancePercentage;
+
+        private static object PrecisionPolicyAuditValues(FinanceSettings settings) => new
+        {
+            settings.UnitPriceDecimalPlaces,
+            settings.ExchangeRateInputDecimalPlaces,
+            settings.ExchangeRateDisplayDecimalPlaces,
+            settings.TaxPercentageDecimalPlaces,
+            settings.TaxRoundingMethod,
+            settings.TaxRoundingScope,
+            settings.TaxRoundingIncrement,
+            settings.InvoiceRoundingEnabled,
+            settings.InvoiceRoundingIncrement,
+            settings.InvoiceRoundingMethod,
+            settings.InvoiceRoundingGainAccountId,
+            settings.InvoiceRoundingLossAccountId,
+            settings.SettlementToleranceAmount,
+            settings.SettlementTolerancePercentage,
+            settings.ReportDisplayDecimalPlaces
+        };
     }
 }

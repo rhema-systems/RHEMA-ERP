@@ -5,6 +5,8 @@ namespace ErpSystem.Core.DTOs.Estate;
 public class EstateManagedAssetDto
 {
     public Guid Id { get; set; }
+    public string ListingScope { get; set; } = "asset";
+    public Guid? ParentAssetId { get; set; }
     public string AssetCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
@@ -80,6 +82,7 @@ public class EstateManagedAssetDto
     public decimal? ExternalMonthlyRent { get; set; }
     public bool? ExternalGroundRentRequired { get; set; }
     public bool? ExternalPremiumChargeRequired { get; set; }
+    public decimal? ExternalPremiumChargeAmount { get; set; }
     public DateTime? RentBillingActivatedAt { get; set; }
     public DateTime? NextRentBillingDate { get; set; }
     public Guid? LastRentInvoiceId { get; set; }
@@ -155,6 +158,7 @@ public class UpdateEstateManagedAssetListingDto
     public decimal? ExternalMonthlyRent { get; set; }
     public bool? ExternalGroundRentRequired { get; set; }
     public bool? ExternalPremiumChargeRequired { get; set; }
+    public decimal? ExternalPremiumChargeAmount { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -254,6 +258,7 @@ public class EstateLandDemarcationDto
     public decimal? ExternalMonthlyRent { get; set; }
     public bool? ExternalGroundRentRequired { get; set; }
     public bool? ExternalPremiumChargeRequired { get; set; }
+    public decimal? ExternalPremiumChargeAmount { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -297,6 +302,7 @@ public class UpdateEstateLandDemarcationDispositionDto
     public decimal? ExternalMonthlyRent { get; set; }
     public bool? ExternalGroundRentRequired { get; set; }
     public bool? ExternalPremiumChargeRequired { get; set; }
+    public decimal? ExternalPremiumChargeAmount { get; set; }
     public int? ExternalLeaseTermMonths { get; set; }
     public string ExternalListingCurrency { get; set; } = "GHS";
     public string? ExternalListingNotes { get; set; }
@@ -322,7 +328,9 @@ public class EstateManagedAssetQuery
     public bool? AvailableForSale { get; set; }
     public bool? AvailableForSaleOrLease { get; set; }
     public bool? PortalListingCandidates { get; set; }
+    public string? ExternalListingStatus { get; set; }
     public bool? PublishedToExternalPortal { get; set; }
+    public bool IncludeLandDemarcations { get; set; }
     public int Skip { get; set; }
     public int Take { get; set; } = 100;
 }

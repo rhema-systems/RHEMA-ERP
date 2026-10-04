@@ -118,6 +118,37 @@ if (args.Length > 0 && args[0] == "seed-finance-baseline")
     return;
 }
 
+// Ensure Estate land-bank demonstration parcels exist for every active tenant.
+// This is safe to run on a deployed host without enabling broad development seeding.
+if (args.Length > 0 && args[0] == "seed-estate-land-bank")
+{
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor();
+    tempBuilder.Services.AddErpSystemCliDatabase(
+        tempBuilder.Configuration,
+        migrationCommandOptions.CommandTimeoutSeconds);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        migrationCommandOptions.ApplyAndAssertTo(db.Database);
+        Console.WriteLine($"RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS={migrationCommandOptions.CommandTimeoutSeconds}");
+        await db.Database.MigrateAsync();
+
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedEstateAcquisitionLandBankParcelsAsync();
+    }
+
+    Console.WriteLine("Estate acquisition land bank parcel seeding completed successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -592,7 +623,7 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
         + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-qs-uat, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
-        + "seed-finance-baseline, seed-finance-demo-dimensions, rebuild-db, repair-finance-po-schema.");
+        + "seed-finance-baseline, seed-finance-demo-dimensions, seed-estate-land-bank, rebuild-db, repair-finance-po-schema.");
     return;
 }
 
@@ -915,6 +946,24 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 app.MapHealthChecks("/health/shutdown", new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("shutdown"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+
+// Caddy exposes /api/* to browsers and keeps /health* private to the VPS. These
+// aliases give authenticated application screens the same sanitized health
+// contract without exposing the private loopback routes through the gateway.
+app.MapHealthChecks("/api/health", new HealthCheckOptions
+{
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/api/health/ready", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("ready"),
+    ResponseWriter = HealthCheckResponseWriter.WriteAsync
+});
+app.MapHealthChecks("/api/health/live", new HealthCheckOptions
+{
+    Predicate = check => check.Tags.Contains("live"),
     ResponseWriter = HealthCheckResponseWriter.WriteAsync
 });
 

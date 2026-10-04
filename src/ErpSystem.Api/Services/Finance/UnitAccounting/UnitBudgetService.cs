@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -91,9 +92,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         {
             // Validate unit account exists
             var account = await _unitOfWork.Repository<UnitAccount>()
-                .FirstOrDefaultAsync(a => a.Id == dto.UnitAccountId && a.TenantId == TenantId && a.IsActive && !a.IsDeleted);
+                .GetQueryable(a => a.Id == dto.UnitAccountId && a.TenantId == TenantId && a.IsActive && !a.IsDeleted)
+                .Include(a => a.UnitType)
+                .FirstOrDefaultAsync(cancellationToken);
             if (account == null)
                 throw new ArgumentException($"Active unit account with ID '{dto.UnitAccountId}' not found.");
+            ValidateBudgetQuantity(account, dto.BudgetQuantity);
 
             var period = await _unitOfWork.Repository<FiscalPeriod>()
                 .FirstOrDefaultAsync(p => p.Id == dto.FiscalPeriodId && p.TenantId == TenantId && !p.IsDeleted);
@@ -144,10 +148,16 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
         public async Task<UnitAccountBudgetDto> UpdateAsync(Guid id, UpdateUnitAccountBudgetDto dto, CancellationToken cancellationToken = default)
         {
             var budget = await _unitOfWork.Repository<UnitAccountBudget>()
-                .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == TenantId && !b.IsDeleted);
+                .GetQueryable(b => b.Id == id && b.TenantId == TenantId && !b.IsDeleted)
+                .Include(b => b.UnitAccount)
+                    .ThenInclude(account => account!.UnitType)
+                .FirstOrDefaultAsync(cancellationToken);
 
             if (budget == null)
                 throw new ArgumentException($"Unit budget with ID '{id}' not found.");
+            if (budget.UnitAccount == null)
+                throw new InvalidOperationException("The unit budget has no Unit Account precision policy.");
+            ValidateBudgetQuantity(budget.UnitAccount, dto.BudgetQuantity);
 
             budget.BudgetQuantity = dto.BudgetQuantity;
             budget.Notes = dto.Notes;
@@ -246,6 +256,27 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                 budget.IsActive,
                 budget.CreatedAt
             );
+        }
+
+        private static void ValidateBudgetQuantity(UnitAccount account, decimal quantity)
+        {
+            if (account.UnitType == null)
+                throw new InvalidOperationException(
+                    $"Unit account '{account.AccountNumber}' has no Unit Type precision policy.");
+
+            try
+            {
+                PrecisionRoundingPolicy.ValidateQuantity(
+                    quantity,
+                    account.UnitType.DecimalPlaces,
+                    account.UnitType.RoundingIncrement);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Budget quantity {quantity} is invalid for account '{account.AccountNumber}' Unit Type '{account.UnitType.Code}': {exception.Message}",
+                    exception);
+            }
         }
     }
 }

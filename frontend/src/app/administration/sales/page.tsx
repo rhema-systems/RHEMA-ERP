@@ -36,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import {
   salesSetupService,
+  type SalesSaleableSourceAdapterDefinitionDto,
   type SalesSaleableSourceDto,
   type UpsertSalesSaleableSourceDto,
 } from '@/services/salesSetupService';
@@ -92,47 +93,6 @@ type SaleableSourceSettings = {
   filterValue?: string;
   filters?: SaleableSourceFilter[];
   [key: string]: unknown;
-};
-
-const filterOptionsBySourceType: Record<string, { value: string; label: string }[]> = {
-  Inventory: [
-    { value: 'inventoryType', label: 'Inventory Type' },
-    { value: 'status', label: 'Status' },
-    { value: 'categoryName', label: 'Category' },
-    { value: 'categoryId', label: 'Category ID' },
-    { value: 'brand', label: 'Brand' },
-    { value: 'manufacturer', label: 'Manufacturer' },
-    { value: 'model', label: 'Model' },
-    { value: 'unitOfMeasure', label: 'Unit of Measure' },
-    { value: 'isSerialTracked', label: 'Serial Tracked' },
-    { value: 'isLotTracked', label: 'Lot Tracked' },
-    { value: 'isLocationTracked', label: 'Location Tracked' },
-  ],
-  ProjectUnits: [
-    { value: 'status', label: 'Status' },
-    { value: 'projectCode', label: 'Project Code' },
-    { value: 'unitType', label: 'Unit Type' },
-  ],
-  PropertyRegister: [
-    { value: 'status', label: 'Status' },
-    { value: 'propertyType', label: 'Property Type' },
-    { value: 'location', label: 'Location' },
-  ],
-  AssetRegister: [
-    { value: 'status', label: 'Status' },
-    { value: 'assetType', label: 'Asset Type' },
-    { value: 'location', label: 'Location' },
-  ],
-  LandManagement: [
-    { value: 'status', label: 'Status' },
-    { value: 'plotType', label: 'Plot Type' },
-    { value: 'location', label: 'Location' },
-  ],
-  Custom: [
-    { value: 'status', label: 'Status' },
-    { value: 'type', label: 'Type' },
-    { value: 'category', label: 'Category' },
-  ],
 };
 
 const splitTransactionTypes = (value?: string) =>
@@ -194,6 +154,7 @@ const toForm = (source: SalesSaleableSourceDto): UpsertSalesSaleableSourceDto =>
 export default function SalesAdministrationPage() {
   const { toast } = useToast();
   const [sources, setSources] = useState<SalesSaleableSourceDto[]>([]);
+  const [adapterDefinitions, setAdapterDefinitions] = useState<SalesSaleableSourceAdapterDefinitionDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState('');
@@ -208,8 +169,12 @@ export default function SalesAdministrationPage() {
   const loadSources = async () => {
     try {
       setLoading(true);
-      const data = await salesSetupService.getSaleableSources(true);
+      const [data, adapters] = await Promise.all([
+        salesSetupService.getSaleableSources(true),
+        salesSetupService.getSaleableSourceAdapters(),
+      ]);
       setSources(data);
+      setAdapterDefinitions(adapters);
     } catch (error: any) {
       toast({
         title: 'Error',
@@ -248,13 +213,27 @@ export default function SalesAdministrationPage() {
   const sourceSettings = useMemo(() => parseSourceSettings(form.settingsJson), [form.settingsJson]);
   const selectedWarehouseId = typeof sourceSettings.warehouseId === 'string' ? sourceSettings.warehouseId : '';
   const selectedLocationId = typeof sourceSettings.locationId === 'string' ? sourceSettings.locationId : '';
-  const selectedFilterField = typeof sourceSettings.filterField === 'string'
-    ? sourceSettings.filterField
-    : sourceSettings.filters?.[0]?.field || '';
-  const selectedFilterValue = typeof sourceSettings.filterValue === 'string'
-    ? sourceSettings.filterValue
-    : sourceSettings.filters?.[0]?.value || '';
-  const filterOptions = filterOptionsBySourceType[form.sourceType] || filterOptionsBySourceType.Custom;
+  const filterDefinitions = useMemo(
+    () => adapterDefinitions.find((adapter) => adapter.adapterKey.toLowerCase() === form.adapterKey.toLowerCase())?.filters || [],
+    [adapterDefinitions, form.adapterKey],
+  );
+  const configuredFilters = useMemo(() => {
+    const values = [...(sourceSettings.filters || [])]
+      .filter((filter) => filter.field && filter.value)
+      .map((filter) => ({ field: filter.field || '', value: filter.value || '' }));
+    const legacyFilterField = typeof sourceSettings.filterField === 'string' ? sourceSettings.filterField : '';
+    const legacyFilterValue = typeof sourceSettings.filterValue === 'string' ? sourceSettings.filterValue : '';
+    if (legacyFilterField && legacyFilterValue
+      && !values.some((filter) => filter.field.toLowerCase() === legacyFilterField.toLowerCase())) {
+      values.push({ field: legacyFilterField, value: legacyFilterValue });
+    }
+    filterDefinitions.filter((definition) => definition.isRequired).forEach((definition) => {
+      if (!values.some((filter) => filter.field.toLowerCase() === definition.field.toLowerCase())) {
+        values.push({ field: definition.field, value: definition.defaultValue || '' });
+      }
+    });
+    return values;
+  }, [filterDefinitions, sourceSettings]);
 
   useEffect(() => {
     if (!dialogOpen || form.sourceType !== 'Inventory' || !selectedWarehouseId) {
@@ -325,14 +304,38 @@ export default function SalesAdministrationPage() {
     });
   };
 
-  const updateFilterSetting = (field: string, value: string) => {
-    updateSourceSettings((settings) => ({
-      ...settings,
-      source: settings.source || sourceSettingName(form.sourceType),
-      filterField: field || undefined,
-      filterValue: value || undefined,
-      filters: field && value ? [{ field, value }] : [],
-    }));
+  const persistFilters = (filters: SaleableSourceFilter[]) => {
+    updateSourceSettings((settings) => {
+      const { filterField: _legacyField, filterValue: _legacyValue, ...rest } = settings;
+      return {
+        ...rest,
+        source: settings.source || sourceSettingName(form.sourceType),
+        filters: filters.filter((filter) => filter.field && filter.value),
+      };
+    });
+  };
+
+  const updateFilterSetting = (index: number, field: string, value: string) => {
+    const next = [...configuredFilters];
+    next[index] = { field, value };
+    persistFilters(next);
+  };
+
+  const addFilterSetting = () => {
+    const nextDefinition = filterDefinitions.find((definition) =>
+      !configuredFilters.some((filter) => filter.field.toLowerCase() === definition.field.toLowerCase()));
+    if (!nextDefinition) return;
+    persistFilters([
+      ...configuredFilters,
+      { field: nextDefinition.field, value: nextDefinition.defaultValue || nextDefinition.options?.[0] || '' },
+    ]);
+  };
+
+  const removeFilterSetting = (index: number) => {
+    const filter = configuredFilters[index];
+    const definition = filterDefinitions.find((item) => item.field.toLowerCase() === filter.field.toLowerCase());
+    if (definition?.isRequired) return;
+    persistFilters(configuredFilters.filter((_, itemIndex) => itemIndex !== index));
   };
 
   const updateInventoryWarehouse = (warehouseId: string) => {
@@ -359,10 +362,15 @@ export default function SalesAdministrationPage() {
 
   const handleSourceTypeChange = (value: string) => {
     const selected = sourceTypes.find((type) => type.value === value);
+    const selectedAdapterKey = selected?.adapterKey || form.adapterKey;
+    const requiredFilters = adapterDefinitions
+      .find((adapter) => adapter.adapterKey.toLowerCase() === selectedAdapterKey.toLowerCase())
+      ?.filters.filter((filter) => filter.isRequired)
+      .map((filter) => ({ field: filter.field, value: filter.defaultValue || filter.options?.[0] || '' })) || [];
     setForm((current) => ({
       ...current,
       sourceType: value,
-      adapterKey: selected?.adapterKey || current.adapterKey,
+      adapterKey: selectedAdapterKey,
       icon: selected?.icon || current.icon,
       allowSalesOrders: value === 'Inventory' ? true : current.allowSalesOrders,
       allowSalesAgreements: value === 'Inventory' ? false : current.allowSalesAgreements,
@@ -375,6 +383,9 @@ export default function SalesAdministrationPage() {
         warehouseName: value === 'Inventory' ? parseSourceSettings(current.settingsJson).warehouseName : undefined,
         locationId: value === 'Inventory' ? parseSourceSettings(current.settingsJson).locationId : undefined,
         locationName: value === 'Inventory' ? parseSourceSettings(current.settingsJson).locationName : undefined,
+        filterField: undefined,
+        filterValue: undefined,
+        filters: requiredFilters,
       }),
     }));
   };
@@ -755,37 +766,80 @@ export default function SalesAdministrationPage() {
                 Optional filter applied by the selected source adapter when saleable records are listed.
               </p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Filter Parameter</Label>
-                <Select
-                  value={selectedFilterField || emptySelectValue}
-                  onValueChange={(value) => updateFilterSetting(value === emptySelectValue ? '' : value, selectedFilterValue)}
+            {filterDefinitions.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                This adapter does not expose configurable record filters.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {configuredFilters.map((filter, index) => {
+                  const definition = filterDefinitions.find((item) => item.field.toLowerCase() === filter.field.toLowerCase());
+                  const required = Boolean(definition?.isRequired);
+                  return (
+                    <div className="grid items-end gap-3 md:grid-cols-[1fr_1fr_auto]" key={`${filter.field}-${index}`}>
+                      <div className="space-y-2">
+                        <Label>Filter Parameter</Label>
+                        <Select
+                          value={filter.field}
+                          disabled={required}
+                          onValueChange={(field) => {
+                            const nextDefinition = filterDefinitions.find((item) => item.field === field);
+                            updateFilterSetting(index, field, nextDefinition?.defaultValue || nextDefinition?.options?.[0] || '');
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {filterDefinitions.map((option) => (
+                              <SelectItem key={option.field} value={option.field}>{option.displayName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Filter Value</Label>
+                        {definition?.options?.length ? (
+                          <Select
+                            value={filter.value}
+                            disabled={required && definition.options.length === 1}
+                            onValueChange={(value) => updateFilterSetting(index, filter.field, value)}
+                          >
+                            <SelectTrigger><SelectValue placeholder="Select a value" /></SelectTrigger>
+                            <SelectContent>
+                              {definition.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            value={filter.value}
+                            onChange={(event) => updateFilterSetting(index, filter.field, event.target.value)}
+                            placeholder="Enter the filter value"
+                          />
+                        )}
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        disabled={required}
+                        aria-label={`Remove ${definition?.displayName || filter.field} filter`}
+                        onClick={() => removeFilterSetting(index)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addFilterSetting}
+                  disabled={configuredFilters.length >= filterDefinitions.length}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="No filter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={emptySelectValue}>No filter</SelectItem>
-                    {filterOptions.map((option) => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  <Plus className="mr-2 h-4 w-4" /> Add filter
+                </Button>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="filterValue">Filter Value</Label>
-                <Input
-                  id="filterValue"
-                  value={selectedFilterValue}
-                  onChange={(event) => updateFilterSetting(selectedFilterField, event.target.value)}
-                  placeholder={form.sourceType === 'Inventory' ? 'Example: stocks, Active, ICT' : 'Optional value'}
-                  disabled={!selectedFilterField}
-                />
-              </div>
-            </div>
+            )}
 
             {form.sourceType === 'Inventory' ? (
               <div className="grid gap-3 md:grid-cols-2">

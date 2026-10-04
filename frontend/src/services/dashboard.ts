@@ -1,15 +1,19 @@
 import { apiService } from './api.service'
-import type { CrmConversionsDto, CrmOverviewDto, CrmReportingDto } from './crmService'
-import type { InventoryRequisitionDto } from './inventoryRequisitionService'
 import type { ProjectDashboardDto } from './projectService'
-import type { PurchaseOrderSummaryDto, PurchaseRequisitionSummaryDto } from './purchasingService'
-import type { TenderDto } from './tenderService'
+import type { FinanceDashboardData } from '../types/finance-dashboard'
 
 export interface DashboardModuleStatus {
   module: string
   available: boolean
   accessRestricted?: boolean
   error?: string
+}
+
+export interface DashboardCurrencyReference {
+  currencyCode: string
+  currencyName: string
+  currencySymbol: string
+  decimalPlaces: number
 }
 
 export function getUnavailableDashboardModules(statuses: readonly DashboardModuleStatus[]): DashboardModuleStatus[] {
@@ -65,6 +69,62 @@ export interface MaintenanceScheduleDto {
   nextDueDate?: string
   nextScheduledDate?: string
   assignedTechnicianName?: string
+}
+
+export interface EnterpriseCrmDashboard {
+  totalLeadCount: number
+  qualifiedLeadCount: number
+  leadsNeedingFollowUpCount: number
+  openOpportunityCount: number
+  activeQuoteCount: number
+  activeAccountCount: number
+  atRiskAccountCount: number
+  pipelineAsOf: string
+  funnelModel: string
+  funnelRangeStart: string
+  funnelRangeEnd: string
+  historyCoverageStart?: string | null
+  legacyHistorySnapshotCount: number
+  lostOpportunityCount: number
+  dataQualityIssues: string[]
+  pipelineByStage: Array<{
+    stageId: string
+    stage: string
+    stageOrder: number
+    isClosed: boolean
+    isWon: boolean
+    isLost: boolean
+    opportunityCount: number
+    quoteCount: number
+    percentageOfActivePipeline: number
+    averageAgeDays: number
+    stalledOpportunityCount: number
+    overdueOpportunityCount: number
+    amountsByCurrency?: Array<{ currency: string; amount: number }>
+    weightedAmountsByCurrency?: Array<{ currency: string; amount: number }>
+    opportunitiesWithoutCurrencyCount?: number
+  }>
+  accountRiskByBand: Array<{ label: string; count: number }>
+  conversionFunnel: Array<{
+    stageId: string
+    stage: string
+    stageOrder: number
+    count: number
+    conversionRate: number | null
+    overallConversionRate: number | null
+    amountsByCurrency?: Array<{ currency: string; amount: number }>
+    opportunitiesWithoutCurrencyCount?: number
+  }>
+}
+
+export interface EnterpriseOperationalQueue {
+  pendingPurchaseRequisitionCount: number
+  openPurchaseOrderCount: number
+  pendingInventoryApprovalCount: number
+  pendingInventoryIssueCount: number
+  openTenderCount: number
+  tendersClosingWithin14DaysCount: number
+  openTendersByStatus: Array<{ label: string; count: number }>
 }
 
 export interface ManagementDashboardMoneyPoint {
@@ -136,24 +196,41 @@ export interface ProcurementInventoryManagementDashboard {
 }
 
 export interface EnterpriseDashboardData {
-  crmOverview: CrmOverviewDto | null
-  crmReporting: CrmReportingDto | null
-  crmConversions: CrmConversionsDto | null
+  reportingCurrency: DashboardCurrencyReference
+  financeOverview: FinanceDashboardData | null
+  crm: EnterpriseCrmDashboard | null
   projectDashboard: ProjectDashboardDto | null
-  pendingPurchaseRequisitions: PurchaseRequisitionSummaryDto[]
-  openPurchaseOrders: PurchaseOrderSummaryDto[]
-  pendingInventoryApprovals: InventoryRequisitionDto[]
-  pendingInventoryIssues: InventoryRequisitionDto[]
+  operationalQueues: EnterpriseOperationalQueue
   maintenanceOverview: MaintenanceDashboardOverview | null
   maintenanceMetrics: EnterpriseWorkOrderMetrics | null
   maintenanceTrends: WorkOrderTrendsDto | null
-  upcomingMaintenance: MaintenanceScheduleDto[]
-  tenders: TenderDto[]
   procurementInventoryManagement: ProcurementInventoryManagementDashboard | null
   moduleStatus: DashboardModuleStatus[]
   rangeStartDate: string
   rangeEndDate: string
   lastUpdated: string
+}
+
+export function resolveDashboardReportingCurrency(
+  data: Pick<EnterpriseDashboardData, 'reportingCurrency' | 'financeOverview'>,
+): { currencyCode: string; decimalPlaces: number } {
+  const configuredCode = data.reportingCurrency?.currencyCode?.trim().toUpperCase()
+  if (configuredCode && /^[A-Z]{3}$/.test(configuredCode)) {
+    return {
+      currencyCode: configuredCode,
+      decimalPlaces: data.reportingCurrency.decimalPlaces,
+    }
+  }
+
+  const financeCode = data.financeOverview?.currencyCode?.trim().toUpperCase()
+  if (financeCode && /^[A-Z]{3}$/.test(financeCode)) {
+    return {
+      currencyCode: financeCode,
+      decimalPlaces: data.financeOverview?.currencyDecimalPlaces ?? 0,
+    }
+  }
+
+  return { currencyCode: '', decimalPlaces: 0 }
 }
 
 class DashboardService {

@@ -199,7 +199,7 @@ public class TenderLot : TenantEntity
 /// <summary>
 /// Tender line items - now belongs to a LOT
 /// </summary>
-public class TenderItem : TenantEntity
+public class TenderItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid TenderId { get; set; }
@@ -224,6 +224,10 @@ public class TenderItem : TenantEntity
 
     [MaxLength(20)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     public string? Specifications { get; set; }
 
@@ -1412,7 +1416,7 @@ public class TenderNegotiation : TenantEntity
 /// <summary>
 /// Individual item in a negotiation with original and negotiated prices
 /// </summary>
-public class TenderNegotiationItem : TenantEntity
+public class TenderNegotiationItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     [Required]
     public Guid NegotiationId { get; set; }
@@ -1437,6 +1441,10 @@ public class TenderNegotiationItem : TenantEntity
     /// </summary>
     [MaxLength(50)]
     public string? UnitOfMeasure { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     /// <summary>
     /// Original unit price from the bid

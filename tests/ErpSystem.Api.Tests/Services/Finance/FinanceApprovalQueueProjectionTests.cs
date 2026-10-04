@@ -1,6 +1,7 @@
 using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -77,6 +78,60 @@ public sealed class FinanceApprovalQueueProjectionTests
         result.Should().BeEquivalentTo(new[] { activeCurrent, waitingCurrent });
         (await db.WorkflowApprovals.CountAsync(approval => approval.Status == WorkflowApprovalStatus.Pending))
             .Should().Be(6, "historical approvals remain immutable even when they are no longer actionable");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Capital_project_submitter_cannot_action_assigned_approval_but_independent_checker_can()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var approvalId = AddApprovalGraph(db, tenantId,
+            WorkflowInstanceStatus.InProgress, WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "CapitalProject", initiatorId: makerId,
+            approverRole: "Financial Controller");
+        var instance = db.WorkflowApprovals.Local.Single(item => item.Id == approvalId)
+            .StepInstance.WorkflowInstance;
+        db.CapitalProjects.Add(new ErpSystem.Core.Entities.Finance.FixedAssets.CapitalProject
+        {
+            Id = instance.EntityId,
+            TenantId = tenantId,
+            ProjectCode = "CP-SOD-001",
+            Name = "Capital project maker-checker",
+            StartDate = new DateTime(2026, 9, 1),
+            TotalBudgetAmount = 10_000m,
+            Status = ProjectStatus.PendingApproval,
+            RowVersion = Array.Empty<byte>()
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var maker = CreateQueueController(db, tenantId, makerId);
+        var makerResponse = await maker.GetPending(CancellationToken.None);
+        var makerRows = ((OkObjectResult)makerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        makerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(
+            row => row.EntityType == "CapitalProject" && !row.CanApprove && !row.CanReject &&
+                   row.ApproveDisabledReason != null && row.ApproveDisabledReason.Contains("submitted"));
+
+        var denied = await maker.Approve(approvalId,
+            new FinanceApprovalsController.FinanceApprovalActionRequest { Comments = "self approval" },
+            CancellationToken.None);
+        var problem = denied.Result.Should().BeAssignableTo<ObjectResult>().Which;
+        problem.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        (await db.CapitalProjects.SingleAsync()).Status.Should().Be(ProjectStatus.PendingApproval);
+
+        var checker = CreateQueueController(db, tenantId, checkerId);
+        var checkerResponse = await checker.GetPending(CancellationToken.None);
+        var checkerRows = ((OkObjectResult)checkerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(
+            row => row.EntityType == "CapitalProject" && row.CanApprove && row.CanReject);
     }
 
     [Fact]
@@ -394,9 +449,16 @@ public sealed class FinanceApprovalQueueProjectionTests
             .ReturnsAsync(true);
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookApplicabilityPolicy", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
+        var display = new Mock<IWorkflowEntityDisplayService>();
+        display.Setup(value => value.GetEntityDisplayInfoAsync(It.IsAny<string>(), It.IsAny<Guid>()))
+            .ReturnsAsync((string entityType, Guid entityId) => new WorkflowEntityDisplayInfo
+            {
+                EntityType = entityType,
+                EntityId = entityId
+            });
         return new FinanceApprovalsController(
             db, user.Object, authorization.Object, workflow.Object,
-            Mock.Of<IWorkflowEntityDisplayService>(), Mock.Of<IJournalEntryService>(),
+            display.Object, Mock.Of<IJournalEntryService>(),
             Mock.Of<IInvoiceService>(),
             Mock.Of<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService>(),
             null!, NullLogger<FinanceApprovalsController>.Instance)

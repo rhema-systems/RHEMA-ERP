@@ -40,6 +40,12 @@ export interface SessionRuntimeSettings {
   jwtTokenLifetimeMinutes: number;
 }
 
+export type LoginPageStyle = 'LightCorporate' | 'DarkPremium';
+
+export interface LoginAppearanceSettings {
+  loginPageStyle: LoginPageStyle;
+}
+
 // Admin API DTO interface to match backend SecuritySettingsDto (PascalCase)
 interface AdminSecuritySettingsApiDto {
   // Password Policy
@@ -138,6 +144,18 @@ const mapAdminSecuritySettings = (response: AdminSecuritySettingsApiDto | Record
   };
 };
 
+const mapLoginAppearanceSettings = (
+  response: LoginAppearanceSettings | Record<string, unknown>
+): LoginAppearanceSettings => {
+  const data = response as Record<string, unknown>;
+  const configuredStyle = data.loginPageStyle ?? data.LoginPageStyle;
+
+  return {
+    loginPageStyle:
+      configuredStyle === 'DarkPremium' ? 'DarkPremium' : 'LightCorporate',
+  };
+};
+
 class SettingsService {
   async getSessionSettings(): Promise<SessionRuntimeSettings> {
     const response = await apiService.request<SessionRuntimeSettingsApiDto>('/auth/session-settings', {
@@ -204,6 +222,29 @@ class SettingsService {
     });
 
     return mapAdminSecuritySettings(response);
+  }
+
+  async getLoginAppearance(): Promise<LoginAppearanceSettings> {
+    const response = await apiService.request<LoginAppearanceSettings>(
+      '/settings/login-appearance',
+      { method: 'GET' }
+    );
+
+    return mapLoginAppearanceSettings(response);
+  }
+
+  async updateLoginAppearance(
+    settings: LoginAppearanceSettings
+  ): Promise<LoginAppearanceSettings> {
+    const response = await apiService.request<LoginAppearanceSettings>(
+      '/settings/login-appearance',
+      {
+        method: 'PUT',
+        body: JSON.stringify(settings),
+      }
+    );
+
+    return mapLoginAppearanceSettings(response);
   }
 
   async getPublicSecuritySettings(): Promise<SecuritySettings> {

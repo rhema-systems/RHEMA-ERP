@@ -10,8 +10,13 @@ public class CrmOverviewDto
     public int OpenOpportunityCount { get; set; }
     public decimal OpenOpportunityValue { get; set; }
     public decimal WeightedPipelineValue { get; set; }
+    public List<CrmCurrencyAmountDto> OpenOpportunityValuesByCurrency { get; set; } = new();
+    public List<CrmCurrencyAmountDto> WeightedPipelineValuesByCurrency { get; set; } = new();
+    public int OpenOpportunitiesWithoutCurrencyCount { get; set; }
     public int ActiveQuoteCount { get; set; }
     public decimal ActiveQuoteValue { get; set; }
+    public List<CrmCurrencyAmountDto> ActiveQuoteValuesByCurrency { get; set; } = new();
+    public int ActiveQuotesWithoutCurrencyCount { get; set; }
     public int ActiveAccountCount { get; set; }
     public int AtRiskAccountCount { get; set; }
     public decimal AverageAccountHealthScore { get; set; }
@@ -21,6 +26,12 @@ public class CrmOverviewDto
     public List<CrmAccountOverviewDto> Accounts { get; set; } = new();
     public List<CrmOpportunityOverviewDto> Opportunities { get; set; } = new();
     public List<CrmFollowUpOverviewDto> FollowUps { get; set; } = new();
+}
+
+public class CrmCurrencyAmountDto
+{
+    public string Currency { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
 
 public class CrmAccountOverviewDto
@@ -43,13 +54,19 @@ public class CrmAccountOverviewDto
     public int TotalProjectCount { get; set; }
     public int ActiveProjectCount { get; set; }
     public decimal ProjectValue { get; set; }
+    public List<CrmCurrencyAmountDto> ProjectValuesByCurrency { get; set; } = new();
+    public int ProjectsWithoutCurrencyCount { get; set; }
     public int TotalContractCount { get; set; }
     public int ActiveContractCount { get; set; }
     public decimal ContractValue { get; set; }
+    public List<CrmCurrencyAmountDto> ContractValuesByCurrency { get; set; } = new();
+    public int ContractsWithoutCurrencyCount { get; set; }
     public int TenderInvitationCount { get; set; }
     public int TenderBidCount { get; set; }
     public int TenderAwardCount { get; set; }
     public decimal TenderAwardedValue { get; set; }
+    public List<CrmCurrencyAmountDto> TenderAwardedValuesByCurrency { get; set; } = new();
+    public int TenderAwardsWithoutCurrencyCount { get; set; }
     public bool HasOpenFollowUp { get; set; }
     public bool IsAtRisk { get; set; }
     public int HealthScore { get; set; }
@@ -626,6 +643,7 @@ public class CrmOpportunityOverviewDto
 {
     public Guid OpportunityId { get; set; }
     public string Name { get; set; } = string.Empty;
+    public Guid? StageDefinitionId { get; set; }
     public string Stage { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
@@ -695,6 +713,9 @@ public class CrmLeadDetailDto : CrmLeadListItemDto
     public string? Notes { get; set; }
     public Guid? ConvertedBusinessPartnerId { get; set; }
     public DateTime? ConvertedDate { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
+    public string? PropertyEnquiryTicketNumber { get; set; }
+    public string? PropertyEnquiryCurrency { get; set; }
     public List<CrmOpportunityOverviewDto> Opportunities { get; set; } = new();
 }
 
@@ -782,6 +803,9 @@ public class CrmActivityDetailDto : CrmActivityListItemDto
     public string? Attendees { get; set; }
     public string? Outcome { get; set; }
     public string? Notes { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
+    public string? PropertyEnquiryTicketNumber { get; set; }
+    public string? PropertyEnquirySubject { get; set; }
 }
 
 public class CrmProjectSummaryDto
@@ -1075,6 +1099,9 @@ public class CrmConversionsDto
     public decimal OpportunityToProjectRate { get; set; }
     public decimal TotalOpportunityValue { get; set; }
     public decimal WeightedPipelineValue { get; set; }
+    public List<CrmCurrencyAmountDto> TotalOpportunityValuesByCurrency { get; set; } = new();
+    public List<CrmCurrencyAmountDto> WeightedPipelineValuesByCurrency { get; set; } = new();
+    public int OpportunitiesWithoutCurrencyCount { get; set; }
     public List<CrmConversionStageMetricDto> Funnel { get; set; } = new();
     public List<CrmConversionJourneyDto> Journeys { get; set; } = new();
     public List<CrmConversionLeakDto> Leakage { get; set; } = new();
@@ -1086,6 +1113,8 @@ public class CrmConversionStageMetricDto
     public int EntityCount { get; set; }
     public int RelatedOpportunityCount { get; set; }
     public decimal TotalValue { get; set; }
+    public List<CrmCurrencyAmountDto> ValuesByCurrency { get; set; } = new();
+    public int UnspecifiedCurrencyCount { get; set; }
     public decimal ConversionRate { get; set; }
 }
 
@@ -1236,9 +1265,10 @@ public abstract class CrmOpportunityUpsertDto
 
     public Guid? BusinessPartnerId { get; set; }
     public Guid? LeadId { get; set; }
+    public Guid? StageDefinitionId { get; set; }
 
     [MaxLength(50)]
-    public string Stage { get; set; } = "Prospecting";
+    public string? Stage { get; set; }
 
     [Range(0, 100)]
     public int Probability { get; set; } = 10;
@@ -1269,6 +1299,48 @@ public abstract class CrmOpportunityUpsertDto
 
     [MaxLength(2000)]
     public string? LossReason { get; set; }
+}
+
+public sealed class CrmOpportunityStageDefinitionDto
+{
+    public Guid StageId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; }
+    public bool IsClosed { get; set; }
+    public bool IsWon { get; set; }
+    public bool IsLost { get; set; }
+    public int? DefaultProbability { get; set; }
+}
+
+public sealed class UpdateCrmOpportunityStagesDto
+{
+    [Required]
+    [MinLength(1)]
+    public List<UpdateCrmOpportunityStageDto> Stages { get; set; } = new();
+}
+
+public sealed class UpdateCrmOpportunityStageDto
+{
+    public Guid? StageId { get; set; }
+
+    [Required]
+    [MaxLength(50)]
+    public string Code { get; set; } = string.Empty;
+
+    [Required]
+    [MaxLength(100)]
+    public string Name { get; set; } = string.Empty;
+
+    public int SortOrder { get; set; }
+    public bool IsActive { get; set; } = true;
+    public bool IsClosed { get; set; }
+    public bool IsWon { get; set; }
+    public bool IsLost { get; set; }
+
+    [Range(0, 100)]
+    public int? DefaultProbability { get; set; }
 }
 
 public class CreateCrmOpportunityDto : CrmOpportunityUpsertDto
@@ -1305,6 +1377,7 @@ public abstract class CrmActivityUpsertDto
     public Guid? BusinessPartnerId { get; set; }
     public Guid? LeadId { get; set; }
     public Guid? OpportunityId { get; set; }
+    public Guid? PropertyEnquiryTicketId { get; set; }
 
     [MaxLength(200)]
     public string? Location { get; set; }

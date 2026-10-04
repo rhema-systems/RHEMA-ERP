@@ -43,6 +43,11 @@ import {
   type UpdateEstateLandDemarcationCosting,
   type UpdateEstateLandDemarcationDisposition,
 } from '@/services/estate-land-management.service';
+import {
+  DEFAULT_ESTATE_CURRENCY,
+  loadEstateCurrencyContext,
+  type EstateCurrencyReference,
+} from '@/lib/estate-currency';
 
 const LandBankMap = dynamic(() => import('./LandBankMap'), { ssr: false });
 
@@ -421,6 +426,9 @@ export default function DemarcateLandDialog({
   const [costDialog, setCostDialog] = React.useState<CostDialogState | null>(
     null
   );
+  const [baseCurrency, setBaseCurrency] = React.useState<EstateCurrencyReference>(
+    DEFAULT_ESTATE_CURRENCY
+  );
   const demarcationsLocked = asset?.isPublishedToExternalPortal === true;
 
   const rejectLockedDemarcationChange = () => {
@@ -482,6 +490,16 @@ export default function DemarcateLandDialog({
     setPendingDemarcations([]);
     void loadDemarcations();
   }, [asset, loadDemarcations, open, resetEditor]);
+
+  React.useEffect(() => {
+    let active = true;
+    void loadEstateCurrencyContext().then((context) => {
+      if (active) setBaseCurrency(context.baseCurrency);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const boundaryCoordinates = React.useMemo(
     () => serializeBoundary(beacons),
@@ -871,7 +889,10 @@ export default function DemarcateLandDialog({
             : demarcation.externalListingType
           : 'None',
       externalListingStatus: 'Draft',
-      externalListingCurrency: demarcation.externalListingCurrency || 'GHS',
+      externalListingCurrency:
+        demarcation.externalListingCurrency ||
+        asset.currency ||
+        baseCurrency.code,
       externalListingPrice: demarcation.externalListingPrice ?? null,
       externalSalePrice:
         demarcation.externalSalePrice ??

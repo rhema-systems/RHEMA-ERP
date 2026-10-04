@@ -10,7 +10,7 @@ public class SmsSettings : BaseEntity
     public virtual Tenant Tenant { get; set; } = null!;
 
     [StringLength(50)]
-    public string DefaultProvider { get; set; } = "Twilio";
+    public string DefaultProvider { get; set; } = "GhanaGateway";
 
     /// <summary>
     /// Optional JSON array of fallback providers (e.g. ["GhanaGateway"]).
@@ -29,7 +29,7 @@ public class SmsSettings : BaseEntity
     [StringLength(40)]
     public string? TwilioFromNumber { get; set; }
 
-    // Ghana Gateway (configurable HTTP GET template)
+    // mNotify (legacy column names retained for database compatibility)
     public bool GhanaGatewayEnabled { get; set; } = false;
 
     [StringLength(1000)]

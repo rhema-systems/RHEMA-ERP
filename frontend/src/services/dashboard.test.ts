@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api.service';
-import { dashboardService, getUnavailableDashboardModules, type EnterpriseDashboardData } from './dashboard';
+import {
+  dashboardService,
+  getUnavailableDashboardModules,
+  resolveDashboardReportingCurrency,
+  type EnterpriseDashboardData,
+} from './dashboard';
 
 describe('dashboard availability presentation', () => {
   it('does not describe access-restricted analytics as a service outage', () => {
@@ -26,6 +31,36 @@ describe('dashboard availability presentation', () => {
 
   it('does not warn about successful modules', () => {
     expect(getUnavailableDashboardModules([{ module: 'Purchase Orders', available: true }])).toEqual([]);
+  });
+});
+
+describe('dashboard reporting currency', () => {
+  it('uses tenant configuration ahead of the finance response', () => {
+    expect(resolveDashboardReportingCurrency({
+      reportingCurrency: { currencyCode: 'GHS', currencyName: 'Ghana Cedi', currencySymbol: 'GH₵', decimalPlaces: 2 },
+      financeOverview: { currencyCode: 'USD', currencyDecimalPlaces: 2 } as unknown as EnterpriseDashboardData['financeOverview'],
+    })).toEqual({ currencyCode: 'GHS', decimalPlaces: 2 });
+  });
+
+  it('uses the authoritative finance currency when the settings widget is unavailable', () => {
+    expect(resolveDashboardReportingCurrency({
+      reportingCurrency: { currencyCode: '', currencyName: '', currencySymbol: '', decimalPlaces: 0 },
+      financeOverview: { currencyCode: 'EUR', currencyDecimalPlaces: 2 } as unknown as EnterpriseDashboardData['financeOverview'],
+    })).toEqual({ currencyCode: 'EUR', decimalPlaces: 2 });
+  });
+
+  it('does not invent a currency fallback', () => {
+    expect(resolveDashboardReportingCurrency({
+      reportingCurrency: { currencyCode: '', currencyName: '', currencySymbol: '', decimalPlaces: 0 },
+      financeOverview: null,
+    })).toEqual({ currencyCode: '', decimalPlaces: 0 });
+  });
+
+  it('rejects an invalid configured currency instead of falling back silently', () => {
+    expect(resolveDashboardReportingCurrency({
+      reportingCurrency: { currencyCode: 'N/A', currencyName: '', currencySymbol: '', decimalPlaces: 0 },
+      financeOverview: null,
+    })).toEqual({ currencyCode: '', decimalPlaces: 0 });
   });
 });
 

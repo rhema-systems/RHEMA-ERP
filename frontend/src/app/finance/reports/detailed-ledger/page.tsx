@@ -32,7 +32,7 @@ export default function DetailedLedgerPage() {
     const searchParams = useSearchParams();
     const [startDate, setStartDate] = useState(searchParams.get('startDate') || formatDateInput(new Date(new Date().getFullYear(), 0, 1)));
     const [endDate, setEndDate] = useState(searchParams.get('endDate') || formatDateInput(new Date()));
-    const [bookClassification, setBookClassification] = useState(searchParams.get('bookClassification') || 'IFRS');
+    const [bookClassification, setBookClassification] = useState(searchParams.get('bookClassification') || 'BASE');
     const [accountingBooks, setAccountingBooks] = useState(DEFAULT_ACCOUNTING_BOOKS);
     const [includeReversed, setIncludeReversed] = useState(parseBooleanParam(searchParams.get('includeReversed'), true));
     const [accountSearch, setAccountSearch] = useState('');
@@ -359,7 +359,7 @@ export default function DetailedLedgerPage() {
                                 </div>
                                 <div>
                                     <div className="text-muted-foreground">Currency</div>
-                                    <div className="font-medium">{settings?.baseCurrency || report?.currencyCode || 'GHS'}</div>
+                                    <div className="font-medium">{report?.currencyCode || settings?.baseCurrency || 'GHS'}</div>
                                 </div>
                             </div>
                             {error && <div className="mt-4 text-sm text-red-600">{error}</div>}

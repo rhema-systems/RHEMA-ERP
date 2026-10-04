@@ -206,11 +206,11 @@ namespace ErpSystem.Api.Controllers.Finance
 
         /// <summary>
         /// Performs the fiscal year-end close: zeroes revenue/expense accounts into retained
-        /// earnings and marks the year closed.
+        /// earnings in the explicitly selected book and records its close cycle.
         /// </summary>
         /// <remarks>
         /// **Business Rules:**
-        /// - All fiscal periods in the year must already be closed.
+        /// - Every selected-book period must have an independently approved close.
         /// - The closing journal posts through the finance posting engine (posting event,
         ///   idempotent re-run, account balance snapshots).
         /// - The retained earnings account defaults from Finance Settings when not supplied.
@@ -224,9 +224,12 @@ namespace ErpSystem.Api.Controllers.Finance
         [Authorize(Policy = FinancePermissions.CloseAccountingPeriods)]
         public async Task<ActionResult<PeriodCloseResultDto>> CloseFiscalYear(Guid id, [FromBody] CloseFiscalYearRequestDto? dto = null)
         {
+            if (dto == null || dto.AccountingBookId == Guid.Empty || string.IsNullOrWhiteSpace(dto.IdempotencyKey))
+                return BadRequest("Select an exact accounting book and provide a year-end idempotency key.");
+            if (!ModelState.IsValid) return BadRequest(ModelState);
             try
             {
-                var retainedEarningsAccountId = dto?.RetainedEarningsAccountId;
+                var retainedEarningsAccountId = dto.RetainedEarningsAccountId;
                 if (retainedEarningsAccountId == null || retainedEarningsAccountId == Guid.Empty)
                 {
                     var settings = await _financeSettingsService.GetSettingsAsync();
@@ -246,8 +249,10 @@ namespace ErpSystem.Api.Controllers.Finance
                 var result = await _generalLedgerService.CloseFiscalYearAsync(new YearEndCloseRequestDto
                 {
                     FiscalYearId = id,
+                    AccountingBookId = dto.AccountingBookId,
+                    IdempotencyKey = dto.IdempotencyKey,
                     RetainedEarningsAccountId = retainedEarningsAccountId.Value,
-                    ClosingNotes = dto?.ClosingNotes
+                    ClosingNotes = dto.ClosingNotes
                 });
 
                 return result.Success ? Ok(result) : BadRequest(result);
@@ -258,11 +263,11 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Reopens a closed fiscal year by reversing its year-end closing entry.
+        /// Reopens an exact accounting-book close cycle by reversing its retained closing entry.
         /// </summary>
         /// <remarks>
         /// **Business Rules:**
-        /// - A reason is mandatory and is appended to the year's closing notes for audit.
+        /// - A reason is mandatory and retained on the immutable book-close cycle.
         /// - The closing journal is reversed through the finance posting engine.
         ///
         /// **Authorization:** Requires the reopen-accounting-periods permission.
@@ -276,13 +281,18 @@ namespace ErpSystem.Api.Controllers.Finance
 
             try
             {
-                var result = await _generalLedgerService.ReopenFiscalYearAsync(id, dto.Reason);
+                var result = await _generalLedgerService.ReopenFiscalYearAsync(id, dto);
                 return result.Success ? Ok(result) : BadRequest(result);
             }
             catch (ArgumentException ex) { return NotFound(ex.Message); }
             catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
             catch (Exception ex) { return StatusCode(500, $"Internal server error: {ex.Message}"); }
         }
+
+        [HttpGet("fiscal-years/{id}/book-close-cycles")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<IReadOnlyList<YearEndBookCloseCycleDto>>> GetYearEndCloseCycles(Guid id) =>
+            Ok(await _generalLedgerService.GetYearEndCloseCyclesAsync(id));
 
         #endregion
 

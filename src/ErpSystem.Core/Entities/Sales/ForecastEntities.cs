@@ -9,7 +9,7 @@ namespace ErpSystem.Core.Entities.Sales
     /// <summary>
     /// Sales forecast header — captures a forecast for a specific period
     /// </summary>
-    public class SalesForecast : BaseEntity
+    public class SalesForecast : TenantEntity
     {
         [Required, MaxLength(200)]
         public string Name { get; set; } = string.Empty;
@@ -54,7 +54,7 @@ namespace ErpSystem.Core.Entities.Sales
     /// <summary>
     /// Individual forecast line item — per product, category, or sales rep
     /// </summary>
-    public class SalesForecastLine : BaseEntity
+    public class SalesForecastLine : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
     {
         public Guid SalesForecastId { get; set; }
         public SalesForecast SalesForecast { get; set; } = null!;
@@ -74,6 +74,12 @@ namespace ErpSystem.Core.Entities.Sales
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal ForecastQuantity { get; set; }
+
+        [MaxLength(50)] public string? Unit { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
+        [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+        public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+        [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
         [Column(TypeName = "decimal(18,2)")]
         public decimal ForecastAmount { get; set; }

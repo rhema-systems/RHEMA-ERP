@@ -467,23 +467,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                 <Alert>
                                                     <AlertTriangle className="h-4 w-4" />
                                                     <AlertDescription>
-                                                        Revaluation inclusion is configured after linking, separately for each accounting book. The account classification supplies the inherited default.
+                                                        This link authorizes ordinary transactions in the selected currency. Closing revaluation inclusion is governed separately for each accounting book by the account classification and any approved book override. Advanced closing-rate settings are available after the link is created.
                                                     </AlertDescription>
                                                 </Alert>
-                                                <div className="space-y-2">
-                                                    <Label>Revaluation Frequency</Label>
-                                                    <Select value={newLink.revaluationFrequency} onValueChange={(v) => setNewLink({ ...newLink, revaluationFrequency: v })}>
-                                                        <SelectTrigger><SelectValue /></SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Monthly">Monthly</SelectItem>
-                                                            <SelectItem value="Quarterly">Quarterly</SelectItem>
-                                                            <SelectItem value="Annually">Annually</SelectItem>
-                                                            <SelectItem value="AdHoc">Ad hoc</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4">
+                                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                     <div className="space-y-2">
                                                         <Label>Transaction Rate Type</Label>
                                                         <Select
@@ -500,43 +487,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                         </Select>
                                                     </div>
                                                     <div className="space-y-2">
-                                                        <Label>Revaluation Rate Type</Label>
-                                                        <Select
-                                                            value={newLink.revaluationRateType}
-                                                            onValueChange={(v) => setNewLink({ ...newLink, revaluationRateType: v })}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Month-End">Month End</SelectItem>
-                                                                <SelectItem value="Quarter-End">Quarter End</SelectItem>
-                                                                <SelectItem value="Year-End">Year End</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                </div>
-
-                                                <div className="grid grid-cols-2 gap-4">
-                                                    <div className="space-y-2">
                                                         <Label>Transaction Quote Side</Label>
                                                         <Select
                                                             value={newLink.transactionQuoteSide || 'Mid'}
                                                             onValueChange={(v: ExchangeRateQuoteSide) => setNewLink({ ...newLink, transactionQuoteSide: v })}
-                                                        >
-                                                            <SelectTrigger><SelectValue /></SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Mid">Mid / Reference</SelectItem>
-                                                                <SelectItem value="Buying">Buying (bank buys FX)</SelectItem>
-                                                                <SelectItem value="Selling">Selling (bank sells FX)</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="space-y-2">
-                                                        <Label>Revaluation Quote Side</Label>
-                                                        <Select
-                                                            value={newLink.revaluationQuoteSide || 'Mid'}
-                                                            onValueChange={(v: ExchangeRateQuoteSide) => setNewLink({ ...newLink, revaluationQuoteSide: v })}
                                                         >
                                                             <SelectTrigger><SelectValue /></SelectTrigger>
                                                             <SelectContent>
@@ -604,12 +558,12 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                         </div>
                                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
                                                             <div>
-                                                                <p className="text-muted-foreground">Foreign Exposure</p>
-                                                                <p className="text-xs font-medium">Select an exact book in balance inquiry</p>
+                                                                <p className="text-muted-foreground">Transaction-currency balance</p>
+                                                                <p className="text-xs font-medium">The signed balance held in {link.linkedCurrencyCode}</p>
                                                             </div>
                                                             <div>
-                                                                <p className="text-muted-foreground">Functional Exposure</p>
-                                                                <p className="text-xs font-medium">Not held on currency-link configuration</p>
+                                                                <p className="text-muted-foreground">Functional carrying value</p>
+                                                                <p className="text-xs font-medium">View both balances by accounting book in Balance Inquiry</p>
                                                             </div>
                                                             <div>
                                                                 <p className="text-muted-foreground">Current Rate</p>
@@ -721,6 +675,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                             {policyForm && (
                                 <div className="space-y-4 py-4">
                                     <div className="rounded-md border p-4 space-y-3">
+                                        <div>
+                                            <p className="font-medium">Exact-book revaluation inclusion</p>
+                                            <p className="text-sm text-muted-foreground">The account classification supplies the inherited answer for each book. An approved override changes inclusion for this currency only.</p>
+                                        </div>
                                         <div className="space-y-2">
                                             <Label>Accounting book</Label>
                                             <Select value={selectedPolicyBookId} onValueChange={selectPolicyBook}>
@@ -769,15 +727,20 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                 </Button>
                                             </div>
                                         </>}
+                                    </div>
+                                    <div className="rounded-md border p-4 space-y-4">
+                                        <div>
+                                            <p className="font-medium">Shared account-currency rate policy</p>
+                                            <p className="text-sm text-muted-foreground">These defaults apply to this account and currency across its accounting books. They do not include or exclude the account from revaluation.</p>
+                                        </div>
                                         <div className="space-y-2">
-                                            <Label>Revaluation Frequency</Label>
+                                            <Label>Eligible closing cycles</Label>
                                             <Select value={policyForm.revaluationFrequency} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationFrequency: value })}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
-                                                <SelectContent><SelectItem value="Monthly">Monthly</SelectItem><SelectItem value="Quarterly">Quarterly</SelectItem><SelectItem value="Annually">Annually</SelectItem><SelectItem value="AdHoc">Ad hoc</SelectItem></SelectContent>
+                                                <SelectContent><SelectItem value="Monthly">Monthly, quarter-end and year-end</SelectItem><SelectItem value="Quarterly">Quarter-end and year-end</SelectItem><SelectItem value="Annually">Year-end only</SelectItem><SelectItem value="AdHoc">Ad hoc only</SelectItem></SelectContent>
                                             </Select>
                                         </div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                         <div className="space-y-2">
                                             <Label>Transaction Rate Type</Label>
                                             <Select value={policyForm.transactionRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, transactionRateType: value })}>
@@ -821,16 +784,17 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                 </SelectContent>
                                             </Select>
                                         </div>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Notes</Label>
-                                        <Input value={policyForm.notes || ''} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} />
-                                    </div>
-                                    <div className="flex justify-end">
-                                        <Button variant="secondary" onClick={handleSaveRatePolicy} disabled={savingRatePolicy || !canOverrideFxPolicy}>
-                                            {savingRatePolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                            Save rate settings
-                                        </Button>
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label>Notes</Label>
+                                            <Input value={policyForm.notes || ''} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} />
+                                        </div>
+                                        <div className="flex justify-end">
+                                            <Button variant="secondary" onClick={handleSaveRatePolicy} disabled={savingRatePolicy || !canOverrideFxPolicy}>
+                                                {savingRatePolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                Save rate settings
+                                            </Button>
+                                        </div>
                                     </div>
                                 </div>
                             )}

@@ -4,6 +4,18 @@ import Link from 'next/link';
 import { FileText, ShoppingCart } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import type {
+  SalesSaleableItemDto,
+  SalesSaleableSourceDto,
+} from '@/services/salesSetupService';
+import { buildSaleableSourceParams } from '@/app/sales/components/SaleableSourceQuickStart';
+
+export interface LockedPropertyEnquirySalesOrderSource {
+  propertyEnquiryId: string;
+  assetType: string;
+  source: SalesSaleableSourceDto;
+  item: SalesSaleableItemDto;
+}
 
 export interface CrmSalesHandoffContext {
   businessPartnerId?: string;
@@ -16,7 +28,10 @@ export interface CrmSalesHandoffContext {
   quoteName?: string;
   currency?: string;
   estimatedValue?: number;
+  propertyReference?: string;
+  propertyType?: string;
   contextLabel?: string;
+  lockedPropertyEnquirySalesOrderSource?: LockedPropertyEnquirySalesOrderSource;
 }
 
 interface SalesHandoffActionsProps {
@@ -35,7 +50,22 @@ const appendIfPresent = (params: URLSearchParams, key: string, value?: string | 
 };
 
 const buildSalesHref = (basePath: string, context: CrmSalesHandoffContext) => {
-  const params = new URLSearchParams();
+  const lockedSource = basePath === '/sales/orders/create'
+    ? context.lockedPropertyEnquirySalesOrderSource
+    : undefined;
+  const params = new URLSearchParams(
+    lockedSource
+      ? buildSaleableSourceParams(
+          lockedSource.item,
+          {
+            propertyEnquiryId: lockedSource.propertyEnquiryId,
+            propertyEnquiryAssetType: lockedSource.assetType,
+            saleableSourceLocked: 'true',
+          },
+          lockedSource.source,
+        )
+      : undefined,
+  );
 
   appendIfPresent(params, 'customerId', context.businessPartnerId);
   appendIfPresent(params, 'customerName', context.businessPartnerName);
@@ -47,6 +77,8 @@ const buildSalesHref = (basePath: string, context: CrmSalesHandoffContext) => {
   appendIfPresent(params, 'quoteName', context.quoteName);
   appendIfPresent(params, 'currency', context.currency);
   appendIfPresent(params, 'estimatedValue', context.estimatedValue);
+  appendIfPresent(params, 'propertyReference', context.propertyReference);
+  appendIfPresent(params, 'propertyType', context.propertyType);
   appendIfPresent(params, 'crmContext', context.contextLabel);
 
   return `${basePath}?${params.toString()}`;

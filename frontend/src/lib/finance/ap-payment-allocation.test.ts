@@ -86,7 +86,7 @@ describe('AP payment allocation completeness', () => {
 
   it('clears every stale allocation component when the supplier context changes', () => {
     expect(pageSource).toContain(
-      'if (val !== selectedSupplierId) clearAllocationState();'
+      'if (option.businessPartnerId !== selectedSupplierId) clearAllocationState();'
     );
     expect(pageSource).toMatch(
       /const clearAllocationState = \(\) => \{[\s\S]*setAllocations\(\{\}\);[\s\S]*setPaymentCurrencyAllocations\(\{\}\);[\s\S]*setDiscountAllocations\(\{\}\);[\s\S]*setWithholdingAllocations\(\{\}\);/

@@ -26,6 +26,12 @@ public abstract class FinancePostingCommandDto
     public bool ReturnExistingOnDuplicate { get; set; } = true;
 
     /// <summary>
+    /// Server-owned immutable invoice/cash rounding decision. Producers cannot manufacture this
+    /// value; the governed source adapter freezes it before the posting engine normalizes lines.
+    /// </summary>
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
+    /// <summary>
     /// Optional document-level deviation from the configured rate-selection policy.
     /// Any override is applied consistently to every foreign-currency line.
     /// </summary>
@@ -85,6 +91,10 @@ public sealed class FinancePostingLineDto
     /// re-resolving today's account mappings.
     /// </summary>
     public Guid? SourceDocumentLineId { get; set; }
+    public Guid? CommercialUnitOfMeasureId { get; set; }
+    public string? CommercialUnitOfMeasureCode { get; set; }
+    public int? CommercialQuantityDecimalPlaces { get; set; }
+    public decimal? CommercialQuantityRoundingIncrement { get; set; }
     public string? Description { get; set; }
     public decimal DebitAmount { get; set; }
     public decimal CreditAmount { get; set; }
@@ -159,6 +169,8 @@ public sealed class FinanceReversalPlanDto
     public DateTime ReversalDate { get; set; }
     public string Reason { get; set; } = string.Empty;
     public IReadOnlyList<FinancePostingLineDto> ReversalLines { get; set; } = Array.Empty<FinancePostingLineDto>();
+    public IReadOnlyList<FinanceTaxCalculationSnapshotDto> ReversalTaxCalculationSnapshots { get; set; }
+        = Array.Empty<FinanceTaxCalculationSnapshotDto>();
 }
 
 public sealed class FinanceTaxCalculationSnapshotDto
@@ -171,10 +183,22 @@ public sealed class FinanceTaxCalculationSnapshotDto
     public Guid? TaxGroupId { get; set; }
     /// <summary>Frozen GL account used for this tax component at source posting time.</summary>
     public Guid? PostingAccountId { get; set; }
+    /// <summary>
+    /// Immutable currency evidence. Both values may be null only for tax calculations that
+    /// pre-date governed currency-precision capture; newly created snapshots must populate both.
+    /// </summary>
+    public string? CurrencyCode { get; set; }
+    public int? CurrencyDecimalPlaces { get; set; }
     public decimal BaseAmount { get; set; }
     public decimal TaxableAmount { get; set; }
     public decimal TaxRate { get; set; }
     public decimal TaxAmount { get; set; }
+    public decimal? RawTaxAmount { get; set; }
+    public decimal? RoundingAdjustment { get; set; }
+    public int? AllocationSequence { get; set; }
+    public ErpSystem.Core.Finance.TaxRoundingScope? TaxRoundingScope { get; set; }
+    public ErpSystem.Core.Finance.GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+    public decimal? TaxRoundingIncrement { get; set; }
     public ErpSystem.Core.Enums.CompoundBasis CompoundBasis { get; set; }
     public int CalculationOrder { get; set; }
     public DateTime CalculationDate { get; set; } = DateTime.UtcNow;

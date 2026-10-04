@@ -153,7 +153,10 @@ public class SalesAllocationService : ISalesAllocationService
         if (!string.Equals(status, "Reserved", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Create the allocation as Reserved, then submit it to complete the configured lifecycle.");
         if (ActiveStatuses.Contains(status)
-            && await HasActiveAllocationAsync(source.Id, normalizedSourceItemId))
+            && await HasActiveAllocationForSourceAsync(
+                source.Id,
+                source.AdapterKey,
+                normalizedSourceItemId))
         {
             throw new InvalidOperationException("This saleable item already has an active reservation or allocation.");
         }
@@ -214,6 +217,24 @@ public class SalesAllocationService : ISalesAllocationService
         if (nextStatus is "PendingApproval" or "Approved" or "Rejected")
             throw new InvalidOperationException("Approval status can only be changed through the allocation workflow.");
 
+        if (dto.SalesOrderId.HasValue)
+        {
+            var salesOrder = await _unitOfWork.Repository<SalesOrder>().FirstOrDefaultAsync(order =>
+                    order.Id == dto.SalesOrderId.Value
+                    && order.TenantId == tenantId
+                    && !order.IsDeleted)
+                ?? throw new InvalidOperationException("The selected Sales Order was not found.");
+
+            if (allocation.SalesOrderId.HasValue && allocation.SalesOrderId != salesOrder.Id)
+                throw new InvalidOperationException("This reservation is already linked to another Sales Order.");
+
+            if (allocation.OpportunityId.HasValue && allocation.OpportunityId != salesOrder.OpportunityId)
+                throw new InvalidOperationException("The Sales Order must belong to the Opportunity that reserved this item.");
+
+            if (allocation.BusinessPartnerId.HasValue && allocation.BusinessPartnerId != salesOrder.BusinessPartnerId)
+                throw new InvalidOperationException("The Sales Order customer must match the customer on this reservation.");
+        }
+
         if (nextStatus is "Allocated" or "Sold" or "Leased")
         {
             if (allocation.Status is not ("Approved" or "Allocated" or "Sold" or "Leased"))
@@ -222,7 +243,11 @@ public class SalesAllocationService : ISalesAllocationService
                 throw new InvalidOperationException("Complete the existing allocation approval process before changing its completion status.");
         }
         if (ActiveStatuses.Contains(nextStatus)
-            && await HasActiveAllocationAsync(allocation.SaleableSourceId, allocation.SourceItemId, allocation.Id))
+            && await HasActiveAllocationForSourceAsync(
+                allocation.SaleableSourceId,
+                allocation.AdapterKey,
+                allocation.SourceItemId,
+                allocation.Id))
         {
             throw new InvalidOperationException("This saleable item already has another active reservation or allocation.");
         }
@@ -450,16 +475,48 @@ public class SalesAllocationService : ISalesAllocationService
 
     public async Task<bool> HasActiveAllocationAsync(Guid saleableSourceId, string sourceItemId, Guid? excludeAllocationId = null)
     {
+        var source = await _unitOfWork.Repository<SalesSaleableSource>()
+            .FirstOrDefaultAsync(item =>
+                item.Id == saleableSourceId
+                && item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted);
+
+        return await HasActiveAllocationForSourceAsync(
+            saleableSourceId,
+            source?.AdapterKey,
+            sourceItemId,
+            excludeAllocationId);
+    }
+
+    private async Task<bool> HasActiveAllocationForSourceAsync(
+        Guid saleableSourceId,
+        string? adapterKey,
+        string sourceItemId,
+        Guid? excludeAllocationId = null)
+    {
         var tenantId = _currentUserProvider.TenantId;
         var normalizedSourceItemId = NormalizeRequired(sourceItemId, "Source item ID");
 
         var query = _unitOfWork.Repository<SalesAllocation>().GetQueryable()
             .Where(x =>
                 x.TenantId == tenantId
-                && x.SaleableSourceId == saleableSourceId
                 && x.SourceItemId == normalizedSourceItemId
                 && !x.IsDeleted
                 && ActiveStatuses.Contains(x.Status));
+
+        if (string.Equals(adapterKey, "property-register", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(adapterKey, "project-units", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(adapterKey, "land-management", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x =>
+                x.AdapterKey == "property-register"
+                || x.AdapterKey == "project-units"
+                || x.AdapterKey == "land-management");
+        }
+        else
+        {
+            query = query.Where(x => x.SaleableSourceId == saleableSourceId);
+        }
 
         if (excludeAllocationId.HasValue)
         {

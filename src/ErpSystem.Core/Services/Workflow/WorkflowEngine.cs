@@ -78,6 +78,24 @@ public class WorkflowEngine : IWorkflowEngine
         return await StartWorkflowAsync(definition, entityId, initiatedById, dataContext);
     }
 
+    public async Task<WorkflowInstance> StartWorkflowForTenantAsync(string workflowName, Guid tenantId,
+        Guid entityId, Guid initiatedById, object? dataContext = null)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant is required to start a workflow.", nameof(tenantId));
+
+        var currentTenantId = _currentUserService.TenantId;
+        if (currentTenantId.HasValue && currentTenantId.Value != tenantId)
+            throw new UnauthorizedAccessException("The workflow tenant does not match the current user tenant.");
+
+        _logger.LogInformation("Starting workflow {WorkflowName} for entity {EntityId} in tenant {TenantId}",
+            workflowName, entityId, tenantId);
+        var definition = await _workflowDefinitionRepository.GetByNameAsync(workflowName, tenantId)
+            ?? throw new InvalidOperationException($"Workflow definition '{workflowName}' not found");
+
+        return await StartWorkflowAsync(definition, entityId, initiatedById, dataContext);
+    }
+
     public async Task<WorkflowInstance> StartWorkflowAsync(
         Guid workflowDefinitionId,
         Guid entityId,

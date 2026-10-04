@@ -88,6 +88,44 @@ public sealed class EstateRecurringBillingServiceTests
             It.IsAny<GenerateEstateGroundRentInvoiceDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData(EstateManagedAssetStatus.Reserved)]
+    [InlineData(EstateManagedAssetStatus.Blocked)]
+    [InlineData(EstateManagedAssetStatus.Retired)]
+    public async Task IneligibleProperty_DoesNotGenerateGroundRentInvoice(EstateManagedAssetStatus status)
+    {
+        var tenantId = Guid.NewGuid();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        await using var db = new ApplicationDbContext(options, tenantId);
+        var asset = new EstateManagedAsset
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AssetCode = "UNIT-1",
+            Name = "Unit 1", Status = status
+        };
+        db.EstateManagedAssets.Add(asset);
+        db.EstateGroundRentAccounts.Add(new EstateGroundRentAccount
+        {
+            TenantId = tenantId, EstateManagedAssetId = asset.Id,
+            CustomerBusinessPartnerId = Guid.NewGuid(),
+            GroundRentIncomeAccountId = Guid.NewGuid(),
+            NextDueDate = DateTime.UtcNow.Date.AddDays(-1), Status = "Active"
+        });
+        await db.SaveChangesAsync();
+        var groundRent = new Mock<IGroundRentAdministrationService>();
+        var lockService = new Mock<IDistributedLockService>();
+        lockService.Setup(item => item.TryAcquireAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Lease());
+        var runner = new EstateRecurringBillingService(db, Mock.Of<IInvoiceService>(),
+            groundRent.Object, lockService.Object, NullLogger<EstateRecurringBillingService>.Instance);
+
+        var result = await runner.RunForTenantAsync(tenantId, CancellationToken.None);
+
+        result.GroundRentInvoices.Should().Be(0);
+        groundRent.Verify(item => item.GenerateInvoiceAsync(It.IsAny<Guid>(),
+            It.IsAny<GenerateEstateGroundRentInvoiceDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task DueMonthlyRent_CreatesFinanceInvoiceAndAdvancesScheduleOnce()
     {

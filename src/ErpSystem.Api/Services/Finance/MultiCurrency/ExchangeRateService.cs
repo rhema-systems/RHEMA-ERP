@@ -232,11 +232,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var rateType = ParseRateType(dto.RateType);
             EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
+            ValidateRateTypeQuoteSide(rateType, quoteSide);
+            var expiryDate = NormalizeRateExpiry(rateType, dto.EffectiveDate, dto.ExpiryDate);
+            ValidateStatutoryRateEvidence(rateType, quoteSide, dto.RateSource, dto.SourceReference);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
-            ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+            ValidateRateWindow(dto.Rate, dto.EffectiveDate, expiryDate);
             await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
             await ValidateCurrencyPairAsync(baseCurrencyCode, targetCurrencyCode, cancellationToken);
 
@@ -246,7 +249,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 rateType,
                 quoteSide,
                 dto.EffectiveDate.Date,
-                dto.ExpiryDate?.Date,
+                expiryDate,
                 approvalStatus,
                 excludeId: null,
                 cancellationToken);
@@ -261,7 +264,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 Rate = dto.Rate,
                 InverseRate = 1 / dto.Rate,
                 EffectiveDate = dto.EffectiveDate.Date,
-                EndDate = dto.ExpiryDate?.Date,
+                EndDate = expiryDate,
                 RateType = rateType,
                 QuoteSide = quoteSide,
                 RateSource = dto.RateSource ?? "Manual Entry",
@@ -316,11 +319,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (rateType != rate.RateType)
                 EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
+            ValidateRateTypeQuoteSide(rateType, quoteSide);
+            var expiryDate = NormalizeRateExpiry(rateType, rate.EffectiveDate, dto.ExpiryDate);
+            ValidateStatutoryRateEvidence(rateType, quoteSide, dto.RateSource, dto.SourceReference);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
-            ValidateRateWindow(dto.Rate, rate.EffectiveDate, dto.ExpiryDate);
+            ValidateRateWindow(dto.Rate, rate.EffectiveDate, expiryDate);
             await ValidateClosingRateDateAsync(rateType, rate.EffectiveDate, cancellationToken);
             await EnsureSubmissionDoesNotConflictAsync(
                 rate.BaseCurrencyCode,
@@ -328,7 +334,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 rateType,
                 quoteSide,
                 rate.EffectiveDate.Date,
-                dto.ExpiryDate?.Date,
+                expiryDate,
                 approvalStatus,
                 excludeId: rate.Id,
                 cancellationToken);
@@ -337,7 +343,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             rate.Rate = dto.Rate;
             rate.InverseRate = 1 / dto.Rate;
-            rate.EndDate = dto.ExpiryDate?.Date;
+            rate.EndDate = expiryDate;
             rate.RateType = rateType;
             rate.QuoteSide = quoteSide;
             rate.RateSource = dto.RateSource ?? "Manual Entry";
@@ -412,11 +418,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     var rateType = ParseRateType(dto.RateType);
                     EnsureOperationalRateType(rateType);
                     var quoteSide = ParseQuoteSide(dto.QuoteSide);
+                    ValidateRateTypeQuoteSide(rateType, quoteSide);
+                    var expiryDate = NormalizeRateExpiry(rateType, dto.EffectiveDate, dto.ExpiryDate);
+                    ValidateStatutoryRateEvidence(rateType, quoteSide, dto.RateSource, dto.SourceReference);
                     var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
                     var approvalStatus = _workflowService == null
                         ? requestedApprovalStatus
                         : RateApprovalStatus.Pending;
-                    ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+                    ValidateRateWindow(dto.Rate, dto.EffectiveDate, expiryDate);
                     await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
                     await ValidateCurrencyPairAsync(baseCurrencyCode, targetCurrencyCode, cancellationToken);
                     await EnsureSubmissionDoesNotConflictAsync(
@@ -425,7 +434,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         rateType,
                         quoteSide,
                         dto.EffectiveDate.Date,
-                        dto.ExpiryDate?.Date,
+                        expiryDate,
                         approvalStatus,
                         excludeId: null,
                         cancellationToken);
@@ -440,7 +449,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                         Rate = dto.Rate,
                         InverseRate = 1 / dto.Rate,
                         EffectiveDate = dto.EffectiveDate.Date,
-                        EndDate = dto.ExpiryDate?.Date,
+                        EndDate = expiryDate,
                         RateType = rateType,
                         QuoteSide = quoteSide,
                         RateSource = dto.RateSource ?? "Manual Entry",
@@ -666,6 +675,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 return true;
             }
 
+            if (await _unitOfWork.Repository<VendorPaymentAllocation>()
+                .GetQueryable(allocation =>
+                    allocation.TenantId == rate.TenantId &&
+                    allocation.WithholdingTaxStatutoryExchangeRateId == rate.Id &&
+                    !allocation.IsDeleted)
+                .AnyAsync(cancellationToken))
+                return true;
+
             return await _unitOfWork.Repository<FixedAsset>()
                 .GetQueryable(asset =>
                     asset.TenantId == rate.TenantId &&
@@ -769,6 +786,46 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             {
                 throw new InvalidOperationException(
                     $"{rateType} exchange rates are reserved for future governed workflows and cannot be created yet.");
+            }
+        }
+
+        private static DateTime? NormalizeRateExpiry(
+            ExchangeRateType rateType,
+            DateTime effectiveDate,
+            DateTime? requestedExpiryDate)
+            => rateType == ExchangeRateType.GhanaStatutory
+                ? effectiveDate.Date
+                : requestedExpiryDate?.Date;
+
+        private static void ValidateStatutoryRateEvidence(
+            ExchangeRateType rateType,
+            ExchangeRateQuoteSide quoteSide,
+            string? source,
+            string? sourceReference)
+        {
+            if (rateType != ExchangeRateType.GhanaStatutory)
+                return;
+            if (quoteSide != ExchangeRateQuoteSide.Mid)
+                throw new InvalidOperationException("Ghana statutory tax rates must use the Mid / Reference quote side.");
+            var isBankOfGhana = !string.IsNullOrWhiteSpace(source)
+                && (source.Contains("Bank of Ghana", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(source.Trim(), "BoG", StringComparison.OrdinalIgnoreCase));
+            if (!isBankOfGhana)
+                throw new InvalidOperationException("Ghana statutory tax rates must identify Bank of Ghana as the source.");
+            if (string.IsNullOrWhiteSpace(sourceReference))
+                throw new InvalidOperationException("Ghana statutory tax rates require a Bank of Ghana source reference.");
+        }
+
+        private static void ValidateRateTypeQuoteSide(
+            ExchangeRateType rateType,
+            ExchangeRateQuoteSide quoteSide)
+        {
+            // Bid/ask evidence is meaningful only for daily provider quotes. Reporting,
+            // closing, contractual and statutory schedules are neutral accounting evidence.
+            if (rateType != ExchangeRateType.Daily && quoteSide != ExchangeRateQuoteSide.Mid)
+            {
+                throw new InvalidOperationException(
+                    $"{rateType} exchange rates must use the Mid / Reference quote side. Buying and Selling are supported only for Daily rates.");
             }
         }
 
@@ -947,6 +1004,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 rate.RateType,
                 rate.QuoteSide,
                 rate.RateSource,
+                SourceReference = rate.APIResponseMetadata,
                 rate.IsActive,
                 rate.ApprovalStatus,
                 rate.HasBeenUsedInTransactions,

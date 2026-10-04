@@ -412,6 +412,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                 throw new InvalidOperationException("Only a Delta or Parallel book with a governed base book can prepare inherited structure.");
             if (book.LifecycleStatus is not (AccountingBookLifecycleStatus.Configuring or AccountingBookLifecycleStatus.Initializing))
                 throw new InvalidOperationException("Derived-book structure may be prepared only while the book is Configuring or Initializing.");
+            if (book.IsActive || book.AllowsPosting)
+                throw new InvalidOperationException("Structure preparation requires a non-posting book.");
+            if (await _db.AccountingBookInitializations.AnyAsync(item => item.TenantId == TenantId
+                && item.AccountingBookId == book.Id && !item.IsDeleted
+                && (item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval || item.InitializationStatus == AccountingBookInitializationStatus.Approved), cancellationToken))
+                throw new InvalidOperationException("Structure cannot change while initialization evidence is pending approval or approved.");
 
             var baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == book.BaseAccountingBookId.Value
                 && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
@@ -429,7 +435,10 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     && !item.IsDeleted && item.IsEnabled)
                 .OrderBy(item => item.AccountId).ToListAsync(cancellationToken);
             if (sourceMappings.Count == 0 || sourceMappings.Any(item => item.Account == null || item.Account.IsDeleted
+                || item.Account.TenantId != TenantId
                 || item.AccountClassification == null || item.AccountClassification.IsDeleted
+                || item.AccountClassification.TenantId != TenantId || item.AccountClassification.AccountingBookId != baseBook.Id
+                || !item.AccountClassification.IsPostingClassification || item.AccountClassification.CoreAccountType != item.Account.AccountType
                 || item.AccountClassification.Status != AccountClassificationStatus.Active))
                 throw new InvalidOperationException("The base book must have complete enabled account mappings with active classifications before derived structure can be prepared.");
 
@@ -439,10 +448,12 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var sourceById = sourceClassifications.ToDictionary(item => item.Id);
             var targetByCode = targetClassifications.ToDictionary(item => item.Code, StringComparer.Ordinal);
             var clonedBySourceId = new Dictionary<Guid, AccountClassification>();
+            var resolving = new HashSet<Guid>();
 
             AccountClassification ResolveClassification(AccountClassification source)
             {
                 if (clonedBySourceId.TryGetValue(source.Id, out var resolved)) return resolved;
+                if (!resolving.Add(source.Id)) throw new InvalidOperationException("The source classification hierarchy contains a cycle.");
                 AccountClassification? parent = null;
                 if (source.ParentClassificationId.HasValue)
                 {
@@ -482,6 +493,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     resolved.UpdatedBy = ActorName();
                 }
                 clonedBySourceId[source.Id] = resolved;
+                resolving.Remove(source.Id);
                 return resolved;
             }
 
@@ -490,6 +502,18 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var targetMappings = await _db.AccountAccountingBooks
                 .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
                 .ToDictionaryAsync(item => item.AccountId, cancellationToken);
+            var sourceDisabledAccountIds = await _db.AccountAccountingBooks.AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.AccountingBookId == baseBook.Id
+                    && (item.IsDeleted || !item.IsEnabled))
+                .Select(item => item.AccountId).ToListAsync(cancellationToken);
+            // Refresh inherited eligibility, without disabling target-only protected/local accounts.
+            foreach (var accountId in sourceDisabledAccountIds)
+            {
+                if (!targetMappings.TryGetValue(accountId, out var inherited)) continue;
+                inherited.IsEnabled = false;
+                inherited.UpdatedAt = DateTime.UtcNow;
+                inherited.UpdatedBy = ActorName();
+            }
             foreach (var sourceMapping in sourceMappings)
             {
                 var targetClassification = ResolveClassification(sourceMapping.AccountClassification!);
@@ -548,10 +572,10 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         CancellationToken cancellationToken)
     {
         var available = classifications.ToList();
-        var equity = available.FirstOrDefault(item => item.Code == "EQUITY")
+        var equity = available.FirstOrDefault(item => item.Code == "EQUITY" && item.IsPostingClassification && item.CoreAccountType == AccountType.Equity)
             ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Equity)
             ?? throw new InvalidOperationException("PARALLEL_CTA_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Equity classification.");
-        var rounding = available.FirstOrDefault(item => item.Code == "OTHER_EXPENSE")
+        var rounding = available.FirstOrDefault(item => item.Code == "OTHER_EXPENSE" && item.IsPostingClassification && item.CoreAccountType == AccountType.Expense)
             ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Expense)
             ?? throw new InvalidOperationException("PARALLEL_ROUNDING_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Expense classification.");
         var currency = book.FunctionalCurrencyCode
@@ -768,6 +792,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     public async Task<AccountingBookActivationReadinessDto> GetReadinessAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
     {
         var book = await RequireBookAsync(accountingBookId, cancellationToken);
+        var isReactivation = book.LifecycleStatus == AccountingBookLifecycleStatus.Suspended;
         var blockers = new List<string>();
         var initialization = await Query().AsNoTracking().Where(item => item.AccountingBookId == book.Id)
             .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
@@ -775,9 +800,18 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             blockers.Add("The latest initialization version must be approved.");
         else
         {
-            try { await EnsureEvidenceUnchangedAsync(initialization, cancellationToken); }
+            try { await EnsureEvidenceUnchangedAsync(initialization, cancellationToken, enforceCurrentParallelCutoff: !isReactivation); }
             catch (InvalidOperationException ex) { blockers.Add(ex.Message); }
         }
+        if (isReactivation)
+            return new AccountingBookActivationReadinessDto
+            {
+                IsReady = blockers.Count == 0,
+                Blockers = blockers,
+                InitializationFingerprint = initialization?.EvidenceFingerprint,
+                RequiredPeriodCount = 0,
+                ReadyPeriodCount = 0
+            };
         // Tenant fiscal authority is the sole period gate. Accounting books no longer maintain a
         // second open/close state that can drift from the tenant calendar.
         var firstPostingDate = initialization == null ? (DateTime?)null : initialization.CutoffDate.Date.AddDays(1);
@@ -817,7 +851,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
 
     public async Task<AccountingBookInitializationEvidenceValidationDto> ValidateCurrentApprovedEvidenceAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
     {
-        await RequireBookAsync(accountingBookId, cancellationToken);
+        var book = await RequireBookAsync(accountingBookId, cancellationToken);
         var latest = await Query().AsNoTracking().Where(item => item.AccountingBookId == accountingBookId)
             .OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
         if (latest?.InitializationStatus != AccountingBookInitializationStatus.Approved)
@@ -825,7 +859,8 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         try
         {
             // Re-derivation is the C4 authority: retained hashes alone are not proof that mappings and balances stayed reconciled.
-            await EnsureEvidenceUnchangedAsync(latest, cancellationToken);
+            await EnsureEvidenceUnchangedAsync(latest, cancellationToken,
+                enforceCurrentParallelCutoff: book.LifecycleStatus != AccountingBookLifecycleStatus.Suspended);
             return new() { IsValid = true, InitializationId = latest.Id, Version = latest.Version,
                 EvidenceFingerprint = latest.EvidenceFingerprint, ReconciliationFingerprint = latest.ReconciliationFingerprint };
         }
@@ -836,11 +871,15 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         }
     }
 
-    private async Task EnsureEvidenceUnchangedAsync(AccountingBookInitialization entity, CancellationToken ct)
+    private async Task EnsureEvidenceUnchangedAsync(
+        AccountingBookInitialization entity,
+        CancellationToken ct,
+        bool enforceCurrentParallelCutoff = true)
     {
         var source = await ValidateSourceAsync(entity.AccountingBook, entity.Mode, entity.SourceAccountingBookId, ct);
         var prepared = await PrepareEvidenceAsync(entity.AccountingBook, source, entity.Mode, entity.CutoffDate,
-            entity.IdempotencyKey, entity.Reason, entity.Lines.Select(MapLine).ToList(), ct);
+            entity.IdempotencyKey, entity.Reason, entity.Lines.Select(MapLine).ToList(), ct,
+            enforceCurrentParallelCutoff);
         if (prepared.CutoffFiscalPeriodId != entity.CutoffFiscalPeriodId)
             throw new InvalidOperationException("INITIALIZATION_EVIDENCE_STALE: The authoritative cutoff period changed.");
         if (!prepared.AcceptedEvidenceFingerprints.Contains(entity.EvidenceFingerprint))
@@ -850,9 +889,11 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     }
 
     private async Task<Prepared> PrepareEvidenceAsync(AccountingBook book, AccountingBook? source, AccountingBookInitializationMode mode, DateTime cutoff,
-        string idempotencyKey, string reason, IReadOnlyCollection<AccountingBookInitializationLineDto> requested, CancellationToken ct)
+        string idempotencyKey, string reason, IReadOnlyCollection<AccountingBookInitializationLineDto> requested, CancellationToken ct,
+        bool enforceCurrentParallelCutoff = true)
     {
-        ValidateParallelCutoffContinuity(book, cutoff);
+        if (enforceCurrentParallelCutoff)
+            ValidateParallelCutoffContinuity(book, cutoff);
         var cutoffPeriods = (await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted).ToListAsync(ct))
             .Where(item => item.EndDate.Date == cutoff.Date).ToList();
         if (cutoffPeriods.Count != 1)

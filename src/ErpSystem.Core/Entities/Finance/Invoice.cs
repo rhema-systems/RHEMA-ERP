@@ -50,25 +50,30 @@ namespace ErpSystem.Core.Entities.Finance
 
         public DateTime? DueDate { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal SubTotal { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal TaxAmount { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal DiscountAmount { get; set; }
 
         [MaxLength(500)]
         public string? DiscountReason { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal TotalAmount { get; set; }
+
+        /// <summary>Frozen governed difference between commercial line total and posted invoice total.</summary>
+        [Column(TypeName = "decimal(20,6)")]
+        public decimal RoundingAdjustmentAmount { get; set; }
+        public Guid? FinanceRoundingEvidenceId { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal PaidAmount { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal CreditedAmount { get; set; }
         
         [Column(TypeName = "decimal(18,2)")]
@@ -110,7 +115,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// Used for reporting and credit limit checks.
         /// Formula: TotalAmount * ExchangeRate (if using direct quote)
         /// </summary>
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal BaseCurrencyAmount { get; set; }
 
         // Payment terms
@@ -123,7 +128,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal EarlyPaymentDiscountAmount { get; set; }
 
         // Taxation
@@ -133,6 +138,8 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual TaxGroup? TaxGroup { get; set; }
 
         public Guid? JournalEntryId { get; set; }
+        public Guid? SourceBookAuthorityId { get; set; }
+        public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
         // Multi-tenant
         public Guid TenantId { get; set; }
@@ -146,7 +153,7 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual ICollection<Payment> Payments { get; set; } = new List<Payment>();
     }
 
-    public class InvoiceLineItem : BaseEntity
+    public class InvoiceLineItem : BaseEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
     {
         [Required]
         public Guid InvoiceId { get; set; }
@@ -193,10 +200,10 @@ namespace ErpSystem.Core.Entities.Finance
         public decimal Quantity { get; set; } = 1;
 
         [Required]
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,6)")]
         public decimal UnitPrice { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal LineTotal => Quantity * UnitPrice;
 
         public Guid? TaxGroupId { get; set; }
@@ -206,10 +213,10 @@ namespace ErpSystem.Core.Entities.Finance
 
         public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
-        [Column(TypeName = "decimal(5,2)")]
+        [Column(TypeName = "decimal(18,6)")]
         public decimal TaxRate { get; set; }
         
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal TaxAmount { get; set; }
 
         [MaxLength(50)]
@@ -217,11 +224,15 @@ namespace ErpSystem.Core.Entities.Finance
 
         [MaxLength(50)]
         public string? Unit { get; set; }
+        public Guid? UnitOfMeasureId { get; set; }
+        [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+        public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+        [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
         [Column(TypeName = "decimal(5,2)")]
         public decimal DiscountPercentage { get; set; }
 
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal DiscountAmount { get; set; }
 
         // Multi-tenant

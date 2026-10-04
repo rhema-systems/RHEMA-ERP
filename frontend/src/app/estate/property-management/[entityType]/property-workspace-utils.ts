@@ -43,6 +43,10 @@ export function leaseExpiryDate(asset: EstateManagedAsset): Date | null {
   return new Date(Date.UTC(year, month, day));
 }
 
+export function isFullTermLease(asset: EstateManagedAsset): boolean {
+  return asset.externalListingType?.toLowerCase().includes('lease') === true;
+}
+
 export function leaseExpiryAlert(asset: EstateManagedAsset, asOf = new Date()) {
   if (!isOccupiedLike(asset)) return null;
   const expiry = leaseExpiryDate(asset);
@@ -61,6 +65,33 @@ export function formatEstateMoney(value?: number | null, currency = 'GHS') {
     style: 'currency',
     currency,
   }).format(value);
+}
+
+export function propertyListingCompletionRequirements(stageName?: string | null) {
+  const normalized = stageName?.trim().toLowerCase() || '';
+  const isDecisionStage =
+    normalized === 'management decision' ||
+    normalized === 'estate decision and agreement';
+  const isAgreementHandoffStage =
+    normalized === 'approved transaction handoff' ||
+    normalized === 'legal agreement review';
+
+  return {
+    requiresApprovedRentTerms: isDecisionStage,
+    requiresGeneratedAgreement:
+      normalized === 'estate decision and agreement' || isAgreementHandoffStage,
+    requiresLegalAgreementReview: isAgreementHandoffStage,
+  };
+}
+
+export function isLegalAgreementReviewSigned(status?: string | null) {
+  const normalized = status?.trim().toLowerCase() || '';
+  return (
+    (normalized.includes('head of legal') && normalized.includes('signed')) ||
+    (normalized.includes('approved by legal') &&
+      normalized.includes('customer signature')) ||
+    normalized.includes('fully signed')
+  );
 }
 
 export function propertyReference(asset: EstateManagedAsset) {

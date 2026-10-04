@@ -20,6 +20,10 @@ namespace ErpSystem.Core.Interfaces.Finance
             TaxCalculationRequestDto request,
             CancellationToken cancellationToken = default);
 
+        Task<TaxCalculationResultDto> CalculateDocumentTaxesAsync(
+            TaxDocumentCalculationRequestDto request,
+            CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Gets the default tax group for a given applicability
         /// </summary>

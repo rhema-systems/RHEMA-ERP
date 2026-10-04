@@ -1,8 +1,15 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Crm;
+using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Crm;
+using ErpSystem.Core.Interfaces.Ehc;
+using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Crm;
 
@@ -436,10 +443,40 @@ public class CrmController : ControllerBase
         [FromQuery] string? stage = null,
         [FromQuery] Guid? businessPartnerId = null,
         [FromQuery] Guid? leadId = null,
-        [FromQuery] string? opportunityType = null)
+        [FromQuery] string? opportunityType = null,
+        [FromQuery] Guid? stageDefinitionId = null,
+        [FromQuery] Guid? reachedStageDefinitionId = null,
+        [FromQuery] DateTime? stageEnteredFrom = null,
+        [FromQuery] DateTime? stageEnteredTo = null)
     {
-        var opportunities = await _crmService.GetOpportunitiesAsync(page, pageSize, search, stage, businessPartnerId, leadId, opportunityType);
+        var opportunities = await _crmService.GetOpportunitiesAsync(
+            page, pageSize, search, stage, businessPartnerId, leadId, opportunityType, stageDefinitionId,
+            reachedStageDefinitionId, stageEnteredFrom, stageEnteredTo);
         return Ok(opportunities);
+    }
+
+    [HttpGet("opportunity-stages")]
+    [Authorize(Policy = "Sales")]
+    public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> GetOpportunityStages(
+        [FromQuery] bool includeInactive = false)
+        => Ok(await _crmService.GetOpportunityStagesAsync(includeInactive));
+
+    [HttpPut("opportunity-stages")]
+    [Authorize(Policy = "Sales")]
+    public async Task<ActionResult<IReadOnlyList<CrmOpportunityStageDefinitionDto>>> UpdateOpportunityStages(
+        [FromBody] UpdateCrmOpportunityStagesDto dto)
+    {
+        if (!ModelState.IsValid)
+            return ValidationProblem(ModelState);
+
+        try
+        {
+            return Ok(await _crmService.UpdateOpportunityStagesAsync(dto));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpGet("opportunities/{opportunityId:guid}")]
@@ -540,14 +577,26 @@ public class CrmController : ControllerBase
     }
 
     [HttpGet("activities/{activityId:guid}")]
-    public async Task<ActionResult<CrmActivityDetailDto>> GetActivity(Guid activityId)
+    public async Task<ActionResult<CrmActivityDetailDto>> GetActivity(
+        Guid activityId,
+        [FromServices] ApplicationDbContext db,
+        [FromServices] ICurrentUserService currentUser,
+        CancellationToken cancellationToken)
     {
+        if (currentUser.TenantId is not Guid tenantId) return Forbid();
         var activity = await _crmService.GetActivityByIdAsync(activityId);
-        return activity == null ? NotFound() : Ok(activity);
+        if (activity is null) return NotFound();
+        await AddPropertyEnquiryContextAsync(activity, db, tenantId, cancellationToken);
+        return Ok(activity);
     }
 
     [HttpPost("activities")]
-    public async Task<ActionResult<CrmActivityDetailDto>> CreateActivity([FromBody] CreateCrmActivityDto dto)
+    public async Task<ActionResult<CrmActivityDetailDto>> CreateActivity(
+        [FromBody] CreateCrmActivityDto dto,
+        [FromServices] ApplicationDbContext db,
+        [FromServices] ICurrentUserService currentUser,
+        [FromServices] IPropertyEnquiryProspectService propertyProspects,
+        CancellationToken cancellationToken)
     {
         if (!ModelState.IsValid)
         {
@@ -556,12 +605,152 @@ public class CrmController : ControllerBase
 
         try
         {
-            var activity = await _crmService.CreateActivityAsync(dto);
-            return CreatedAtAction(nameof(GetActivity), new { activityId = activity.ActivityId }, activity);
+            if (currentUser.TenantId is not Guid tenantId) return Forbid();
+            var requestedLeadId = dto.LeadId;
+            var requestedEnquiryId = dto.PropertyEnquiryTicketId;
+            CrmActivityDetailDto? commitCandidate = null;
+
+            // Retry the entire contact/activity/link unit, not individual SaveChanges calls
+            // inside a user transaction. An ambient transaction remains owned by its caller.
+            async Task<ActionResult<CrmActivityDetailDto>> CreateActivityUnitAsync()
+            {
+                dto.LeadId = requestedLeadId;
+                dto.PropertyEnquiryTicketId = requestedEnquiryId;
+                await using var transaction = db.Database.IsRelational()
+                    && db.Database.CurrentTransaction is null
+                        ? await db.Database.BeginTransactionAsync(cancellationToken)
+                        : null;
+                try
+                {
+                    // A lost commit acknowledgement must not create a second activity. The
+                    // activity can exist only if its complete transaction committed.
+                    if (commitCandidate is not null && await db.CrmActivities.AsNoTracking().AnyAsync(
+                            activity => activity.Id == commitCandidate.ActivityId && activity.TenantId == tenantId,
+                            cancellationToken))
+                        return CreatedAtAction(nameof(GetActivity), new { activityId = commitCandidate.ActivityId }, commitCandidate);
+
+                    PropertyEnquiryTarget? propertyEnquiry = null;
+                    if (dto.PropertyEnquiryTicketId.HasValue)
+                    {
+                        if (!CanManagePropertyEnquiry(User)) return Forbid();
+                        propertyEnquiry = await FindPropertyEnquiryAsync(
+                            db,
+                            tenantId,
+                            dto.PropertyEnquiryTicketId.Value,
+                            cancellationToken);
+                        if (propertyEnquiry is null)
+                            return Problem(
+                                statusCode: StatusCodes.Status400BadRequest,
+                                title: "Property enquiry is unavailable",
+                                detail: "Select a current property enquiry assigned to Sales.");
+
+                        if (dto.LeadId.HasValue
+                            && propertyEnquiry.CrmLeadId != dto.LeadId.Value)
+                            return Problem(
+                                statusCode: StatusCodes.Status400BadRequest,
+                                title: "Lead and property enquiry do not match",
+                                detail: "The selected property enquiry is not linked to this Lead.");
+                    }
+                    else if (dto.LeadId.HasValue)
+                    {
+                        var leadEnquiries = await FindPropertyEnquiriesForLeadAsync(
+                            db,
+                            tenantId,
+                            dto.LeadId.Value,
+                            cancellationToken);
+                        if (leadEnquiries.Count == 1)
+                        {
+                            if (!CanManagePropertyEnquiry(User)) return Forbid();
+                            propertyEnquiry = leadEnquiries[0];
+                            dto.PropertyEnquiryTicketId = propertyEnquiry.TicketId;
+                        }
+                        else if (leadEnquiries.Count > 1)
+                        {
+                            return Problem(
+                                statusCode: StatusCodes.Status400BadRequest,
+                                title: "Property enquiry selection is required",
+                                detail: "This Lead is linked to more than one property enquiry. Select the enquiry for this activity.");
+                        }
+                    }
+
+                    if (propertyEnquiry is not null && IsCompletedContact(dto))
+                    {
+                        var existingProspect = await propertyProspects.GetAsync(
+                            propertyEnquiry.TicketId,
+                            cancellationToken);
+                        var prospect = existingProspect is null
+                            || existingProspect.Status is EhcPropertyProspectStatuses.New
+                                or EhcPropertyProspectStatuses.Contacted
+                                ? await propertyProspects.RecordContactAsync(
+                                    propertyEnquiry.TicketId,
+                                    new RecordPropertyEnquiryContactRequest
+                                    {
+                                        Notes = BuildContactNotes(dto)
+                                    },
+                                    cancellationToken)
+                                : existingProspect;
+                        dto.LeadId = prospect.LeadId;
+                    }
+
+                    var activity = await _crmService.CreateActivityAsync(dto);
+                    if (propertyEnquiry is not null)
+                    {
+                        var actorId = Guid.TryParse(currentUser.UserId, out var parsedActorId)
+                            ? parsedActorId
+                            : (Guid?)null;
+                        db.EhcCrmEngagementLinks.Add(new EhcCrmEngagementLink
+                        {
+                            TenantId = tenantId,
+                            TicketId = propertyEnquiry.TicketId,
+                            CrmActivityId = activity.ActivityId,
+                            SourceKey = $"ManualCrmActivity:{activity.ActivityId:D}",
+                            EngagementType = IsCompletedContact(dto)
+                                ? "SalesContact"
+                                : dto.ActivityType.Trim(),
+                            CreatedBy = currentUser.UserName,
+                            CreatedById = actorId
+                        });
+                        db.EhcTicketAuditEvents.Add(new EhcTicketAuditEvent
+                        {
+                            TenantId = tenantId,
+                            TicketId = propertyEnquiry.TicketId,
+                            EventType = "CrmActivityLinked",
+                            Title = "CRM activity linked to property enquiry",
+                            Body = $"{dto.ActivityStatus} {dto.ActivityType} activity '{dto.Subject.Trim()}' was linked to {propertyEnquiry.TicketNumber}.",
+                            IsInternal = true,
+                            ActorUserId = actorId,
+                            CreatedBy = currentUser.UserName,
+                            CreatedById = actorId
+                        });
+                        await db.SaveChangesAsync(cancellationToken);
+                        activity.PropertyEnquiryTicketId = propertyEnquiry.TicketId;
+                        activity.PropertyEnquiryTicketNumber = propertyEnquiry.TicketNumber;
+                        activity.PropertyEnquirySubject = propertyEnquiry.Subject;
+                    }
+
+                    commitCandidate = activity;
+                    if (transaction is not null) await transaction.CommitAsync(cancellationToken);
+                    return CreatedAtAction(nameof(GetActivity), new { activityId = activity.ActivityId }, activity);
+                }
+                catch
+                {
+                    // SaveChanges may already have accepted tracked entities before a later
+                    // failure rolls back the transaction. Reload them on the next attempt.
+                    if (transaction is not null) db.ChangeTracker.Clear();
+                    throw;
+                }
+            }
+
+            return db.Database.CurrentTransaction is not null
+                ? await CreateActivityUnitAsync()
+                : await db.Database.CreateExecutionStrategy().ExecuteAsync(_ => CreateActivityUnitAsync(), cancellationToken);
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "CRM activity could not be created",
+                detail: ex.Message);
         }
     }
 
@@ -684,4 +873,105 @@ public class CrmController : ControllerBase
         var tender = await _crmService.GetTenderByEntityAsync(entityType, entityId);
         return tender == null ? NotFound() : Ok(tender);
     }
+
+    private static bool CanManagePropertyEnquiry(System.Security.Claims.ClaimsPrincipal user) =>
+        user.IsInRole("Sales User")
+        || user.IsInRole("Sales Officer")
+        || user.IsInRole("Sales Manager")
+        || user.IsInRole("TenantAdmin")
+        || user.IsInRole("SuperAdmin");
+
+    private static bool IsCompletedContact(CrmActivityUpsertDto dto) =>
+        string.Equals(dto.ActivityStatus, "Completed", StringComparison.OrdinalIgnoreCase)
+        && (string.Equals(dto.ActivityType, "Call", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(dto.ActivityType, "Meeting", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(dto.ActivityType, "Email", StringComparison.OrdinalIgnoreCase));
+
+    private static string BuildContactNotes(CrmActivityUpsertDto dto)
+    {
+        var details = new[] { dto.Description, dto.Outcome, dto.Notes }
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim());
+        var result = string.Join(" ", details);
+        if (string.IsNullOrWhiteSpace(result)) result = dto.Subject.Trim();
+        return result.Length <= 2000 ? result : result[..2000];
+    }
+
+    private static async Task<PropertyEnquiryTarget?> FindPropertyEnquiryAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid ticketId,
+        CancellationToken cancellationToken) =>
+        await db.EhcTickets.AsNoTracking()
+            .Where(ticket => ticket.Id == ticketId
+                && ticket.TenantId == tenantId
+                && !ticket.IsDeleted
+                && ticket.TicketType == EhcTicketType.Enquiry
+                && ticket.Status != EhcTicketStatus.New
+                && ticket.PropertyListingContextJson != null
+                && ticket.AssignedOrganizationUnit != null
+                && !ticket.AssignedOrganizationUnit.IsDeleted
+                && ticket.AssignedOrganizationUnit.IsActive
+                && (ticket.AssignedOrganizationUnit.Code == "DEPT-SALES"
+                    || ticket.AssignedOrganizationUnit.Code == "UNIT-MKT"))
+            .Select(ticket => new PropertyEnquiryTarget(
+                ticket.Id,
+                ticket.TicketNumber,
+                ticket.Subject,
+                ticket.CrmLeadId))
+            .SingleOrDefaultAsync(cancellationToken);
+
+    private static async Task<List<PropertyEnquiryTarget>> FindPropertyEnquiriesForLeadAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid leadId,
+        CancellationToken cancellationToken) =>
+        await db.EhcTickets.AsNoTracking()
+            .Where(ticket => ticket.TenantId == tenantId
+                && !ticket.IsDeleted
+                && ticket.TicketType == EhcTicketType.Enquiry
+                && ticket.Status != EhcTicketStatus.New
+                && ticket.PropertyListingContextJson != null
+                && ticket.CrmLeadId == leadId
+                && ticket.AssignedOrganizationUnit != null
+                && !ticket.AssignedOrganizationUnit.IsDeleted
+                && ticket.AssignedOrganizationUnit.IsActive
+                && (ticket.AssignedOrganizationUnit.Code == "DEPT-SALES"
+                    || ticket.AssignedOrganizationUnit.Code == "UNIT-MKT"))
+            .OrderByDescending(ticket => ticket.CreatedAt)
+            .Select(ticket => new PropertyEnquiryTarget(
+                ticket.Id,
+                ticket.TicketNumber,
+                ticket.Subject,
+                ticket.CrmLeadId))
+            .ToListAsync(cancellationToken);
+
+    private static async Task AddPropertyEnquiryContextAsync(
+        CrmActivityDetailDto activity,
+        ApplicationDbContext db,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var context = await db.EhcCrmEngagementLinks.AsNoTracking()
+            .Where(link => link.TenantId == tenantId
+                && !link.IsDeleted
+                && link.CrmActivityId == activity.ActivityId
+                && !link.Ticket.IsDeleted)
+            .Select(link => new PropertyEnquiryTarget(
+                link.TicketId,
+                link.Ticket.TicketNumber,
+                link.Ticket.Subject,
+                link.Ticket.CrmLeadId))
+            .SingleOrDefaultAsync(cancellationToken);
+        if (context is null) return;
+        activity.PropertyEnquiryTicketId = context.TicketId;
+        activity.PropertyEnquiryTicketNumber = context.TicketNumber;
+        activity.PropertyEnquirySubject = context.Subject;
+    }
+
+    private sealed record PropertyEnquiryTarget(
+        Guid TicketId,
+        string TicketNumber,
+        string? Subject,
+        Guid? CrmLeadId);
 }

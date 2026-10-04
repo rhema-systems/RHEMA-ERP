@@ -26,6 +26,7 @@ public sealed class AccountingBookInitializationController(IAccountingBookInitia
         Ok(await service.PrepareAsync(accountingBookId, mode, cutoffDate, sourceAccountingBookId, ct));
 
     [HttpPost("delta-structure")]
+    [HttpPost("structure")]
     [Authorize(Policy = FinancePermissions.ManageAccountingBookInitialization)]
     public async Task<IActionResult> PrepareDeltaStructure(Guid accountingBookId, CancellationToken ct) =>
         Ok(await service.EnsureDeltaStructureAsync(accountingBookId, ct));

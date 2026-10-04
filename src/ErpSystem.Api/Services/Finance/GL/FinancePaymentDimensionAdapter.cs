@@ -212,8 +212,11 @@ public sealed class FinancePaymentDimensionAdapter : IFinancePaymentDimensionAda
                 allocation.InvoiceSettlementExchangeRate);
             AddComponent(components, FinanceSettlementComponentType.WithholdingTax,
                 allocation.InvoiceCurrencyCode, allocation.WithholdingTaxAmount,
-                allocation.WithholdingTaxFunctionalAmount, allocation.InvoiceSettlementExchangeRateId,
-                allocation.InvoiceSettlementExchangeRate);
+                allocation.WithholdingTaxFunctionalAmount,
+                allocation.WithholdingTaxStatutoryExchangeRateId
+                    ?? allocation.InvoiceSettlementExchangeRateId,
+                allocation.WithholdingTaxStatutoryExchangeRate
+                    ?? allocation.InvoiceSettlementExchangeRate);
             AddComponent(components, FinanceSettlementComponentType.RealizedFx,
                 allocation.InvoiceCurrencyCode, 0m, realizedFx,
                 allocation.InvoiceSettlementExchangeRateId, allocation.InvoiceSettlementExchangeRate,

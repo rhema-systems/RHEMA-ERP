@@ -19,6 +19,8 @@ import { salesAllocationService } from '@/services/salesAllocationService';
 import { projectService } from '@/services/projectService';
 import { apiService } from '@/services/api.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
+import { taxDataService } from '@/services/finance/tax-data.service';
+import type { TaxGroup } from '@/types/tax';
 import {
   parseSaleableSourceContextFromParams,
   saleableItemToContext,
@@ -30,6 +32,7 @@ import {
   type SalesSaleableItemDto,
   type SalesSaleableSourceDto,
 } from '@/services/salesSetupService';
+import { hasSaleableNumber } from '@/lib/sales/saleableItemDisplay';
 
 interface LineItem extends CreateSalesOrderLineDto {
   key: string;
@@ -66,6 +69,10 @@ export default function CreateSalesOrderPage() {
   const [linkedSourceContext, setLinkedSourceContext] = useState<SalesLinkedSourceContext | null>(null);
   const [lineSearchSource, setLineSearchSource] = useState<SalesSaleableSourceDto | null>(null);
   const [crmHandoffContext, setCrmHandoffContext] = useState<CrmHandoffContext | null>(null);
+  const [propertyEnquirySourceLock, setPropertyEnquirySourceLock] = useState<{
+    enquiryId: string;
+    assetType?: string;
+  } | null>(null);
 
   // Form state
   const [businessPartnerId, setBusinessPartnerId] = useState('');
@@ -77,6 +84,11 @@ export default function CreateSalesOrderPage() {
   const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [paymentTermId, setPaymentTermId] = useState('');
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
+  const [taxGroups, setTaxGroups] = useState<TaxGroup[]>([]);
+  const [taxGroupId, setTaxGroupId] = useState('');
+  const [taxAmount, setTaxAmount] = useState(0);
+  const [taxLoading, setTaxLoading] = useState(false);
+  const [taxError, setTaxError] = useState('');
   const [customerPoNumber, setCustomerPoNumber] = useState('');
   const [propertyReference, setPropertyReference] = useState('');
   const [propertyType, setPropertyType] = useState('');
@@ -88,7 +100,7 @@ export default function CreateSalesOrderPage() {
 
   // Order lines
   const [lines, setLines] = useState<LineItem[]>([
-    { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 },
+    { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0 },
   ]);
   const [activeLinePicker, setActiveLinePicker] = useState<string | null>(null);
   const [lineItemSearch, setLineItemSearch] = useState<Record<string, string>>({});
@@ -113,6 +125,8 @@ export default function CreateSalesOrderPage() {
     const propertyReferenceParam = params.get('propertyReference');
     const orderTypeParam = params.get('orderType');
     const sourceContext = parseSaleableSourceContextFromParams(params);
+    const propertyEnquiryId = params.get('propertyEnquiryId');
+    const sourceIsLocked = params.get('saleableSourceLocked') === 'true';
     const crmContext: CrmHandoffContext = {
       contextLabel: params.get('crmContext') || undefined,
       quoteId: params.get('quoteId') || undefined,
@@ -151,6 +165,13 @@ export default function CreateSalesOrderPage() {
           return current.map((line, index) => index === 0 ? { ...updatedFirst, key: line.key } : line);
         });
       }
+    }
+
+    if (sourceContext && sourceIsLocked && propertyEnquiryId) {
+      setPropertyEnquirySourceLock({
+        enquiryId: propertyEnquiryId,
+        assetType: params.get('propertyEnquiryAssetType') || undefined,
+      });
     }
 
     if (customerId) {
@@ -194,15 +215,23 @@ export default function CreateSalesOrderPage() {
       .catch(() => setPaymentTerms([]));
   }, []);
 
+  useEffect(() => {
+    taxDataService.getActiveTaxGroups('Sales')
+      .then((groups) => setTaxGroups(groups || []))
+      .catch(() => setTaxGroups([]));
+  }, []);
+
   const applySaleableItem = (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => {
     const context = saleableItemToContext(item, source);
+    const resolvedCustomerId = item.customerId || item.activeAllocationBusinessPartnerId || businessPartnerId;
+    const resolvedCustomerName = item.customerName || item.activeAllocationCustomerName || customerSearch;
     setLinkedSourceContext(context);
     setLineSearchSource(source);
     setCurrency(item.currency || source.defaultCurrency || 'GHS');
-    setBusinessPartnerId(item.customerId || '');
-    setCustomerSearch(item.customerName || '');
-    setSelectedCustomer(item.customerId && item.customerName
-      ? { id: item.customerId, companyName: item.customerName, name: item.customerName }
+    setBusinessPartnerId(resolvedCustomerId);
+    setCustomerSearch(resolvedCustomerName);
+    setSelectedCustomer(resolvedCustomerId && resolvedCustomerName
+      ? { id: resolvedCustomerId, companyName: resolvedCustomerName, name: resolvedCustomerName }
       : null);
     setPropertyReference(item.propertyReference || '');
     setPropertyType(item.itemType || '');
@@ -259,7 +288,7 @@ export default function CreateSalesOrderPage() {
   };
 
   const addLine = () => {
-    setLines([...lines, { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0, taxPercent: 0 }]);
+    setLines([...lines, { key: crypto.randomUUID(), itemName: '', quantity: 1, unitPrice: 0, discountPercent: 0 }]);
   };
 
   const removeLine = (key: string) => {
@@ -351,24 +380,67 @@ export default function CreateSalesOrderPage() {
 
   const calcLineTotal = (line: LineItem) => {
     const base = line.quantity * line.unitPrice;
-    const discounted = base * (1 - (line.discountPercent || 0) / 100);
-    const taxed = discounted * (1 + (line.taxPercent || 0) / 100);
-    return taxed;
+    return base * (1 - (line.discountPercent || 0) / 100);
   };
 
   const subtotal = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
   const totalDiscount = lines.reduce((sum, l) => sum + l.quantity * l.unitPrice * (l.discountPercent || 0) / 100, 0);
-  const totalTax = lines.reduce((sum, l) => {
-    const base = l.quantity * l.unitPrice;
-    const discounted = base * (1 - (l.discountPercent || 0) / 100);
-    return sum + discounted * (l.taxPercent || 0) / 100;
-  }, 0);
-  const grandTotal = subtotal - totalDiscount + totalTax;
+  const taxableAmount = Math.max(0, subtotal - totalDiscount);
+  const grandTotal = taxableAmount + taxAmount;
+
+  useEffect(() => {
+    let active = true;
+    if (!taxGroupId || taxableAmount <= 0) {
+      setTaxAmount(0);
+      setTaxError('');
+      setTaxLoading(false);
+      return () => { active = false; };
+    }
+
+    setTaxLoading(true);
+    setTaxError('');
+    const timer = window.setTimeout(() => {
+      const taxableLines = lines
+        .map((line) => Math.max(0, line.quantity * line.unitPrice * (1 - (line.discountPercent || 0) / 100)))
+        .filter((amount) => amount > 0);
+
+      Promise.all(taxableLines.map((baseAmount) => taxDataService.calculateTax({
+        baseAmount,
+        taxGroupId,
+        transactionType: 'SaleOfGoods',
+        businessPartnerId: businessPartnerId || null,
+        businessPartnerRole: 'Customer',
+      }))).then((results) => {
+        if (active) setTaxAmount(results.reduce((sum, result) => sum + result.totalTaxAmount, 0));
+      }).catch((error: any) => {
+        if (!active) return;
+        setTaxAmount(0);
+        setTaxError(error?.message || 'The selected tax could not be calculated.');
+      }).finally(() => {
+        if (active) setTaxLoading(false);
+      });
+    }, 200);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [businessPartnerId, lines, taxGroupId, taxableAmount]);
 
   const handleSave = async () => {
     if (!businessPartnerId) { toast.error('Please select a customer'); return; }
     if (lines.some(l => !l.itemName)) { toast.error('All lines must have an item name'); return; }
     if (lines.some(l => l.quantity <= 0)) { toast.error('Quantities must be greater than 0'); return; }
+
+    const reusingOpportunityReservation = Boolean(
+      linkedSourceContext?.activeAllocationId
+        && linkedSourceContext.activeAllocationStatus === 'Reserved'
+        && !linkedSourceContext.activeAllocationSalesOrderId
+        && (!crmHandoffContext?.opportunityId
+          || linkedSourceContext.activeAllocationOpportunityId === crmHandoffContext.opportunityId)
+        && (!linkedSourceContext.activeAllocationBusinessPartnerId
+          || linkedSourceContext.activeAllocationBusinessPartnerId === businessPartnerId),
+    );
 
     const dto: CreateSalesOrderDto = {
       businessPartnerId,
@@ -386,7 +458,11 @@ export default function CreateSalesOrderPage() {
       notes: notes || undefined,
       internalNotes: internalNotes || undefined,
       quoteId: crmHandoffContext?.quoteId,
-      opportunityId: crmHandoffContext?.opportunityId,
+      opportunityId: crmHandoffContext?.opportunityId || linkedSourceContext?.activeAllocationOpportunityId,
+      salesAllocationId: reusingOpportunityReservation
+        ? linkedSourceContext?.activeAllocationId
+        : undefined,
+      taxGroupId: taxGroupId || undefined,
       lines: lines.map(l => ({
         itemName: l.itemName,
         itemCode: l.itemCode || undefined,
@@ -402,7 +478,7 @@ export default function CreateSalesOrderPage() {
         unit: l.unit || l.unitOfMeasure || 'EA',
         unitPrice: l.unitPrice,
         discountPercent: l.discountPercent || 0,
-        taxPercent: l.taxPercent || 0,
+        taxGroupId: taxGroupId || undefined,
       })),
     };
 
@@ -413,7 +489,7 @@ export default function CreateSalesOrderPage() {
           linkedSourceContext.sourceId,
           linkedSourceContext.sourceItemId,
         );
-        if (activeCheck.hasActiveAllocation) {
+        if (activeCheck.hasActiveAllocation && !reusingOpportunityReservation) {
           toast.error('This saleable item already has an active reservation or allocation.');
           return;
         }
@@ -429,22 +505,24 @@ export default function CreateSalesOrderPage() {
       }
       if (linkedSourceContext?.sourceId && linkedSourceContext.sourceItemId && linkedSourceContext.shouldCreateSalesAllocation !== false) {
         try {
-          await salesAllocationService.createAllocation({
-            saleableSourceId: linkedSourceContext.sourceId,
-            sourceItemId: linkedSourceContext.sourceItemId,
-            sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
-            sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || propertyReference || 'Saleable item',
-            sourceItemType: linkedSourceContext.itemType || propertyType || undefined,
-            businessPartnerId,
-            customerName: selectedCustomer?.companyName || selectedCustomer?.name || customerSearch || linkedSourceContext.customerName,
-            salesOrderId: result.id,
-            allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
-            status: 'Reserved',
-            estimatedValue: linkedSourceContext.estimatedValue,
-            agreedValue: result.totalAmount || grandTotal,
-            currency,
-            notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
-          });
+          if (!reusingOpportunityReservation) {
+            await salesAllocationService.createAllocation({
+              saleableSourceId: linkedSourceContext.sourceId,
+              sourceItemId: linkedSourceContext.sourceItemId,
+              sourceItemCode: linkedSourceContext.itemCode || linkedSourceContext.projectUnitCode,
+              sourceItemName: linkedSourceContext.itemName || linkedSourceContext.projectUnitName || propertyReference || 'Saleable item',
+              sourceItemType: linkedSourceContext.itemType || propertyType || undefined,
+              businessPartnerId,
+              customerName: selectedCustomer?.companyName || selectedCustomer?.name || customerSearch || linkedSourceContext.customerName,
+              salesOrderId: result.id,
+              allocationType: orderType === 'Lease' ? 'Lease' : 'Reservation',
+              status: 'Reserved',
+              estimatedValue: linkedSourceContext.estimatedValue ?? undefined,
+              agreedValue: result.totalAmount || grandTotal,
+              currency,
+              notes: `Reserved from Sales Order ${result.orderNumber || result.id}`,
+            });
+          }
         } catch (allocationError: any) {
           toast.warning(allocationError?.message || 'Sales order created, but the saleable item reservation could not be recorded.');
         }
@@ -482,9 +560,21 @@ export default function CreateSalesOrderPage() {
       <SaleableSourceQuickStart
         mode="order"
         linkedContext={linkedSourceContext}
+        currentOpportunityId={crmHandoffContext?.opportunityId}
+        currentCustomerId={businessPartnerId || undefined}
         onSourceSelected={setLineSearchSource}
         onUseOrder={applySaleableItem}
       />
+
+      {propertyEnquirySourceLock ? (
+        <Card className="border-amber-200 bg-amber-50/60">
+          <CardContent className="py-3 text-sm text-amber-900">
+            This order was started from a property enquiry. The exact{' '}
+            {propertyEnquirySourceLock.assetType || 'Estate'} listing is locked to this order
+            to preserve the enquiry, opportunity, reservation, and Sales Order lineage.
+          </CardContent>
+        </Card>
+      ) : null}
 
       {crmHandoffContext ? (
         <Card className="border-blue-200 bg-blue-50/60">
@@ -637,7 +727,9 @@ export default function CreateSalesOrderPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Order Lines</CardTitle>
-                <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
+                {!propertyEnquirySourceLock ? (
+                  <Button variant="outline" size="sm" onClick={addLine}><Plus className="h-4 w-4 mr-2" />Add Line</Button>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent className="overflow-visible pb-10">
@@ -650,7 +742,6 @@ export default function CreateSalesOrderPage() {
                 <TableHead className="w-20">UoM</TableHead>
                 <TableHead className="w-28">Unit Price</TableHead>
                 <TableHead className="w-20">Disc %</TableHead>
-                <TableHead className="w-20">Tax %</TableHead>
                 <TableHead className="text-right w-28">Total</TableHead>
                 <TableHead className="w-10"></TableHead>
               </TableRow>
@@ -660,7 +751,7 @@ export default function CreateSalesOrderPage() {
                 <TableRow key={line.key}>
                   <TableCell>
                     <Popover
-                      open={Boolean(activeLineSearchSourceId && activeLinePicker === line.key)}
+                      open={Boolean(!propertyEnquirySourceLock && activeLineSearchSourceId && activeLinePicker === line.key)}
                       onOpenChange={(open) => {
                         if (!open && activeLinePicker === line.key) {
                           setActiveLinePicker(null);
@@ -674,7 +765,9 @@ export default function CreateSalesOrderPage() {
                             ? `Search ${activeLineSearchSourceName || 'source'} items`
                             : 'Item name'}
                           value={activeLinePicker === line.key ? (lineItemSearch[line.key] ?? line.itemName) : line.itemName}
+                          disabled={Boolean(propertyEnquirySourceLock)}
                           onFocus={() => {
+                            if (propertyEnquirySourceLock) return;
                             setActiveLinePicker(line.key);
                             setLineItemSearch((current) => ({ ...current, [line.key]: current[line.key] ?? line.itemName }));
                             if (activeLineSearchSourceId) {
@@ -682,6 +775,7 @@ export default function CreateSalesOrderPage() {
                             }
                           }}
                           onChange={(e) => {
+                            if (propertyEnquirySourceLock) return;
                             if (activeLineSearchSourceId) {
                               handleLineItemSearchChange(line, e.target.value);
                             } else {
@@ -690,7 +784,7 @@ export default function CreateSalesOrderPage() {
                           }}
                         />
                       </PopoverAnchor>
-                      {activeLineSearchSourceId ? (
+                      {activeLineSearchSourceId && !propertyEnquirySourceLock ? (
                         <PopoverContent
                           align="start"
                           side="bottom"
@@ -720,12 +814,12 @@ export default function CreateSalesOrderPage() {
                                       .join(' - ')}
                                   </div>
                                   <div className="mt-1 flex flex-wrap gap-1 text-xs text-muted-foreground">
-                                    {item.availableQuantity !== undefined ? (
+                                    {hasSaleableNumber(item.availableQuantity) ? (
                                       <span>
                                         Available: {item.availableQuantity.toLocaleString()} {item.unitOfMeasure || ''}
                                       </span>
                                     ) : null}
-                                    {item.estimatedValue !== undefined ? (
+                                    {hasSaleableNumber(item.estimatedValue) ? (
                                       <span>
                                         {item.currency || currency} {item.estimatedValue.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                                       </span>
@@ -744,7 +838,12 @@ export default function CreateSalesOrderPage() {
                     </Popover>
                   </TableCell>
                   <TableCell>
-                    <Input placeholder="Code" value={line.itemCode || ''} onChange={(e) => updateLine(line.key, 'itemCode', e.target.value)} />
+                    <Input
+                      placeholder="Code"
+                      value={line.itemCode || ''}
+                      disabled={Boolean(propertyEnquirySourceLock)}
+                      onChange={(e) => updateLine(line.key, 'itemCode', e.target.value)}
+                    />
                   </TableCell>
                   <TableCell>
                     <Input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', parseFloat(e.target.value) || 0)} />
@@ -758,16 +857,15 @@ export default function CreateSalesOrderPage() {
                   <TableCell>
                     <Input type="number" min={0} max={100} value={line.discountPercent || 0} onChange={(e) => updateLine(line.key, 'discountPercent', parseFloat(e.target.value) || 0)} />
                   </TableCell>
-                  <TableCell>
-                    <Input type="number" min={0} max={100} value={line.taxPercent || 0} onChange={(e) => updateLine(line.key, 'taxPercent', parseFloat(e.target.value) || 0)} />
-                  </TableCell>
                   <TableCell className="text-right font-semibold">
                     GHS {calcLineTotal(line).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                   </TableCell>
                   <TableCell>
-                    <Button variant="ghost" size="icon" onClick={() => removeLine(line.key)}>
-                      <Trash2 className="h-4 w-4 text-red-500" />
-                    </Button>
+                    {!propertyEnquirySourceLock ? (
+                      <Button variant="ghost" size="icon" onClick={() => removeLine(line.key)}>
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))}
@@ -776,10 +874,30 @@ export default function CreateSalesOrderPage() {
 
           <Separator className="my-4" />
           <div className="flex justify-end">
-            <div className="w-64 space-y-2">
+            <div className="w-full max-w-sm space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="sales-order-tax">Tax</Label>
+                <Select
+                  value={taxGroupId || 'none'}
+                  onValueChange={(value) => setTaxGroupId(value === 'none' ? '' : value)}
+                >
+                  <SelectTrigger id="sales-order-tax" aria-label="Sales order tax">
+                    <SelectValue placeholder="Select tax" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">No tax</SelectItem>
+                    {taxGroups.map((group) => (
+                      <SelectItem key={group.id} value={group.id}>
+                        {group.name} ({group.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {taxError ? <p className="text-xs text-destructive">{taxError}</p> : null}
+              </div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Subtotal</span><span>GHS {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
               <div className="flex justify-between text-sm"><span className="text-gray-500">Discount</span><span className="text-red-500">-GHS {totalDiscount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
-              <div className="flex justify-between text-sm"><span className="text-gray-500">Tax</span><span>GHS {totalTax.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
+              <div className="flex justify-between text-sm"><span className="text-gray-500">Tax amount</span><span>{taxLoading ? 'Calculating...' : `GHS ${taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`}</span></div>
               <Separator />
               <div className="flex justify-between font-bold text-lg"><span>Total</span><span className="text-blue-600">GHS {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></div>
             </div>

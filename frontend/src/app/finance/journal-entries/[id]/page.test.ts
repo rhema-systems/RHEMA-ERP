@@ -60,4 +60,13 @@ describe('Journal entry action visibility', () => {
     expect(pageSource).toContain('>Approved At<');
     expect(pageSource).toContain('formatDateTime(entry.approvedDate)');
   });
+
+  it('does not send a stale browser date when original-period reversal timing is selected', () => {
+    expect(pageSource).toContain(
+      "reversalDatePolicy === 'CurrentOpenPeriod' ? reverseDate : undefined"
+    );
+    expect(pageSource).toContain(
+      'If the original period is closed, the reversal falls forward to the current open period.'
+    );
+  });
 });

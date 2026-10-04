@@ -41,6 +41,19 @@ public class SalesSetupService : ISalesSetupService
         return sources;
     }
 
+    public Task<IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto>> GetSaleableSourceAdapterDefinitionsAsync()
+    {
+        IReadOnlyCollection<SalesSaleableSourceAdapterDefinitionDto> definitions = _adapters.Values
+            .OrderBy(adapter => adapter.AdapterKey, StringComparer.OrdinalIgnoreCase)
+            .Select(adapter => new SalesSaleableSourceAdapterDefinitionDto
+            {
+                AdapterKey = adapter.AdapterKey,
+                Filters = adapter.FilterDefinitions
+            })
+            .ToArray();
+        return Task.FromResult(definitions);
+    }
+
     public async Task<IReadOnlyCollection<SalesSaleableItemDto>> SearchSaleableItemsAsync(Guid sourceId, string? search = null, int take = 50)
     {
         await EnsureDefaultSaleableSourcesAsync();
@@ -62,7 +75,7 @@ public class SalesSetupService : ISalesSetupService
 
         var normalizedTake = Math.Clamp(take, 1, 100);
         var items = (await adapter.SearchItemsAsync(source, search, normalizedTake)).ToList();
-        await HydrateActiveAllocationStateAsync(source.Id, items);
+        await HydrateActiveAllocationStateAsync(source, items);
         return items;
     }
 
@@ -211,11 +224,28 @@ public class SalesSetupService : ISalesSetupService
         var existing = (await repository.FindAsync(x => x.TenantId == _currentUserProvider.TenantId))
             .ToDictionary(x => x.Code, StringComparer.OrdinalIgnoreCase);
 
-        var createdAny = false;
+        var changedAny = false;
+        foreach (var legacySource in existing.Values.Where(RetireLegacyProjectUnitSource))
+        {
+            legacySource.UpdatedBy = _currentUserProvider.Username;
+            legacySource.LastModifiedById = _currentUserProvider.UserId;
+            await repository.UpdateAsync(legacySource);
+            changedAny = true;
+        }
+
         foreach (var source in GetDefaultSources())
         {
-            if (existing.ContainsKey(source.Code))
+            if (existing.TryGetValue(source.Code, out var current))
             {
+                var sourceChanged = UpgradeLandManagementPlaceholder(current);
+                sourceChanged |= ReconcileEstatePortalSource(current);
+                if (sourceChanged)
+                {
+                    current.UpdatedBy = _currentUserProvider.Username;
+                    current.LastModifiedById = _currentUserProvider.UserId;
+                    await repository.UpdateAsync(current);
+                    changedAny = true;
+                }
                 continue;
             }
 
@@ -223,37 +253,107 @@ public class SalesSetupService : ISalesSetupService
             source.CreatedBy = _currentUserProvider.Username;
             source.CreatedById = _currentUserProvider.UserId;
             await repository.AddAsync(source);
-            createdAny = true;
+            changedAny = true;
         }
 
-        if (createdAny)
+        if (changedAny)
         {
             await _unitOfWork.SaveChangesAsync();
         }
     }
 
+    private static bool UpgradeLandManagementPlaceholder(SalesSaleableSource source)
+    {
+        if (!source.Code.Equals("LAND_MANAGEMENT", StringComparison.OrdinalIgnoreCase)
+            || !source.AdapterKey.Equals("land-management", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(source.SettingsJson?.Trim(),
+                "{\"source\":\"land-management\",\"integrationStatus\":\"pending-merge\"}",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        source.Description = "Published Estate land demarcations available for configured Sales transactions.";
+        source.IsActive = true;
+        source.RequiresExternalModule = false;
+        source.SettingsJson = LandManagementSettingsJson;
+        return true;
+    }
+
+    private const string LandManagementSettingsJson =
+        "{\"source\":\"land-management\",\"filters\":[{\"field\":\"isPublishedToExternalPortal\",\"value\":\"true\"},{\"field\":\"externalListingStatus\",\"value\":\"Published\"}]}";
+
+    private const string PropertyRegisterSettingsJson =
+        "{\"source\":\"property-register\",\"filters\":[{\"field\":\"isPublishedToExternalPortal\",\"value\":\"true\"},{\"field\":\"assetType\",\"value\":\"Property\"}]}";
+
+    private const string FacilityRegisterSettingsJson =
+        "{\"source\":\"property-register\",\"filters\":[{\"field\":\"isPublishedToExternalPortal\",\"value\":\"true\"},{\"field\":\"assetType\",\"value\":\"Facility\"}]}";
+
+    private static bool RetireLegacyProjectUnitSource(SalesSaleableSource source)
+    {
+        if (!source.IsSystemSource
+            || !source.Code.Equals("PROJECT_UNITS", StringComparison.OrdinalIgnoreCase)
+            || !source.AdapterKey.Equals("project-units", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        const string description = "Project units are now published through the Estate Property Register and selected from the Property or Facility sales source.";
+        var changed = source.IsActive || !string.Equals(source.Description, description, StringComparison.Ordinal);
+        source.IsActive = false;
+        source.Description = description;
+        return changed;
+    }
+
+    private static bool ReconcileEstatePortalSource(SalesSaleableSource source)
+    {
+        if (!source.IsSystemSource
+            || !source.AdapterKey.Equals("property-register", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        string displayName;
+        string description;
+        string sourceType;
+        string settingsJson;
+        if (source.Code.Equals("PROPERTY_REGISTER", StringComparison.OrdinalIgnoreCase))
+        {
+            displayName = "Properties";
+            description = "Estate assets marked for external portal publication and classified as Property, including project units.";
+            sourceType = "PropertyRegister";
+            settingsJson = PropertyRegisterSettingsJson;
+        }
+        else if (source.Code.Equals("FACILITY_REGISTER", StringComparison.OrdinalIgnoreCase))
+        {
+            displayName = "Facilities";
+            description = "Estate assets marked for external portal publication and classified as Facility.";
+            sourceType = "FacilityRegister";
+            settingsJson = FacilityRegisterSettingsJson;
+        }
+        else
+        {
+            return false;
+        }
+
+        var changed = !source.IsActive
+            || source.RequiresExternalModule
+            || !string.Equals(source.DisplayName, displayName, StringComparison.Ordinal)
+            || !string.Equals(source.Description, description, StringComparison.Ordinal)
+            || !string.Equals(source.SourceType, sourceType, StringComparison.Ordinal)
+            || !string.Equals(source.SettingsJson, settingsJson, StringComparison.Ordinal);
+
+        source.DisplayName = displayName;
+        source.Description = description;
+        source.SourceType = sourceType;
+        source.IsActive = true;
+        source.RequiresExternalModule = false;
+        source.SettingsJson = settingsJson;
+        return changed;
+    }
+
     private static IReadOnlyCollection<SalesSaleableSource> GetDefaultSources() =>
     [
-        new SalesSaleableSource
-        {
-            Code = "PROJECT_UNITS",
-            DisplayName = "Project Units",
-            Description = "Released project units available for sale, lease, or allocation.",
-            SourceType = "ProjectUnits",
-            AdapterKey = "project-units",
-            IsActive = true,
-            Icon = "Building2",
-            ColorCode = "#2563EB",
-            SortOrder = 10,
-            SupportedTransactionTypes = "SalesOrder,SalesAgreement,LeaseAgreement,Reservation",
-            DefaultCurrency = "GHS",
-            DefaultWorkflowEntityType = "SalesOrder",
-            AllowSalesOrders = true,
-            AllowSalesAgreements = true,
-            AllowReservations = true,
-            IsSystemSource = true,
-            SettingsJson = "{\"source\":\"projects\",\"requiresReleasedForMarket\":true}"
-        },
         new SalesSaleableSource
         {
             Code = "INVENTORY",
@@ -277,11 +377,11 @@ public class SalesSetupService : ISalesSetupService
         new SalesSaleableSource
         {
             Code = "PROPERTY_REGISTER",
-            DisplayName = "Property Register",
-            Description = "Standalone property register items that can be sold, leased, or reserved once the property register module is available.",
+            DisplayName = "Properties",
+            Description = "Estate assets marked for external portal publication and classified as Property, including project units.",
             SourceType = "PropertyRegister",
             AdapterKey = "property-register",
-            IsActive = false,
+            IsActive = true,
             Icon = "Home",
             ColorCode = "#7C3AED",
             SortOrder = 30,
@@ -292,8 +392,29 @@ public class SalesSetupService : ISalesSetupService
             AllowSalesAgreements = true,
             AllowReservations = true,
             IsSystemSource = true,
-            RequiresExternalModule = true,
-            SettingsJson = "{\"source\":\"property-register\",\"status\":\"pending-module\"}"
+            RequiresExternalModule = false,
+            SettingsJson = PropertyRegisterSettingsJson
+        },
+        new SalesSaleableSource
+        {
+            Code = "FACILITY_REGISTER",
+            DisplayName = "Facilities",
+            Description = "Estate assets marked for external portal publication and classified as Facility.",
+            SourceType = "FacilityRegister",
+            AdapterKey = "property-register",
+            IsActive = true,
+            Icon = "Building2",
+            ColorCode = "#0F766E",
+            SortOrder = 35,
+            SupportedTransactionTypes = "SalesOrder,SalesAgreement,LeaseAgreement,Reservation",
+            DefaultCurrency = "GHS",
+            DefaultWorkflowEntityType = "SalesAgreement",
+            AllowSalesOrders = true,
+            AllowSalesAgreements = true,
+            AllowReservations = true,
+            IsSystemSource = true,
+            RequiresExternalModule = false,
+            SettingsJson = FacilityRegisterSettingsJson
         },
         new SalesSaleableSource
         {
@@ -319,10 +440,10 @@ public class SalesSetupService : ISalesSetupService
         {
             Code = "LAND_MANAGEMENT",
             DisplayName = "Land Management Plots",
-            Description = "Pending source for available plots after the Land Management module is merged.",
+            Description = "Published Estate land demarcations available for configured Sales transactions.",
             SourceType = "LandManagement",
             AdapterKey = "land-management",
-            IsActive = false,
+            IsActive = true,
             Icon = "Map",
             ColorCode = "#0891B2",
             SortOrder = 50,
@@ -332,9 +453,9 @@ public class SalesSetupService : ISalesSetupService
             AllowSalesOrders = true,
             AllowSalesAgreements = true,
             AllowReservations = true,
-            RequiresExternalModule = true,
+            RequiresExternalModule = false,
             IsSystemSource = true,
-            SettingsJson = "{\"source\":\"land-management\",\"integrationStatus\":\"pending-merge\"}"
+            SettingsJson = LandManagementSettingsJson
         }
     ];
 
@@ -364,7 +485,9 @@ public class SalesSetupService : ISalesSetupService
         UpdatedAt = source.UpdatedAt
     };
 
-    private async Task HydrateActiveAllocationStateAsync(Guid sourceId, List<SalesSaleableItemDto> items)
+    private async Task HydrateActiveAllocationStateAsync(
+        SalesSaleableSource source,
+        List<SalesSaleableItemDto> items)
     {
         if (items.Count == 0)
         {
@@ -383,14 +506,30 @@ public class SalesSetupService : ISalesSetupService
         }
 
         var activeStatuses = new[] { "Reserved", "Allocated", "Sold", "Leased", "PendingApproval", "Approved" };
-        var allocations = await _unitOfWork.Repository<SalesAllocation>()
+        var allocationQuery = _unitOfWork.Repository<SalesAllocation>()
             .GetQueryable()
             .Where(allocation =>
                 allocation.TenantId == _currentUserProvider.TenantId
-                && allocation.SaleableSourceId == sourceId
                 && sourceItemIds.Contains(allocation.SourceItemId)
                 && !allocation.IsDeleted
-                && activeStatuses.Contains(allocation.Status))
+                && activeStatuses.Contains(allocation.Status));
+
+        if (source.AdapterKey.Equals("property-register", StringComparison.OrdinalIgnoreCase)
+            || source.AdapterKey.Equals("project-units", StringComparison.OrdinalIgnoreCase)
+            || source.AdapterKey.Equals("land-management", StringComparison.OrdinalIgnoreCase))
+        {
+            allocationQuery = allocationQuery.Where(allocation =>
+                allocation.AdapterKey == "property-register"
+                || allocation.AdapterKey == "project-units"
+                || allocation.AdapterKey == "land-management");
+        }
+        else
+        {
+            allocationQuery = allocationQuery.Where(allocation =>
+                allocation.SaleableSourceId == source.Id);
+        }
+
+        var allocations = await allocationQuery
             .OrderByDescending(allocation => allocation.CreatedAt)
             .ToListAsync();
 
@@ -413,9 +552,14 @@ public class SalesSetupService : ISalesSetupService
             item.ActiveAllocationId = allocation.Id;
             item.ActiveAllocationStatus = allocation.Status;
             item.ActiveAllocationReservedUntil = allocation.ReservedUntil;
+            item.ActiveAllocationBusinessPartnerId = allocation.BusinessPartnerId;
+            item.ActiveAllocationOpportunityId = allocation.OpportunityId;
+            item.ActiveAllocationSalesOrderId = allocation.SalesOrderId;
             item.ActiveAllocationCustomerName = allocation.CustomerName;
             item.HasActiveAllocation = true;
             item.CanCreateSalesOrder = false;
+            item.SalesOrderIneligibilityReason =
+                $"This item already has an active {allocation.Status} allocation.";
             item.CanCreateSalesAgreement = false;
             item.CanCreateLeaseAgreement = false;
             item.CommercialStatus = string.IsNullOrWhiteSpace(item.CommercialStatus)

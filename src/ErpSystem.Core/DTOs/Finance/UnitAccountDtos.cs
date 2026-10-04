@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ErpSystem.Core.DTOs.Finance;
 
 // ========================================================================
@@ -14,6 +16,7 @@ public class UnitTypeDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public int DecimalPlaces { get; set; }
+    public decimal? RoundingIncrement { get; set; }
     public bool IsActive { get; set; }
     public int AccountCount { get; set; }
     public DateTime CreatedAt { get; set; }
@@ -31,6 +34,7 @@ public class CreateUnitTypeDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public int DecimalPlaces { get; set; } = 0;
+    public decimal? RoundingIncrement { get; set; }
 }
 
 /// <summary>
@@ -38,9 +42,21 @@ public class CreateUnitTypeDto
 /// </summary>
 public class UpdateUnitTypeDto
 {
+    private decimal? _roundingIncrement;
     public string? Name { get; set; }
     public string? Description { get; set; }
     public int? DecimalPlaces { get; set; }
+    public decimal? RoundingIncrement
+    {
+        get => _roundingIncrement;
+        set
+        {
+            _roundingIncrement = value;
+            RoundingIncrementSpecified = true;
+        }
+    }
+    [JsonIgnore]
+    public bool RoundingIncrementSpecified { get; private set; }
     public bool? IsActive { get; set; }
 }
 

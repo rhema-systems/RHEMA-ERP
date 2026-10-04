@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -33,6 +34,74 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed partial class ApInvoicePostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinancePrecisionRelational")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task VendorInvoiceStorageAndPosting_RoundTripsZeroThreeAndFourDecimalCurrencies()
+    {
+        var databaseName = $"ApPrecision_{Guid.NewGuid():N}";
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer($"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;TrustServerCertificate=True;ConnectRetryCount=0")
+            .Options);
+        db.Database.SetCommandTimeout(TimeSpan.FromMinutes(3));
+        try
+        {
+            await db.Database.EnsureCreatedAsync();
+            var cases = new[]
+            {
+                new { Code = "JPY", Places = 0, UnitPrice = 123.5m, Expected = 124m },
+                new { Code = "KWD", Places = 3, UnitPrice = 123.4565m, Expected = 123.457m },
+                new { Code = "CLF", Places = 4, UnitPrice = 123.45675m, Expected = 123.4568m }
+            };
+
+            foreach (var item in cases)
+            {
+                var tenantId = Guid.NewGuid();
+                var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+                {
+                    invoice.CurrencyCode = item.Code;
+                    invoice.LineItems.Single().UnitPrice = item.UnitPrice;
+                    invoice.SubTotal = item.Expected;
+                    invoice.TotalAmount = item.Expected;
+                    invoice.BaseCurrencyAmount = item.Expected;
+                });
+                var tenant = await db.Tenants.SingleAsync(value => value.Id == tenantId);
+                tenant.BaseCurrency = item.Code;
+                tenant.CurrencyDecimalPlaces = item.Places;
+                (await db.AccountingBooks.SingleAsync(value => value.TenantId == tenantId)).FunctionalCurrencyCode = item.Code;
+                (await db.FinanceSettings.SingleAsync(value => value.TenantId == tenantId)).BaseCurrency = item.Code;
+                foreach (var account in await db.Accounts.Where(value => value.TenantId == tenantId).ToListAsync())
+                    account.CurrencyCode = item.Code;
+                var currency = await db.Currencies.SingleAsync(value => value.TenantId == tenantId);
+                currency.CurrencyCode = item.Code;
+                currency.NumericCode = item.Code;
+                currency.CurrencyName = item.Code;
+                currency.CurrencySymbol = item.Code;
+                currency.DecimalPlaces = item.Places;
+                await db.SaveChangesAsync();
+
+                db.ChangeTracker.Clear();
+                var stored = await db.VendorInvoices.Include(value => value.LineItems)
+                    .SingleAsync(value => value.Id == fixture.Invoice.Id);
+                stored.TotalAmount.Should().Be(item.Expected);
+                stored.LineItems.Single().UnitPrice.Should().Be(item.UnitPrice);
+
+                var (service, _) = CreateService(db, tenantId);
+                var posted = await service.PostAsync(stored.Id);
+                var journal = await db.JournalEntries.Include(value => value.Transactions)
+                    .SingleAsync(value => value.Id == posted.JournalEntryId);
+                journal.Transactions.Sum(value => value.DebitAmount).Should().Be(item.Expected);
+                journal.Transactions.Sum(value => value.CreditAmount).Should().Be(item.Expected);
+                journal.Transactions.Should().OnlyContain(value =>
+                    value.TransactionDebitAmount + value.TransactionCreditAmount == item.Expected);
+            }
+        }
+        finally
+        {
+            await db.Database.EnsureDeletedAsync();
+        }
+    }
+
     [Theory]
     [InlineData("profile")]
     [InlineData("invoice")]
@@ -373,6 +442,48 @@ public sealed partial class ApInvoicePostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
+    public async Task PostingRequest_ShouldUseTheTenantDefaultPrimaryBookCode()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var primaryBook = await db.AccountingBooks.SingleAsync(book =>
+            book.TenantId == tenantId && book.IsDefault && !book.IsDeleted);
+        primaryBook.IsDefault = false;
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "BASE",
+            Name = "Ghana Statutory Primary",
+            Purpose = "Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        });
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+        var build = typeof(VendorInvoiceService).GetMethod(
+            "BuildApInvoicePostingRequestAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        var request = await (Task<FinancePostingRequestV2Dto>)build.Invoke(service, new object?[]
+        {
+            fixture.Invoice,
+            Array.Empty<Guid>(),
+            null,
+            CancellationToken.None
+        })!;
+
+        request.AccountingBookCode.Should().Be("BASE");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
     public async Task LineTradeDiscounts_ShouldReduceExpenseAndRetainSourceDimensionCombinations()
     {
         var tenantId = Guid.NewGuid();
@@ -483,15 +594,28 @@ public sealed partial class ApInvoicePostingMigrationTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
-        TaxCalculationRequestDto? capturedTaxRequest = null;
+        TaxDocumentCalculationRequestDto? capturedTaxRequest = null;
         var taxEngine = new Mock<ITaxCalculationEngine>();
-        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
-                It.IsAny<TaxCalculationRequestDto>(),
+        taxEngine.Setup(engine => engine.CalculateDocumentTaxesAsync(
+                It.IsAny<TaxDocumentCalculationRequestDto>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
-            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            .Callback<TaxDocumentCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxDocumentCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
             {
-                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+                CurrencyCode = request.CurrencyCode,
+                CurrencyDecimalPlaces = 2,
+                TotalTaxAmount = 13.5m,
+                TaxBreakdowns = request.Lines.Select(line => new TaxBreakdownDto
+                {
+                    DocumentLineId = line.DocumentLineId,
+                    TaxId = Guid.NewGuid(),
+                    TaxCode = "VAT",
+                    TaxName = "VAT",
+                    TaxRate = 15m,
+                    TaxableAmount = line.BaseAmount,
+                    TaxAmount = 13.5m,
+                    RawTaxAmount = 13.5m
+                }).ToList()
             });
         var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
 
@@ -520,7 +644,13 @@ public sealed partial class ApInvoicePostingMigrationTests
         });
 
         capturedTaxRequest.Should().NotBeNull();
-        capturedTaxRequest!.BaseAmount.Should().Be(90m);
+        capturedTaxRequest!.CurrencyCode.Should().Be("GHS");
+        capturedTaxRequest.Lines.Should().ContainSingle();
+        capturedTaxRequest.Lines[0].BaseAmount.Should().Be(90m);
+        taxEngine.Verify(engine => engine.CalculateDocumentTaxesAsync(
+            It.IsAny<TaxDocumentCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        taxEngine.Verify(engine => engine.CalculateTaxesAsync(
+            It.IsAny<TaxCalculationRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
         created.SubTotal.Should().Be(90m);
         created.DiscountAmount.Should().Be(10m);
         created.TaxAmount.Should().Be(13.5m);
@@ -1071,7 +1201,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         var act = () => service.PostAsync(fixture.Invoice.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         fixture.Invoice.JournalEntryId.Should().BeNull();
     }
 
@@ -1643,7 +1773,7 @@ public sealed partial class ApInvoicePostingMigrationTests
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
     {
-        var userId = Guid.NewGuid().ToString();
+        var userId = tenantId.ToString();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
@@ -1853,7 +1983,7 @@ public sealed partial class ApInvoicePostingMigrationTests
         {
             Id = tenantId,
             Name = $"Tenant {code}",
-            Code = code,
+            Code = code == "TEN" ? $"TEN-{tenantId:N}" : code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
@@ -1864,6 +1994,27 @@ public sealed partial class ApInvoicePostingMigrationTests
             LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
             IsDefault = true, IsActive = true, AllowsPosting = true
         });
+        db.Currencies.Add(new Currency
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, CurrencyCode = "GHS", NumericCode = "936",
+            CurrencyName = "Ghanaian Cedi", CurrencySymbol = "GH₵", DecimalPlaces = 2,
+            IsBaseCurrency = true, IsActive = true, CreatedAt = DateTime.UtcNow, CreatedBy = "Tests"
+        });
+        if (!db.Users.Local.Any(user => user.Id == tenantId))
+        {
+            db.Users.Add(new ApplicationUser
+            {
+                Id = tenantId,
+                TenantId = tenantId,
+                UserName = $"ap.poster.{tenantId:N}",
+                NormalizedUserName = $"AP.POSTER.{tenantId:N}",
+                Email = $"ap.poster.{tenantId:N}@example.test",
+                NormalizedEmail = $"AP.POSTER.{tenantId:N}@EXAMPLE.TEST",
+                FirstName = "AP",
+                LastName = "Poster",
+                IsActive = true
+            });
+        }
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1882,11 +2033,29 @@ public sealed partial class ApInvoicePostingMigrationTests
     {
         var startDate = new DateTime(periodDate.Year, periodDate.Month, 1);
         var endDate = startDate.AddMonths(1).AddDays(-1);
+        var fiscalYear = db.FiscalYears.Local.SingleOrDefault(year =>
+            year.TenantId == tenantId && year.Year == startDate.Year);
+        if (fiscalYear is null)
+        {
+            var yearStart = new DateTime(startDate.Year, 1, 1);
+            var yearEnd = new DateTime(startDate.Year, 12, 31);
+            fiscalYear = new FiscalYear
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                FiscalYearName = $"Fiscal Year {startDate.Year}",
+                FiscalYearCode = startDate.Year.ToString(CultureInfo.InvariantCulture),
+                Year = startDate.Year, FiscalYearType = "Calendar",
+                StartDate = yearStart, EndDate = yearEnd,
+                TotalDays = (yearEnd - yearStart).Days + 1,
+                NumberOfPeriods = 12, Status = "Open", IsActive = true
+            };
+            db.FiscalYears.Add(fiscalYear);
+        }
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = startDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture),
             PeriodCode = startDate.ToString("yyyy-MM", CultureInfo.InvariantCulture),
             PeriodNumber = startDate.Month,

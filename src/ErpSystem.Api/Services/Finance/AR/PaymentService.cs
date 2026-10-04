@@ -44,6 +44,7 @@ namespace ErpSystem.Api.Services.Finance.AR
         private ExchangeRateQuoteSide? _settlementQuoteSide;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
         public PaymentService(
             IUnitOfWork unitOfWork,
@@ -59,7 +60,8 @@ namespace ErpSystem.Api.Services.Finance.AR
             IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null,
             IExchangeRateService? exchangeRateService = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
-            IFinancePaymentDimensionAdapter? paymentDimensions = null)
+            IFinancePaymentDimensionAdapter? paymentDimensions = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -75,6 +77,7 @@ namespace ErpSystem.Api.Services.Finance.AR
             _exchangeRateService = exchangeRateService;
             _sourceDimensions = sourceDimensions;
             _paymentDimensions = paymentDimensions;
+            _sourceBookAuthority = sourceBookAuthority;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -604,7 +607,6 @@ namespace ErpSystem.Api.Services.Finance.AR
                 if (_paymentDimensions is not null)
                     await _paymentDimensions.SynchronizeCustomerPaymentAsync(payment.Id, producer, cancellationToken);
                 await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, producer, cancellationToken);
-
                 if (dto.IsCreditNote)
                 {
                     await PostCustomerCreditNoteAsync(payment.Id, cancellationToken);
@@ -938,6 +940,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         !item.IsDeleted)
                     .SingleOrDefaultAsync(cancellationToken)
                     ?? throw new InvalidOperationException("The original AR receipt posting event was not found.");
+                var originalAuthority = await RequireCustomerPaymentBoundAuthorityAsync(
+                    payment, CustomerPaymentProducer(), originalPosting.Id, cancellationToken);
+                if (originalAuthority.OriginalJournalEntryId != payment.JournalEntryId ||
+                    originalAuthority.OriginalFinancePostingEventId != originalPosting.Id)
+                    throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_ORIGINAL_MISMATCH: receipt reversal evidence differs from the retained original.");
 
                 CashTransaction? originalCashTransaction = null;
                 LiquidityAccountEntry? originalLiquidityEntry = null;
@@ -1001,7 +1008,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     Description = $"Reverse customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
                     PostingDate = reversalDate,
                     JournalType = "AR Receipt Reversal",
-                    AccountingBookCode = "IFRS",
+                    AccountingBookCode = originalAuthority.AccountingBookCode,
                     FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                     ReversalReason = reason,
@@ -1032,6 +1039,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                         reason,
                         reversalDate,
                         cancellationToken);
+                    var originalFxEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+                        .GetQueryable(item => item.TenantId == TenantId && item.Id == settlement.PostingEventId.Value &&
+                            item.JournalEntryId == settlement.JournalEntryId && item.PostingStatus == "Posted" && !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("The original realized-FX posting evidence was not found.");
                     var fxResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "FX",
@@ -1043,7 +1055,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         Description = $"Reverse AR realized FX for {payment.PaymentNumber}",
                         PostingDate = reversalDate,
                         JournalType = "Realized FX Reversal",
-                        AccountingBookCode = "IFRS",
+                        AccountingBookCode = originalFxEvent.BookClassification,
                         FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
                         ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
                         ReversalReason = reason,
@@ -1288,7 +1300,9 @@ namespace ErpSystem.Api.Services.Finance.AR
 
             await ValidateAndFreezeCustomerPaymentDimensionsAsync(payment, producer, cancellationToken);
             var wasAlreadyLinked = payment.JournalEntryId.HasValue;
+            var authority = await PrepareCustomerPaymentAuthorityAsync(payment, producer, cancellationToken);
             var postingRequest = await BuildArReceiptPostingRequestAsync(payment, producer, cancellationToken);
+            postingRequest.AccountingBookCode = authority.AccountingBookCode;
             var postingResult = await _financePostingEngine.PostAsync(
                 postingRequest, producer, cancellationToken);
 
@@ -1304,6 +1318,11 @@ namespace ErpSystem.Api.Services.Finance.AR
                 await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
             }
+            await RequireSourceBookAuthority().BindOriginalPostingAsync(
+                authority.AuthorityId,
+                postingResult.PostingEventId,
+                postingResult.JournalEntryId,
+                cancellationToken);
 
             return new ArReceiptPostingOutcome(payment, postingResult, wasAlreadyLinked);
         }
@@ -2127,6 +2146,7 @@ namespace ErpSystem.Api.Services.Finance.AR
 
                     var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
+                        // Both bound origins must remain on one exact book; the helper rejects mixed evidence.
                         SourceModule = "AR",
                         SourceDocumentType = "CustomerPaymentAdvanceApplication",
                         SourceDocumentId = allocation.Id,
@@ -2136,7 +2156,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                         Description = $"Apply customer advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
                         PostingDate = applicationDate,
                         JournalType = "AR Customer Advance Application",
-                        AccountingBookCode = "IFRS",
+                        AccountingBookCode = (await RequireAdvanceApplicationBookAsync(payment, invoice, cancellationToken)).AccountingBookCode,
                         FunctionalCurrencyCode = functionalCurrency,
                         IdempotencyKey = $"AR:CustomerPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
                         ReturnExistingOnDuplicate = true,
@@ -3287,7 +3307,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                     : $"Customer receipt {payment.PaymentNumber} - {customer.PartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AR Receipt",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = string.Empty,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"{producer.Definition.SourceRoute}:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3570,7 +3590,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 Description = $"Customer credit note {payment.PaymentNumber} - {customer.PartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AR Credit Note",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = string.Empty,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AR:CustomerCreditNote:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
@@ -3809,6 +3829,186 @@ namespace ErpSystem.Api.Services.Finance.AR
                 or FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt))
                 throw new InvalidOperationException("The trusted producer context is not a supported Finance customer-payment route.");
             return producer;
+        }
+
+        private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
+            _sourceBookAuthority
+            ?? throw new InvalidOperationException(
+                "Finance source-book authority is not configured for customer-payment posting.");
+
+        private static FinanceSourceBookAuthorityFreezeRequest CustomerPaymentAuthorityRequest(
+            CustomerPayment payment,
+            FinancePostingProducerContext producer,
+            string freezeStage) => new()
+        {
+            OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                producer.Definition.ProducerModule),
+            SourceDocumentType = producer.Definition.DocumentType,
+            SourceDocumentId = payment.Id,
+            PostingAction = "Post",
+            EffectiveDate = payment.PaymentDate,
+            TransactionCurrencyCode = payment.CurrencyCode,
+            FreezeStage = freezeStage
+        };
+
+        private async Task<FinanceSourceBookAuthorityResult> PrepareCustomerPaymentAuthorityAsync(
+            CustomerPayment payment,
+            FinancePostingProducerContext producer,
+            CancellationToken cancellationToken)
+        {
+            var authorityService = RequireSourceBookAuthority();
+            if (!payment.SourceBookAuthorityId.HasValue)
+            {
+                FinanceSourceBookAuthorityResult frozen;
+                if (payment.JournalEntryId.HasValue)
+                {
+                    var retainedEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+                        .GetQueryable(item => item.TenantId == TenantId
+                            && item.SourceModule == producer.Definition.PostingSourceModule
+                            && item.SourceDocumentType == producer.Definition.DocumentType
+                            && item.SourceDocumentId == payment.Id
+                            && item.PostingAction == "Post"
+                            && item.JournalEntryId == payment.JournalEntryId.Value
+                            && item.PostingStatus == "Posted"
+                            && !item.IsDeleted)
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException(
+                            "SOURCE_BOOK_AUTHORITY_LEGACY_EVIDENCE_INVALID: exact customer-payment posting evidence was not found.");
+                    frozen = await authorityService.RetainExistingPostedOriginalAsync(
+                        CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+                        payment.JournalEntryId.Value,
+                        retainedEvent.Id,
+                        cancellationToken);
+                }
+                else
+                {
+                    var invoiceOrigins = new List<FinanceSourceBookAuthorityOriginRequest>();
+                    foreach (var invoice in payment.Allocations
+                        .Where(item => !item.IsDeleted && item.Invoice is not null)
+                        .Select(item => item.Invoice!)
+                        .DistinctBy(item => item.Id))
+                    {
+                        var invoiceAuthority = await RequireInvoiceBoundAuthorityForSettlementAsync(
+                            invoice, cancellationToken);
+                        invoiceOrigins.Add(new FinanceSourceBookAuthorityOriginRequest
+                        {
+                            OriginAuthorityId = invoiceAuthority.AuthorityId,
+                            Role = "CUSTOMER_INVOICE"
+                        });
+                    }
+
+                    frozen = invoiceOrigins.Count == 0
+                        ? await authorityService.FreezeInitialPrimaryAsync(
+                            CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
+                            cancellationToken)
+                        : await authorityService.FreezeInheritedAsync(
+                            CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
+                            invoiceOrigins,
+                            cancellationToken);
+                }
+
+                payment.SourceBookAuthorityId = frozen.AuthorityId;
+                await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            return await authorityService.RequireForPostingAsync(
+                CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.PrePost),
+                cancellationToken);
+        }
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireCustomerPaymentBoundAuthorityAsync(
+            CustomerPayment payment,
+            FinancePostingProducerContext producer,
+            Guid retainedEventId,
+            CancellationToken cancellationToken)
+        {
+            var authorityService = RequireSourceBookAuthority();
+            if (!payment.SourceBookAuthorityId.HasValue)
+            {
+                if (!payment.JournalEntryId.HasValue)
+                    throw new InvalidOperationException(
+                        "SOURCE_BOOK_AUTHORITY_MISSING: the customer payment has no retained original posting.");
+                var retained = await authorityService.RetainExistingPostedOriginalAsync(
+                    CustomerPaymentAuthorityRequest(payment, producer, FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+                    payment.JournalEntryId.Value,
+                    retainedEventId,
+                    cancellationToken);
+                payment.SourceBookAuthorityId = retained.AuthorityId;
+                await _unitOfWork.Repository<CustomerPayment>().UpdateAsync(payment);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            return await authorityService.RequireBoundOriginalAsync(
+                payment.SourceBookAuthorityId.Value,
+                cancellationToken);
+        }
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireInvoiceBoundAuthorityForSettlementAsync(
+            Invoice invoice,
+            CancellationToken cancellationToken)
+        {
+            var authorityService = RequireSourceBookAuthority();
+            if (!invoice.SourceBookAuthorityId.HasValue)
+            {
+                if (!invoice.JournalEntryId.HasValue)
+                    throw new InvalidOperationException(
+                        "SOURCE_BOOK_AUTHORITY_MISSING: an allocated invoice requires governed reapproval before settlement.");
+                var retainedEvent = await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item => item.TenantId == TenantId
+                        && item.SourceDocumentType == "CustomerInvoice"
+                        && item.SourceDocumentId == invoice.Id
+                        && item.PostingAction == "Post"
+                        && item.JournalEntryId == invoice.JournalEntryId.Value
+                        && item.PostingStatus == "Posted"
+                        && !item.IsDeleted)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "SOURCE_BOOK_AUTHORITY_LEGACY_EVIDENCE_INVALID: exact customer-invoice posting evidence was not found.");
+                var retained = await authorityService.RetainExistingPostedOriginalAsync(
+                    new FinanceSourceBookAuthorityFreezeRequest
+                    {
+                        OriginModuleCode = FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                            retainedEvent.SourceModule, retainedEvent.OriginModuleCode),
+                        SourceDocumentType = "CustomerInvoice",
+                        SourceDocumentId = invoice.Id,
+                        PostingAction = "Post",
+                        EffectiveDate = invoice.InvoiceDate,
+                        TransactionCurrencyCode = invoice.CurrencyCode,
+                        FreezeStage = FinanceSourceBookAuthorityFreezeStages.LegacyPosted
+                    },
+                    invoice.JournalEntryId.Value,
+                    retainedEvent.Id,
+                    cancellationToken);
+                invoice.SourceBookAuthorityId = retained.AuthorityId;
+                await _unitOfWork.Repository<Invoice>().UpdateAsync(invoice);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+
+            return await authorityService.RequireBoundOriginalAsync(
+                invoice.SourceBookAuthorityId.Value,
+                cancellationToken);
+        }
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireAdvanceApplicationBookAsync(
+            CustomerPayment payment,
+            Invoice invoice,
+            CancellationToken cancellationToken)
+        {
+            if (!payment.SourceBookAuthorityId.HasValue)
+                throw new InvalidOperationException(
+                    "SOURCE_BOOK_AUTHORITY_MISSING: customer advance authority is not retained.");
+            var paymentAuthority = await RequireSourceBookAuthority().RequireBoundOriginalAsync(
+                payment.SourceBookAuthorityId.Value,
+                cancellationToken);
+            var invoiceAuthority = await RequireInvoiceBoundAuthorityForSettlementAsync(invoice, cancellationToken);
+            if (paymentAuthority.AccountingBookId != invoiceAuthority.AccountingBookId
+                || !paymentAuthority.FunctionalCurrencyCode.Equals(
+                    invoiceAuthority.FunctionalCurrencyCode,
+                    StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    "SOURCE_BOOK_AUTHORITY_MIXED_ORIGINS: the advance and invoice use different exact book evidence.");
+            return paymentAuthority;
         }
 
         private static IReadOnlyList<PaymentAllocation> GetEffectivePaymentDimensionAllocations(
@@ -4609,6 +4809,8 @@ namespace ErpSystem.Api.Services.Finance.AR
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
+                RoundingAdjustmentAmount = payment.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = payment.FinanceRoundingEvidenceId,
                 PaymentMethod = payment.PaymentMethod,
                 PaymentMethodId = payment.PaymentMethodId,
                 PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,

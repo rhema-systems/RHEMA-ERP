@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Estate;
 using System.Globalization;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -75,6 +76,9 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         var tenantId = GetTenantId();
         var assets = await _db.EstateManagedAssets.AsNoTracking()
             .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.Status == EstateManagedAssetStatus.Available
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied)
                 && (asset.AssetCode.Contains(term) || asset.Name.Contains(term)
                     || (asset.ProjectCode != null && asset.ProjectCode.Contains(term))
                     || (asset.ProjectTitle != null && asset.ProjectTitle.Contains(term))
@@ -131,7 +135,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
         var term = search?.Trim();
         var query = _db.EstateManagedAssets.AsNoTracking()
-            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted);
+            .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted
+                && (asset.Status == EstateManagedAssetStatus.Available
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied));
         query = string.IsNullOrWhiteSpace(property.ProjectCode)
             ? query.Where(asset => asset.Id == property.Id)
             : query.Where(asset => asset.ProjectCode == property.ProjectCode);
@@ -198,6 +205,95 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
                 || string.Equals(item.CompletionStatus, status, StringComparison.OrdinalIgnoreCase)
                 || string.Equals(item.AttendanceStatus, status, StringComparison.OrdinalIgnoreCase))
             .ToList();
+
+        return Ok(new { success = true, data = roster });
+    }
+
+    [HttpGet("mine")]
+    public async Task<IActionResult> GetMyRoster(
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] string? status,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var employeeId = _currentUserService.EmployeeId;
+        if (employeeId is null || employeeId == Guid.Empty)
+        {
+            return Unauthorized(new { success = false, message = "Your account is not linked to an employee record." });
+        }
+
+        var employee = await _db.Employees.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Id == employeeId.Value)
+            .Select(item => new { item.Id, item.EmployeeNumber })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (employee is null)
+        {
+            return NotFound(new { success = false, message = "Your employee record was not found." });
+        }
+
+        var profileIds = await _db.PayrollEmployeeProfiles.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.EmployeeId == employee.Id)
+            .Select(item => item.Id)
+            .ToListAsync(cancellationToken);
+        var fromDate = (from ?? DateTime.UtcNow.Date.AddDays(-7)).Date;
+        var toDate = (to ?? DateTime.UtcNow.Date.AddDays(30)).Date;
+        if (toDate < fromDate)
+        {
+            return BadRequest(new { success = false, message = "End date cannot be before start date." });
+        }
+
+        var query = _db.EstateFacilityDutyRosters
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (item.EmployeeNumber == employee.EmployeeNumber
+                    || (item.EmployeeProfileId.HasValue && profileIds.Contains(item.EmployeeProfileId.Value)))
+                && (item.EndDate == null || item.EndDate >= fromDate)
+                && item.StartDate <= toDate);
+
+        var items = await query
+            .OrderBy(item => item.StartDate)
+            .ThenBy(item => item.ShiftStart)
+            .ThenBy(item => item.ServiceAreaName)
+            .ToListAsync(cancellationToken);
+
+        var rosterIds = items.Select(item => item.Id).ToList();
+        var attendances = new List<EstateFacilityDutyAttendance>();
+        if (rosterIds.Count > 0)
+        {
+            attendances = await _db.EstateFacilityDutyAttendances.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && rosterIds.Contains(item.DutyRosterId)
+                    && item.DutyDate >= fromDate
+                    && item.DutyDate <= toDate)
+                .ToListAsync(cancellationToken);
+        }
+        var attendanceByKey = attendances.ToDictionary(
+            item => (item.DutyRosterId, item.DutyDate.Date),
+            item => item);
+
+        var roster = new List<EstateFacilityDutyRosterDto>();
+        foreach (var item in items)
+        {
+            for (var date = fromDate; date <= toDate; date = date.AddDays(1))
+            {
+                if (!IsScheduledOn(item, date))
+                {
+                    continue;
+                }
+
+                var dto = ToDto(item, date, attendanceByKey.GetValueOrDefault((item.Id, date)));
+                if (!string.IsNullOrWhiteSpace(status)
+                    && !string.Equals(status, "all", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(dto.CompletionStatus, status, StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(dto.AttendanceStatus, status, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                roster.Add(dto);
+            }
+        }
 
         return Ok(new { success = true, data = roster });
     }
@@ -297,9 +393,48 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         var now = DateTime.UtcNow;
         if (!IsScheduledOn(item, now.Date))
             return BadRequest(new { success = false, message = "This staff duty is not scheduled for today." });
-        item.AttendanceStatus = TrimOrDefault(request.AttendanceStatus, "Present");
-        item.CompletionStatus = TrimOrDefault(request.CompletionStatus, "Completed");
-        item.QualityStatus = TrimOrDefault(request.QualityStatus, "Pending inspection");
+        var attendanceStatus = TrimOrDefault(request.AttendanceStatus, "Present");
+        var completionStatus = TrimOrDefault(request.CompletionStatus, "Completed");
+        var qualityStatus = TrimOrDefault(request.QualityStatus, "Pending inspection");
+        if (IsInspectionDecision(qualityStatus))
+        {
+            if (item.SupervisorEmployeeId is null)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Assign a supervisor from HR before inspection can be marked."
+                });
+            }
+
+            if (_currentUserService.EmployeeId is not { } employeeId
+                || employeeId == Guid.Empty
+                || employeeId != item.SupervisorEmployeeId.Value)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    success = false,
+                    message = "Only the assigned supervisor can mark this inspection."
+                });
+            }
+
+            var wasCompleted = string.Equals(item.AttendanceStatus, "Present", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(item.CompletionStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+            var remainsCompleted = string.Equals(attendanceStatus, "Present", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(completionStatus, "Completed", StringComparison.OrdinalIgnoreCase);
+            if (!wasCompleted && !remainsCompleted)
+            {
+                return BadRequest(new
+                {
+                    success = false,
+                    message = "Inspection can only be marked after the duty is present and completed."
+                });
+            }
+        }
+
+        item.AttendanceStatus = attendanceStatus;
+        item.CompletionStatus = completionStatus;
+        item.QualityStatus = qualityStatus;
         item.LinkedMaintenanceReference = TrimToNull(request.LinkedMaintenanceReference) ?? item.LinkedMaintenanceReference;
         item.LinkedComplaintReference = TrimToNull(request.LinkedComplaintReference) ?? item.LinkedComplaintReference;
         item.LastAttendanceAt = now;
@@ -375,14 +510,30 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
                 .Select(profile => (Guid?)profile.Id).FirstOrDefaultAsync(cancellationToken);
         }
 
+        if (request.SupervisorEmployeeId is { } supervisorEmployeeId)
+        {
+            var supervisor = await _db.Employees.AsNoTracking()
+                .Where(row => row.TenantId == tenantId && !row.IsDeleted && row.IsActive
+                    && row.Id == supervisorEmployeeId)
+                .Select(row => new { row.Id, row.FirstName, row.MiddleName, row.LastName })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (supervisor is null) return "Select an active supervisor from HR.";
+
+            request.SupervisorName = string.Join(" ", new[] { supervisor.FirstName, supervisor.MiddleName, supervisor.LastName }
+                .Where(part => !string.IsNullOrWhiteSpace(part)));
+        }
+
         if (!string.IsNullOrWhiteSpace(request.PropertyReference))
         {
             var reference = request.PropertyReference.Trim();
             var property = await _db.EstateManagedAssets.AsNoTracking()
                 .Where(asset => asset.TenantId == tenantId && !asset.IsDeleted && asset.AssetCode == reference)
-                .Select(asset => new { asset.Id, asset.AssetCode, asset.ProjectCode })
+                .Select(asset => new { asset.Id, asset.AssetCode, asset.ProjectCode, asset.Status })
                 .FirstOrDefaultAsync(cancellationToken);
             if (property is null) return "Select a property or site from Estate.";
+            if (property.Status is not (EstateManagedAssetStatus.Available
+                or EstateManagedAssetStatus.Leased or EstateManagedAssetStatus.Occupied))
+                return "Staff duties cannot be assigned to a reserved, blocked, retired, or otherwise unavailable property.";
             request.PropertyReference = property.AssetCode;
 
             if (!string.IsNullOrWhiteSpace(request.PropertyUnit))
@@ -393,9 +544,12 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
                         && (asset.AssetCode == unitReference || asset.ProjectUnitCode == unitReference)
                         && (asset.Id == property.Id
                             || (property.ProjectCode != null && asset.ProjectCode == property.ProjectCode)))
-                    .Select(asset => new { asset.AssetCode, asset.ProjectUnitCode })
+                    .Select(asset => new { asset.AssetCode, asset.ProjectUnitCode, asset.Status })
                     .FirstOrDefaultAsync(cancellationToken);
                 if (unit is null) return "Select a unit or parcel belonging to the selected property.";
+                if (unit.Status is not (EstateManagedAssetStatus.Available
+                    or EstateManagedAssetStatus.Leased or EstateManagedAssetStatus.Occupied))
+                    return "Staff duties cannot be assigned to a reserved, blocked, retired, or otherwise unavailable unit.";
                 request.PropertyUnit = unit.ProjectUnitCode ?? unit.AssetCode;
             }
         }
@@ -450,6 +604,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         item.ShiftStart = TrimOrDefault(request.ShiftStart, "08:00");
         item.ShiftEnd = TrimOrDefault(request.ShiftEnd, "17:00");
         item.SupervisorName = TrimToNull(request.SupervisorName);
+        item.SupervisorEmployeeId = request.SupervisorEmployeeId;
         item.ToolsIssued = TrimToNull(request.ToolsIssued);
         item.SuppliesIssued = TrimToNull(request.SuppliesIssued);
         item.InventoryIssueVoucherId = request.InventoryIssueVoucherId;
@@ -491,6 +646,11 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.ServiceAreaName))
         {
             return "Service area, apartment, unit, floor, or route is required.";
+        }
+
+        if (request.SupervisorEmployeeId is null)
+        {
+            return "Select the supervisor from HR employees.";
         }
 
         if (request.EndDate is not null && request.StartDate.Date > request.EndDate.Value.Date)
@@ -552,6 +712,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
         return new(
             item.Id,
             item.RosterReference,
+            date,
             item.EmployeeProfileId,
             item.EmployeeNumber,
             item.StaffName,
@@ -568,6 +729,7 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
             item.ShiftStart,
             item.ShiftEnd,
             item.SupervisorName,
+            item.SupervisorEmployeeId,
             item.ToolsIssued,
             item.SuppliesIssued,
             item.InventoryIssueVoucherId,
@@ -592,6 +754,10 @@ public sealed class FacilitiesDutyRosterController : ControllerBase
 
     private static string? TrimToNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsInspectionDecision(string qualityStatus)
+        => string.Equals(qualityStatus, "Passed inspection", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(qualityStatus, "Failed inspection", StringComparison.OrdinalIgnoreCase);
 
     private static string? MergeNotes(string? existingNotes, string? newNotes)
     {

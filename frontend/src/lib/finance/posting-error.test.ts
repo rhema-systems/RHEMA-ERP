@@ -30,6 +30,19 @@ describe('getFinancePostingErrorPresentation', () => {
         });
     });
 
+    it('presents structured financial-statement validation errors instead of a generic HTTP status', () => {
+        expect(getFinancePostingErrorPresentation({
+            isValid: false,
+            issues: [
+                { severity: 'Warning', code: 'LAYOUT_WARNING', message: 'A harmless warning.' },
+                { severity: 'Error', code: 'ROW_MAPPING_REQUIRED', rowCode: 'ASSETS', message: 'At least one mapping is required.' },
+            ],
+        }, 'The layout action failed.', 'Finance action failed')).toEqual({
+            title: 'Finance action failed',
+            description: 'Row ASSETS — At least one mapping is required.',
+        });
+    });
+
     it('replaces generic Finance toast titles with the affected action', () => {
         expect(getFinanceFeedbackTitle('Error', 'Failed to load supplier invoices.', true))
             .toBe('Unable to load supplier invoices');

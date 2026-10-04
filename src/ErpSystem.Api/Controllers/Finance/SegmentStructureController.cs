@@ -62,8 +62,8 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
-                var segments = await _segmentStructureService.GetSegmentStructuresAsync();
-                return Ok(segments);
+                var segments = await _accountSegmentStructureService.GetAllAsync();
+                return Ok(segments.Select(MapToSegmentStructureDto).ToList());
             }
             catch (Exception ex)
             {
@@ -84,8 +84,9 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
-                var segments = await _segmentStructureService.GetSegmentStructuresAsync(cancellationToken);
-                var dimensions = segments.Where(s => s.IsReportingDimension && s.IsActive).ToList();
+                var segments = await _accountSegmentStructureService.GetAllAsync(cancellationToken);
+                var dimensions = segments.Where(s => s.IsReportingDimension && s.IsActive)
+                    .Select(MapToSegmentStructureDto).ToList();
                 return Ok(dimensions);
             }
             catch (Exception ex)
@@ -148,11 +149,11 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             try
             {
-                var segment = await _segmentStructureService.GetSegmentStructureByIdAsync(id);
+                var segment = await _accountSegmentStructureService.GetByIdAsync(id);
                 if (segment == null)
                     return NotFound($"Segment structure with ID {id} not found");
 
-                return Ok(segment);
+                return Ok(MapToSegmentStructureDto(segment));
             }
             catch (ArgumentException ex)
             {
@@ -447,48 +448,6 @@ namespace ErpSystem.Api.Controllers.Finance
             }
         }
 
-        /// <summary>
-        /// Forces regeneration of all account numbers based on current segments.
-        /// </summary>
-        /// <remarks>
-        /// Useful if account numbers get out of sync with segment structure.
-        ///
-        /// **Common Use Cases:**
-        /// - Fix account numbers that are out of sync after manual database changes
-        /// - Recalculate all account numbers after a segment structure correction
-        /// - Ensure consistency across all accounts after migration or import
-        ///
-        /// **Integration Pattern:**
-        /// - Call this endpoint after any bulk changes to segment structure
-        /// - Wait for completion before performing account-related operations
-        /// - Verify results by fetching accounts and inspecting their numbers
-        ///
-        /// **Business Rules:**
-        /// - Regenerates account numbers for every account in the system
-        /// - This is a potentially long-running operation for large account sets
-        /// - Does not create or delete accounts; only updates their computed account numbers
-        /// - Safe to call multiple times; the result is idempotent
-        ///
-        /// **Authorization:** Requires Finance.Write permission
-        /// </remarks>
-        /// <returns>Success message confirming account numbers were regenerated.</returns>
-        /// <response code="200">Account numbers regenerated successfully.</response>
-        /// <response code="500">Internal server error.</response>
-        [HttpPost("regenerate")]
-        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
-        public async Task<ActionResult> RegenerateAccountNumbers()
-        {
-            try
-            {
-                await _accountSegmentStructureService.RegenerateAccountNumbersAsync();
-                return Ok(new { message = "Account numbers regenerated successfully." });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, $"Internal server error: {ex.Message}");
-            }
-        }
-
         private SegmentStructureDto MapToSegmentStructureDto(AccountSegmentStructureDto source)
         {
              return new SegmentStructureDto
@@ -508,11 +467,22 @@ namespace ErpSystem.Api.Controllers.Finance
                  LifecycleStatus = source.LifecycleStatus,
                  RowVersion = source.RowVersion,
                  AccountUsageCount = source.AccountUsageCount,
+                 TotalAccountCount = source.TotalAccountCount,
                  CanActivate = source.CanActivate,
                  CanFreeze = source.CanFreeze,
                  IsSystemDefined = source.IsSystemDefined,
                  Description = source.Description,
-                 LookupValueCount = source.LookupValuesCount
+                 LookupValueCount = source.LookupValuesCount,
+                 LookupValues = source.LookupValues.Select(value => new SegmentLookupValueDto
+                 {
+                     Id = value.Id,
+                     TenantId = source.TenantId,
+                     SegmentStructureId = source.Id,
+                     SegmentValue = value.SegmentValue,
+                     Description = value.Description,
+                     IsActive = value.IsActive,
+                     DisplayOrder = value.DisplayOrder
+                 }).ToList()
              };
         }
 

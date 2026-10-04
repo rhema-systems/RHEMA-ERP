@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Building2, FileText, Loader2, Package, Search, ShoppingCart } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +14,7 @@ import {
   type SalesSaleableItemDto,
   type SalesSaleableSourceDto,
 } from '@/services/salesSetupService';
+import { hasSaleableNumber } from '@/lib/sales/saleableItemDisplay';
 
 export interface SalesLinkedSourceContext {
   sourceId?: string;
@@ -27,9 +28,9 @@ export interface SalesLinkedSourceContext {
   itemType?: string;
   customerId?: string;
   customerName?: string;
-  estimatedValue?: number;
+  estimatedValue?: number | null;
   currency?: string;
-  areaSquareMeters?: number;
+  areaSquareMeters?: number | null;
   propertyReference?: string;
   projectId?: string;
   projectCode?: string;
@@ -46,10 +47,17 @@ export interface SalesLinkedSourceContext {
   locationId?: string;
   locationName?: string;
   unitOfMeasure?: string;
-  currentQuantity?: number;
-  availableQuantity?: number;
-  allocatedQuantity?: number;
+  currentQuantity?: number | null;
+  availableQuantity?: number | null;
+  allocatedQuantity?: number | null;
   shouldCreateSalesAllocation?: boolean;
+  activeAllocationId?: string;
+  activeAllocationStatus?: string;
+  activeAllocationReservedUntil?: string;
+  activeAllocationBusinessPartnerId?: string;
+  activeAllocationOpportunityId?: string;
+  activeAllocationSalesOrderId?: string;
+  activeAllocationCustomerName?: string;
 }
 
 export type SaleableQuickStartMode = 'order' | 'agreement';
@@ -84,6 +92,13 @@ const contextParamKeys: (keyof SalesLinkedSourceContext)[] = [
   'locationId',
   'locationName',
   'unitOfMeasure',
+  'activeAllocationId',
+  'activeAllocationStatus',
+  'activeAllocationReservedUntil',
+  'activeAllocationBusinessPartnerId',
+  'activeAllocationOpportunityId',
+  'activeAllocationSalesOrderId',
+  'activeAllocationCustomerName',
 ];
 
 const parseNumberParam = (params: URLSearchParams, key: string) => {
@@ -143,6 +158,13 @@ export const saleableItemToContext = (
     availableQuantity: item.availableQuantity,
     allocatedQuantity: item.allocatedQuantity,
     shouldCreateSalesAllocation: item.shouldCreateSalesAllocation,
+    activeAllocationId: item.activeAllocationId,
+    activeAllocationStatus: item.activeAllocationStatus,
+    activeAllocationReservedUntil: item.activeAllocationReservedUntil,
+    activeAllocationBusinessPartnerId: item.activeAllocationBusinessPartnerId,
+    activeAllocationOpportunityId: item.activeAllocationOpportunityId,
+    activeAllocationSalesOrderId: item.activeAllocationSalesOrderId,
+    activeAllocationCustomerName: item.activeAllocationCustomerName,
   });
 
 export const buildSaleableSourceParams = (
@@ -210,7 +232,7 @@ export const parseSaleableSourceContextFromParams = (params: URLSearchParams) =>
   return normalizeContext(context);
 };
 
-const formatAmount = (amount?: number, currency?: string) => {
+const formatAmount = (amount?: number | null, currency?: string) => {
   if (amount === undefined || amount === null) return currency || '-';
   return `${currency || ''} ${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`.trim();
 };
@@ -218,6 +240,8 @@ const formatAmount = (amount?: number, currency?: string) => {
 interface SaleableSourceQuickStartProps {
   mode: SaleableQuickStartMode;
   linkedContext: SalesLinkedSourceContext | null;
+  currentOpportunityId?: string;
+  currentCustomerId?: string;
   onSourceSelected?: (source: SalesSaleableSourceDto | null) => void;
   onUseOrder?: (item: SalesSaleableItemDto, source: SalesSaleableSourceDto) => void;
   onUseAgreement?: (item: SalesSaleableItemDto, source: SalesSaleableSourceDto, intent: SaleableAgreementIntent) => void;
@@ -226,6 +250,8 @@ interface SaleableSourceQuickStartProps {
 export function SaleableSourceQuickStart({
   mode,
   linkedContext,
+  currentOpportunityId,
+  currentCustomerId,
   onSourceSelected,
   onUseOrder,
   onUseAgreement,
@@ -239,6 +265,7 @@ export function SaleableSourceQuickStart({
   const [selectedItemId, setSelectedItemId] = useState('');
   const [searching, setSearching] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  const searchRequestId = useRef(0);
 
   const availableSources = useMemo(
     () =>
@@ -250,6 +277,20 @@ export function SaleableSourceQuickStart({
 
   const selectedSource = availableSources.find((source) => source.id === selectedSourceId) || availableSources[0];
   const selectedItem = items.find((item) => item.sourceItemId === selectedItemId) || items[0];
+  const selectedItemReservationCanBeUsedForOrder = Boolean(
+    mode === 'order'
+      && selectedItem?.hasActiveAllocation
+      && selectedItem.activeAllocationStatus === 'Reserved'
+      && !selectedItem.activeAllocationSalesOrderId
+      && (!currentOpportunityId
+        || selectedItem.activeAllocationOpportunityId === currentOpportunityId)
+      && (!currentCustomerId
+        || !selectedItem.activeAllocationBusinessPartnerId
+        || selectedItem.activeAllocationBusinessPartnerId === currentCustomerId),
+  );
+  const canUseSelectedItemForOrder = Boolean(
+    selectedItem?.canCreateSalesOrder || selectedItemReservationCanBeUsedForOrder,
+  );
   const title = mode === 'order' ? 'Start From Saleable Source' : 'Start From Saleable Source';
   const description =
     mode === 'order'
@@ -297,16 +338,23 @@ export function SaleableSourceQuickStart({
     onSourceSelected?.(selectedSource || null);
   }, [onSourceSelected, selectedSource]);
 
-  const searchItems = async () => {
-    if (!selectedSource) return;
+  const searchItems = async (
+    source: SalesSaleableSourceDto | undefined = selectedSource,
+    query = search,
+  ) => {
+    if (!source) return;
+
+    const requestId = ++searchRequestId.current;
 
     try {
       setSearching(true);
       setHasSearched(true);
-      const results = await salesSetupService.searchSaleableItems(selectedSource.id, search.trim() || undefined, 50);
+      const results = await salesSetupService.searchSaleableItems(source.id, query.trim() || undefined, 50);
+      if (requestId !== searchRequestId.current) return;
       setItems(results);
       setSelectedItemId(results[0]?.sourceItemId || '');
     } catch (error: any) {
+      if (requestId !== searchRequestId.current) return;
       setItems([]);
       setSelectedItemId('');
       toast({
@@ -315,7 +363,7 @@ export function SaleableSourceQuickStart({
         variant: 'destructive',
       });
     } finally {
-      setSearching(false);
+      if (requestId === searchRequestId.current) setSearching(false);
     }
   };
 
@@ -346,12 +394,12 @@ export function SaleableSourceQuickStart({
             <div className="mt-2 flex flex-wrap gap-1">
               {linkedContext.sourceType ? <Badge variant="secondary">{linkedContext.sourceType}</Badge> : null}
               {linkedContext.itemType ? <Badge variant="outline">{linkedContext.itemType}</Badge> : null}
-              {linkedContext.estimatedValue !== undefined ? (
+              {hasSaleableNumber(linkedContext.estimatedValue) ? (
                 <Badge variant="outline">{formatAmount(linkedContext.estimatedValue, linkedContext.currency)}</Badge>
               ) : null}
               {linkedContext.warehouseName ? <Badge variant="outline">{linkedContext.warehouseName}</Badge> : null}
               {linkedContext.locationName ? <Badge variant="outline">{linkedContext.locationName}</Badge> : null}
-              {linkedContext.availableQuantity !== undefined ? (
+              {hasSaleableNumber(linkedContext.availableQuantity) ? (
                 <Badge variant="outline">
                   {linkedContext.availableQuantity.toLocaleString()} {linkedContext.unitOfMeasure || ''}
                 </Badge>
@@ -374,14 +422,17 @@ export function SaleableSourceQuickStart({
           <Select
             value={selectedSource?.id || ''}
             onValueChange={(value) => {
+              const source = availableSources.find((candidate) => candidate.id === value);
               setSelectedSourceId(value);
+              setSearch('');
               setItems([]);
               setSelectedItemId('');
               setHasSearched(false);
+              void searchItems(source, '');
             }}
             disabled={loadingSources || availableSources.length === 0}
           >
-            <SelectTrigger>
+            <SelectTrigger aria-label="Saleable source">
               <SelectValue placeholder={loadingSources ? 'Loading sources' : 'Select source'} />
             </SelectTrigger>
             <SelectContent>
@@ -398,12 +449,17 @@ export function SaleableSourceQuickStart({
             onChange={(event) => setSearch(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
-                searchItems();
+                void searchItems();
               }
             }}
             disabled={!selectedSource || searching}
           />
-          <Button variant="outline" onClick={searchItems} disabled={!selectedSource || searching}>
+          <Button
+            variant="outline"
+            aria-label="Search saleable items"
+            onClick={() => void searchItems()}
+            disabled={!selectedSource || searching}
+          >
             {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
           </Button>
         </div>
@@ -470,11 +526,13 @@ export function SaleableSourceQuickStart({
                       <div className="font-medium">{selectedItem.warehouseName || '-'}</div>
                     </div>
                     <div>
-                      <div className="text-muted-foreground">{selectedItem.availableQuantity !== undefined ? 'Available' : 'Area'}</div>
+                      <div className="text-muted-foreground">{hasSaleableNumber(selectedItem.availableQuantity) ? 'Available' : 'Area'}</div>
                       <div className="font-medium">
-                        {selectedItem.availableQuantity !== undefined
+                        {hasSaleableNumber(selectedItem.availableQuantity)
                           ? `${selectedItem.availableQuantity.toLocaleString()} ${selectedItem.unitOfMeasure || ''}`.trim()
-                          : selectedItem.areaSquareMeters ? `${selectedItem.areaSquareMeters.toLocaleString()} sqm` : '-'}
+                          : hasSaleableNumber(selectedItem.areaSquareMeters)
+                            ? `${selectedItem.areaSquareMeters.toLocaleString()} sqm`
+                            : '-'}
                       </div>
                     </div>
                     <div>
@@ -486,16 +544,27 @@ export function SaleableSourceQuickStart({
                       <div className="font-medium">{selectedItem.locationName || '-'}</div>
                     </div>
                   </div>
-                  {selectedItem.hasActiveAllocation ? (
+                  {selectedItemReservationCanBeUsedForOrder ? (
+                    <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+                      This property has a reservation that can be linked to this Sales Order.
+                      {selectedItem.activeAllocationReservedUntil ? ` Reserved until ${new Date(selectedItem.activeAllocationReservedUntil).toLocaleDateString()}.` : ''}
+                    </div>
+                  ) : selectedItem.hasActiveAllocation ? (
                     <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       This item already has an active {selectedItem.activeAllocationStatus || 'reservation'}.
                       {selectedItem.activeAllocationReservedUntil ? ` Reserved until ${new Date(selectedItem.activeAllocationReservedUntil).toLocaleDateString()}.` : ''}
                     </div>
                   ) : null}
+                  {mode === 'order' && !selectedItem.canCreateSalesOrder && !selectedItem.hasActiveAllocation ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      {selectedItem.salesOrderIneligibilityReason ||
+                        'This item is not currently eligible for a sales order.'}
+                    </div>
+                  ) : null}
                   {mode === 'order' ? (
                     <Button
                       className="w-full justify-start"
-                      disabled={!selectedItem.canCreateSalesOrder || !selectedSource}
+                      disabled={!canUseSelectedItemForOrder || !selectedSource}
                       onClick={() => selectedSource && onUseOrder?.(selectedItem, selectedSource)}
                     >
                       <ShoppingCart className="mr-2 h-4 w-4" />

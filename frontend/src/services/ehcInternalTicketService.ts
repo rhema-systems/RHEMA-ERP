@@ -374,6 +374,13 @@ export const ehcInternalTicketService = {
     });
   },
 
+  async routeTicket(ticketId: string, assignedOrganizationUnitId: string): Promise<void> {
+    const qs = new URLSearchParams({ assignedOrganizationUnitId });
+    await apiService.request<ApiEnvelope<any>>(`/ehc/internal/tickets/${ticketId}/route?${qs.toString()}`, {
+      method: 'POST',
+    });
+  },
+
   async transitionTicket(ticketId: string, targetStatus: EhcTicketStatus, notes?: string | null, workflowTransitionId?: string | null, workflowTransitionName?: string | null): Promise<void> {
     const qs = new URLSearchParams({ targetStatus });
     if (workflowTransitionId) qs.set('workflowTransitionId', workflowTransitionId);

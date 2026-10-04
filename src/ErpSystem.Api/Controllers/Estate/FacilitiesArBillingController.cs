@@ -177,7 +177,7 @@ public sealed class FacilitiesArBillingController : ControllerBase
                 ["sourceLabel"] = SourceLabel,
                 ["sourceModule"] = "Estate / Facilities",
                 ["financeArReference"] = invoice.InvoiceNumber,
-                ["customerId"] = invoice.BusinessPartnerId,
+                ["businessPartnerId"] = invoice.BusinessPartnerId,
                 ["amount"] = invoice.TotalAmount,
                 ["currencyCode"] = invoice.CurrencyCode,
                 ["propertyUnit"] = property.AssetCode

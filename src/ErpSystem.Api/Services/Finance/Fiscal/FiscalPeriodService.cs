@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -104,6 +105,30 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalYearDto> CreateFiscalYearAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken = default)
         {
+            var ownsTransaction = !_unitOfWork.HasActiveTransaction;
+            if (ownsTransaction)
+                await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(
+                    $"finance-fiscal-calendar:{TenantId:N}",
+                    cancellationToken);
+                var result = await CreateFiscalYearCoreAsync(dto, cancellationToken);
+                if (ownsTransaction)
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                if (ownsTransaction && _unitOfWork.HasActiveTransaction)
+                    await _unitOfWork.RollbackAsync(cancellationToken);
+                throw;
+            }
+        }
+
+        private async Task<FiscalYearDto> CreateFiscalYearCoreAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken)
+        {
             var startDate = dto.StartDate.Date;
             var endDate = dto.EndDate.Date;
             if (endDate < startDate)
@@ -118,6 +143,51 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             if (overlapping)
                 throw new InvalidOperationException("Fiscal year dates overlap with an existing fiscal year.");
+
+            var latestFiscalYear = await _unitOfWork.Repository<FiscalYear>()
+                .GetQueryable(fy => fy.TenantId == TenantId && !fy.IsDeleted)
+                .OrderByDescending(fy => fy.EndDate)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (latestFiscalYear != null)
+            {
+                var expectedYear = latestFiscalYear.Year + 1;
+                var expectedStartDate = latestFiscalYear.EndDate.Date.AddDays(1);
+                if (dto.Year != expectedYear || startDate != expectedStartDate)
+                {
+                    throw new InvalidOperationException(
+                        $"The next fiscal year must be FY{expectedYear} and start on {expectedStartDate:yyyy-MM-dd}; fiscal years must be created contiguously.");
+                }
+
+                var establishedPeriodTypes = await _unitOfWork.Repository<FiscalPeriod>()
+                    .GetQueryable(period =>
+                        period.TenantId == TenantId &&
+                        period.FiscalYearId == latestFiscalYear.Id &&
+                        !period.IsDeleted)
+                    .Select(period => period.PeriodType)
+                    .Distinct()
+                    .Take(2)
+                    .ToListAsync(cancellationToken);
+
+                if (establishedPeriodTypes.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Fiscal year '{latestFiscalYear.FiscalYearCode}' has no period structure. Repair the fiscal calendar before adding another year.");
+                }
+
+                if (establishedPeriodTypes.Count != 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Fiscal year '{latestFiscalYear.FiscalYearCode}' contains mixed period types. Repair the fiscal calendar before adding another year.");
+                }
+
+                var establishedPeriodType = establishedPeriodTypes[0];
+                if (dto.PeriodType != establishedPeriodType)
+                {
+                    throw new InvalidOperationException(
+                        $"The fiscal calendar uses {establishedPeriodType} periods. All subsequent fiscal years must use the same period type.");
+                }
+            }
 
             var now = DateTime.UtcNow;
             var fiscalYear = new FiscalYear
@@ -143,6 +213,14 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             };
 
             await _unitOfWork.Repository<FiscalYear>().AddAsync(fiscalYear);
+
+            var authorityBookIds = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(book => book.TenantId == TenantId
+                    && !book.IsDeleted
+                    && book.LifecycleStatus != AccountingBookLifecycleStatus.Retired)
+                .Select(book => book.Id)
+                .ToListAsync(cancellationToken);
+            var generatedPeriods = new List<FiscalPeriod>();
 
             // Generate periods based on type
             var periodType = dto.PeriodType;
@@ -226,10 +304,27 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 };
 
                 await _unitOfWork.Repository<FiscalPeriod>().AddAsync(period);
+                generatedPeriods.Add(period);
                 
                 // Prepare for next iteration
                 currentDate = periodEnd.AddDays(1);
                 periodNumber++;
+            }
+
+            if (authorityBookIds.Count > 0 && generatedPeriods.Count > 0)
+            {
+                var authorities = generatedPeriods.SelectMany(period => authorityBookIds.Select(bookId =>
+                    new AccountingBookPeriod
+                    {
+                        TenantId = TenantId,
+                        AccountingBookId = bookId,
+                        FiscalPeriodId = period.Id,
+                        PeriodStatus = AccountingBookPeriodStatus.Future,
+                        CreatedAt = now,
+                        CreatedBy = UserName,
+                        CreatedById = CurrentUserId
+                    })).ToList();
+                await _unitOfWork.Repository<AccountingBookPeriod>().AddRangeAsync(authorities);
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -291,6 +386,11 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             CancellationToken cancellationToken)
         {
             var dependencies = new List<string>();
+
+            if (await _unitOfWork.Repository<YearEndBookCloseCycle>()
+                .GetQueryable(cycle => cycle.TenantId == TenantId && cycle.FiscalYearId == fiscalYearId)
+                .AnyAsync(cancellationToken))
+                dependencies.Add("retained accounting-book year-end close cycles");
 
             if (await _unitOfWork.Repository<FiscalYear>()
                 .GetQueryable(fy => fy.TenantId == TenantId && fy.NextFiscalYearId == fiscalYearId)
@@ -4667,6 +4767,32 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             if (!hasSignedCertificate)
                 blockers.Add("The latest close cycle has no active signed maker-checker certificate to supersede.");
 
+            var activeBookYearCloseCycles = await _unitOfWork.Repository<YearEndBookCloseCycle>()
+                .GetQueryable(item => item.TenantId == TenantId &&
+                    item.FiscalYearId == period.FiscalYearId &&
+                    !item.IsDeleted &&
+                    item.Status != "Reopened")
+                .OrderBy(item => item.AccountingBookCode)
+                .ThenBy(item => item.CycleNumber)
+                .ThenBy(item => item.Id)
+                .Select(item => new PeriodReopenImpactBookYearCycle(
+                    item.Id,
+                    item.AccountingBookId,
+                    item.AccountingBookCode,
+                    item.CycleNumber,
+                    item.Status,
+                    item.ClosingJournalEntryId,
+                    item.ReversalJournalEntryId,
+                    item.ClosedAtUtc))
+                .ToListAsync(cancellationToken);
+            if (activeBookYearCloseCycles.Count > 0)
+            {
+                var affectedCycles = string.Join(", ", activeBookYearCloseCycles.Select(item =>
+                    $"{item.AccountingBookCode} cycle {item.CycleNumber} ({item.Status})"));
+                blockers.Add(
+                    $"Reopen every active book-year close before reopening the shared tenant period: {affectedCycles}.");
+            }
+
             var laterPeriods = await _unitOfWork.Repository<FiscalPeriod>()
                 .GetQueryable(item => item.TenantId == TenantId &&
                     item.FiscalYearId == period.FiscalYearId &&
@@ -4712,6 +4838,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 fiscalYear?.IsLocked ?? false,
                 closedCycle.Id,
                 closedCycle.CycleNumber,
+                activeBookYearCloseCycles,
                 laterPeriods,
                 warnings);
             var snapshotJson = JsonSerializer.Serialize(snapshot);
@@ -4814,8 +4941,19 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             bool FiscalYearIsLocked,
             Guid FinanceCloseCycleId,
             int CloseCycleNumber,
+            IReadOnlyList<PeriodReopenImpactBookYearCycle> ActiveBookYearCloseCycles,
             IReadOnlyList<PeriodReopenImpactPeriod> AffectedPeriods,
             IReadOnlyList<string> Warnings);
+
+        private sealed record PeriodReopenImpactBookYearCycle(
+            Guid YearEndBookCloseCycleId,
+            Guid AccountingBookId,
+            string AccountingBookCode,
+            int CycleNumber,
+            string Status,
+            Guid? ClosingJournalEntryId,
+            Guid? ReversalJournalEntryId,
+            DateTime ClosedAtUtc);
 
         private sealed record PeriodReopenImpactValidation(
             PeriodReopenImpactSnapshot Snapshot,

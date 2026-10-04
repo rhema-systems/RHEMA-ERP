@@ -53,6 +53,10 @@ public class CustomerPayment : BusinessEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    [Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
     /// <summary>
     /// True only when the original posted receipt was recorded to the configured customer-advance
     /// liability account. Later allocations must reclassify that advance through the Finance posting engine.
@@ -72,7 +76,7 @@ public class CustomerPayment : BusinessEntity
     public string? OpeningSourceReference { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
-    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
+    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount - RoundingAdjustmentAmount;
 
     [Required]
     [MaxLength(50)]
@@ -161,6 +165,8 @@ public class CustomerPayment : BusinessEntity
 
     // GL Posting
     public Guid? JournalEntryId { get; set; }
+    public Guid? SourceBookAuthorityId { get; set; }
+    public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
     /// <summary>
     /// Durable lineage for a controlled posted-receipt reversal. The original receipt, journal,

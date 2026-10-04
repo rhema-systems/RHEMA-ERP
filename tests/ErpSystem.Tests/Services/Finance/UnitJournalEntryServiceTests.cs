@@ -200,6 +200,30 @@ namespace ErpSystem.Tests.Services.Finance
         }
 
         [Fact]
+        public async Task CreateAsync_RejectsQuantityThatViolatesConfiguredIncrement()
+        {
+            var fiscalPeriod = CreateFiscalPeriod();
+            var accountId = Guid.NewGuid();
+            var dto = new CreateUnitJournalEntryDto
+            {
+                EntryDate = DateTime.UtcNow,
+                FiscalPeriodId = fiscalPeriod.Id,
+                Lines =
+                [
+                    new() { UnitAccountId = accountId, Quantity = 1.126m }
+                ]
+            };
+            SetupPeriodQueryable([fiscalPeriod]);
+            SetupAccountQueryable([CreateAccount(accountId, roundingIncrement: 0.125m, decimalPlaces: 3)]);
+
+            var action = () => _service.CreateAsync(dto);
+
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*line 1*Unit Type*whole multiple*0.125*");
+            _mockEntryRepository.Verify(repository => repository.AddAsync(It.IsAny<UnitJournalEntry>()), Times.Never);
+        }
+
+        [Fact]
         public async Task CreateAsync_ThrowsException_WhenFiscalPeriodNotFound()
         {
             // Arrange
@@ -624,6 +648,26 @@ namespace ErpSystem.Tests.Services.Finance
         }
 
         [Fact]
+        public async Task PostAsync_RevalidatesPersistedQuantityBeforeBalanceMutation()
+        {
+            var entry = CreateEntry(UnitJournalEntryStatus.Approved);
+            var line = CreateLine(entry.Id);
+            line.Quantity = 1.126m;
+            entry.Lines.Add(line);
+            var account = CreateAccount(line.UnitAccountId, currentBalance: 100m, roundingIncrement: 0.125m, decimalPlaces: 3);
+            SetupEntryQueryableWithIncludes([entry]);
+            SetupAccountQueryable([account]);
+            SetupPeriodQueryable([CreateFiscalPeriod(entry.FiscalPeriodId, entry.FiscalYearId)]);
+
+            var action = () => _service.PostAsync(entry.Id);
+
+            await action.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*line 1*whole multiple*0.125*");
+            account.CurrentBalance.Should().Be(100m);
+            entry.Status.Should().Be(UnitJournalEntryStatus.Approved);
+        }
+
+        [Fact]
         public async Task PostAsync_ThrowsException_WhenNotApproved()
         {
             // Arrange
@@ -734,8 +778,22 @@ namespace ErpSystem.Tests.Services.Finance
             };
         }
 
-        private UnitAccount CreateAccount(Guid id, decimal currentBalance = 0m)
+        private UnitAccount CreateAccount(
+            Guid id,
+            decimal currentBalance = 0m,
+            decimal? roundingIncrement = null,
+            int decimalPlaces = 2)
         {
+            var unitType = new UnitType
+            {
+                Id = Guid.NewGuid(),
+                TenantId = _tenantId,
+                Code = "TST",
+                Name = "Test Unit Type",
+                DecimalPlaces = decimalPlaces,
+                RoundingIncrement = roundingIncrement,
+                IsActive = true
+            };
             return new UnitAccount
             {
                 Id = id,
@@ -745,7 +803,9 @@ namespace ErpSystem.Tests.Services.Finance
                 IsActive = true,
                 IsPostingAccount = true,
                 CurrentBalance = currentBalance,
-                ChildAccounts = new List<UnitAccount>()
+                ChildAccounts = new List<UnitAccount>(),
+                UnitTypeId = unitType.Id,
+                UnitType = unitType
             };
         }
 

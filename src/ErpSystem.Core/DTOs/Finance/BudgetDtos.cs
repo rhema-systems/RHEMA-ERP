@@ -110,6 +110,10 @@ public class BudgetReturnDto
     public Guid? SegmentValueId { get; set; }
     public string? SegmentValueName { get; set; }
     public string? SegmentValueCode { get; set; }
+    public Guid? DistributionDimensionValueId { get; set; }
+    public Guid? DistributionDimensionDefinitionId { get; set; }
+    public string? DistributionDimensionCode { get; set; }
+    public string? DistributionDimensionName { get; set; }
     public Guid? AssignedToUserId { get; set; }
     public string? AssignedToUserName { get; set; }
     public Guid? ApproverUserId { get; set; }
@@ -131,6 +135,8 @@ public class CreateBudgetReturnDto
     public Guid BudgetScenarioId { get; set; }
 
     public Guid? SegmentValueId { get; set; }
+
+    public Guid? DistributionDimensionValueId { get; set; }
 
     public Guid? AssignedToUserId { get; set; }
 

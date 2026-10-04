@@ -15,6 +15,9 @@ namespace ErpSystem.Core.Entities.Finance;
 /// <summary>Server-owned land acquisition payable source.</summary>
 public enum EstatePayableKind { SurveyorFee = 1, VendorConsideration = 2, StampDuty = 3, OtherAcquisitionCosts = 4 }
 
+/// <summary>Server-owned component of an IFRS 16 lease instalment AP draft.</summary>
+public enum LeaseInvoiceComponent { Principal = 1, Interest = 2 }
+
 /// <summary>
 /// Status of a vendor/supplier invoice through its lifecycle.
 /// </summary>
@@ -112,6 +115,19 @@ public enum PaymentBatchStatus
 /// </summary>
 public class VendorInvoice : TenantEntity
 {
+    /// <summary>Server-owned IFRS 16 schedule source. Generic AP clients cannot assign it.</summary>
+    public Guid? LeaseScheduleLineId { get; set; }
+    public virtual LeaseScheduleLine? LeaseScheduleLine { get; set; }
+    /// <summary>Retained voided lease invoice replaced by this governed successor.</summary>
+    public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    public virtual VendorInvoice? ReplacesLeaseVendorInvoice { get; set; }
+    public virtual ICollection<VendorInvoice> LeaseReplacementInvoices { get; set; } = new List<VendorInvoice>();
+    public Guid? LeaseAccountingBookId { get; set; }
+    [MaxLength(20)] public string? LeaseAccountingBookCode { get; set; }
+    [MaxLength(3)] public string? LeaseFunctionalCurrencyCode { get; set; }
+    /// <summary>Server-owned immutable book authority for governed posting and settlement.</summary>
+    public Guid? SourceBookAuthorityId { get; set; }
+    public FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
     public Guid? EstateAcquisitionId { get; set; }
     public EstatePayableKind? EstatePayableKind { get; set; }
     /// <summary>Reviewed Procurement distribution overrides; applied by the shared posting builder.</summary>
@@ -173,19 +189,23 @@ public class VendorInvoice : TenantEntity
 
     // ── Financial ───────────────────────────────────────────────────────
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal SubTotal { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
+    [Column(TypeName = "decimal(20,4)")]
     public decimal PaidAmount { get; set; }
 
     [NotMapped]
@@ -215,7 +235,7 @@ public class VendorInvoice : TenantEntity
     public Guid? ExchangeRateId { get; set; }
     public virtual ExchangeRate? ExchangeRateRecord { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal BaseCurrencyAmount { get; set; }
 
     // ── Payment Terms ───────────────────────────────────────────────────
@@ -232,7 +252,7 @@ public class VendorInvoice : TenantEntity
 
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal EarlyPaymentDiscountAmount { get; set; }
 
     // ── Withholding Tax ─────────────────────────────────────────────────
@@ -244,7 +264,7 @@ public class VendorInvoice : TenantEntity
     public decimal? WithholdingTaxRateOverride { get; set; }
     public bool WithholdingDecisionPending { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal WithholdingTaxAmount { get; set; }
 
     public Guid? WithholdingTaxId { get; set; }
@@ -384,8 +404,10 @@ public class VendorInvoice : TenantEntity
 /// <summary>
 /// An individual line item on a vendor invoice.
 /// </summary>
-public class VendorInvoiceLineItem : TenantEntity
+public class VendorInvoiceLineItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
+    /// <summary>Server-owned immutable lease component; null for ordinary AP lines.</summary>
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     /// <summary>Posted landed-cost charge cleared by this AP line; assigned only by the AP handoff.</summary>
     public Guid? LandedCostItemId { get; set; }
 
@@ -470,7 +492,7 @@ public class VendorInvoiceLineItem : TenantEntity
     public decimal Quantity { get; set; } = 1;
 
     [Required]
-    [Column(TypeName = "decimal(18,4)")]
+    [Column(TypeName = "decimal(20,6)")]
     public decimal UnitPrice { get; set; }
 
     [NotMapped]
@@ -483,10 +505,10 @@ public class VendorInvoiceLineItem : TenantEntity
 
     public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
-    [Column(TypeName = "decimal(5,2)")]
+    [Column(TypeName = "decimal(18,6)")]
     public decimal TaxRate { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TaxAmount { get; set; }
 
     [MaxLength(50)]
@@ -497,13 +519,17 @@ public class VendorInvoiceLineItem : TenantEntity
     [Column(TypeName = "decimal(5,2)")]
     public decimal DiscountPercentage { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal DiscountAmount { get; set; }
 
     // ── Unit of Measure ─────────────────────────────────────────────────
 
     [MaxLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     // ── Multi-tenant ────────────────────────────────────────────────────
 
@@ -561,6 +587,10 @@ public class VendorPayment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AllocatedAmount { get; set; }
 
+    [Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
     /// <summary>
     /// True only when the original posted payment was recorded to the configured supplier-advance
     /// account. Later allocations must reclassify that advance through the Finance posting engine.
@@ -581,7 +611,7 @@ public class VendorPayment : TenantEntity
     public string? OpeningSourceReference { get; set; }
 
     [NotMapped]
-    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount;
+    public decimal UnallocatedAmount => TotalAmount - AllocatedAmount - RoundingAdjustmentAmount;
 
     // ── Payment Method ──────────────────────────────────────────────────
 
@@ -602,6 +632,14 @@ public class VendorPayment : TenantEntity
     /// this stable reference instead of trusting a later lookup or an untraceable typed value.
     /// </summary>
     public Guid? ExchangeRateId { get; set; }
+
+    /// <summary>
+    /// Exact accounting-book authority inherited from the posted invoices settled by this
+    /// payment. It is frozen before the first payment journal and reused by FX and reversals.
+    /// </summary>
+    public Guid? AccountingBookId { get; set; }
+    [MaxLength(20)] public string? AccountingBookCode { get; set; }
+    [MaxLength(3)] public string? FunctionalCurrencyCode { get; set; }
 
     // ── Bank Details ────────────────────────────────────────────────────
 
@@ -860,6 +898,27 @@ public class VendorPaymentAllocation : TenantEntity
     /// </summary>
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxFunctionalAmount { get; set; }
+
+    /// <summary>Frozen net supply component in functional currency; null denotes pre-v2 evidence.</summary>
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? WithholdingTaxBaseFunctionalAmount { get; set; }
+
+    /// <summary>
+    /// Approved Bank of Ghana statutory rate used to convert this allocation's invoice-currency
+    /// WHT basis into GHS. Null for a native GHS allocation.
+    /// </summary>
+    public Guid? WithholdingTaxStatutoryExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? WithholdingTaxStatutoryExchangeRate { get; set; }
+
+    public DateTime? WithholdingTaxStatutoryExchangeRateDate { get; set; }
+
+    [MaxLength(100)]
+    public string? WithholdingTaxStatutoryExchangeRateSource { get; set; }
+
+    [MaxLength(1000)]
+    public string? WithholdingTaxStatutoryExchangeRateReference { get; set; }
 
     public DateTime AllocationDate { get; set; } = DateTime.UtcNow;
 

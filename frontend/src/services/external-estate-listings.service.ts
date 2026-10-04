@@ -24,6 +24,7 @@ export interface ExternalEstateListing {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   groundRentPayable?: number | null;
   groundRentRatePerAcre?: number | null;
@@ -69,10 +70,44 @@ export interface CreatePropertyListingEnquiry {
   message: string;
   businessPartnerId?: string;
   captchaToken?: string;
-  contactName?: string;
-  contactEmail?: string;
+}
+
+/**
+ * Public contract deliberately excludes every internal assignment, workflow,
+ * business-partner and opportunity field. The server derives the listing,
+ * source, status and ownership from the route and authenticated tenant setup.
+ */
+export interface CreatePublicPropertyListingEnquiry {
+  submissionId: string;
+  contactName: string;
   contactPhone?: string;
-  contactReference?: string;
+  contactEmail?: string;
+  preferredContactMethod: 'Email' | 'Phone';
+  contactVerificationToken: string;
+  message: string;
+  captchaToken?: string;
+}
+
+export type PublicEnquiryContactChannel = 'Email' | 'Phone';
+
+export interface PublicEnquiryContactChallenge {
+  channel: PublicEnquiryContactChannel;
+  maskedContact: string;
+  expiresInSeconds: number;
+}
+
+export interface PublicEnquiryContactProfile {
+  contactName: string;
+  contactEmail?: string | null;
+  contactPhone?: string | null;
+  requiresPortalLogin: boolean;
+  externalPortalPath?: string | null;
+}
+
+export interface PublicEnquiryContactVerification {
+  verificationToken: string;
+  expiresAtUtc: string;
+  profile: PublicEnquiryContactProfile;
 }
 
 export interface ExternalListingRequestDocument {
@@ -142,14 +177,16 @@ export interface PublicEstateListingsPage {
 
 class ExternalEstateListingsService {
   async getEnquiryProfiles(): Promise<EnquiryPartnerProfile[]> {
-    const response = await apiService.get<ApiResponse<EnquiryPartnerProfile[]>>('/estate/external/enquiry-profiles');
+    const response = await apiService.get<ApiResponse<EnquiryPartnerProfile[]>>(
+      '/estate/external/enquiry-profiles'
+    );
     return response.data || [];
   }
 
   async getCustomerProfiles(): Promise<ExternalCustomerProfile[]> {
-    const response = await apiService.get<ApiResponse<ExternalCustomerProfile[]>>(
-      '/estate/external/customer-profiles'
-    );
+    const response = await apiService.get<
+      ApiResponse<ExternalCustomerProfile[]>
+    >('/estate/external/customer-profiles');
     return response.data || [];
   }
 
@@ -199,10 +236,9 @@ class ExternalEstateListingsService {
     search?: string;
     take?: number;
   }): Promise<ExternalEstateListing[]> {
-    const response = await rawApiService.publicRequest<ApiResponse<ExternalEstateListing[]>>(
-      appendQueryParams('/estate/public/listings', query),
-      { method: 'GET' }
-    );
+    const response = await rawApiService.publicRequest<
+      ApiResponse<ExternalEstateListing[]>
+    >(appendQueryParams('/estate/public/listings', query), { method: 'GET' });
     return response.data || [];
   }
 
@@ -215,10 +251,9 @@ class ExternalEstateListingsService {
     page?: number;
     pageSize?: number;
   }): Promise<PublicEstateListingsPage> {
-    const response = await rawApiService.publicRequest<ApiResponse<ExternalEstateListing[]>>(
-      appendQueryParams('/estate/public/listings', query),
-      { method: 'GET' }
-    );
+    const response = await rawApiService.publicRequest<
+      ApiResponse<ExternalEstateListing[]>
+    >(appendQueryParams('/estate/public/listings', query), { method: 'GET' });
     return {
       items: response.data || [],
       page: response.pagination?.page ?? query.page ?? 1,
@@ -259,12 +294,44 @@ class ExternalEstateListingsService {
 
   async createPublicEnquiry(
     listingId: string,
-    payload: CreatePropertyListingEnquiry
+    payload: CreatePublicPropertyListingEnquiry
   ): Promise<ExternalListingEnquiry> {
-    const response = await rawApiService.publicRequest<ApiResponse<ExternalListingEnquiry>>(
-      `/estate/public/listings/${listingId}/enquiries`,
-      { method: 'POST', body: JSON.stringify(payload) }
-    );
+    const response = await rawApiService.publicRequest<
+      ApiResponse<ExternalListingEnquiry>
+    >(`/estate/public/listings/${listingId}/enquiries`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return response.data;
+  }
+
+  async requestPublicEnquiryContactChallenge(payload: {
+    listingId: string;
+    channel: PublicEnquiryContactChannel;
+    contact: string;
+    captchaToken?: string;
+  }): Promise<PublicEnquiryContactChallenge> {
+    const response = await rawApiService.publicRequest<
+      ApiResponse<PublicEnquiryContactChallenge>
+    >('/estate/public/property-enquiry-contacts/challenges', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return response.data;
+  }
+
+  async verifyPublicEnquiryContact(payload: {
+    listingId: string;
+    channel: PublicEnquiryContactChannel;
+    contact: string;
+    otpCode: string;
+  }): Promise<PublicEnquiryContactVerification> {
+    const response = await rawApiService.publicRequest<
+      ApiResponse<PublicEnquiryContactVerification>
+    >('/estate/public/property-enquiry-contacts/verifications', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
     return response.data;
   }
 

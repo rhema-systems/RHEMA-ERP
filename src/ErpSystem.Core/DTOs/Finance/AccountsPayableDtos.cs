@@ -14,6 +14,11 @@ namespace ErpSystem.Core.DTOs.Finance;
 
 public class VendorInvoiceDto
 {
+    public Guid? LeaseScheduleLineId { get; set; }
+    public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    public Guid? LeaseAccountingBookId { get; set; }
+    public string? LeaseAccountingBookCode { get; set; }
+    public string? LeaseFunctionalCurrencyCode { get; set; }
     public Guid? EstateAcquisitionId { get; set; }
     public EstatePayableKind? EstatePayableKind { get; set; }
     public bool IsProcurementAutoInvoice { get; set; }
@@ -41,6 +46,8 @@ public class VendorInvoiceDto
     public decimal TaxAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TotalAmount { get; set; }
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal BalanceAmount { get; set; }
 
@@ -113,6 +120,12 @@ public class VendorInvoiceDto
 
 public class VendorInvoiceCreateDto
 {
+    // Set only by the Finance lease adapter after tenant/source/authority validation.
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? LeaseScheduleLineId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? ReplacesLeaseVendorInvoiceId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public Guid? LeaseAccountingBookId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? LeaseAccountingBookCode { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore] public string? LeaseFunctionalCurrencyCode { get; set; }
     // Set only by the Estate controller after its source and stage authorization checks.
     [System.Text.Json.Serialization.JsonIgnore] public Guid? EstateAcquisitionId { get; set; }
     [System.Text.Json.Serialization.JsonIgnore] public EstatePayableKind? EstatePayableKind { get; set; }
@@ -265,6 +278,7 @@ public class VendorInvoiceQueryDto
 
 public class VendorInvoiceLineItemDto
 {
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     public Guid? LandedCostItemId { get; set; }
     public Guid Id { get; set; }
     public Guid VendorInvoiceId { get; set; }
@@ -296,6 +310,9 @@ public class VendorInvoiceLineItemDto
 
 public class VendorInvoiceLineItemCreateDto
 {
+    // Never accept lease source classifications from a generic invoice request.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public LeaseInvoiceComponent? LeaseComponent { get; set; }
     // Never accept source links from a generic invoice request.
     [System.Text.Json.Serialization.JsonIgnore]
     public Guid? LandedCostItemId { get; set; }
@@ -601,6 +618,8 @@ public class VendorPaymentDto
     public decimal TotalAmount { get; set; }
     public decimal AllocatedAmount { get; set; }
     public decimal UnallocatedAmount { get; set; }
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
     public VendorPaymentMethod PaymentMethod { get; set; }
     public Guid? PaymentMethodId { get; set; }
     public string? PaymentMethodName { get; set; }
@@ -648,6 +667,9 @@ public class VendorPaymentDto
     public Guid? PaymentBatchId { get; set; }
     public string? PaymentBatchNumber { get; set; }
     public Guid? JournalEntryId { get; set; }
+    public Guid? AccountingBookId { get; set; }
+    public string? AccountingBookCode { get; set; }
+    public string? FunctionalCurrencyCode { get; set; }
     public Guid? ReversalJournalEntryId { get; set; }
     public Guid? ReversalPostingEventId { get; set; }
     public DateTime? ReversalDate { get; set; }
@@ -884,6 +906,12 @@ public class VendorPaymentAllocationDto
     public decimal DiscountFunctionalAmount { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
     public decimal WithholdingTaxFunctionalAmount { get; set; }
+    public decimal? WithholdingTaxBaseFunctionalAmount { get; set; }
+    public Guid? WithholdingTaxStatutoryExchangeRateId { get; set; }
+    public decimal? WithholdingTaxStatutoryExchangeRate { get; set; }
+    public DateTime? WithholdingTaxStatutoryExchangeRateDate { get; set; }
+    public string? WithholdingTaxStatutoryExchangeRateSource { get; set; }
+    public string? WithholdingTaxStatutoryExchangeRateReference { get; set; }
     public DateTime AllocationDate { get; set; }
     public string? Notes { get; set; }
     public bool IsReversal { get; set; }
@@ -933,6 +961,7 @@ public class VendorPaymentAllocationResultDto
 
 public class OutstandingVendorInvoiceDto
 {
+    public decimal NetSupplyAmount { get; set; }
     public bool? ApplySupplierWithholdingDefaults { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public decimal WithholdingTaxRate { get; set; }

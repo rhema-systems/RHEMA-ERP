@@ -26,6 +26,13 @@ import {
   type EstateManagedAsset,
   type ExistingLandOwner,
 } from '@/services/estate-land-management.service';
+import {
+  DEFAULT_ESTATE_CURRENCY,
+  buildEstateCurrencyOptions,
+  formatEstateCurrencyOption,
+  loadEstateCurrencyContext,
+  type EstateCurrencyReference,
+} from '@/lib/estate-currency';
 
 type FormState = Record<string, string>;
 type Beacon = { beacon: string; northing: string; easting: string; bearing: string; distance: string };
@@ -38,7 +45,7 @@ const initialForm: FormState = {
   planningComplianceStatus: '', gisLayerReference: '', cadastreDescription: '', region: '', district: '', town: '',
   areaValue: '', areaUnit: 'sq ft', surveyorName: '', surveyDate: '',
   surveyPlanNumber: '', mapSheetNumber: '', valuationAmount: '', ownerConsiderationCost: '',
-  externalSurveyorCost: '', stampDutyCost: '', otherAcquisitionCost: '', currency: 'GHS', notes: '',
+  externalSurveyorCost: '', stampDutyCost: '', otherAcquisitionCost: '', currency: DEFAULT_ESTATE_CURRENCY.code, notes: '',
 };
 
 const initialBeacons = (): Beacon[] => Array.from({ length: 4 }, (_, index) => ({
@@ -109,6 +116,12 @@ export default function ExistingLandDialog({
   const [documents, setDocuments] = React.useState<PendingDocument[]>([]);
   const [boundaryVerified, setBoundaryVerified] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [currencies, setCurrencies] = React.useState<
+    Awaited<ReturnType<typeof loadEstateCurrencyContext>>['activeCurrencies']
+  >([]);
+  const [baseCurrency, setBaseCurrency] = React.useState<EstateCurrencyReference>(
+    DEFAULT_ESTATE_CURRENCY
+  );
   const boundaryPreviewCoordinates = React.useMemo(
     () => boundaryCoordinatesFromBeacons(beacons),
     [beacons]
@@ -129,10 +142,32 @@ export default function ExistingLandDialog({
   }, [form.externalSurveyorCost, form.otherAcquisitionCost, form.ownerConsiderationCost, form.stampDutyCost, form.valuationAmount]);
 
   const setValue = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
-  const reset = () => {
-    setForm(initialForm); setBeacons(initialBeacons()); setOwners([initialOwner()]); setDocuments([]);
+  const reset = React.useCallback(() => {
+    setForm({ ...initialForm, currency: baseCurrency.code }); setBeacons(initialBeacons()); setOwners([initialOwner()]); setDocuments([]);
     setBoundaryVerified(false);
-  };
+  }, [baseCurrency.code]);
+
+  React.useEffect(() => {
+    let active = true;
+    void loadEstateCurrencyContext().then((context) => {
+      if (!active) return;
+      setCurrencies(context.activeCurrencies);
+      setBaseCurrency(context.baseCurrency);
+      setForm((current) =>
+        !current.currency || current.currency === DEFAULT_ESTATE_CURRENCY.code
+          ? { ...current, currency: context.baseCurrency.code }
+          : current
+      );
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const currencyOptions = React.useMemo(
+    () => buildEstateCurrencyOptions(currencies, baseCurrency, form.currency),
+    [baseCurrency, currencies, form.currency]
+  );
 
   const missing = React.useMemo(() => {
     const optional = ['description', 'notes', 'ownerConsiderationCost', 'externalSurveyorCost', 'stampDutyCost', 'otherAcquisitionCost'];
@@ -222,7 +257,7 @@ export default function ExistingLandDialog({
               ['name', 'Land Name'], ['location', 'Location'], ['purpose', 'Purpose'],
               ['zoningClassification', 'Zoning Classification'], ['planningComplianceStatus', 'Planning Compliance Status'],
               ['valuationAmount', 'Fallback Valuation Amount'], ['currency', 'Currency'],
-            ].map(([key, label]) => <div key={key} className="space-y-2"><RequiredLabel>{label}</RequiredLabel><Input type={key === 'valuationAmount' ? 'number' : 'text'} value={form[key]} onChange={(event) => setValue(key, event.target.value)} /></div>)}
+            ].map(([key, label]) => <div key={key} className="space-y-2"><RequiredLabel>{label}</RequiredLabel>{key === 'currency' ? <Select value={form.currency} onValueChange={(value) => setValue('currency', value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{currencyOptions.map((code) => <SelectItem key={code} value={code}>{formatEstateCurrencyOption(currencies, code, baseCurrency)}</SelectItem>)}</SelectContent></Select> : <Input type={key === 'valuationAmount' ? 'number' : 'text'} value={form[key]} onChange={(event) => setValue(key, event.target.value)} />}</div>)}
             <div className="grid gap-4 rounded-md border bg-muted/20 p-4 md:col-span-2 md:grid-cols-2">
               <div className="space-y-1 md:col-span-2">
                 <h3 className="text-sm font-semibold">Land cost breakdown</h3>

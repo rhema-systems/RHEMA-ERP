@@ -8,7 +8,9 @@ vi.stubGlobal('React', React);
 
 vi.mock('./sidebar', () => ({
   Sidebar: () => <nav aria-label="Main navigation" />,
+  navigationItems: [],
   settingsNavigationItems: [],
+  filterNavigationByAccess: (items: unknown[]) => items,
 }));
 
 vi.mock('../../hooks/use-auth', () => ({

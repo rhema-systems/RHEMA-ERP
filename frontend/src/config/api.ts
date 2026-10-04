@@ -44,9 +44,11 @@ export const API_ENDPOINTS = {
 
   // Health
   HEALTH: {
-    CHECK: '/health',
-    READY: '/health/ready',
-    LIVE: '/health/live',
+    // Browser health requests must stay under /api so the production Caddy
+    // gateway sends them to ASP.NET rather than the Next.js fallback.
+    CHECK: '/api/health',
+    READY: '/api/health/ready',
+    LIVE: '/api/health/live',
   },
 
   // Asset Analytics

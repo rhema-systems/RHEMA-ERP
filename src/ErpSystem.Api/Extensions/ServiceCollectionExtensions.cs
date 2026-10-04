@@ -455,7 +455,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Core services
             services.AddScoped<ErpSystem.Core.Interfaces.IFileUploadService, ErpSystem.Api.Services.SimpleFileUploadService>();
 
-            // SMS (Twilio + Ghana gateway) - used by notifications + OTP flows
+            // SMS (Twilio + mNotify; GhanaGateway remains the persisted compatibility name)
+            // used by notifications and OTP flows.
             services.AddOptions<ErpSystem.Api.Services.Sms.SmsOptions>()
                 .BindConfiguration("Sms");
             services.AddScoped<ErpSystem.Api.Services.Sms.TwilioSmsSender>();
@@ -464,7 +465,11 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                 var opts = sp.GetRequiredService<IOptions<ErpSystem.Api.Services.Sms.SmsOptions>>().Value;
                 var seconds = Math.Clamp(opts.GhanaGateway.TimeoutSeconds, 1, 60);
                 client.Timeout = TimeSpan.FromSeconds(seconds);
-            });
+            }).RemoveAllLoggers();
+            // mNotify requires the API key in the query string. This dedicated client
+            // must not use the standard HttpClientFactory request logger, which records
+            // request URIs and could therefore disclose the credential.
+            services.AddHttpClient("mnotify").RemoveAllLoggers();
             services.AddScoped<ErpSystem.Api.Services.Sms.CompositeSmsSender>();
             services.AddScoped<ErpSystem.Api.Services.Sms.ISmsSender>(sp => sp.GetRequiredService<ErpSystem.Api.Services.Sms.CompositeSmsSender>());
             services.AddScoped<ErpSystem.Api.Services.Sms.ITenantSmsSender, ErpSystem.Api.Services.Sms.TenantSmsSender>();
@@ -575,6 +580,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Register both email service implementations
             services.AddScoped<SimpleEmailService>();
             services.AddScoped<ProductionEmailService>();
+            services.AddScoped<ITenantEmailSender, TenantEmailSender>();
 
             services.AddScoped<ErpSystem.Core.Interfaces.Common.IEmailService, CoreEmailServiceAdapter>();
 
@@ -724,6 +730,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Enquiry, Helpdesk & Complaints (EHC) services
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcTicketService, ErpSystem.Core.Services.Ehc.EhcTicketService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IPropertyEnquiryProspectService, ErpSystem.Api.Services.Ehc.PropertyEnquiryProspectService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IProspectDepositFinancePostingService, ErpSystem.Api.Services.Ehc.ProspectDepositFinancePostingService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IPropertyEnquiryDepositApplicationService, ErpSystem.Api.Services.Ehc.PropertyEnquiryDepositApplicationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Ehc.IEhcProblemService, ErpSystem.Core.Services.Ehc.EhcProblemService>();
 
             // Enhanced maintenance workflow integration - NOW ENABLED
@@ -731,6 +740,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
             // Maintenance asset service - NOW ENABLED
             services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Maintenance.IMaintenanceAssetMappingService, ErpSystem.Api.Services.Maintenance.MaintenanceAssetMappingService>();
 
             // Inventory repositories
             services.AddScoped<ErpSystem.Core.Interfaces.Inventory.IInventoryItemRepository, ErpSystem.Data.Repositories.Inventory.InventoryItemRepository>();
@@ -850,6 +860,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookPeriodService, ErpSystem.Api.Services.Finance.Settings.AccountingBookPeriodService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookInitializationService, ErpSystem.Api.Services.Finance.Settings.AccountingBookInitializationService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IAccountingBookApplicabilityService, ErpSystem.Api.Services.Finance.Settings.AccountingBookApplicabilityService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceSourceBookAuthorityService, ErpSystem.Api.Services.Finance.GL.FinanceSourceBookAuthorityService>();
             services.AddOptions<ErpSystem.Api.Services.Finance.GL.AccountingEventOptions>()
                 .BindConfiguration(ErpSystem.Api.Services.Finance.GL.AccountingEventOptions.SectionName);
             services.AddScoped<ErpSystem.Api.Services.Finance.GL.AccountingEventService>();
@@ -975,6 +986,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IOpeningBalanceService, ErpSystem.Api.Services.Finance.Migration.OpeningBalanceService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IMigrationSignOffService, ErpSystem.Api.Services.Finance.Migration.MigrationSignOffService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitTypeService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitTypeService>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceQuantityPrecisionAdapter, ErpSystem.Api.Services.Finance.UnitAccounting.FinanceQuantityPrecisionAdapter>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityPolicyValidator, ErpSystem.Api.Services.Inventory.CommercialQuantityPolicyValidator>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitAccountService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitAccountService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitJournalEntryService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitJournalEntryService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Finance.IUnitBudgetService, ErpSystem.Api.Services.Finance.UnitAccounting.UnitBudgetService>();
@@ -1457,6 +1470,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.InventorySaleableSourceAdapter>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.FixedAssetSaleableSourceAdapter>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.PropertyRegisterSaleableSourceAdapter>();
+        services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.LandManagementSaleableSourceAdapter>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IQuoteService, ErpSystem.Core.Services.Sales.QuoteService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICommissionService, ErpSystem.Core.Services.Sales.CommissionService>();
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.IReturnOrderService, ErpSystem.Core.Services.Sales.ReturnOrderService>();
@@ -1489,6 +1503,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IConsignmentSettlementService, ErpSystem.Core.Services.Procurement.ConsignmentSettlementService>();
             services.AddScoped<ErpSystem.Api.Services.ProcurementInventoryManagementDashboardService>();
             services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardService>();
+            services.AddScoped<ErpSystem.Api.Services.EnterpriseDashboardProjectionService>();
 
             // RFQ (Request For Quotation) - separate from Tender
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IRfqService, ErpSystem.Core.Services.Procurement.RfqService>();
@@ -1630,6 +1645,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement("settings.read", "settings.update")))
                 .AddPolicy("HrIdentityReconciliationManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
+                .AddPolicy("dashboard.read", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("dashboard.read")))
                 .AddPolicy("Finance", policy =>
                     policy.RequireAssertion(ctx =>
                         ctx.User?.Identity?.IsAuthenticated == true
@@ -2343,12 +2360,22 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
 
         public static IServiceCollection AddErpSystemLogging(this IServiceCollection services, IConfiguration configuration)
         {
-            Log.Logger = new LoggerConfiguration()
+            var loggerConfiguration = new LoggerConfiguration()
                 .ReadFrom.Configuration(configuration)
                 .Enrich.FromLogContext()
                 .Enrich.WithThreadId()
-                .Enrich.WithMachineName()
-                .CreateLogger();
+                .Enrich.WithMachineName();
+
+            // The VPS deploy preserves server settings and may start without an appsettings file.
+            // Keep errors visible through the service's captured stdout in that case.
+            if (!configuration.GetSection("Serilog:WriteTo").Exists())
+            {
+                if (!configuration.GetSection("Serilog:MinimumLevel").Exists())
+                    loggerConfiguration.MinimumLevel.Warning();
+                loggerConfiguration.WriteTo.Console();
+            }
+
+            Log.Logger = loggerConfiguration.CreateLogger();
 
             services.AddSerilog();
 

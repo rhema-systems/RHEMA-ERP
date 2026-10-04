@@ -33,9 +33,18 @@
     <Compile Include="Services\QsUatActorSeederTests.cs" />
     <Compile Include="Services\QsUatPreparationSeederTests.cs" />
     <Compile Include="Services\EstateUatLandSeederTests.cs" />
+    <Compile Include="Services\Maintenance\MaintenanceAssetSourceIntegrationTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryProspectLifecycleTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryContactLinkageTests.cs" />
+    <Compile Include="Services\Ehc\PropertyEnquiryDepositApplicationTests.cs" />
+    <Compile Include="Services\Ehc\ProspectDepositFinancePostingServiceTests.cs" />
+    <Compile Include="Services\Otp\OtpServiceSecurityTests.cs" />
+    <Compile Include="Services\Sms\MNotifySmsGatewayTests.cs" />
     <Compile Include="Controllers\Inventory\PhysicalCountReviewTests.cs" />
     <Compile Include="Services\Finance\ProcurementAutoInvoiceTests.cs" />
     <Compile Include="Services\Finance\CustomerBalanceAdjustmentPostingTests.cs" />
+    <Compile Include="Services\Finance\CapitalProjectPostingTests.cs" />
+    <Compile Include="Services\Finance\CapitalizationLineageMigrationTests.cs" />
     <Compile Include="Controllers\Procurement\ProcurementSupplierInvoiceBoundaryTests.cs" />
     <Compile Include="Controllers\Procurement\EstateSupplierInvoiceLineageTests.cs" />
     <Compile Include="Services\Workflow\OptionalApprovalConfigurationTests.cs" />
@@ -56,9 +65,12 @@
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
+    <Compile Include="Controllers\Settings\LoginAppearanceSettingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\UserTenantMappingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\InternalUserCredentialsControllerTests.cs" />
     <Compile Include="Controllers\Crm\CrmControllerRouteTests.cs" />
+    <Compile Include="Controllers\Crm\CrmActivityTransactionTests.cs" />
+    <Compile Include="Controllers\Sales\SalesReferenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
@@ -70,7 +82,12 @@
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
     <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
+    <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactContractTests.cs" />
+    <Compile Include="Controllers\Estate\PublicPropertyEnquiryContactControllerTests.cs" />
+    <Compile Include="Controllers\Ehc\EhcInternalTicketsAssignmentTests.cs" />
+    <Compile Include="Controllers\Ehc\EhcPropertyEnquiriesListTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Finance\FinanceApprovalInvoiceProducerRouteTests.cs" />
     <Compile Include="Controllers\Finance\BusinessPartnerFinanceProfilesControllerTests.cs" />
     <Compile Include="Services\Finance\BusinessPartnerFinanceProfilePolicyTests.cs" />
     <Compile Include="Controllers\InventoryGlobalSearchControllerTests.cs" />
@@ -172,6 +189,7 @@
     <Compile Include="Controllers\Projects\CivilEngineering*.cs" />
     <Compile Include="Controllers\QuantitySurvey\**\*.cs" />
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
+    <Compile Include="Controllers\DashboardAuthorizationIntegrationTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
     <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
@@ -180,11 +198,14 @@
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
+    <Compile Include="Services\Estate\EstateSalesListingApplicationHandoffTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
+    <Compile Include="Services\Estate\GroundRentAssessmentTests.cs" />
     <Compile Include="Services\Estate\FacilitiesDutyRosterScheduleTests.cs" />
     <Compile Include="Services\Estate\FacilitiesComplaintHandoffServiceTests.cs" />
     <Compile Include="Services\Estate\FacilitiesProviderSelectionServiceTests.cs" />
     <Compile Include="Services\Estate\EstateTerminationReleaseTests.cs" />
+    <Compile Include="Services\Estate\FacilitiesMaintenanceHandoffTests.cs" />
     <Compile Include="Services\Estate\FacilitiesMaintenanceCloseoutTests.cs" />
     <Compile Include="Services\Estate\FacilitiesProviderOptionsControllerTests.cs" />
     <Compile Include="Services\Estate\FacilitiesBudgetProjectionTests.cs" />
@@ -202,6 +223,7 @@
     <Compile Include="Services\Finance\FinanceBudgetSqlServerReleaseGateTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\InvoiceCashRoundingPostingAdapterTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\FinanceAccountProvisioningTransactionTests.cs" />
     <Compile Include="Services\Finance\DatabaseSeedFinanceProvisioningIsolationTests.cs" />
@@ -263,6 +285,9 @@
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.PartnerDefaults.cs" />
     <Compile Include="Services\Finance\CustomerPostingSettingsFixture.cs" />
     <Compile Include="Services\Finance\CanonicalVendorInvoiceBusinessPartnerTests.cs" />
+    <Compile Include="Services\Finance\LeaseInstallmentApOpenItemTests.cs" />
+    <Compile Include="Services\Finance\LeaseActivationGovernanceTests.cs" />
+    <Compile Include="Services\Finance\LeaseGovernanceMigrationModelTests.cs" />
     <Compile Include="Services\Finance\CanonicalCustomerProfileReadTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
@@ -284,6 +309,8 @@
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\EnterpriseDashboardAccessStatusTests.cs" />
+    <Compile Include="Services\EnterpriseDashboardProjectionTests.cs" />
+    <Compile Include="Services\LegacyDashboardRealDataTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalOptionalApprovalMigrationTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
@@ -303,6 +330,11 @@
     <Compile Include="Services\Finance\CashBankPermissionContractTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
     <Compile Include="Services\Finance\BankingSettlementReleaseGateTests.cs" />
+    <!-- Source-book authority is shared Finance posting evidence. This project disables
+         implicit compile items, so keep both lifecycle and schema-contract tests in CI. -->
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityMigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceSourceBookAuthorityCallerAdoptionTests.cs" />
     <Compile Include="Services\Finance\CashierTillControlTests.cs" />
     <Compile Include="Services\Finance\CashBankControlledDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\WhtCertificateDocumentBuilderTests.cs" />

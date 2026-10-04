@@ -4,8 +4,11 @@ import { EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/es
 import {
   assetMatchesWorkspacePrefill,
   buildPropertyWorkspaceHref,
+  isFullTermLease,
+  isLegalAgreementReviewSigned,
   leaseExpiryAlert,
   leaseExpiryDate,
+  propertyListingCompletionRequirements,
 } from './property-workspace-utils';
 
 const asset = {
@@ -43,6 +46,20 @@ describe('property workspace prefill links', () => {
 });
 
 describe('lease expiry', () => {
+  it('keeps a 60-year lease end separate from billing dates', () => {
+    const lease = {
+      ...asset,
+      dateOfTenancy: '2026-10-01T00:00:00Z',
+      leaseTermYears: 60,
+      externalListingType: 'Lease',
+      nextRentBillingDate: undefined,
+    } as EstateManagedAsset;
+
+    expect(isFullTermLease(lease)).toBe(true);
+    expect(leaseExpiryDate(lease)?.toISOString().slice(0, 10)).toBe('2086-10-01');
+    expect(isFullTermLease({ ...lease, externalListingType: 'Rent' })).toBe(false);
+  });
+
   it('clamps month-end terms and flags active leases near expiry', () => {
     const rental = {
       ...asset,
@@ -67,5 +84,36 @@ describe('lease expiry', () => {
     } as EstateManagedAsset;
 
     expect(leaseExpiryAlert(former, new Date('2027-01-01T00:00:00Z'))).toBeNull();
+  });
+});
+
+describe('property listing completion gates', () => {
+  it('does not require agreement or Legal work while completing intake', () => {
+    expect(
+      propertyListingCompletionRequirements(
+        'Intake and validate property request'
+      )
+    ).toEqual({
+      requiresApprovedRentTerms: false,
+      requiresGeneratedAgreement: false,
+      requiresLegalAgreementReview: false,
+    });
+  });
+
+  it('requires agreement and Legal completion at the transaction handoff', () => {
+    expect(
+      propertyListingCompletionRequirements('Approved transaction handoff')
+    ).toEqual({
+      requiresApprovedRentTerms: false,
+      requiresGeneratedAgreement: true,
+      requiresLegalAgreementReview: true,
+    });
+  });
+
+  it('recognizes Legal release statuses used by the server', () => {
+    expect(isLegalAgreementReviewSigned('Head of Legal signed')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Approved by Legal - ready for customer signature')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Fully signed agreement')).toBe(true);
+    expect(isLegalAgreementReviewSigned('Under Legal review')).toBe(false);
   });
 });

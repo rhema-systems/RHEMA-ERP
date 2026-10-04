@@ -117,6 +117,8 @@ export interface CashTransaction {
     transferPairId?: string;
     transferLeg?: 'Outgoing' | 'Incoming';
     amount: number;
+    roundingAdjustmentAmount?: number;
+    financeRoundingEvidenceId?: string;
     currency: string;
     exchangeRate?: number;
     exchangeRateId?: string;
@@ -351,6 +353,10 @@ export interface LiquidityAccount {
     isSystemAccount: boolean;
     notes?: string;
     currentBalance: number;
+    settlementBalance: number;
+    balanceDifference: number;
+    isReconciled: boolean;
+    balanceAuthority: 'PrimaryBookGL' | 'LiquiditySubledgerFallback';
     availableToSettle: number;
     openEntryCount: number;
     rowVersion: string;

@@ -313,6 +313,130 @@ public class BudgetServiceHardeningTests
     }
 
     [Fact]
+    public async Task CreateReturnAsync_RequiresAValueFromTheScenarioControlDimensions()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var definition = CreateDimensionDefinition();
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.AddRange(scenario, definition);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db).CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id
+        });
+
+        await act.Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*distribution value*");
+    }
+
+    [Fact]
+    public async Task CreateReturnAsync_PersistsAnActiveScenarioDistributionValue()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var definition = CreateDimensionDefinition();
+        var value = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance Department",
+            EffectiveDate = new DateTime(2026, 1, 1), IsActive = true
+        };
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.AddRange(scenario, definition, value);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id,
+            DistributionDimensionValueId = value.Id
+        });
+
+        result.DistributionDimensionValueId.Should().Be(value.Id);
+        result.DistributionDimensionDefinitionId.Should().Be(definition.Id);
+        result.DistributionDimensionCode.Should().Be("FIN");
+        result.DistributionDimensionName.Should().Be("Finance Department");
+        (await db.BudgetReturns.SingleAsync()).DistributionDimensionValueId.Should().Be(value.Id);
+    }
+
+    [Fact]
+    public async Task BulkSaveEntriesAsync_RequiresTheReturnDistributionValueOnEveryCell()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var period = CreatePeriod(fiscalYear.Id);
+        var scenario = CreateScenario();
+        scenario.FiscalYearId = fiscalYear.Id;
+        var definition = CreateDimensionDefinition();
+        var assignedValue = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "FIN", Name = "Finance Department",
+            EffectiveDate = fiscalYear.StartDate, IsActive = true
+        };
+        var otherValue = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = definition.Id,
+            Code = "OPS", Name = "Operations Department",
+            EffectiveDate = fiscalYear.StartDate, IsActive = true
+        };
+        var budgetReturn = CreateReturn(scenario.Id, CurrentUserId);
+        budgetReturn.DistributionDimensionValueId = assignedValue.Id;
+        var account = CreateAccount(AccountType.Expense);
+        account.Status = AccountStatus.Active;
+        account.AllowDirectPosting = true;
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, BudgetScenarioId = scenario.Id,
+            FinanceDimensionDefinitionId = definition.Id, DisplayOrder = 0
+        });
+        db.AddRange(fiscalYear, period, scenario, definition, assignedValue, otherValue, budgetReturn, account);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db).BulkSaveEntriesAsync(new BulkSaveBudgetEntriesDto
+        {
+            BudgetReturnId = budgetReturn.Id,
+            ReturnRowVersion = Convert.ToBase64String(budgetReturn.RowVersion),
+            Entries =
+            {
+                new BudgetEntrySaveDto
+                {
+                    BudgetReturnId = budgetReturn.Id,
+                    AccountId = account.Id,
+                    FiscalPeriodId = period.Id,
+                    CurrencyCode = "GHS",
+                    Amount = 1_000m,
+                    DimensionAssignments =
+                    {
+                        new BudgetDimensionAssignmentInputDto
+                        {
+                            FinanceDimensionDefinitionId = definition.Id,
+                            FinanceDimensionValueId = otherValue.Id
+                        }
+                    }
+                }
+            }
+        });
+
+        await act.Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*assigned distribution dimension value*");
+    }
+
+    [Fact]
     public async Task AdoptScenarioAsync_SupersedesTheExistingOfficialBudget()
     {
         await using var db = CreateContext();

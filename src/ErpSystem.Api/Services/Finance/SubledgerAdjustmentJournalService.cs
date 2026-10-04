@@ -1,6 +1,8 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -17,19 +19,22 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
     private readonly IDocumentNumberingService _documentNumberingService;
     private readonly IFinancePostingEngine _postingEngine;
     private readonly ITenantSettingsService _tenantSettingsService;
+    private readonly IFinanceSourceBookAuthorityService _sourceBookAuthority;
 
     public SubledgerAdjustmentJournalService(
         ApplicationDbContext context,
         ICurrentUserService currentUser,
         IDocumentNumberingService documentNumberingService,
         IFinancePostingEngine postingEngine,
-        ITenantSettingsService tenantSettingsService)
+        ITenantSettingsService tenantSettingsService,
+        IFinanceSourceBookAuthorityService sourceBookAuthority)
     {
         _context = context;
         _currentUser = currentUser;
         _documentNumberingService = documentNumberingService;
         _postingEngine = postingEngine;
         _tenantSettingsService = tenantSettingsService;
+        _sourceBookAuthority = sourceBookAuthority;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -73,7 +78,11 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             ? await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
             : await _context.Database.BeginTransactionAsync(cancellationToken);
         var replay = await FindCustomerAdjustmentReplayAsync(dto, cancellationToken);
-        if (replay != null) return MapToDto(replay);
+        if (replay != null)
+        {
+            await RequireBoundAdjustmentAuthorityAsync(replay, cancellationToken);
+            return MapToDto(replay);
+        }
         var adjustment = await CreateAndPostCoreAsync(dto, null, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return MapToDto(adjustment);
@@ -161,6 +170,9 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             cancellationToken);
         var originalAdjustment = originalAdjustmentId.HasValue
             ? await LoadAdjustmentAsync(originalAdjustmentId.Value, false, cancellationToken) : null;
+        var accountingBookCode = originalAdjustment is null
+            ? await ResolvePrimaryAccountingBookCodeAsync(tenantId, cancellationToken)
+            : await ResolveOriginalAccountingBookCodeAsync(originalAdjustment, tenantId, cancellationToken);
 
         var settings = await _context.FinanceSettings
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
@@ -246,12 +258,45 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
         _context.SubledgerAdjustmentJournals.Add(adjustment);
         await _context.SaveChangesAsync(cancellationToken);
 
+        var authorityRequest = BuildAuthorityRequest(adjustment);
+        FinanceSourceBookAuthorityResult authority;
+        if (originalAdjustment is null)
+        {
+            authority = await _sourceBookAuthority.FreezeInitialPrimaryAsync(
+                authorityRequest, cancellationToken);
+        }
+        else
+        {
+            var originalAuthority = await RequireBoundAdjustmentAuthorityAsync(
+                originalAdjustment, cancellationToken);
+            authority = await _sourceBookAuthority.FreezeInheritedAsync(
+                authorityRequest,
+                [new FinanceSourceBookAuthorityOriginRequest
+                {
+                    OriginAuthorityId = originalAuthority.AuthorityId,
+                    Role = "ORIGINAL_ADJUSTMENT"
+                }],
+                cancellationToken);
+        }
+        if (!string.Equals(authority.AccountingBookCode, accountingBookCode, StringComparison.Ordinal) ||
+            !string.Equals(authority.FunctionalCurrencyCode, baseCurrencyCode, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The frozen source-book authority conflicts with the adjustment's exact book or functional currency.");
+        }
+
         var postingResult = await PostJournalAsync(
             adjustment,
             controlAccount.Id,
             contraAccount.Id,
             counterparty.Name,
             baseCurrencyCode,
+            accountingBookCode,
+            cancellationToken);
+        await _sourceBookAuthority.BindOriginalPostingAsync(
+            authority.AuthorityId,
+            postingResult.PostingEventId,
+            postingResult.JournalEntryId,
             cancellationToken);
         adjustment.JournalEntryId = postingResult.JournalEntryId;
         adjustment.UpdatedAt = DateTime.UtcNow;
@@ -271,12 +316,37 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
         return reloaded;
     }
 
+    private static FinanceSourceBookAuthorityFreezeRequest BuildAuthorityRequest(
+        SubledgerAdjustmentJournal adjustment) => new()
+    {
+        OriginModuleCode = FinanceModuleLockCatalog.Finance,
+        SourceDocumentType = "SubledgerAdjustmentJournal",
+        SourceDocumentId = adjustment.Id,
+        PostingAction = adjustment.OriginalAdjustmentId.HasValue
+            ? "PostSubledgerAdjustmentJournalReversal"
+            : "PostSubledgerAdjustmentJournal",
+        EffectiveDate = adjustment.AdjustmentDate,
+        TransactionCurrencyCode = adjustment.CurrencyCode,
+        FreezeStage = FinanceSourceBookAuthorityFreezeStages.PrePost
+    };
+
+    private async Task<FinanceSourceBookAuthorityResult> RequireBoundAdjustmentAuthorityAsync(
+        SubledgerAdjustmentJournal adjustment,
+        CancellationToken cancellationToken)
+    {
+        var authority = await _sourceBookAuthority.RequireForPostingAsync(
+            BuildAuthorityRequest(adjustment), cancellationToken);
+        return await _sourceBookAuthority.RequireBoundOriginalAsync(
+            authority.AuthorityId, cancellationToken);
+    }
+
     private async Task<FinancePostingResultDto> PostJournalAsync(
         SubledgerAdjustmentJournal adjustment,
         Guid controlAccountId,
         Guid contraAccountId,
         string counterpartyName,
         string functionalCurrencyCode,
+        string accountingBookCode,
         CancellationToken cancellationToken)
     {
         var isDebit = string.Equals(adjustment.AdjustmentType, SubledgerAdjustmentTypes.Debit, StringComparison.OrdinalIgnoreCase);
@@ -305,6 +375,7 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
             Description = description,
             PostingDate = adjustment.AdjustmentDate,
             JournalType = $"{adjustment.Module} Adjustment",
+            AccountingBookCode = accountingBookCode,
             FunctionalCurrencyCode = functionalCurrencyCode,
             IdempotencyKey = $"SubledgerAdjustmentJournal:{adjustment.TenantId:N}:{adjustment.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -314,6 +385,70 @@ public partial class SubledgerAdjustmentJournalService : ISubledgerAdjustmentJou
                 BuildPostingLine(contraAccountId, adjustment.Reason, contraLineType, adjustment, 2)
             }
         }, cancellationToken);
+    }
+
+    private async Task<string> ResolvePrimaryAccountingBookCodeAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var books = await _context.AccountingBooks
+            .AsNoTracking()
+            .Where(book => book.TenantId == tenantId && book.IsDefault && book.IsActive &&
+                book.AllowsPosting && !book.IsDeleted &&
+                book.BookType == AccountingBookType.PrimaryFull &&
+                book.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+            .Take(2)
+            .Select(book => new { book.Id, book.Code })
+            .ToListAsync(cancellationToken);
+        if (books.Count != 1 || books[0].Id == Guid.Empty || !IsCanonicalExactBookCode(books[0].Code))
+        {
+            throw new InvalidOperationException(
+                "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book with a canonical exact code is required.");
+        }
+
+        return books[0].Code;
+    }
+
+    private async Task<string> ResolveOriginalAccountingBookCodeAsync(
+        SubledgerAdjustmentJournal original,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (!original.JournalEntryId.HasValue || original.JournalEntry is null ||
+            original.JournalEntry.TenantId != tenantId || original.JournalEntry.AccountingBookId == Guid.Empty ||
+            !IsCanonicalExactBookCode(original.JournalEntry.BookClassification))
+        {
+            throw new InvalidOperationException(
+                "The original adjustment is missing valid tenant-owned exact-book journal evidence.");
+        }
+
+        var book = await _context.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(candidate =>
+            candidate.TenantId == tenantId &&
+            candidate.Id == original.JournalEntry.AccountingBookId &&
+            candidate.IsActive && candidate.AllowsPosting && !candidate.IsDeleted &&
+            candidate.BookType == AccountingBookType.PrimaryFull &&
+            candidate.LifecycleStatus == AccountingBookLifecycleStatus.Active,
+            cancellationToken);
+        if (book is null || !IsCanonicalExactBookCode(book.Code) ||
+            !string.Equals(book.Code, original.JournalEntry.BookClassification, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "The original adjustment journal's accounting-book evidence is stale or inconsistent.");
+        }
+
+        return book.Code;
+    }
+
+    private static bool IsCanonicalExactBookCode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 20 ||
+            !string.Equals(value, value.Trim().ToUpperInvariant(), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return value.All(character => character is >= 'A' and <= 'Z' or >= '0' and <= '9' or '_') &&
+            value is not "ALL" and not "ALL_ACTIVE_BOOKS" and not "ALL_CLASSIFIED_BOOKS" and not "ALLCLASSIFIEDBOOKS";
     }
 
     private static FinancePostingLineDto BuildPostingLine(

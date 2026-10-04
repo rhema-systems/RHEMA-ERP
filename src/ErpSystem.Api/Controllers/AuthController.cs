@@ -218,6 +218,17 @@ namespace ErpSystem.Api.Controllers
             return sb.ToString();
         }
 
+        private static DateTime GetJwtExpiryUtc(string token)
+        {
+            var handler = new JwtSecurityTokenHandler();
+            if (!handler.CanReadToken(token))
+            {
+                throw new InvalidOperationException("Generated JWT token could not be read.");
+            }
+
+            return handler.ReadJwtToken(token).ValidTo.ToUniversalTime();
+        }
+
         private async Task<IActionResult> CompleteSuccessfulLoginAsync(ApplicationUser user, Tenant? tenant, string usernameForLogs, string details)
         {
             var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
@@ -365,9 +376,16 @@ namespace ErpSystem.Api.Controllers
             // Update last login timestamp
             user.LastLoginDate = DateTime.UtcNow;
             await _userManager.UpdateAsync(user);
-            var refreshToken = _tokenService.GenerateRefreshToken();
-
-            // TODO: Store refresh token in database for security
+            // The established service issues a fixed 30-day token with unlimited use until
+            // expiry/revocation. Reuse it on refresh instead of introducing rotation here; the
+            // browser coordinates one refresh flight across all of its ERP tabs.
+            var refreshTokenEntity = await _refreshTokenService.CreateRefreshTokenAsync(
+                user.Id,
+                effectiveTenantId,
+                ipAddress,
+                userAgent,
+                deviceFingerprint);
+            var refreshToken = refreshTokenEntity.TokenHash;
 
             _logger.LogInformation("{Details} for user: {Username}", details, usernameForLogs);
 
@@ -390,7 +408,7 @@ namespace ErpSystem.Api.Controllers
             {
                 Token = token,
                 RefreshToken = refreshToken,
-                ExpiresAt = DateTime.UtcNow.AddHours(24), // Match JWT expiry
+                ExpiresAt = GetJwtExpiryUtc(token),
                 User = new UserInfo
                 {
                     Id = user.Id,
@@ -910,9 +928,15 @@ namespace ErpSystem.Api.Controllers
                 var principal = _tokenService.GetPrincipalFromExpiredToken(request.Token);
                 var userId = principal.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-                if (string.IsNullOrEmpty(userId))
+                if (!Guid.TryParse(userId, out var parsedUserId))
                 {
                     return Unauthorized(new { message = "Invalid token" });
+                }
+
+                var storedRefreshToken = await _refreshTokenService.GetValidRefreshTokenAsync(request.RefreshToken);
+                if (storedRefreshToken == null || storedRefreshToken.UserId != parsedUserId)
+                {
+                    return Unauthorized(new { message = "Invalid refresh token" });
                 }
 
                 var user = await _userManager.FindByIdAsync(userId);
@@ -938,16 +962,44 @@ namespace ErpSystem.Api.Controllers
                     });
                 }
 
-                // TODO: Validate refresh token from database
+                var sessionId = principal.FindFirst("sid")?.Value;
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    var session = await _userSessionService.GetSessionAsync(sessionId);
+                    if (session == null || !session.IsActive || session.UserId != user.Id)
+                    {
+                        return Unauthorized(new { message = "Session is no longer active" });
+                    }
+                }
 
-                var newToken = await _tokenService.GenerateTokenAsync(user);
-                var newRefreshToken = _tokenService.GenerateRefreshToken();
+                await _refreshTokenService.MarkRefreshTokenAsUsedAsync(storedRefreshToken);
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
+
+                if (!string.IsNullOrEmpty(sessionId))
+                {
+                    await _userSessionService.UpdateSessionActivityAsync(sessionId);
+                    var currentSession = await _context.UserSessions
+                        .FirstOrDefaultAsync(s => s.SessionId == sessionId && s.IsActive);
+                    if (currentSession != null)
+                    {
+                        var newJti = new JwtSecurityTokenHandler().ReadJwtToken(newToken).Claims
+                            .FirstOrDefault(claim => claim.Type == JwtRegisteredClaimNames.Jti)?.Value;
+                        if (!string.IsNullOrEmpty(newJti))
+                        {
+                            currentSession.JwtTokenId = newJti;
+                            await _context.SaveChangesAsync();
+                        }
+                    }
+                }
 
                 var response = new LoginResponse
                 {
                     Token = newToken,
-                    RefreshToken = newRefreshToken,
-                    ExpiresAt = DateTime.UtcNow.AddHours(24),
+                    // No rotation: preserve the fixed-expiry, revocable refresh token.
+                    RefreshToken = request.RefreshToken,
+                    ExpiresAt = GetJwtExpiryUtc(newToken),
                     User = new UserInfo
                     {
                         Id = user.Id,
@@ -1398,13 +1450,15 @@ namespace ErpSystem.Api.Controllers
 
                 _logger.LogInformation("User {Username} selected tenant {TenantCode}", user.UserName, request.TenantCode);
 
-                // Generate new JWT token with updated tenant context
-                var newToken = await _tokenService.GenerateTokenAsync(user);
+                // Generate the tenant-context JWT without dropping the browser session identity.
+                var sessionId = User.FindFirst("sid")?.Value;
+                var newToken = string.IsNullOrEmpty(sessionId)
+                    ? await _tokenService.GenerateTokenAsync(user)
+                    : await _tokenService.GenerateTokenAsync(user, sessionId);
 
                 // Extract JTI from the new token and update the current session
                 try
                 {
-                    var sessionId = User.FindFirst("sid")?.Value;
                     if (!string.IsNullOrEmpty(sessionId) && Guid.TryParse(sessionId, out var sessionGuid))
                     {
                         var currentSession = await _context.UserSessions
@@ -1483,7 +1537,7 @@ namespace ErpSystem.Api.Controllers
                 var response = new SelectTenantResponse
                 {
                     Token = newToken,
-                    ExpiresAt = DateTime.UtcNow.AddHours(24),
+                    ExpiresAt = GetJwtExpiryUtc(newToken),
                     User = new UserInfo
                     {
                         Id = user.Id,
@@ -1712,7 +1766,7 @@ namespace ErpSystem.Api.Controllers
                         maxAttempts: 5,
                         HttpContext.RequestAborted);
 
-                    await _tenantSmsSender.SendAsync(
+                    await _tenantSmsSender.SendOtpAsync(
                         registrationTenant.Id,
                         phone,
                         $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
@@ -1868,7 +1922,7 @@ namespace ErpSystem.Api.Controllers
                         maxAttempts: 5,
                         HttpContext.RequestAborted);
 
-                    await _tenantSmsSender.SendAsync(
+                    await _tenantSmsSender.SendOtpAsync(
                         registrationTenant.Id,
                         phone,
                         $"Your {registrationTenant.Name} verification code is {otp}. It expires in 10 minutes.",
@@ -2301,7 +2355,7 @@ namespace ErpSystem.Api.Controllers
                          }
                          else
                          {
-                             await _tenantSmsSender.SendAsync(
+                             await _tenantSmsSender.SendOtpAsync(
                                  tenantId,
                                 user.PhoneNumber ?? identifier,
                                 $"Your one-time login code is {otp}. It expires in 10 minutes.",
@@ -2449,6 +2503,49 @@ namespace ErpSystem.Api.Controllers
             }
         }
 
+        private async Task<(Core.Entities.Security Settings, Tenant? Tenant)> ResolvePublicSecuritySettingsAsync()
+        {
+            Core.Entities.Security? settings = null;
+            Tenant? resolvedTenant = null;
+            var host = GetEffectiveHost();
+
+            if (!string.IsNullOrWhiteSpace(host))
+            {
+                var tenant = await _tenantService.GetTenantByDomainAsync(host);
+                if (tenant != null && tenant.Status == TenantStatus.Active)
+                {
+                    resolvedTenant = tenant;
+                    settings = await _settingsService.GetSecuritySettingsAsync(tenant.Id);
+                }
+            }
+
+            settings ??= await _settingsService.GetPublicSecuritySettingsAsync();
+            return (settings ?? new Core.Entities.Security(), resolvedTenant);
+        }
+
+        [HttpGet("/api/public/config/login")]
+        [AllowAnonymous]
+        [EnableRateLimiting("PublicPortalPolicy")]
+        public async Task<ActionResult<LoginAppearanceSettingsDto>> GetPublicLoginConfiguration()
+        {
+            try
+            {
+                var (settings, _) = await ResolvePublicSecuritySettingsAsync();
+                return Ok(new LoginAppearanceSettingsDto
+                {
+                    LoginPageStyle = settings.LoginPageStyle.ToString()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to retrieve public login configuration; using LightCorporate fallback");
+                return Ok(new LoginAppearanceSettingsDto
+                {
+                    LoginPageStyle = Core.Enums.LoginPageStyle.LightCorporate.ToString()
+                });
+            }
+        }
+
         [HttpGet("security-settings")]
         [AllowAnonymous]
         public async Task<IActionResult> GetPublicSecuritySettings()
@@ -2457,52 +2554,27 @@ namespace ErpSystem.Api.Controllers
             {
                 // This endpoint provides public security settings needed for registration and login
                 // (password policy, CAPTCHA settings, etc.) without requiring authentication
-
-                // Try to get actual security settings from the database
-                Core.Entities.Security? settings = null;
-                Tenant? resolvedTenant = null;
-                try
-                {
-                    // Prefer host-based tenant selection for public portals (e.g. support.company.com)
-                    var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
-                    var host = !string.IsNullOrWhiteSpace(forwardedHost) ? forwardedHost : Request.Host.Host;
-
-                    if (!string.IsNullOrWhiteSpace(host))
-                    {
-                        var tenant = await _tenantService.GetTenantByDomainAsync(host);
-                        if (tenant != null && tenant.Status == TenantStatus.Active)
-                        {
-                            resolvedTenant = tenant;
-                            settings = await _settingsService.GetSecuritySettingsAsync(tenant.Id);
-                        }
-                    }
-
-                    // Fallback to the default tenant settings if host-based lookup didn't resolve
-                    settings ??= await _settingsService.GetPublicSecuritySettingsAsync();
-                    _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
-                        settings?.CaptchaEnabled, settings?.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings?.RecaptchaSiteKey);
-                }
-                catch (Exception settingsEx)
-                {
-                    _logger.LogWarning(settingsEx, "Failed to retrieve public security settings from database, using defaults");
-                }
+                var (settings, resolvedTenant) = await ResolvePublicSecuritySettingsAsync();
+                _logger.LogInformation("Retrieved public security settings from database: CAPTCHA enabled = {CaptchaEnabled}, Site key = {SiteKeyPrefix}...",
+                    settings.CaptchaEnabled, settings.RecaptchaSiteKey?.Length > 10 ? settings.RecaptchaSiteKey[..10] : settings.RecaptchaSiteKey);
 
                 // Return actual security settings or defaults
                 var publicSettings = new
                 {
                     tenantCode = resolvedTenant?.Code,
                     tenantName = resolvedTenant?.Name,
-                    passwordMinLength = settings?.PasswordMinLength ?? 8,
-                    passwordRequireUppercase = settings?.PasswordRequireUppercase ?? true,
-                    passwordRequireLowercase = settings?.PasswordRequireLowercase ?? true,
-                    passwordRequireDigits = settings?.PasswordRequireDigits ?? true,
-                    passwordRequireSpecialChars = settings?.PasswordRequireSpecialChars ?? true,
-                    captchaEnabled = settings?.CaptchaEnabled ?? false,
-                    captchaProvider = settings?.CaptchaProvider ?? "recaptcha",
-                    recaptchaSiteKey = settings?.RecaptchaSiteKey,
-                    hCaptchaSiteKey = settings?.HCaptchaSiteKey,
-                    termsOfServiceUrl = settings?.TermsOfServiceUrl,
-                    privacyPolicyUrl = settings?.PrivacyPolicyUrl
+                    passwordMinLength = settings.PasswordMinLength,
+                    passwordRequireUppercase = settings.PasswordRequireUppercase,
+                    passwordRequireLowercase = settings.PasswordRequireLowercase,
+                    passwordRequireDigits = settings.PasswordRequireDigits,
+                    passwordRequireSpecialChars = settings.PasswordRequireSpecialChars,
+                    captchaEnabled = settings.CaptchaEnabled,
+                    captchaProvider = settings.CaptchaProvider,
+                    recaptchaSiteKey = settings.RecaptchaSiteKey,
+                    hCaptchaSiteKey = settings.HCaptchaSiteKey,
+                    termsOfServiceUrl = settings.TermsOfServiceUrl,
+                    privacyPolicyUrl = settings.PrivacyPolicyUrl,
+                    loginPageStyle = settings.LoginPageStyle.ToString()
                 };
 
                 _logger.LogInformation("Public security settings retrieved: CAPTCHA enabled = {CaptchaEnabled}, Provider = {CaptchaProvider}, Site Key = {SiteKeyPrefix}...",
@@ -2528,7 +2600,8 @@ namespace ErpSystem.Api.Controllers
                     recaptchaSiteKey = (string?)null,
                     hCaptchaSiteKey = (string?)null,
                     termsOfServiceUrl = (string?)null,
-                    privacyPolicyUrl = (string?)null
+                    privacyPolicyUrl = (string?)null,
+                    loginPageStyle = Core.Enums.LoginPageStyle.LightCorporate.ToString()
                 };
 
                 return Ok(fallbackSettings);

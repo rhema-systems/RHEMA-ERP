@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -55,6 +56,55 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         FinancePostingProducerContext producerContext,
         CancellationToken cancellationToken = default) =>
         await PostCoreAsync(request, request.AccountingBookCode, producerContext ?? throw new ArgumentNullException(nameof(producerContext)), allowHistoricalMappingException: false, cancellationToken);
+
+    public async Task<FinancePostingResultDto> PostYearEndAsync(
+        FinancePostingRequestV2Dto request, Guid bookCloseCycleId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = _currentUserService.GetRequiredFinanceTenantId();
+        var actor = GetCurrentUserGuid() ?? throw new UnauthorizedAccessException("An authenticated Finance user is required.");
+        if (_context.Database.IsRelational() && (_context.Database.CurrentTransaction is null
+            || _context.Database.CurrentTransaction.GetDbTransaction().IsolationLevel != System.Data.IsolationLevel.Serializable))
+            throw new InvalidOperationException("Year-end posting requires the caller's serializable transaction.");
+        var cycle = _context.YearEndBookCloseCycles.Local.SingleOrDefault(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted);
+        var stored = await _context.YearEndBookCloseCycles.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == bookCloseCycleId && item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        if (cycle == null || stored == null || cycle.AccountingBookId != stored.AccountingBookId
+            || cycle.AccountingBookCode != stored.AccountingBookCode || cycle.FunctionalCurrencyCode != stored.FunctionalCurrencyCode
+            || cycle.FiscalYearId != stored.FiscalYearId || cycle.Status != stored.Status
+            || cycle.ClosingJournalEntryId != stored.ClosingJournalEntryId
+            || cycle.RetainedEarningsAccountId != stored.RetainedEarningsAccountId || cycle.IdempotencyKey != stored.IdempotencyKey
+            || cycle.ClosedByUserId != stored.ClosedByUserId || cycle.ClosedAtUtc != stored.ClosedAtUtc
+            || cycle.PeriodAuthoritySnapshotJson != stored.PeriodAuthoritySnapshotJson)
+            throw new InvalidOperationException("Year-end posting requires its durable, unchanged book-close cycle authority.");
+        var reverse = request.SourceDocumentType == "YearEndCloseReversal";
+        if (request.SourceModule != "GL" || request.SourceDocumentTenantId != tenantId || request.SourceDocumentId != cycle.Id
+            || request.AccountingBookCode != cycle.AccountingBookCode || request.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode
+            || request.ExistingJournalEntryId != null || !request.AllowPostingToClosedPeriod
+            || (reverse
+                ? cycle.Status != "Closed" || cycle.ClosingJournalEntryId == null
+                    || request.ReversalOfJournalEntryId != cycle.ClosingJournalEntryId || request.PostingAction != "Reverse"
+                : request.SourceDocumentType != "YearEndClose" || cycle.Status != "Closing"
+                    || cycle.ClosedByUserId != actor || request.ReversalOfJournalEntryId != null || request.PostingAction != "Post")
+            || request.IdempotencyKey != $"GL:{(reverse ? "YearEndCloseReversal" : "YearEndClose")}:{tenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}")
+            throw new InvalidOperationException("The year-end request does not match its exact book-close cycle.");
+        var period = await _context.FiscalPeriods.Include(item => item.FiscalYear).SingleOrDefaultAsync(item =>
+            item.Id == request.FiscalPeriodId && item.TenantId == tenantId && item.FiscalYearId == cycle.FiscalYearId
+            && !item.IsDeleted, cancellationToken);
+        if (period == null || period.FiscalYear.IsLocked || period.FiscalYear.IsClosed
+            || request.PostingDate.Date != period.FiscalYear.EndDate.Date || period.IsLocked)
+            throw new InvalidOperationException("Year-end posting date and fiscal-year authority do not match.");
+        var currentPeriodAuthority = await YearEndTenantPeriodAuthority.CaptureAsync(
+            _context, tenantId, cycle.FiscalYearId, cancellationToken);
+        if (!string.Equals(cycle.PeriodAuthoritySnapshotJson, currentPeriodAuthority, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "Year-end posting requires unchanged captured tenant fiscal-period close authority.");
+        var validation = await ValidatePostingRequestAsync(tenantId, request, cycle.AccountingBookCode,
+            producerContext: null, allowHistoricalMappingException: reverse, cancellationToken, cycle);
+        if (validation.AccountingBookId != cycle.AccountingBookId)
+            throw new InvalidOperationException("The resolved accounting book differs from the frozen close cycle.");
+        return await ExecutePostingAsync(tenantId, validation, request, accountingEventContext: null, cancellationToken, cycle);
+    }
 
     private async Task<FinancePostingResultDto> PostCoreAsync(
         FinancePostingCommandDto request,
@@ -105,14 +155,27 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 _context.ChangeTracker.Clear();
 
                 var racedPosting = await FindExistingPostingAsync(tenantId, validation, accountingEventContext: null, cancellationToken);
-                if (racedPosting != null && request.ReturnExistingOnDuplicate)
+                if (racedPosting != null)
                 {
-                    await RecordDuplicatePostingAuditAsync(tenantId, validation, racedPosting, cancellationToken);
-                    return ToResult(racedPosting, wasDuplicate: true);
+                    if (request.ReturnExistingOnDuplicate)
+                    {
+                        await RecordDuplicatePostingAuditAsync(tenantId, validation, racedPosting, cancellationToken);
+                        return ToResult(racedPosting, wasDuplicate: true);
+                    }
+
+                    throw new InvalidOperationException("This source document/action has already been posted.", ex);
                 }
 
+                _logger.LogError(ex,
+                    "Finance posting persistence failed and was rolled back for tenant {TenantId}, source {SourceModule}/{SourceDocumentType}/{SourceDocumentId}, action {PostingAction}, book {AccountingBookCode}.",
+                    tenantId,
+                    validation.SourceModule,
+                    validation.SourceDocumentType,
+                    validation.SourceDocumentId,
+                    validation.PostingAction,
+                    validation.AccountingBookCode);
                 throw new InvalidOperationException(
-                    "Finance posting failed. The source document/action may have already been posted by another request.",
+                    "FINANCE_POSTING_PERSISTENCE_FAILED: Posting was rolled back because ledger evidence could not be saved. No Primary or Parallel ledger posting was committed. Review the server log for the underlying database constraint and retry after correcting it.",
                     ex);
             }
         });
@@ -123,10 +186,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         ValidatedPosting validation,
         FinancePostingCommandDto request,
         AccountingEventPostingAuthority? accountingEventContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
         await EnsureNoParallelBookPostingAsync(tenantId, validation, acquireLock: true,
             accountingEventContext, cancellationToken);
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, validation.AccountingBookId, validation.FiscalPeriod.FiscalYearId, cancellationToken);
         var duplicateInsideTransaction = await FindExistingPostingAsync(tenantId, validation, accountingEventContext, cancellationToken);
         if (duplicateInsideTransaction != null)
         {
@@ -153,7 +219,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         // Resolve every active foreign-currency representation before any ledger row is
         // committed. Missing rates, mappings, or rounding authority therefore roll the
         // Primary posting back instead of creating an inconsistent Parallel ledger.
-        var parallelReplicas = await BuildParallelReplicasAsync(
+        var parallelReplicas = yearEndCycle != null ? Array.Empty<ParallelReplica>() : await BuildParallelReplicasAsync(
             tenantId, validation, journalEntry, now, postedByUserId, cancellationToken);
 
         if (validation.BudgetReservationIds.Count > 0)
@@ -198,6 +264,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
+        if (validation.ReversalOfJournalEntryId.HasValue)
+        {
+            AddReversalTaxSnapshots(
+                tenantId,
+                request.TaxCalculationSnapshots ?? Array.Empty<FinanceTaxCalculationSnapshotDto>(),
+                validation.SourceDocumentId,
+                now,
+                postedByUserId);
+        }
         foreach (var replica in parallelReplicas)
         {
             _context.JournalEntries.Add(replica.JournalEntry);
@@ -288,10 +363,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             Description = $"Exact AccountingEvent reversal of {journal.JournalEntryNumber}: {reason.Trim()}",
             PostingDate = reversalDate.Date, JournalType = "System Generated",
             AccountingBookCode = original.BookClassification, FunctionalCurrencyCode = original.FunctionalCurrencyCode,
-            IdempotencyKey = idempotencyKey, ReturnExistingOnDuplicate = true,
+            IdempotencyKey = idempotencyKey, FinanceRoundingEvidenceId = original.FinanceRoundingEvidenceId,
+            ReturnExistingOnDuplicate = true,
             Lines = journal.Transactions.OrderBy(item => item.LineNumber).Select(item => new FinancePostingLineDto
             {
                 AccountId = item.AccountId, SourceDocumentLineId = item.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = item.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = item.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = item.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = item.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {item.Description}", DebitAmount = item.CreditAmount,
                 CreditAmount = item.DebitAmount, TransactionCurrency = item.TransactionCurrency,
                 ForeignCurrencyAmount = item.ForeignCurrencyAmount, ExchangeRate = item.ExchangeRate,
@@ -414,6 +494,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 AccountId = t.AccountId,
                 SourceDocumentLineId = t.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = t.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = t.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = t.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = t.CommercialQuantityRoundingIncrement,
                 Description = $"Reversal: {t.Description}",
                 DebitAmount = t.CreditAmount,
                 CreditAmount = t.DebitAmount,
@@ -435,6 +519,43 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             .ToList();
         var resolvedReversalDate = reversalDate?.Date
             ?? await ResolveDefaultReversalDateAsync(tenantId, cancellationToken);
+        var taxSnapshots = await _context.Set<TaxCalculation>()
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.DocumentType == postingEvent.SourceDocumentType
+                && item.DocumentId == postingEvent.SourceDocumentId
+                && !item.IsDeleted)
+            .OrderBy(item => item.AllocationSequence)
+            .ThenBy(item => item.DocumentLineId)
+            .ThenBy(item => item.CalculationOrder)
+            .ThenBy(item => item.TaxId)
+            .Select(item => new FinanceTaxCalculationSnapshotDto
+            {
+                DocumentType = item.DocumentType,
+                DocumentId = item.DocumentId,
+                DocumentLineId = item.DocumentLineId,
+                TaxId = item.TaxId,
+                TaxGroupId = item.TaxGroupId,
+                PostingAccountId = item.PostingAccountId,
+                CurrencyCode = item.CurrencyCode,
+                CurrencyDecimalPlaces = item.CurrencyDecimalPlaces,
+                BaseAmount = -item.BaseAmount,
+                TaxableAmount = -item.TaxableAmount,
+                TaxRate = item.TaxRate,
+                TaxAmount = -item.TaxAmount,
+                RawTaxAmount = -item.RawTaxAmount,
+                RoundingAdjustment = -item.RoundingAdjustment,
+                AllocationSequence = item.AllocationSequence,
+                TaxRoundingScope = item.TaxRoundingScope,
+                TaxRoundingMethod = item.TaxRoundingMethod,
+                TaxRoundingIncrement = item.TaxRoundingIncrement,
+                CompoundBasis = item.CompoundBasis,
+                CalculationOrder = item.CalculationOrder,
+                CalculationDate = resolvedReversalDate,
+                IsManualOverride = item.IsManualOverride,
+                OverrideReason = item.OverrideReason
+            })
+            .ToListAsync(cancellationToken);
 
         return new FinanceReversalPlanDto
         {
@@ -444,7 +565,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             PostingAction = "Reverse",
             ReversalDate = resolvedReversalDate,
             Reason = reason.Trim(),
-            ReversalLines = lines
+            ReversalLines = lines,
+            ReversalTaxCalculationSnapshots = taxSnapshots
         };
     }
 
@@ -479,14 +601,99 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             AccountingBookCode = original.BookClassification,
             FunctionalCurrencyCode = original.FunctionalCurrencyCode,
             IdempotencyKey = $"exact-reversal:{postingEventId:N}",
+            FinanceRoundingEvidenceId = original.FinanceRoundingEvidenceId,
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines
+            Lines = plan.ReversalLines,
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                "FinancePostingEventReversal",
+                postingEventId)
         };
         // Only this server-derived command can admit inactive historical book mappings. Ordinary
         // V2 requests cannot set or influence the exception.
         return await PostCoreAsync(request, request.AccountingBookCode, producerContext: null,
             allowHistoricalMappingException: true, cancellationToken);
     }
+
+    private void AddReversalTaxSnapshots(
+        Guid tenantId,
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        Guid sourceDocumentId,
+        DateTime now,
+        Guid? actorId)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.DocumentType)
+                || snapshot.DocumentId != sourceDocumentId)
+            {
+                throw new InvalidOperationException(
+                    "Reversal tax evidence must be bound to the reversal source document.");
+            }
+
+            _context.Set<TaxCalculation>().Add(new TaxCalculation
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                DocumentType = snapshot.DocumentType,
+                DocumentId = snapshot.DocumentId,
+                DocumentLineId = snapshot.DocumentLineId,
+                TaxId = snapshot.TaxId,
+                TaxGroupId = snapshot.TaxGroupId,
+                PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                BaseAmount = snapshot.BaseAmount,
+                TaxableAmount = snapshot.TaxableAmount,
+                TaxRate = snapshot.TaxRate,
+                TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+                CompoundBasis = snapshot.CompoundBasis,
+                CalculationOrder = snapshot.CalculationOrder,
+                CalculationDate = snapshot.CalculationDate,
+                IsManualOverride = snapshot.IsManualOverride,
+                OverrideReason = snapshot.OverrideReason,
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName,
+                CreatedById = actorId
+            });
+        }
+    }
+
+    private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        string documentType,
+        Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = documentType,
+            DocumentId = documentId,
+            DocumentLineId = snapshot.DocumentLineId,
+            TaxId = snapshot.TaxId,
+            TaxGroupId = snapshot.TaxGroupId,
+            PostingAccountId = snapshot.PostingAccountId,
+            CurrencyCode = snapshot.CurrencyCode,
+            CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+            BaseAmount = snapshot.BaseAmount,
+            TaxableAmount = snapshot.TaxableAmount,
+            TaxRate = snapshot.TaxRate,
+            TaxAmount = snapshot.TaxAmount,
+            RawTaxAmount = snapshot.RawTaxAmount,
+            RoundingAdjustment = snapshot.RoundingAdjustment,
+            AllocationSequence = snapshot.AllocationSequence,
+            TaxRoundingScope = snapshot.TaxRoundingScope,
+            TaxRoundingMethod = snapshot.TaxRoundingMethod,
+            TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+            CompoundBasis = snapshot.CompoundBasis,
+            CalculationOrder = snapshot.CalculationOrder,
+            CalculationDate = snapshot.CalculationDate,
+            IsManualOverride = snapshot.IsManualOverride,
+            OverrideReason = snapshot.OverrideReason
+        }).ToArray();
 
     private async Task<DateTime> ResolveDefaultReversalDateAsync(
         Guid tenantId,
@@ -566,8 +773,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             var existingLine = existingLines[i];
             var requestLine = validation.Lines[i];
             if (existingLine.AccountId != requestLine.AccountId ||
-                RoundMoney(existingLine.DebitAmount) != requestLine.DebitAmount ||
-                RoundMoney(existingLine.CreditAmount) != requestLine.CreditAmount)
+                RoundMoney(existingLine.DebitAmount, validation.FunctionalDecimalPlaces) != requestLine.DebitAmount ||
+                RoundMoney(existingLine.CreditAmount, validation.FunctionalDecimalPlaces) != requestLine.CreditAmount)
             {
                 throw new InvalidOperationException("Existing journal lines do not match the posting request.");
             }
@@ -604,6 +811,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             transaction.SourceModule = validation.SourceModule;
             transaction.SourceDocumentId = validation.SourceDocumentId;
             transaction.SourceDocumentLineId = requestLine.SourceDocumentLineId;
+            transaction.CommercialUnitOfMeasureId = requestLine.CommercialUnitOfMeasureId;
+            transaction.CommercialUnitOfMeasureCode = requestLine.CommercialUnitOfMeasureCode;
+            transaction.CommercialQuantityDecimalPlaces = requestLine.CommercialQuantityDecimalPlaces;
+            transaction.CommercialQuantityRoundingIncrement = requestLine.CommercialQuantityRoundingIncrement;
             transaction.SourceDocumentType = validation.SourceDocumentType;
             transaction.Description = requestLine.Description ?? validation.Description;
             transaction.SourceReferenceNumber = requestLine.SourceReferenceNumber ?? validation.SourceDocumentReference;
@@ -686,6 +897,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 TenantId = tenantId,
                 AccountId = line.AccountId,
                 SourceDocumentLineId = line.SourceDocumentLineId,
+                CommercialUnitOfMeasureId = line.CommercialUnitOfMeasureId,
+                CommercialUnitOfMeasureCode = line.CommercialUnitOfMeasureCode,
+                CommercialQuantityDecimalPlaces = line.CommercialQuantityDecimalPlaces,
+                CommercialQuantityRoundingIncrement = line.CommercialQuantityRoundingIncrement,
                 JournalEntryId = journalEntry.Id,
                 TransactionDate = validation.PostingDate,
                 Description = line.Description ?? validation.Description,
@@ -804,6 +1019,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 || a.ForeignCurrencyAmount != b.ForeignCurrencyAmount || a.ExchangeRateId != b.ExchangeRateId
                 || a.ExchangeRate != b.ExchangeRate || a.ExchangeRateDate != b.ExchangeRateDate
                 || a.SourceDocumentLineId != b.SourceDocumentLineId
+                || a.CommercialUnitOfMeasureId != b.CommercialUnitOfMeasureId
+                || a.CommercialQuantityDecimalPlaces != b.CommercialQuantityDecimalPlaces
+                || a.CommercialQuantityRoundingIncrement != b.CommercialQuantityRoundingIncrement
+                || !string.Equals(a.CommercialUnitOfMeasureCode, b.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.ExchangeRateSource, b.ExchangeRateSource, StringComparison.Ordinal)
                 || !string.Equals(a.TransactionCurrency, b.TransactionCurrency, StringComparison.OrdinalIgnoreCase)
                 || !string.Equals(a.SourceReferenceNumber, b.SourceReferenceNumber, StringComparison.Ordinal)
@@ -870,6 +1089,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             PostingAction = validation.PostingAction,
             SourceDocumentReference = validation.SourceDocumentReference,
             IdempotencyKey = validation.IdempotencyKey,
+            FinanceRoundingEvidenceId = validation.FinanceRoundingEvidenceId,
             RequestFingerprintVersion = validation.RequestFingerprintVersion,
             RequestFingerprint = validation.RequestFingerprint,
             JournalEntryId = journalEntryId,
@@ -921,12 +1141,26 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         if (books.Count == 0) return Array.Empty<ParallelReplica>();
 
         var sourceAccountIds = primaryJournal.Transactions.Select(item => item.AccountId).Distinct().ToArray();
+        var persistedSnapshotIds = primaryJournal.Transactions
+            .Where(item => item.FinanceDimensionSnapshotId.HasValue && item.FinanceDimensionSnapshot is null)
+            .Select(item => item.FinanceDimensionSnapshotId!.Value)
+            .Distinct()
+            .ToArray();
+        var persistedSnapshots = persistedSnapshotIds.Length == 0
+            ? new Dictionary<Guid, FinanceDimensionSnapshot>()
+            : await _context.FinanceDimensionSnapshots.AsNoTracking()
+                .Include(item => item.Items)
+                .Where(item => item.TenantId == tenantId && persistedSnapshotIds.Contains(item.Id) && !item.IsDeleted)
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
         var replicas = new List<ParallelReplica>(books.Count);
         foreach (var book in books)
         {
+            await EnsureBookYearIsOpenAsync(tenantId, book.Id, validation.FiscalPeriod.FiscalYearId, cancellationToken);
             if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode)
                 || string.Equals(book.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.Ordinal))
                 throw new InvalidOperationException($"PARALLEL_CURRENCY_INVALID: Parallel book {book.Code} must use a foreign currency.");
+            var bookDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, book.FunctionalCurrencyCode, cancellationToken);
 
             var mappedIds = await _context.AccountAccountingBooks.AsNoTracking()
                 .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
@@ -949,8 +1183,18 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
             var lines = primaryJournal.Transactions.OrderBy(item => item.LineNumber).Select(source =>
             {
-                var debit = RoundMoney(source.DebitAmount * rate.Rate);
-                var credit = RoundMoney(source.CreditAmount * rate.Rate);
+                var debit = RoundMoney(source.DebitAmount * rate.Rate, bookDecimalPlaces);
+                var credit = RoundMoney(source.CreditAmount * rate.Rate, bookDecimalPlaces);
+                FinanceDimensionSnapshot? sourceSnapshot = source.FinanceDimensionSnapshot;
+                if (source.FinanceDimensionSnapshotId.HasValue && sourceSnapshot is null
+                    && !persistedSnapshots.TryGetValue(source.FinanceDimensionSnapshotId.Value, out sourceSnapshot))
+                    throw new InvalidOperationException(
+                        $"PARALLEL_DIMENSION_EVIDENCE_MISSING: Source line {source.LineNumber} has no resolvable immutable dimension snapshot.");
+                var replicaSnapshot = sourceSnapshot is null
+                    ? null
+                    : CloneParallelDimensionSnapshot(sourceSnapshot, tenantId, now, postedByUserId);
+                if (replicaSnapshot is not null)
+                    _context.FinanceDimensionSnapshots.Add(replicaSnapshot);
                 return new AccountTransaction
                 {
                     Id = Guid.NewGuid(), TenantId = tenantId, AccountId = source.AccountId,
@@ -964,9 +1208,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     ExchangeRateId = rate.Id, ExchangeRate = rate.Rate,
                     ExchangeRateSource = rate.Source, ExchangeRateDate = rate.Date,
                     FinanceDimensionSetId = source.FinanceDimensionSetId,
-                    FinanceDimensionSnapshotId = source.FinanceDimensionSnapshotId,
+                    FinanceDimensionSnapshotId = replicaSnapshot?.Id,
                     SourceModule = source.SourceModule, SourceDocumentId = source.SourceDocumentId,
                     SourceDocumentLineId = source.SourceDocumentLineId,
+                    CommercialUnitOfMeasureId = source.CommercialUnitOfMeasureId,
+                    CommercialUnitOfMeasureCode = source.CommercialUnitOfMeasureCode,
+                    CommercialQuantityDecimalPlaces = source.CommercialQuantityDecimalPlaces,
+                    CommercialQuantityRoundingIncrement = source.CommercialQuantityRoundingIncrement,
                     SourceDocumentType = source.SourceDocumentType,
                     SourceReferenceNumber = source.SourceReferenceNumber,
                     BookClassification = book.Code, AccountingBookId = book.Id,
@@ -978,9 +1226,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 };
             }).ToList();
 
-            var debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
-            var creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
-            var residual = RoundMoney(debitTotal - creditTotal);
+            var debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount), bookDecimalPlaces);
+            var creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount), bookDecimalPlaces);
+            var residual = RoundMoney(debitTotal - creditTotal, bookDecimalPlaces);
             if (residual != 0m)
             {
                 if (!book.CurrencyRoundingAccountId.HasValue)
@@ -1009,8 +1257,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     TransactionTag = "Parallel rounding", CreatedAt = now,
                     CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId
                 });
-                debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
-                creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
+                debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount), bookDecimalPlaces);
+                creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount), bookDecimalPlaces);
             }
 
             var journal = new JournalEntry
@@ -1066,6 +1314,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 SourceDocumentType = validation.SourceDocumentType, SourceDocumentId = validation.SourceDocumentId,
                 PostingAction = validation.PostingAction, SourceDocumentReference = validation.SourceDocumentReference,
                 IdempotencyKey = ParallelIdempotencyKey(validation.IdempotencyKey, book.Code),
+                FinanceRoundingEvidenceId = validation.FinanceRoundingEvidenceId,
                 RequestFingerprintVersion = "FINPOST-PARALLEL-V1", RequestFingerprint = fingerprint,
                 JournalEntryId = journal.Id, PostingStatus = PostedStatus,
                 PostingDate = validation.PostingDate, RequestedAt = now, PostedAt = now,
@@ -1087,9 +1336,59 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         return replicas;
     }
 
+    private FinanceDimensionSnapshot CloneParallelDimensionSnapshot(
+        FinanceDimensionSnapshot source,
+        Guid tenantId,
+        DateTime now,
+        Guid? actorId)
+    {
+        var clone = new FinanceDimensionSnapshot
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            FinanceDimensionSetId = source.FinanceDimensionSetId,
+            CombinationHashSnapshot = source.CombinationHashSnapshot,
+            DisplayValueSnapshot = source.DisplayValueSnapshot,
+            SnapshotSource = "ParallelReplica", SnapshotCapturedAt = now,
+            SnapshotQuality = source.SnapshotQuality,
+            HistoricalNameReconstructed = source.HistoricalNameReconstructed,
+            RuleEvidenceHash = source.RuleEvidenceHash,
+            ProducerModule = source.ProducerModule,
+            SourceRoute = source.SourceRoute,
+            SourceDocumentType = source.SourceDocumentType,
+            ContractVersion = source.ContractVersion,
+            CreatedAt = now, CreatedBy = _currentUserService.UserName, CreatedById = actorId
+        };
+        foreach (var item in source.Items)
+        {
+            clone.Items.Add(new FinanceDimensionSnapshotItem
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, FinanceDimensionSnapshotId = clone.Id,
+                FinanceDimensionDefinitionId = item.FinanceDimensionDefinitionId,
+                FinanceDimensionValueId = item.FinanceDimensionValueId,
+                DimensionCodeSnapshot = item.DimensionCodeSnapshot,
+                DimensionNameSnapshot = item.DimensionNameSnapshot,
+                DimensionValueCodeSnapshot = item.DimensionValueCodeSnapshot,
+                DimensionValueNameSnapshot = item.DimensionValueNameSnapshot,
+                FinanceDimensionAccountRuleId = item.FinanceDimensionAccountRuleId,
+                RuleFamilyIdSnapshot = item.RuleFamilyIdSnapshot,
+                RuleVersionSnapshot = item.RuleVersionSnapshot,
+                RuleTypeSnapshot = item.RuleTypeSnapshot,
+                RuleEffectiveDateSnapshot = item.RuleEffectiveDateSnapshot,
+                RuleExpiryDateSnapshot = item.RuleExpiryDateSnapshot,
+                SnapshotSource = "ParallelReplica", SnapshotCapturedAt = now,
+                SnapshotQuality = item.SnapshotQuality,
+                HistoricalNameReconstructed = item.HistoricalNameReconstructed,
+                CreatedAt = now, CreatedBy = _currentUserService.UserName, CreatedById = actorId
+            });
+        }
+        return clone;
+    }
+
     private async Task<ParallelRate> ResolveParallelRateAsync(Guid tenantId, string sourceCurrency,
         string targetCurrency, DateTime accountingDate, CancellationToken cancellationToken)
     {
+        var accountingDay = accountingDate.Date;
+        var nextAccountingDay = accountingDay.AddDays(1);
         var rate = await _context.ExchangeRates
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive
                 && (item.ApprovalStatus == RateApprovalStatus.Approved
@@ -1097,13 +1396,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 && item.BaseCurrencyCode == sourceCurrency && item.TargetCurrencyCode == targetCurrency
                 && item.QuoteSide == ExchangeRateQuoteSide.Mid
                 && item.RateType == ExchangeRateType.Daily
-                && item.EffectiveDate <= accountingDate
-                && (item.EndDate == null || item.EndDate >= accountingDate))
+                && item.EffectiveDate >= accountingDay
+                && item.EffectiveDate < nextAccountingDay
+                && (item.EndDate == null || item.EndDate >= accountingDay))
             .OrderByDescending(item => item.EffectiveDate).ThenByDescending(item => item.Priority)
             .ThenByDescending(item => item.CreatedDate)
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(
-                $"PARALLEL_EXCHANGE_RATE_REQUIRED: Posting was not completed because the active {targetCurrency} Parallel book requires an approved {sourceCurrency}/{targetCurrency} exchange rate for accounting date {accountingDate:yyyy-MM-dd}. No Primary or Parallel ledger posting was committed. Add and approve the missing rate under Finance > Exchange Rates, then retry the posting action.");
+                $"PARALLEL_EXCHANGE_RATE_REQUIRED: Posting was not completed because the active {targetCurrency} Parallel book requires an approved exact-date Daily {sourceCurrency}/{targetCurrency} exchange rate for accounting date {accountingDate:yyyy-MM-dd}. No Primary or Parallel ledger posting was committed. Add and approve the missing rate under Finance > Exchange Rates, then retry the posting action.");
         // Canonical storage is source-to-target: 1 BaseCurrency = Rate TargetCurrency.
         if (rate.Rate <= 0m)
             throw new InvalidOperationException("PARALLEL_EXCHANGE_RATE_INVALID: Approved Parallel source-to-target rate must be greater than zero.");
@@ -1252,9 +1552,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 .OrderByDescending(t => t.TransactionDate)
                 .ThenByDescending(t => t.LineNumber)
                 .First();
+            var transactionDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, group.Key.CurrencyCode, cancellationToken);
+            var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, lastLine.FunctionalCurrencyCode, cancellationToken);
 
-            link.ForeignCurrencyBalance = RoundMoney(link.ForeignCurrencyBalance + foreignDelta);
-            link.BaseCurrencyEquivalent = RoundMoney(link.BaseCurrencyEquivalent + functionalDelta);
+            link.ForeignCurrencyBalance = RoundMoney(
+                link.ForeignCurrencyBalance + foreignDelta, transactionDecimalPlaces);
+            link.BaseCurrencyEquivalent = RoundMoney(
+                link.BaseCurrencyEquivalent + functionalDelta, functionalDecimalPlaces);
             link.HasTransactionHistory = true;
             link.TransactionCount += groupLines.Count;
             link.FirstTransactionDate = link.FirstTransactionDate.HasValue
@@ -1289,8 +1595,15 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         string accountingBookCode,
         FinancePostingProducerContext? producerContext,
         bool allowHistoricalMappingException,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        YearEndBookCloseCycle? yearEndCycle = null)
     {
+        YearEndClosingPlan? yearEndPlan = null;
+        if (yearEndCycle?.Status == "Closing")
+        {
+            yearEndPlan = await YearEndClosingPlan.BuildAsync(_context, yearEndCycle, cancellationToken);
+            yearEndPlan.RequireExactLines(request.Lines);
+        }
         if (!await _context.Tenants.AnyAsync(t => t.Id == tenantId && !t.IsDeleted, cancellationToken))
         {
             throw new InvalidOperationException("Finance tenant context is invalid.");
@@ -1306,6 +1619,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             sourceModule,
             request.OriginModuleCode);
         var sourceDocumentType = NormalizeRequired(request.SourceDocumentType, "Source document type", 100);
+        ValidateTaxCalculationSnapshots(request.TaxCalculationSnapshots);
+        if (yearEndCycle == null && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Year-end postings must use the governed book-close cycle workflow.");
         var route = producerContext?.Definition
             ?? FinanceDimensionRouteCatalog.MatchLegacyPosting(sourceModule, sourceDocumentType);
         if (producerContext is not null
@@ -1341,7 +1658,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
-        if (accountingBook.BookType == AccountingBookType.ParallelFull)
+        if (accountingBook.BookType == AccountingBookType.ParallelFull && yearEndCycle == null)
             throw new InvalidOperationException("PARALLEL_DIRECT_POSTING_FORBIDDEN: Parallel books accept only immutable system-generated replicas of Primary postings.");
         if (accountingBook.BookType == AccountingBookType.PrimaryFull
             && (accountingBook.EffectiveFromUtc.HasValue || accountingBook.EffectiveToUtc.HasValue))
@@ -1360,6 +1677,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 ?? throw new InvalidOperationException("DELTA_BASE_CURRENCY_REQUIRED: Delta base-book currency authority is missing.")
             : accountingBook.FunctionalCurrencyCode
                 ?? throw new InvalidOperationException("BOOK_FUNCTIONAL_CURRENCY_REQUIRED: Full-book currency authority is missing.");
+        var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            tenantId, functionalCurrency, cancellationToken);
         if (!string.Equals(requestedFunctionalCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Posting functional currency does not match the selected book currency.");
@@ -1420,16 +1739,50 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
         // Year-end closing may target the closed final period, but an explicit period lock is
         // still authoritative and must be lifted through the controlled reopen process first.
-        var isYearEndClosePosting = request.AllowPostingToClosedPeriod
+        var isYearEndClosePosting = yearEndCycle != null && request.AllowPostingToClosedPeriod
             && !fiscalPeriod.IsLocked
             && string.Equals(sourceModule, "GL", StringComparison.OrdinalIgnoreCase)
             && (string.Equals(sourceDocumentType, "YearEndClose", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(sourceDocumentType, "YearEndCloseReversal", StringComparison.OrdinalIgnoreCase));
 
+        if (!isYearEndClosePosting)
+        {
+            var accountingBookPeriod = await _context.AccountingBookPeriods
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId
+                    && item.AccountingBookId == accountingBook.Id
+                    && item.FiscalPeriodId == fiscalPeriod.Id
+                    && !item.IsDeleted,
+                    cancellationToken);
+            if (accountingBookPeriod == null)
+                throw new InvalidOperationException(
+                    "ACCOUNTING_BOOK_PERIOD_REQUIRED: The selected accounting book has no governed authority for this fiscal period.");
+            if (accountingBookPeriod.PeriodStatus != AccountingBookPeriodStatus.Open)
+            {
+                await RecordPostingBlockedByBookPeriodAuditAsync(
+                    tenantId,
+                    request,
+                    accountingBook,
+                    accountingBookPeriod,
+                    fiscalPeriod,
+                    postingDate,
+                    cancellationToken);
+                throw new InvalidOperationException(
+                    $"ACCOUNTING_BOOK_PERIOD_NOT_OPEN: Accounting book '{accountingBook.Code}' is {accountingBookPeriod.PeriodStatus} for fiscal period '{fiscalPeriod.PeriodCode}'.");
+            }
+        }
+
+        if (yearEndCycle == null)
+            await EnsureBookYearIsOpenAsync(tenantId, accountingBook.Id, fiscalPeriod.FiscalYearId, cancellationToken);
+
         if ((!fiscalPeriod.IsOpen || fiscalPeriod.IsClosed || fiscalPeriod.IsLocked) && !isYearEndClosePosting)
         {
             await RecordPostingBlockedByPeriodAuditAsync(tenantId, request, fiscalPeriod, postingDate, cancellationToken);
-            throw new InvalidOperationException("Posting period is not open.");
+            var periodState = fiscalPeriod.IsLocked ? "locked" : fiscalPeriod.IsClosed ? "closed" : "not open";
+            throw new InvalidOperationException(
+                $"Posting period is not open. Posting date {postingDate:yyyy-MM-dd}, book '{accountingBook.Code}', " +
+                $"fiscal period '{fiscalPeriod.PeriodCode}' ({fiscalPeriod.PeriodName}) is {periodState}. " +
+                "Ask Finance to open the tenant fiscal period through the approved workflow, or correct the document date.");
         }
 
         if (!isYearEndClosePosting)
@@ -1461,6 +1814,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 $"Future-dated posting is not allowed for fiscal period '{fiscalPeriod.PeriodCode}'.");
         }
 
+        await InvoiceCashRoundingPostingAdapter.ApplyAsync(
+            _context, tenantId, request, functionalCurrency, functionalDecimalPlaces, cancellationToken);
+
         var requestedLines = request.Lines?.ToList() ?? new List<FinancePostingLineDto>();
         if (requestedLines.Count == 0)
         {
@@ -1481,8 +1837,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 throw new InvalidOperationException("Posting line account is required.");
             }
 
-            var debit = RoundMoney(line.DebitAmount);
-            var credit = RoundMoney(line.CreditAmount);
+            var lineCurrency = NormalizeCurrency(line.TransactionCurrency, "Transaction currency", functionalCurrency);
+            var transactionDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+                tenantId, lineCurrency, cancellationToken);
+            var debit = RoundMoney(line.DebitAmount, functionalDecimalPlaces);
+            var credit = RoundMoney(line.CreditAmount, functionalDecimalPlaces);
             if (debit < 0 || credit < 0)
             {
                 throw new InvalidOperationException("Posting amounts cannot be negative.");
@@ -1493,7 +1852,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 throw new InvalidOperationException("Each posting line must contain either a debit or a credit amount.");
             }
 
-            var lineCurrency = NormalizeCurrency(line.TransactionCurrency, "Transaction currency", functionalCurrency);
             var exchangeRate = line.ExchangeRate;
             var foreignAmount = line.ForeignCurrencyAmount;
             var transactionDebit = line.TransactionDebitAmount;
@@ -1548,6 +1906,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                     line.ExchangeRateId,
                     line.ExchangeRate,
                     ratePolicy,
+                    line.TransactionTag,
                     ratePolicySettings?.RequireExchangeRateOverrideApproval ?? true,
                     request,
                     cancellationToken);
@@ -1559,6 +1918,9 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 exchangeRateDate = rateSnapshot.RateDate;
                 transactionDebit ??= debit > 0 ? foreignAmount : 0m;
                 transactionCredit ??= credit > 0 ? foreignAmount : 0m;
+                transactionDebit = RoundMoney(transactionDebit.GetValueOrDefault(), transactionDecimalPlaces);
+                transactionCredit = RoundMoney(transactionCredit.GetValueOrDefault(), transactionDecimalPlaces);
+                foreignAmount = RoundMoney(foreignAmount.Value, transactionDecimalPlaces);
 
                 if ((transactionDebit.GetValueOrDefault() > 0 && transactionCredit.GetValueOrDefault() > 0)
                     || (transactionDebit.GetValueOrDefault() == 0 && transactionCredit.GetValueOrDefault() == 0))
@@ -1568,7 +1930,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
                 var expectedFunctional = RoundMoney((transactionDebit.GetValueOrDefault() > 0
                     ? transactionDebit.GetValueOrDefault()
-                    : transactionCredit.GetValueOrDefault()) * exchangeRate.Value);
+                    : transactionCredit.GetValueOrDefault()) * exchangeRate.Value, functionalDecimalPlaces);
                 var actualFunctional = debit > 0 ? debit : credit;
                 if (expectedFunctional != actualFunctional)
                 {
@@ -1583,6 +1945,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             {
                 transactionDebit ??= debit > 0 ? debit : 0m;
                 transactionCredit ??= credit > 0 ? credit : 0m;
+                transactionDebit = RoundMoney(transactionDebit.GetValueOrDefault(), transactionDecimalPlaces);
+                transactionCredit = RoundMoney(transactionCredit.GetValueOrDefault(), transactionDecimalPlaces);
                 foreignAmount = null;
                 exchangeRateId = null;
                 exchangeRate = null;
@@ -1590,7 +1954,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 exchangeRateDate = null;
             }
 
-            var dimensionSet = await ResolveDimensionSetAsync(
+            // Only a validated immutable close-cycle plan may carry historical coding into
+            // a new nominal/equity transfer. Ordinary producers retain the existing resolver.
+            var dimensionSet = yearEndPlan != null
+                ? ResolveYearEndDimensionSet(yearEndPlan.Sources[line.SourceDocumentLineId!.Value])
+                : await ResolveDimensionSetAsync(
                 tenantId,
                 postingDate,
                 request,
@@ -1601,9 +1969,25 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 credit,
                 cancellationToken);
 
+            var carriesCommercialUomEvidence = line.CommercialUnitOfMeasureId.HasValue ||
+                !string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                line.CommercialQuantityDecimalPlaces.HasValue ||
+                line.CommercialQuantityRoundingIncrement.HasValue;
+            if (carriesCommercialUomEvidence && (!line.CommercialUnitOfMeasureId.HasValue ||
+                string.IsNullOrWhiteSpace(line.CommercialUnitOfMeasureCode) ||
+                !line.CommercialQuantityDecimalPlaces.HasValue))
+                throw new InvalidOperationException("Commercial UOM posting evidence must include stable ID, code, and decimal precision together.");
+            if (carriesCommercialUomEvidence)
+                ErpSystem.Core.Inventory.CommercialQuantityPolicy.ValidateConfiguration(
+                    line.CommercialQuantityDecimalPlaces!.Value, line.CommercialQuantityRoundingIncrement);
+
             normalizedLines.Add(new ValidatedPostingLine(
                 line.AccountId,
                 line.SourceDocumentLineId,
+                line.CommercialUnitOfMeasureId,
+                NormalizeOptional(line.CommercialUnitOfMeasureCode, 20, "Commercial UOM code"),
+                line.CommercialQuantityDecimalPlaces,
+                line.CommercialQuantityRoundingIncrement,
                 NormalizeOptional(line.Description, 500, "Line description"),
                 debit,
                 credit,
@@ -1628,8 +2012,8 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             throw new InvalidOperationException("Posting must contain at least one debit and one credit line.");
         }
 
-        var totalDebit = RoundMoney(normalizedLines.Sum(l => l.DebitAmount));
-        var totalCredit = RoundMoney(normalizedLines.Sum(l => l.CreditAmount));
+        var totalDebit = RoundMoney(normalizedLines.Sum(l => l.DebitAmount), functionalDecimalPlaces);
+        var totalCredit = RoundMoney(normalizedLines.Sum(l => l.CreditAmount), functionalDecimalPlaces);
         if (totalDebit != totalCredit)
         {
             throw new InvalidOperationException("Posting is not balanced. Total debits must equal total credits.");
@@ -1712,6 +2096,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         foreach (var line in normalizedLines)
         {
             var account = accounts[line.AccountId];
+            // Parallel year-end transfers close that book's functional balances; they do not
+            // introduce a new foreign transaction into the primary account's native ledger.
+            if (yearEndCycle != null && accountingBook.BookType == AccountingBookType.ParallelFull
+                && string.Equals(line.TransactionCurrency, functionalCurrency, StringComparison.Ordinal))
+                continue;
             var accountCurrency = NormalizeCurrency(account.CurrencyCode, "Account currency", functionalCurrency);
             if (!account.IsMultiCurrency
                 && !string.Equals(accountCurrency, line.TransactionCurrency, StringComparison.OrdinalIgnoreCase))
@@ -1794,6 +2183,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             normalizedAccountingBookCode,
             accountingBook.Id,
             functionalCurrency,
+            functionalDecimalPlaces,
             fiscalPeriod,
             normalizedLines,
             totalDebit,
@@ -1807,11 +2197,39 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             NormalizeOptional(request.ExchangeRateOverrideReason, 500, "Exchange-rate override reason"),
             request.ExchangeRateOverrideApprovedByUserId,
             request.ExchangeRateOverrideApprovedAt,
+            request.FinanceRoundingEvidenceId,
             budgetReservationIds,
             budgetReservationSourceDocumentType,
             RequestFingerprintVersion,
             requestFingerprint,
             allowHistoricalMappingException);
+    }
+
+    private static void ValidateTaxCalculationSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots)
+    {
+        foreach (var snapshot in snapshots)
+        {
+            if (string.IsNullOrWhiteSpace(snapshot.CurrencyCode)
+                || !snapshot.CurrencyDecimalPlaces.HasValue
+                || !snapshot.RawTaxAmount.HasValue
+                || !snapshot.RoundingAdjustment.HasValue
+                || !snapshot.AllocationSequence.HasValue
+                || !snapshot.TaxRoundingScope.HasValue
+                || !snapshot.TaxRoundingMethod.HasValue
+                || !snapshot.TaxRoundingIncrement.HasValue)
+                throw new InvalidOperationException(
+                    "FINANCE_TAX_EVIDENCE_INCOMPLETE: posting tax evidence must include currency precision, signed raw/rounded delta, allocation sequence, and rounding policy.");
+
+            var currencyCode = snapshot.CurrencyCode.Trim().ToUpperInvariant();
+            if (currencyCode.Length != 3)
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence currency code must contain three characters.");
+            CurrencyMinorUnitPolicy.Validate(currencyCode, snapshot.CurrencyDecimalPlaces.Value);
+            if (snapshot.TaxRoundingIncrement.Value <= 0m
+                || !Enum.IsDefined(snapshot.TaxRoundingScope.Value)
+                || !Enum.IsDefined(snapshot.TaxRoundingMethod.Value))
+                throw new InvalidOperationException("FINANCE_TAX_EVIDENCE_INVALID: tax evidence rounding policy is invalid.");
+        }
     }
 
     private async Task<FiscalPeriod> ResolveFiscalPeriodAsync(
@@ -1841,6 +2259,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 cancellationToken);
 
         return period ?? throw new InvalidOperationException("No fiscal period covers the posting date for this tenant.");
+    }
+
+    private async Task EnsureBookYearIsOpenAsync(Guid tenantId, Guid bookId, Guid fiscalYearId, CancellationToken ct)
+    {
+        if (await _context.YearEndBookCloseCycles.AsNoTracking().AnyAsync(item => item.TenantId == tenantId
+            && item.AccountingBookId == bookId && item.FiscalYearId == fiscalYearId && item.Status != "Reopened", ct))
+            throw new InvalidOperationException("The accounting book is closed for this fiscal year. Reopen its year-end close cycle first.");
     }
 
     private async Task EnsureOriginModuleCanPostAsync(
@@ -2031,6 +2456,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         Guid? exchangeRateId,
         decimal? suppliedRate,
         ExchangeRatePolicy policy,
+        string? transactionTag,
         bool requireOverrideApproval,
         FinancePostingCommandDto request,
         CancellationToken cancellationToken)
@@ -2141,11 +2567,26 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             throw new InvalidOperationException("Exchange rate must be active and approved before posting.");
         }
 
+        // Ghana WHT is a GHS statutory liability measured at the exact-date Bank of Ghana
+        // reference rate, not at the commercial Daily rate used by the rest of the payment.
+        // Admit that rate only on the trusted AP vendor-payment WHT line; every other line and
+        // producer continues to use the ordinary policy/override approval boundary.
+        var isGovernedGhanaStatutoryWht =
+            string.Equals(request.SourceModule, "AP", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(request.SourceDocumentType, "VendorPayment", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(transactionTag, "AP-WHT", StringComparison.Ordinal) &&
+            rate.RateType == ExchangeRateType.GhanaStatutory &&
+            rate.QuoteSide == ExchangeRateQuoteSide.Mid &&
+            rate.EffectiveDate.Date == postingDate.Date &&
+            IsBankOfGhanaRateSource(rate.RateSource) &&
+            !string.IsNullOrWhiteSpace(rate.APIResponseMetadata);
+
         if (rate.RateType != policy.RateType || rate.QuoteSide != policy.QuoteSide)
         {
             // A reversal must reproduce the original immutable rate snapshot even
             // when the tenant's current policy has since changed.
-            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement)
+            if (!request.ReversalOfJournalEntryId.HasValue && !preservesHistoricalSourceMeasurement &&
+                !isGovernedGhanaStatutoryWht)
             {
                 EnsureExchangeRateOverrideApproval(request, requireOverrideApproval);
                 policyOverrideUsed = true;
@@ -2168,6 +2609,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
 
         return new ExchangeRateSnapshot(rate.Id, functionalMultiplier, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
     }
+
+    private static bool IsBankOfGhanaRateSource(string? source) =>
+        !string.IsNullOrWhiteSpace(source) &&
+        (source.Contains("Bank of Ghana", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(source.Trim(), "BoG", StringComparison.OrdinalIgnoreCase));
 
     private static ExchangeRateType ParseExchangeRateType(string? value, ExchangeRateType fallback)
     {
@@ -2500,6 +2946,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var requested = requestedLines[index];
             if (stored.AccountId != requested.AccountId
                 || stored.SourceDocumentLineId != requested.SourceDocumentLineId
+                || stored.CommercialUnitOfMeasureId != requested.CommercialUnitOfMeasureId
+                || stored.CommercialQuantityDecimalPlaces != requested.CommercialQuantityDecimalPlaces
+                || stored.CommercialQuantityRoundingIncrement != requested.CommercialQuantityRoundingIncrement
+                || !string.Equals(stored.CommercialUnitOfMeasureCode, requested.CommercialUnitOfMeasureCode, StringComparison.OrdinalIgnoreCase)
                 || stored.DebitAmount != requested.DebitAmount
                 || stored.CreditAmount != requested.CreditAmount
                 || stored.TransactionDebitAmount != requested.TransactionDebitAmount
@@ -2682,6 +3132,49 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             Comment = "Posting blocked because the accounting period is closed, locked, or not open.",
             Resource = "Finance.FiscalPeriod",
             ResourceId = fiscalPeriod.Id.ToString()
+        }, cancellationToken);
+    }
+
+    private async Task RecordPostingBlockedByBookPeriodAuditAsync(
+        Guid tenantId,
+        FinancePostingCommandDto request,
+        AccountingBook accountingBook,
+        AccountingBookPeriod accountingBookPeriod,
+        FiscalPeriod fiscalPeriod,
+        DateTime postingDate,
+        CancellationToken cancellationToken)
+    {
+        if (_financeAuditService == null)
+        {
+            return;
+        }
+
+        await _financeAuditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.PostingBlockedPeriodClosedLocked,
+            TenantId = tenantId,
+            SourceModule = request.SourceModule,
+            SourceDocumentType = request.SourceDocumentType,
+            SourceDocumentId = request.SourceDocumentId == Guid.Empty ? null : request.SourceDocumentId,
+            AfterValues = new
+            {
+                request.SourceModule,
+                request.SourceDocumentType,
+                request.SourceDocumentId,
+                request.PostingAction,
+                request.SourceDocumentReference,
+                PostingDate = postingDate,
+                FiscalPeriodId = fiscalPeriod.Id,
+                fiscalPeriod.PeriodCode,
+                fiscalPeriod.PeriodName,
+                AccountingBookId = accountingBook.Id,
+                accountingBook.Code,
+                AccountingBookPeriodId = accountingBookPeriod.Id,
+                accountingBookPeriod.PeriodStatus
+            },
+            Comment = "Posting blocked because the selected accounting book is not open for the fiscal period.",
+            Resource = "Finance.AccountingBookPeriod",
+            ResourceId = accountingBookPeriod.Id.ToString()
         }, cancellationToken);
     }
 
@@ -3015,6 +3508,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             var prefix = $"line[{lineIndex}]";
             AddGuid($"{prefix}.accountId", line.AccountId);
             AddGuid($"{prefix}.sourceDocumentLineId", line.SourceDocumentLineId);
+            AddGuid($"{prefix}.commercialUnitOfMeasureId", line.CommercialUnitOfMeasureId);
+            Add($"{prefix}.commercialUnitOfMeasureCode", line.CommercialUnitOfMeasureCode);
+            Add($"{prefix}.commercialQuantityDecimalPlaces", line.CommercialQuantityDecimalPlaces?.ToString(CultureInfo.InvariantCulture));
+            AddDecimal($"{prefix}.commercialQuantityRoundingIncrement", line.CommercialQuantityRoundingIncrement);
             Add($"{prefix}.description", line.Description);
             AddDecimal($"{prefix}.debitAmount", line.DebitAmount);
             AddDecimal($"{prefix}.creditAmount", line.CreditAmount);
@@ -3077,10 +3574,18 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             AddGuid($"{prefix}.taxId", item.TaxId);
             AddGuid($"{prefix}.taxGroupId", item.TaxGroupId);
             AddGuid($"{prefix}.postingAccountId", item.PostingAccountId);
+            Add($"{prefix}.currencyCode", item.CurrencyCode?.Trim().ToUpperInvariant());
+            AddInt($"{prefix}.currencyDecimalPlaces", item.CurrencyDecimalPlaces);
             AddDecimal($"{prefix}.baseAmount", item.BaseAmount);
             AddDecimal($"{prefix}.taxableAmount", item.TaxableAmount);
             AddDecimal($"{prefix}.taxRate", item.TaxRate);
             AddDecimal($"{prefix}.taxAmount", item.TaxAmount);
+            AddDecimal($"{prefix}.rawTaxAmount", item.RawTaxAmount);
+            AddDecimal($"{prefix}.roundingAdjustment", item.RoundingAdjustment);
+            AddInt($"{prefix}.allocationSequence", item.AllocationSequence);
+            AddInt($"{prefix}.taxRoundingScope", item.TaxRoundingScope.HasValue ? (int)item.TaxRoundingScope.Value : null);
+            AddInt($"{prefix}.taxRoundingMethod", item.TaxRoundingMethod.HasValue ? (int)item.TaxRoundingMethod.Value : null);
+            AddDecimal($"{prefix}.taxRoundingIncrement", item.TaxRoundingIncrement);
             AddInt($"{prefix}.compoundBasis", (int)item.CompoundBasis);
             AddInt($"{prefix}.calculationOrder", item.CalculationOrder);
             AddDate($"{prefix}.calculationDate", item.CalculationDate);
@@ -3113,9 +3618,32 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
             : null;
     }
 
-    private static decimal RoundMoney(decimal amount)
+    private static decimal RoundMoney(decimal amount, int decimalPlaces = 2) =>
+        CurrencyMinorUnitPolicy.Round(amount, decimalPlaces);
+
+    private async Task<int> ResolveCurrencyDecimalPlacesAsync(
+        Guid tenantId,
+        string currencyCode,
+        CancellationToken cancellationToken)
     {
-        return decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+        var normalized = NormalizeCurrency(currencyCode, "Currency");
+        var configured = await _context.Currencies
+            .AsNoTracking()
+            .Where(currency => currency.TenantId == tenantId
+                && currency.CurrencyCode == normalized
+                && !currency.IsDeleted)
+            .Select(currency => (int?)currency.DecimalPlaces)
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (configured.HasValue)
+        {
+            CurrencyMinorUnitPolicy.Validate(normalized, configured.Value);
+            return configured.Value;
+        }
+
+        return CurrencyMinorUnitPolicy.ExpectedDecimalPlaces(normalized)
+            ?? throw new InvalidOperationException(
+                $"Currency {normalized} must be configured with its ISO 4217 minor-unit precision before posting.");
     }
 
     private static decimal RoundRate(decimal amount)
@@ -3347,6 +3875,11 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
 
         return new ValidatedDimensionSet(dimensionSetId, combinationHash, displayValue, resolvedItems, true);
     }
+
+    private static ValidatedDimensionSet? ResolveYearEndDimensionSet(AccountTransaction source) =>
+        source.FinanceDimensionSnapshot != null ? ToValidatedDimensionSet(source.FinanceDimensionSnapshot)
+        : source.FinanceDimensionSet != null ? ToValidatedDimensionSet(source.FinanceDimensionSet, requiresInsert: false)
+        : null;
 
     private async Task EnsureDimensionSetsAsync(
         Guid tenantId,
@@ -3616,6 +4149,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string AccountingBookCode,
         Guid AccountingBookId,
         string FunctionalCurrencyCode,
+        int FunctionalDecimalPlaces,
         FiscalPeriod FiscalPeriod,
         IReadOnlyList<ValidatedPostingLine> Lines,
         decimal TotalDebitAmount,
@@ -3629,6 +4163,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string? ExchangeRateOverrideReason,
         Guid? ExchangeRateOverrideApprovedByUserId,
         DateTime? ExchangeRateOverrideApprovedAt,
+        Guid? FinanceRoundingEvidenceId,
         IReadOnlyList<Guid> BudgetReservationIds,
         string? BudgetReservationSourceDocumentType,
         string RequestFingerprintVersion,
@@ -3638,6 +4173,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
     private sealed record ValidatedPostingLine(
         Guid AccountId,
         Guid? SourceDocumentLineId,
+        Guid? CommercialUnitOfMeasureId,
+        string? CommercialUnitOfMeasureCode,
+        int? CommercialQuantityDecimalPlaces,
+        decimal? CommercialQuantityRoundingIncrement,
         string? Description,
         decimal DebitAmount,
         decimal CreditAmount,
@@ -3709,4 +4248,164 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         ExchangeRateType RateType,
         ExchangeRateQuoteSide QuoteSide,
         bool IsOverride);
+}
+
+internal static class YearEndTenantPeriodAuthority
+{
+    private const string SnapshotVersion = "TENANT-FISCAL-PERIOD-CLOSE-V2";
+
+    internal static async Task<string> CaptureAsync(
+        ApplicationDbContext context,
+        Guid tenantId,
+        Guid fiscalYearId,
+        CancellationToken cancellationToken = default)
+    {
+        var year = await context.FiscalYears.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == fiscalYearId && !item.IsDeleted,
+            cancellationToken)
+            ?? throw new InvalidOperationException("The tenant fiscal year is unavailable.");
+        if (year.IsLocked)
+            throw new InvalidOperationException("The tenant fiscal year is locked.");
+        if (year.IsClosed)
+            throw new InvalidOperationException("The tenant fiscal year is already globally closed.");
+
+        var periods = await context.FiscalPeriods.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.FiscalYearId == fiscalYearId && !item.IsDeleted)
+            .OrderBy(item => item.StartDate)
+            .ThenBy(item => item.EndDate)
+            .ThenBy(item => item.Id)
+            .ToListAsync(cancellationToken);
+        if (periods.Count == 0)
+            throw new InvalidOperationException("The fiscal year has no tenant fiscal periods.");
+
+        var expectedStart = year.StartDate.Date;
+        foreach (var period in periods)
+        {
+            if (period.StartDate.Date != expectedStart || period.EndDate.Date < period.StartDate.Date
+                || period.EndDate.Date > year.EndDate.Date)
+                throw new InvalidOperationException(
+                    "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+            expectedStart = period.EndDate.Date.AddDays(1);
+            if (!period.IsClosed || period.IsOpen || period.IsLocked
+                || !string.Equals(period.PeriodStatus, "Closed", StringComparison.Ordinal)
+                || period.ClosedByUserId == null || period.ClosedDate == null)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' is not an unlocked, consistently closed tenant period.");
+        }
+        if (expectedStart != year.EndDate.Date.AddDays(1))
+            throw new InvalidOperationException(
+                "Tenant fiscal periods must cover the fiscal year exactly once without gaps or overlaps.");
+
+        var periodIds = periods.Select(item => item.Id).ToArray();
+        var closeCycles = await context.FinanceCloseCycles.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && periodIds.Contains(item.FiscalPeriodId)
+                && !item.IsDeleted && item.Status == FinanceCloseStatuses.Closed)
+            .ToListAsync(cancellationToken);
+        var cycleIds = closeCycles.Select(item => item.Id).ToArray();
+        var certifications = await context.FinanceCloseCertifications.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && cycleIds.Contains(item.FinanceCloseCycleId)
+                && !item.IsDeleted && !item.IsSuperseded)
+            .ToListAsync(cancellationToken);
+
+        var snapshots = new List<TenantPeriodCloseEvidence>(periods.Count);
+        foreach (var period in periods)
+        {
+            var cycleRows = closeCycles.Where(item => item.FiscalPeriodId == period.Id).ToArray();
+            if (cycleRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain exactly one current closed Finance close cycle.");
+            var cycle = cycleRows[0];
+            var certificateRows = certifications.Where(item => item.FinanceCloseCycleId == cycle.Id).ToArray();
+            if (certificateRows.Length != 1)
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' must retain one active Finance close certification.");
+            var certificate = certificateRows[0];
+            if (cycle.PreparedAt == null || cycle.ClosedAt == null
+                || certificate.PreparedByUserId == null || certificate.PreparedAt == null
+                || certificate.ReviewedByUserId == null || certificate.ReviewedAt == null
+                || certificate.ApprovedByUserId == null || certificate.ApprovedAt == null
+                || certificate.PreparedByUserId == certificate.ApprovedByUserId
+                || certificate.ReviewedByUserId != certificate.ApprovedByUserId
+                || certificate.ReviewedAt != certificate.ApprovedAt
+                || cycle.PreparedAt != certificate.PreparedAt
+                || cycle.ClosedAt != certificate.ApprovedAt
+                || period.ClosedByUserId != certificate.ApprovedByUserId
+                || string.IsNullOrWhiteSpace(certificate.PreparerDeclaration)
+                || string.IsNullOrWhiteSpace(certificate.ReviewerDeclaration))
+                throw new InvalidOperationException(
+                    $"Fiscal period '{period.PeriodCode}' lacks consistent independent preparation and approval evidence.");
+
+            snapshots.Add(new TenantPeriodCloseEvidence(
+                period.Id,
+                period.PeriodCode,
+                period.PeriodNumber,
+                period.StartDate,
+                period.EndDate,
+                period.PeriodStatus,
+                period.IsOpen,
+                period.IsClosed,
+                period.IsLocked,
+                period.IsGlobalLockSuspended,
+                period.ClosedDate.Value,
+                period.ClosedByUserId.Value,
+                cycle.Id,
+                cycle.CycleNumber,
+                cycle.TemplateCode,
+                cycle.CloseType,
+                cycle.TemplateVersion,
+                cycle.PreparedAt.Value,
+                cycle.ClosedAt.Value,
+                certificate.Id,
+                certificate.PreparedByUserId.Value,
+                certificate.PreparedAt.Value,
+                certificate.ReviewedByUserId.Value,
+                certificate.ReviewedAt.Value,
+                certificate.ApprovedByUserId.Value,
+                certificate.ApprovedAt.Value));
+        }
+
+        return System.Text.Json.JsonSerializer.Serialize(new TenantFiscalYearCloseAuthority(
+            SnapshotVersion,
+            tenantId,
+            fiscalYearId,
+            year.StartDate,
+            year.EndDate,
+            snapshots));
+    }
+
+    private sealed record TenantFiscalYearCloseAuthority(
+        string Version,
+        Guid TenantId,
+        Guid FiscalYearId,
+        DateTime FiscalYearStart,
+        DateTime FiscalYearEnd,
+        IReadOnlyList<TenantPeriodCloseEvidence> Periods);
+
+    private sealed record TenantPeriodCloseEvidence(
+        Guid FiscalPeriodId,
+        string PeriodCode,
+        int PeriodNumber,
+        DateTime StartDate,
+        DateTime EndDate,
+        string PeriodStatus,
+        bool IsOpen,
+        bool IsClosed,
+        bool IsLocked,
+        bool IsGlobalLockSuspended,
+        DateTime ClosedDate,
+        Guid ClosedByUserId,
+        Guid FinanceCloseCycleId,
+        int FinanceCloseCycleNumber,
+        string TemplateCode,
+        string CloseType,
+        int TemplateVersion,
+        DateTime CyclePreparedAt,
+        DateTime CycleClosedAt,
+        Guid CertificationId,
+        Guid PreparedByUserId,
+        DateTime PreparedAt,
+        Guid ReviewedByUserId,
+        DateTime ReviewedAt,
+        Guid ApprovedByUserId,
+        DateTime ApprovedAt);
 }

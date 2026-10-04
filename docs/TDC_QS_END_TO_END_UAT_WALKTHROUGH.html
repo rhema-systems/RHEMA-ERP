@@ -1,1567 +1,256 @@
 <!doctype html>
 <html lang="en">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width,initial-scale=1" />
-        <title>TDC Quantity Survey UAT Walkthrough</title>
-        <style>
-            :root {
-                --ink: #16283d;
-                --muted: #52667a;
-                --line: #dce5ec;
-                --blue: #135d9e;
-                --green: #146c43;
-                --amber: #8a5200;
-                --red: #9f2323;
-            }
-            * {
-                box-sizing: border-box;
-            }
-            html {
-                scroll-behavior: smooth;
-            }
-            body {
-                margin: 0;
-                background: #eef3f7;
-                color: var(--ink);
-                font:
-                    15px/1.62 "Segoe UI",
-                    Arial,
-                    sans-serif;
-            }
-            header {
-                background: #102b45;
-                color: white;
-                padding: 24px max(24px, calc((100vw - 1136px) / 2));
-            }
-            header strong {
-                font-size: 19px;
-            }
-            header span {
-                display: block;
-                color: #c1d7eb;
-                font-size: 13px;
-            }
-            nav {
-                position: sticky;
-                top: 0;
-                z-index: 2;
-                background: white;
-                border-bottom: 1px solid var(--line);
-                display: flex;
-                gap: 9px;
-                flex-wrap: wrap;
-                padding: 11px max(24px, calc((100vw - 1136px) / 2));
-            }
-            nav a {
-                border: 1px solid #c3d6e6;
-                border-radius: 7px;
-                padding: 6px 11px;
-                color: var(--blue);
-                text-decoration: none;
-                font-weight: 650;
-                font-size: 13px;
-            }
-            nav a:first-child {
-                background: var(--blue);
-                color: white;
-                border-color: var(--blue);
-            }
-            main {
-                max-width: 1184px;
-                margin: 28px auto;
-                background: white;
-                padding: 40px 42px 55px;
-                box-shadow: 0 4px 28px #17324d0a;
-                border: 1px solid var(--line);
-                border-radius: 12px;
-            }
-            h1 {
-                font-size: 34px;
-                line-height: 1.2;
-                letter-spacing: -0.7px;
-                margin: 0 0 18px;
-            }
-            h2 {
-                font-size: 24px;
-                line-height: 1.3;
-                color: #103d64;
-                border-top: 2px solid #dbe8f3;
-                padding-top: 24px;
-                margin: 40px 0 18px;
-                scroll-margin-top: 90px;
-            }
-            h3 {
-                font-size: 19px;
-                line-height: 1.4;
-                margin: 28px 0 12px;
-                color: #164d78;
-                scroll-margin-top: 90px;
-            }
-            p {
-                margin: 12px 0;
-            }
-            a {
-                color: #075da3;
-                text-underline-offset: 2px;
-            }
-            code {
-                background: #f0f4f8;
-                color: #153d63;
-                border-radius: 4px;
-                padding: 1px 4px;
-                font-size: 0.88em;
-                overflow-wrap: anywhere;
-            }
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin: 18px 0 25px;
-                font-size: 13px;
-                line-height: 1.52;
-            }
-            th,
-            td {
-                border: 1px solid var(--line);
-                padding: 10px 11px;
-                text-align: left;
-                vertical-align: top;
-                overflow-wrap: anywhere;
-            }
-            th {
-                background: #eaf2f8;
-                color: #153e60;
-                font-weight: 700;
-            }
-            tr:nth-child(even) td {
-                background: #f8fafc;
-            }
-            ol,
-            ul {
-                padding-left: 24px;
-            }
-            li {
-                margin: 7px 0;
-            }
-            .callout {
-                padding: 16px 18px;
-                border: 1px solid #c3d6e6;
-                background: #eaf2f8;
-                border-radius: 8px;
-            }
-            .pass {
-                color: var(--green);
-                font-weight: 700;
-            }
-            .hold {
-                color: var(--amber);
-                font-weight: 700;
-            }
-            .stop {
-                color: var(--red);
-                font-weight: 700;
-            }
-            .step {
-                font-weight: 700;
-                color: #103d64;
-            }
-            .navigation {
-                min-width: 185px;
-                color: #203d57;
-            }
-            .nav-path {
-                display: block;
-                border-left: 3px solid #4b88ba;
-                background: #eef6fc;
-                border-radius: 4px;
-                padding: 7px 9px;
-                line-height: 1.45;
-            }
-            .nav-path strong {
-                color: #103d64;
-            }
-            .check {
-                font-size: 18px;
-                white-space: nowrap;
-            }
-            details {
-                margin: 12px 0;
-                padding: 12px 16px;
-                border: 1px solid var(--line);
-                border-radius: 8px;
-            }
-            summary {
-                cursor: pointer;
-                font-weight: 700;
-                color: var(--blue);
-            }
-            footer {
-                color: var(--muted);
-                font-size: 12px;
-                text-align: center;
-                padding: 0 20px 25px;
-            }
-            @media (max-width: 760px) {
-                main {
-                    margin: 12px;
-                    padding: 22px 15px;
-                }
-                h1 {
-                    font-size: 27px;
-                }
-                h2 {
-                    font-size: 21px;
-                }
-                table {
-                    font-size: 12px;
-                }
-                td,
-                th {
-                    padding: 7px;
-                }
-                nav {
-                    position: static;
-                }
-            }
-            @page {
-                size: A4 landscape;
-                margin: 14mm;
-            }
-            @media print {
-                body {
-                    background: white;
-                    font-size: 10.5pt;
-                    line-height: 1.5;
-                }
-                header,
-                nav,
-                footer {
-                    display: none;
-                }
-                main {
-                    margin: 0;
-                    max-width: none;
-                    padding: 0;
-                    box-shadow: none;
-                    border: 0;
-                    border-radius: 0;
-                }
-                h1 {
-                    font-size: 25pt;
-                }
-                h2 {
-                    font-size: 17pt;
-                    break-before: page;
-                    border-top: 0;
-                    padding-top: 0;
-                    margin-top: 0;
-                }
-                h1,
-                h2 {
-                    break-after: avoid;
-                }
-                table {
-                    font-size: 9.3pt;
-                }
-                th,
-                td {
-                    padding: 7px;
-                }
-                tr {
-                    break-inside: avoid;
-                }
-                thead {
-                    display: table-header-group;
-                }
-                .callout {
-                    border-color: #999;
-                    background: #f7f7f7;
-                }
-            }
-        </style>
-    </head>
-    <body>
-        <header>
-            <strong>TDC ERP · Quantity Survey UAT</strong
-            ><span
-                >End-to-end role-based walkthrough · updated 23 September 2026
-                · print with Ctrl+P</span
-            >
-        </header>
-        <nav aria-label="Walkthrough sections">
-            <a href="#start">Start</a><a href="#accounts">Accounts</a
-            ><a href="#navigation">Navigation</a
-            ><a href="#fresh-run">Fresh run</a
-            ><a href="#procurement">Works procurement</a
-            ><a href="#qs">QS delivery</a
-            ><a href="#change">Variation and claim</a
-            ><a href="#handover">Handover</a
-            ><a href="#finance">Finance boundary</a
-            ><a href="#troubleshooting">Troubleshooting</a>
-        </nav>
-        <main>
-            <h1 id="start">Quantity Survey end-to-end UAT walkthrough</h1>
-            <p>
-                Use this guide to run one complete, controlled Quantity Survey
-                journey: project, approved BOQ, Works procurement/contract,
-                measurement, valuation, certificate, variation, claim, handover
-                and closeout. Every sign-in step names the account that should
-                perform it. Passwords are deliberately not included here; enter
-                them only in the sign-in page.
-            </p>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TDC Quantity Survey UAT — Step-by-Step Operator Walkthrough</title>
+  <style>
+    :root { --ink:#172b3f; --muted:#536779; --line:#d8e3ec; --blue:#145f9d; --blue-soft:#eef6fc; --green:#176b44; --green-soft:#edf8f1; --amber:#8b5500; --amber-soft:#fff7e8; --red:#a32929; --red-soft:#fff0f0; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:#eef3f7; color:var(--ink); font:15px/1.58 "Segoe UI",Arial,sans-serif; }
+    header { background:#102c47; color:white; padding:24px max(24px,calc((100vw - 1260px)/2)); }
+    header strong { display:block; font-size:21px; }
+    header span { color:#c7dced; font-size:13px; }
+    nav { position:sticky; top:0; z-index:3; display:flex; flex-wrap:wrap; gap:8px; padding:10px max(24px,calc((100vw - 1260px)/2)); background:white; border-bottom:1px solid var(--line); }
+    nav a { border:1px solid #bfd2e1; border-radius:7px; padding:6px 10px; color:var(--blue); text-decoration:none; font-weight:650; font-size:12px; }
+    main { max-width:1308px; margin:26px auto; padding:38px 42px 54px; background:white; border:1px solid var(--line); border-radius:12px; box-shadow:0 4px 28px #17324d0a; }
+    h1 { margin:0 0 12px; font-size:34px; line-height:1.2; }
+    h2 { margin:42px 0 16px; padding-top:24px; border-top:2px solid #dbe8f3; color:#103d64; font-size:24px; scroll-margin-top:84px; }
+    h3 { margin:28px 0 12px; color:#164d78; font-size:19px; scroll-margin-top:84px; }
+    p { margin:10px 0; }
+    ol,ul { padding-left:23px; }
+    li { margin:6px 0; }
+    code { padding:1px 5px; border-radius:4px; background:#f0f4f8; color:#153d63; font-size:.9em; overflow-wrap:anywhere; }
+    table { width:100%; margin:14px 0 26px; border-collapse:collapse; font-size:13px; line-height:1.48; }
+    th,td { padding:9px 10px; border:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:anywhere; }
+    th { background:#eaf2f8; color:#153e60; }
+    tr:nth-child(even) td { background:#f9fbfc; }
+    .callout { margin:14px 0; padding:15px 17px; border:1px solid #bcd1e1; border-radius:8px; background:var(--blue-soft); }
+    .passbox { border-color:#a9d3b9; background:var(--green-soft); }
+    .warnbox { border-color:#e2c27f; background:var(--amber-soft); }
+    .stopbox { border-color:#e1aaaa; background:var(--red-soft); }
+    .pass { color:var(--green); font-weight:700; }
+    .hold { color:var(--amber); font-weight:700; }
+    .stop { color:var(--red); font-weight:700; }
+    .check { width:52px; text-align:center; font-size:18px; }
+    .step { width:118px; color:#103d64; font-weight:750; }
+    .actor { width:150px; }
+    .route { display:block; margin-bottom:5px; padding:6px 8px; border-left:3px solid #4b88ba; border-radius:4px; background:#eef6fc; color:#203d57; }
+    .click { font-weight:700; color:#0c568e; }
+    .value { display:inline-block; margin:1px 2px 1px 0; padding:1px 5px; border:1px solid #c8d6e1; border-radius:4px; background:white; font-family:Consolas,monospace; font-size:.92em; }
+    .mini { color:var(--muted); font-size:12px; }
+    .sample-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:10px; margin:14px 0 22px; }
+    .sample-card { padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:#fbfdff; }
+    .sample-card b { display:block; margin-bottom:4px; color:#164d78; }
+    .stage-note { margin:-4px 0 14px; color:var(--muted); }
+    details { margin:12px 0; padding:12px 15px; border:1px solid var(--line); border-radius:8px; }
+    summary { cursor:pointer; color:var(--blue); font-weight:700; }
+    footer { padding:0 20px 25px; color:var(--muted); text-align:center; font-size:12px; }
+    @media (max-width:800px) { main{margin:10px;padding:22px 13px} nav{position:static} h1{font-size:27px} table{font-size:12px} th,td{padding:7px} }
+    @page { size:A4 landscape; margin:12mm; }
+    @media print { body{background:white;font-size:10pt} header,nav,footer{display:none} main{max-width:none;margin:0;padding:0;border:0;box-shadow:none} h2{break-before:page;border:0;margin-top:0;padding-top:0} tr{break-inside:avoid} thead{display:table-header-group} table{font-size:8.5pt} th,td{padding:6px} .callout{background:#f7f7f7} }
+  </style>
+</head>
+<body>
+  <header><strong>TDC ERP · Quantity Survey UAT operator script</strong><span>Field-by-field fresh run · verified against the application on 29 September 2026 · print with Ctrl+P</span></header>
+  <nav aria-label="Walkthrough sections"><a href="#start">Start</a><a href="#preflight">Preflight</a><a href="#sample">Sample values</a><a href="#project">Project</a><a href="#boq">BOQ</a><a href="#procurement">Procurement</a><a href="#measurement">Measurement</a><a href="#valuation">Valuation</a><a href="#certificate">Certificate/AP</a><a href="#variation">Variation</a><a href="#claim">Claim</a><a href="#closeout">Closeout</a><a href="#reports">Reports</a><a href="#problems">Problems</a></nav>
+  <main>
+    <h1 id="start">Quantity Survey end-to-end UAT — ordinary-user walkthrough</h1>
+    <p>This script tells the tester exactly who signs in, where to go, what to click, what example value to enter, what result to expect, and what evidence to save. It follows one continuous example from project registration through BOQ, Works procurement, measurement, valuation, payment certificate, Finance AP handoff, variation, contractor claim, handover, defects, final account, and reports.</p>
+    <aside class="callout warnbox"><strong>Use the deployed VPS address.</strong> The paths below start after the host name. For example, if the facilitator gives you <code>https://your-vps-host</code>, the Projects page is <code>https://your-vps-host/development/projects</code>. Do not use <code>localhost</code> for the VPS UAT.</aside>
+    <aside class="callout"><strong>Fresh-run rule.</strong> Use the run code <code>QS-UAT-20260930-01</code> in every title, note, and evidence filename. If that code already exists, change only the final number to <code>02</code>, <code>03</code>, and so on. Never edit the preserved demonstration project <code>PRJ-2026-0003</code>.</aside>
 
-            <aside class="callout">
-                <strong>Read this first.</strong> This is a
-                <strong>fresh-run script</strong>. Give every new record a
-                unique prefix such as
-                <code>UAT-QS-&lt;date&gt;-&lt;initials&gt;</code>. Do not reuse,
-                edit, submit or approve the completed fixture unless you are
-                demonstrating history. The preserved fixture is
-                <a
-                    href="http://localhost:3000/development/projects/cb23b1c6-d663-4017-b86a-976933fa98b7/overview"
-                    >PRJ-2026-0003</a
-                >; its linked invoice stays Draft and must not be posted or
-                paid.
-            </aside>
+    <h2>How to follow each row</h2>
+    <ol>
+      <li>Tick <strong>Done</strong> only after the expected result is visible.</li>
+      <li>When the actor changes, sign out completely, sign in with the named username, and select tenant <strong>DEFAULT</strong>.</li>
+      <li>Copy the example text and numbers exactly for this rehearsal. Pick the named controlled record from a selector; never type a database ID.</li>
+      <li>After every create, submit, approve, post, or close action, write the generated reference in the Reference Log and take the requested screenshot.</li>
+      <li>Click a mutation button once. If the page is slow, wait and refresh the record before trying again.</li>
+      <li>If a named selector value is missing, a button is absent, or the expected status does not appear, stop that branch and record the visible message. Do not change roles, dates, database rows, or statuses to force it through.</li>
+    </ol>
 
-            <h2>How to use this script</h2>
-            <ol>
-                <li>
-                    Use
-                    <a href="http://localhost:3000/login">localhost:3000</a> and
-                    select the <strong>DEFAULT</strong> tenant after every
-                    sign-in.
-                </li>
-                <li>
-                    At each row, verify the expected result before moving on.
-                    Record the reference number and a screenshot in the UAT
-                    evidence pack.
-                </li>
-                <li>
-                    Sign out fully before changing actor. Opening a link does
-                    not change the signed-in user.
-                </li>
-                <li>
-                    Use the normal action shown by the page. Do not change a
-                    role, workflow, policy, database row or status to make a
-                    test pass.
-                </li>
-                <li>
-                    If a prerequisite is missing, stop at that row and record it
-                    as a UAT issue. Continue only with an independent part of
-                    the script.
-                </li>
-            </ol>
+    <h2 id="preflight">0. Preflight — do this before creating transactions</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Sign in as</th><th>Click and capture</th><th>Expected result</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">0.1 Open the VPS</td><td>Any UAT user</td><td>Open the supplied VPS URL. On Sign In, enter the username and shared UAT password, click <span class="click">Sign In</span>, and select <span class="value">DEFAULT</span>.</td><td>Dashboard opens; the top-right user name matches the account used. Capture the dashboard header.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.2 Confirm configuration</td><td><code>admin</code></td><td><span class="route">Administration → Project Management → Quantity Survey Configuration</span>Open profile <span class="value">TDC-QUANTITY-SURVEY v1</span>. Confirm the profile is published/effective and decisions <span class="value">QS-DEC-001</span> through <span class="value">QS-DEC-017</span> show approved/verified outcomes.</td><td class="pass">PASS only if the effective profile and all 17 decisions are ready. Capture the profile header and decision badges.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.3 Confirm actors</td><td><code>admin</code></td><td><span class="route">Administration → Identity Management → Users</span>Search every username in the account table below. Confirm Active and DEFAULT membership. Do not reset an existing password.</td><td>Every named account exists and is active. Record any missing account before continuing.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.4 Confirm Estate land</td><td><code>uat.qs.preparer</code></td><td><span class="route">Projects → Projects → New Project</span>Open the <span class="click">Demarcated Land</span> selector without saving. Look for <span class="value">LAND-2026-8C30C53A-PORTION-001</span> and <span class="value">TDC-PORTAL-LAND-001-PORTION-001</span>. Close the page.</td><td>At least one named verified, unused Estate portion is selectable. The value comes from Estate; it is not free text.</td></tr>
+      <tr><td class="check">☐</td><td class="step">0.5 Prepare evidence</td><td>UAT facilitator</td><td>Prepare clean, non-sensitive files named <span class="value">QS-UAT-20260930-01-BOQ-basis.pdf</span>, <span class="value">QS-UAT-20260930-01-site-measurement.jpg</span>, <span class="value">QS-UAT-20260930-01-valuation.pdf</span>, <span class="value">QS-UAT-20260930-01-variation.pdf</span>, and <span class="value">QS-UAT-20260930-01-claim.pdf</span>.</td><td>Each file opens locally, contains obvious UAT-only text, and contains no real personal, bank, or tender information.</td></tr>
+    </tbody></table>
 
-            <h2 id="accounts">Account card</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Username</th>
-                        <th>Use in this walkthrough</th>
-                        <th>Independence rule</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td>
-                            Creates the project, BOQ, measurements, valuation,
-                            certificate, variation, claim and evidence.
-                        </td>
-                        <td>
-                            Never approves or technically reviews its own
-                            submission.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>uat.qs.reviewer</code></td>
-                        <td>
-                            Technical reviewer for BOQ, valuation, certificate,
-                            variation and claim.
-                        </td>
-                        <td>
-                            Must be different from the preparer and final
-                            approver.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>uat.qs.approver</code></td>
-                        <td>Independent QS/project final approver.</td>
-                        <td>
-                            Must be different from preparer and technical
-                            reviewer.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>procurementofficer</code></td>
-                        <td>
-                            Creates the Works procurement route, tender and
-                            contract preparation.
-                        </td>
-                        <td>Does not approve its own procurement decision.</td>
-                    </tr>
-                    <tr>
-                        <td><code>procurementapprover</code></td>
-                        <td>
-                            Procurement approval and authorised
-                            contract/Works-closeout access.
-                        </td>
-                        <td>
-                            Use a different authorised person where a configured
-                            workflow requires independence.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>uat.qs.contractor</code></td>
-                        <td>
-                            External contractor: submits the Works bid and
-                            required supplier evidence.
-                        </td>
-                        <td>
-                            Can access only its own business-partner records.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <code>tdc0102-checker-201531</code>,
-                            <code>procurementevaluator</code>,
-                            <code>finance.manager</code>
-                        </td>
-                        <td>Appointed tender-evaluation committee members.</td>
-                        <td>
-                            Each signs/evaluates as the appointed individual.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>ap.officer</code></td>
-                        <td>
-                            Finance AP owner if the authorised Finance stage is
-                            enabled.
-                        </td>
-                        <td>
-                            Do not use until Finance confirms the budget and
-                            accounting prerequisites.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <code>financereviewer</code> /
-                            <code>financeapprover</code>
-                        </td>
-                        <td>
-                            Finance review/approval where the Finance workflow
-                            assigns them.
-                        </td>
-                        <td>
-                            Use the actual assigned workflow actors; do not
-                            substitute QS users.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td><code>admin</code></td>
-                        <td>
-                            Emergency UAT setup only: user reset, role check or
-                            published-workflow check.
-                        </td>
-                        <td>
-                            Never use Administrator as a business approver
-                            simply to pass a test.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h3>Account card</h3>
+    <table><thead><tr><th>Username</th><th>Use in this script</th><th>Must not do</th></tr></thead><tbody>
+      <tr><td><code>uat.qs.preparer</code></td><td>Create project, BOQ, measurement; perform internal QS preparation.</td><td>Final-approve own governed record.</td></tr>
+      <tr><td><code>uat.qs.reviewer</code></td><td>Independent QS review/vetting and first configured approval stage.</td><td>Create and final-approve the same record.</td></tr>
+      <tr><td><code>uat.qs.approver</code></td><td>Independent project/QS final approval.</td><td>Act as the maker.</td></tr>
+      <tr><td><code>uat.qs.contractor</code></td><td>External contractor bid, valuation claim, and contract claim.</td><td>See another partner's records.</td></tr>
+      <tr><td><code>uat.qs.consultant</code></td><td>External consultant endorsement when required.</td><td>Change contractor quantities.</td></tr>
+      <tr><td><code>uat.qs.engineer</code></td><td>Engineering/site confirmation where the configured route asks for it.</td><td>Final-approve own technical initiation.</td></tr>
+      <tr><td><code>procurementofficer</code></td><td>Budget/plan/PR preparation, Works tender, award preparation, contract creation.</td><td>Approve own procurement decision.</td></tr>
+      <tr><td><code>procurementapprover</code></td><td>Assigned Procurement approval and Works contract/closeout actions.</td><td>Replace an assigned evaluator or Finance reviewer.</td></tr>
+      <tr><td><code>tdc0102-checker-201531</code>, <code>procurementevaluator</code>, <code>finance.manager</code></td><td>Use only for their tender-specific committee/evaluation assignments.</td><td>Share one login during committee evaluation.</td></tr>
+      <tr><td><code>ap.officer</code>, <code>financereviewer</code>, <code>financeapprover</code></td><td>Finance AP validation, review, posting/payment stages when assigned.</td><td>Change the QS certificate to make Finance balance.</td></tr>
+    </tbody></table>
 
-            <h2 id="navigation">Where to find each workspace</h2>
-            <p>
-                After signing in and selecting the <strong>DEFAULT</strong>
-                tenant, use the left sidebar paths below. For a project-specific
-                page, open <strong>Projects → Projects</strong>, select the UAT
-                project, and then select the named project tab across the top of
-                the project workspace.
-            </p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>What you need</th>
-                        <th>Left sidebar / page navigation</th>
-                        <th>Direct starting page</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Project creation and project tabs</td>
-                        <td>
-                            Projects → Projects → open the project → Overview,
-                            Work Components, Commercial Admin, Handover or
-                            Defects
-                        </td>
-                        <td>
-                            <a href="http://localhost:3000/development/projects"
-                                >Projects list</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>BOQ and measurements</td>
-                        <td>
-                            Projects → Projects → open project → Work Components
-                            → BOQ actions or Measurements
-                        </td>
-                        <td>
-                            <code
-                                >/development/projects/&lt;project-id&gt;/packages</code
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Valuations, certificates, variations and claims</td>
-                        <td>
-                            Projects → Projects → open project → Commercial
-                            Admin → select the numbered section shortcut
-                        </td>
-                        <td>
-                            <code
-                                >/development/projects/&lt;project-id&gt;/commercial-admin</code
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Procurement budget and plan</td>
-                        <td>
-                            Procurement → Planning → Budgets or Procurement
-                            Plans
-                        </td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/procurement/planning/budgets"
-                                >Budgets</a
-                            >
-                            ·
-                            <a
-                                href="http://localhost:3000/procurement/planning/plans"
-                                >Procurement Plans</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Purchase request</td>
-                        <td>
-                            Procurement → Purchasing → Purchase Requests
-                        </td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/procurement/purchase-requisitions"
-                                >Purchase Requests</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Tender and tender documents</td>
-                        <td>
-                            Procurement → Tendering → Tenders → open the tender
-                            → use the process-flow sidebar
-                        </td>
-                        <td>
-                            <a href="http://localhost:3000/procurement/tenders"
-                                >Tenders</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Committee evaluation and award</td>
-                        <td>
-                            Procurement → Tendering → My Assigned Tenders,
-                            Evaluations or Awards
-                        </td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/procurement/my-assigned-tenders"
-                                >My Assigned Tenders</a
-                            >
-                            ·
-                            <a
-                                href="http://localhost:3000/procurement/evaluations"
-                                >Evaluations</a
-                            >
-                            ·
-                            <a href="http://localhost:3000/procurement/awards"
-                                >Awards</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Works contract and closeout</td>
-                        <td>
-                            Procurement → Tendering → Contracts → open the
-                            contract → Works Closeout
-                        </td>
-                        <td>
-                            <a href="http://localhost:3000/procurement/contracts"
-                                >Contracts</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Contractor tender submission</td>
-                        <td>
-                            External Portal → Procurement → Available Tenders;
-                            submitted records are under My Tender Bids
-                        </td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/external-portal/tenders"
-                                >Available Tenders</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>QS reports and registers</td>
-                        <td>Reports → Quantity Survey Reports</td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/reports/quantity-survey"
-                                >Quantity Survey Reports</a
-                            >
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Finance invoice created from a certificate</td>
-                        <td>Finance → Accounts Payable → Invoices</td>
-                        <td>
-                            <a
-                                href="http://localhost:3000/finance/ap/invoices"
-                                >Vendor Invoices</a
-                            >
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="sample">1. Sample data pack — use these values throughout</h2>
+    <div class="sample-grid">
+      <div class="sample-card"><b>Run code</b><code>QS-UAT-20260930-01</code></div><div class="sample-card"><b>Project title</b><code>QS-UAT-20260930-01 – Community Office Block</code></div><div class="sample-card"><b>Estate portion</b><code>LAND-2026-8C30C53A-PORTION-001</code></div><div class="sample-card"><b>Project dates</b><code>01/10/2026</code> to <code>30/09/2027</code></div><div class="sample-card"><b>Project estimated budget</b>Leave blank. Zero is also accepted. The Procurement budget is created later.</div><div class="sample-card"><b>Currency</b><code>GHS</code></div><div class="sample-card"><b>Contractor</b><code>QS-UAT-CONT-001 – Fictional QS UAT Contractor</code></div><div class="sample-card"><b>Consultant</b><code>QS-UAT-CONS-001 – Fictional QS UAT Consultant</code></div><div class="sample-card"><b>BOQ line</b><code>100 EA × GHS 1,000 = GHS 100,000</code></div><div class="sample-card"><b>First measurement</b><code>20 EA</code></div><div class="sample-card"><b>QS-certified quantity</b><code>18 EA</code>; retention <code>5%</code></div><div class="sample-card"><b>Expected valuation</b>Gross <code>GHS 18,000</code>; retention <code>GHS 900</code>; net before configured tax <code>GHS 17,100</code></div><div class="sample-card"><b>Variation</b><code>+5 EA × GHS 1,000 = GHS 5,000</code></div><div class="sample-card"><b>Contract claim</b>Claimed <code>GHS 2,500</code>; QS assessed <code>GHS 2,000</code></div>
+    </div>
+    <aside class="callout passbox"><strong>Important calculation rule.</strong> Tax and AP coding come from the effective QS/Finance configuration. The tester does not type or override them in the certificate window. Record the tax amount the system calculates.</aside>
 
-            <h2 id="fresh-run">A. Prepare the project and approved BOQ</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A1. Confirm the environment</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/development/projects">Projects → Projects</a></span></td>
-                        <td>
-                            Open
-                            <a href="http://localhost:3000/development/projects"
-                                >Development → Projects</a
-                            >. Confirm DEFAULT tenant and no relevant error
-                            banner.
-                        </td>
-                        <td>
-                            Projects list loads. Record the date, browser
-                            version and signed-in name.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A2. Create a project</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/development/projects">Projects → Projects</a> → <a href="http://localhost:3000/development/projects/new">New Project</a></span></td>
-                        <td>
-                            Select New Project. Use the UAT prefix, Construction
-                            Development, appropriate development type, GHS and
-                            future start/end dates. Estimated Budget is optional;
-                            leave it blank or enter zero until an estimate is available. Select
-                            the available project manager/sponsor through the
-                            controlled selector.
-                        </td>
-                        <td>
-                            Project saves as Draft with a reference. Record
-                            project ID and reference.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A3. Submit project</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open the new project → Overview<br><code>/development/projects/&lt;project-id&gt;/overview</code></span></td>
-                        <td>
-                            Open the project Overview; verify the details, then
-                            Submit with a UAT-only note.
-                        </td>
-                        <td>
-                            Status becomes Pending Approval. The workflow/audit
-                            history identifies the approver route.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A4. Approve project</td>
-                        <td><code>uat.qs.approver</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open the same project → Overview → Approval action</span></td>
-                        <td>
-                            Sign out/in, reopen the same project, confirm
-                            Approve current step is available, then approve with
-                            a UAT comment.
-                        </td>
-                        <td>
-                            Status becomes Planned. Audit shows preparer and
-                            independent approver.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            A5. Create work package and BOQ line
-                        </td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components<br><code>/development/projects/&lt;project-id&gt;/packages</code></span></td>
-                        <td>
-                            Open Work Components. Add one UAT work package and
-                            one BOQ line with controlled trade/cost code, unit,
-                            quantity and rate. Use the relevant existing catalogue
-                            values; do not create catalogue masters unless they
-                            are genuinely missing.
-                        </td>
-                        <td>
-                            Draft original BOQ snapshot shows its line quantity,
-                            rate and total.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A6. Submit BOQ</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components → BOQ Version Actions</span></td>
-                        <td>
-                            Open BOQ Version Actions and submit the original BOQ.
-                        </td>
-                        <td>
-                            Status becomes Pending Approval. The submitted
-                            snapshot is immutable while under review.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A7. Technical BOQ review</td>
-                        <td><code>uat.qs.reviewer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components → BOQ Version Actions</span></td>
-                        <td>Approve the assigned Technical review step.</td>
-                        <td>
-                            Workflow moves to Independent approval; it must not
-                            publish after this first review.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">A8. Final BOQ approval</td>
-                        <td><code>uat.qs.approver</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components → BOQ Version Actions</span></td>
-                        <td>Approve the Independent approval step.</td>
-                        <td>
-                            Approved/published BOQ version exists. Record its
-                            reference and total. Retired/draft history remains
-                            available.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h3>Reference Log — write each generated number here</h3>
+    <table><thead><tr><th>Record</th><th>Generated reference</th><th>Status reached</th><th>Screenshot/evidence filename</th></tr></thead><tbody>
+      <tr><td>Project</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>BOQ version</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Budget / Plan / PR</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Tender / Bid / Award / Contract</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Measurement / Valuation</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Certificate / AP invoice</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Variation / Claim</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Handover / Defect / Final account</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>
+    </tbody></table>
 
-            <h2 id="procurement">B. Obtain the linked Works contract</h2>
-            <p>
-                This is the required procurement handoff. Use the detailed
-                process controls in
-                <a href="TDC_CUSTOMER_PROCUREMENT_STORES_WALKTHROUGH.html"
-                    >the Procurement UAT walkthrough</a
-                >; the condensed QS-critical sequence below ensures the QS
-                tester does not skip the contract relationship.
-            </p>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            B1. Prepare budget, plan and requisition
-                        </td>
-                        <td><code>procurementofficer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/procurement/planning/budgets">Procurement → Planning → Budgets</a>; then <a href="http://localhost:3000/procurement/planning/plans">Procurement Plans</a>; then <a href="http://localhost:3000/procurement/purchase-requisitions">Procurement → Purchasing → Purchase Requests</a></span></td>
-                        <td>
-                            Create or use the approved UAT budget/plan and raise
-                            a Works requisition tied to the new QS project.
-                            Follow each configured departmental, Procurement,
-                            Finance and MD approval in the Procurement guide.
-                        </td>
-                        <td>
-                            Approved sourcing authority and project-linked Works
-                            requirement. If the required route is missing, stop
-                            and log the configuration gap.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            B2. Prepare and publish Works tender
-                        </td>
-                        <td>
-                            <code>procurementofficer</code>, then configured
-                            approvers
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/procurement/tenders">Procurement → Tendering → Tenders</a> → open the tender → use the process-flow sidebar</span></td>
-                        <td>
-                            Create the tender from the approved sourcing record,
-                            attach the approved BOQ/specification and publish it
-                            through the configured workflow.
-                        </td>
-                        <td>
-                            Published Works tender with an open bid window.
-                            Record tender reference.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">B3. Submit contractor bid</td>
-                        <td><code>uat.qs.contractor</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/external-portal/tenders">External Portal → Procurement → Available Tenders</a> → open tender; submission history is under My Tender Bids</span></td>
-                        <td>
-                            Sign in through the external portal. Open the
-                            tender, upload the required UAT bid and supplier
-                            evidence, then submit once.
-                        </td>
-                        <td>
-                            Bid reference/receipt appears for the contractor. No
-                            other supplier's records are visible.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">B4. Evaluate and award</td>
-                        <td>
-                            Each appointed evaluator, then configured award
-                            approver
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Procurement → Tendering → <a href="http://localhost:3000/procurement/my-assigned-tenders">My Assigned Tenders</a>; then <a href="http://localhost:3000/procurement/evaluations">Evaluations</a> and <a href="http://localhost:3000/procurement/awards">Awards</a></span></td>
-                        <td>
-                            Each committee member accepts appointment and
-                            records their own evaluation. Complete the
-                            evaluation report and independent award decision
-                            through the Procurement workflow.
-                        </td>
-                        <td>
-                            Audit identifies each evaluator and the independent
-                            award approver. Award is approved.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            B5. Create and activate Works contract
-                        </td>
-                        <td>
-                            <code>procurementofficer</code>, then authorised
-                            independent contract approver
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/procurement/contracts">Procurement → Tendering → Contracts</a> → Create Contract or open the awarded tender’s contract action</span></td>
-                        <td>
-                            Create the contract from the award, choose Works,
-                            link the QS project and contractor, complete
-                            required evidence and submit/approve/activate it.
-                        </td>
-                        <td>
-                            Active Works contract linked to the project and
-                            contractor. Record contract reference and value.
-                            This is the only contract to use for A–H.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">B6. Confirm QS linkage</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Overview; then Commercial Admin</span></td>
-                        <td>
-                            Return to Project Overview/Commercial Admin. Confirm
-                            the active Works contract is visible and the
-                            approved BOQ can be selected in the QS workspace.
-                        </td>
-                        <td>
-                            Contract, project, tenant and currency match. Do not
-                            continue with a Supply contract or a manually typed
-                            contract reference.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="project">2. Create and approve the project</h2>
+    <p class="stage-note">The project Estimated Budget is deliberately optional. A real approved Procurement budget becomes necessary when the sourcing/tender branch begins.</p>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Enter or select these example values</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">2.1 Start</td><td><code>uat.qs.preparer</code></td><td><span class="route">Projects → Projects</span>Click <span class="click">New Project</span>.</td><td>Confirm the page title is <span class="value">Create Project</span>.</td><td>A blank governed project form opens.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.2 Initiation</td><td><code>uat.qs.preparer</code></td><td>Complete the first part of the form.</td><td>Title: <span class="value">QS-UAT-20260930-01 – Community Office Block</span><br>Project Type: <span class="value">QS UAT Construction Development</span><br>Priority: <span class="value">Medium</span><br>Template: <span class="value">No template</span><br>Portfolio/Program: <span class="value">No portfolio</span>/<span class="value">No program</span><br>Methodology: <span class="value">Waterfall</span></td><td>Required-field markers clear as values are selected. If an exact seeded value is absent, stop and record the selector rather than choosing a substitute.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.3 Delivery profile</td><td><code>uat.qs.preparer</code></td><td>Continue down the same form.</td><td>Delivery Structure: <span class="value">Whole Development</span><br>Development Type: <span class="value">Commercial</span><br>Site Name: <span class="value">QS UAT Community Office Site</span><br>Procurement Route: <span class="value">Traditional</span><br>Contract Strategy: <span class="value">Measured Works</span><br>Handover Strategy: <span class="value">Single Handover</span></td><td>The Construction Foundation choices remain visible.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.4 Dates and money</td><td><code>uat.qs.preparer</code></td><td>Continue down the same form.</td><td>Start Date: <span class="value">01/10/2026</span><br>Target End Date: <span class="value">30/09/2027</span><br>Estimated Budget: <span class="value">leave blank</span><br>Project Base Currency: <span class="value">GHS</span><br>Funding Source: <span class="value">Internal Budget</span></td><td>No validation error demands an Estimated Budget. Currency remains GHS.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.5 Ownership</td><td><code>uat.qs.preparer</code></td><td>Use the controlled selectors.</td><td>Sponsor: select <span class="value">uat.qs.approver</span><br>Project Manager: select <span class="value">uat.qs.preparer</span><br>Business Partner: <span class="value">No business partner</span><br>Contract: <span class="value">No contract</span></td><td>The project can be created before its later Works contract exists. Stop and record the selector if either seeded QS account is absent.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.6 Narrative</td><td><code>uat.qs.preparer</code></td><td>Enter the project narrative fields.</td><td>Summary: <span class="value">Construct one fictional community office block for QS UAT.</span><br>Business Case: <span class="value">Demonstrate controlled QS, Procurement and Finance integration.</span><br>Objectives: <span class="value">Complete one traceable BOQ-to-certificate lifecycle.</span><br>Scope: <span class="value">Preliminaries and one measured general Works item.</span><br>Site Address: <span class="value">QS UAT fictional site, Accra</span></td><td>Text is readable and clearly marked as UAT.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.7 Estate link</td><td><code>uat.qs.preparer</code></td><td>Open <span class="click">Demarcated Land</span>.</td><td>Select <span class="value">LAND-2026-8C30C53A-PORTION-001</span>. If already assigned by another run, select <span class="value">TDC-PORTAL-LAND-001-PORTION-001</span> and record that choice.</td><td>The selector displays the Estate portion label. Do not type a land reference manually.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.8 Remaining details</td><td><code>uat.qs.preparer</code></td><td>Complete the bottom of the form.</td><td>Funding Arrangement: <span class="value">TDC internal UAT allocation</span><br>Expected Benefits: <span class="value">Traceable QS approvals and Finance handoff.</span><br>Consultant Team: <span class="value">Fictional QS UAT Consultant</span><br>Construction Notes: <span class="value">UAT only; no real construction obligation.</span><br>Approval Required: <span class="value">On</span></td><td>The form is complete and no real-world commitment is implied.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.9 Create</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Create Project</span> once.</td><td>No additional values.</td><td>Project opens in <span class="value">Draft</span>. Record its generated project code and capture Overview.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.10 Submit</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Overview → Workflow</span>Click <span class="click">Submit</span> and confirm the dialog if shown.</td><td>Comment, if requested: <span class="value">Submit QS-UAT-20260930-01 project for independent approval.</span></td><td>Status becomes <span class="value">Pending Approval</span>. Capture workflow history.</td></tr>
+      <tr><td class="check">☐</td><td class="step">2.11 Approve</td><td><code>uat.qs.approver</code></td><td>Sign out/in, reopen the same project, and click the current <span class="click">Approve</span> action.</td><td>Approval comment: <span class="value">Approved for QS UAT Works lifecycle.</span></td><td>Final project status becomes <span class="value">Planned</span>. If it remains Pending Approval, follow the next assigned workflow actor shown on the page; do not reuse the preparer.</td></tr>
+    </tbody></table>
 
-            <h2 id="qs">C. Measure, value and certify the Works</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C1. Record measurement</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components → Measurements button</span></td>
-                        <td>
-                            In Work Components, select Measurements. Select the
-                            active contract and approved BOQ. Select a
-                            project location or enter a clear UAT site detail,
-                            then save measured quantities against the approved
-                            item.
-                        </td>
-                        <td>
-                            Measurement is saved against the correct project/BOQ
-                            item. Preserve the location and quantity evidence.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C2. Prepare valuation and evidence</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 1. Valuations</span></td>
-                        <td>
-                            Create the valuation from the recorded measurement.
-                            Upload the required UAT evidence through Central DMS
-                            and verify a clean scan. Vet and submit the
-                            valuation.
-                        </td>
-                        <td>
-                            Valuation is Pending Approval with controlled DMS
-                            evidence and no AP invoice yet.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C3. Technical valuation review</td>
-                        <td><code>uat.qs.reviewer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 1. Valuations → open the submitted valuation</span></td>
-                        <td>Approve the Technical review step.</td>
-                        <td>
-                            Valuation moves to Independent approval; it is not
-                            certified yet.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C4. Final valuation approval</td>
-                        <td><code>uat.qs.approver</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 1. Valuations → open the reviewed valuation</span></td>
-                        <td>Approve the Independent approval step.</td>
-                        <td>
-                            Valuation is Approved/Certified and is eligible for
-                            a payment certificate. Verify full workflow audit
-                            history.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C5. Create payment certificate</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 2. Certificates and payments</span></td>
-                        <td>
-                            Create the certificate from the approved valuation.
-                            Confirm gross amount, tax group,
-                            deductions/retention, currency, due date and
-                            contractor before submitting.
-                        </td>
-                        <td>
-                            Certificate is Pending Approval with the expected
-                            total. Record certificate reference.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C6. Technical certificate review</td>
-                        <td><code>uat.qs.reviewer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 2. Certificates and payments → open the submitted certificate</span></td>
-                        <td>Approve the Technical review step.</td>
-                        <td>
-                            Certificate moves to Independent approval and
-                            remains unchanged financially.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C7. Final certificate approval</td>
-                        <td><code>uat.qs.approver</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 2. Certificates and payments → open the reviewed certificate</span></td>
-                        <td>Approve the Independent approval step.</td>
-                        <td>
-                            Certificate is Approved. A governed PDF is retained
-                            in Central DMS and the certificate is handed to AP
-                            as a source-linked draft, not paid invoice.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">C8. Confirm document and report</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Project → Commercial Admin → 2. Certificates and payments; then <a href="http://localhost:3000/reports/quantity-survey">Reports → Quantity Survey Reports</a> → Certificate Register</span></td>
-                        <td>
-                            Use Preview PDF, then Save PDF as if the browser
-                            supports it. Open
-                            <a
-                                href="http://localhost:3000/reports/quantity-survey"
-                                >Reports → Quantity Survey Reports</a
-                            >
-                            and check Certificate Register.
-                        </td>
-                        <td>
-                            Protected preview opens; saved-file delivery is
-                            confirmed by the tester. Register shows the
-                            certificate, amount and AP handoff status.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="boq">3. Create, snapshot, submit, and approve the BOQ</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Enter or select these example values</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">3.1 Add component</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Work Components</span>Click <span class="click">Add Work Component</span>.</td><td>Name: <span class="value">QS-UAT-20260930-01 General Works</span><br>Code: <span class="value">QSUAT-GW-01</span><br>Phase: <span class="value">No phase</span><br>Work Component Type: <span class="value">Work Package</span><br>Status: <span class="value">Planned</span><br>Weight: <span class="value">100</span><br>Currency: <span class="value">GHS</span><br>Dates: <span class="value">01/10/2026</span> to <span class="value">30/09/2027</span><br>Business Partner/Contract/Tender/Plan/PR/PO: choose each <span class="value">No …</span> option<br>Budget Baseline/Forecast: leave blank<br>Description: <span class="value">Fictional measured Works component for QS UAT.</span></td><td>One Planned Work Package is added. Capture its card/row.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.2 Add BOQ item</td><td><code>uat.qs.preparer</code></td><td>On Work Components, click <span class="click">Add BOQ Item</span>.</td><td>Work Component: <span class="value">QSUAT-GW-01</span><br>Item Type: use default measured item<br>Section: <span class="value">QS-UAT-PRELIM – QS UAT preliminaries</span><br>Trade: <span class="value">QS-UAT-GENERAL – QS UAT general building work</span><br>Cost Code: <span class="value">QS-UAT-001 – QS UAT controlled Works item</span><br>Measurement Code: <span class="value">QS-UAT-COUNT – QS UAT measured count</span><br>Inventory Item: leave unlinked<br>Description: <span class="value">QS UAT controlled general Works item</span><br>Line Number: <span class="value">1.01</span><br>Item Code: <span class="value">QS-UAT-001</span><br>Quantity: <span class="value">100</span><br>Unit: <span class="value">EA</span><br>Unit Rate: <span class="value">1000</span><br>Forecast: <span class="value">100000</span><br>Currency: <span class="value">GHS</span><br>Procurement Plan Item: <span class="value">No plan item</span><br>Notes: <span class="value">Fresh QS UAT BOQ line.</span></td><td>The line amount is <span class="value">GHS 100,000</span>. Budget field stays read-only and may be blank because it is owned by the Budgeting tab.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.3 Create snapshot</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Versions</span>, then <span class="click">Create snapshot</span>.</td><td>Version Type: <span class="value">Original</span><br>Change Summary: <span class="value">Initial QS-UAT-20260930-01 approved-tender BOQ candidate.</span></td><td>A v1 Original row appears in <span class="value">Draft</span> with one line. If Original is unavailable for a project with no prior version, stop and record the policy error.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.4 Inspect snapshot</td><td><code>uat.qs.preparer</code></td><td>Use the three-dot menu on the new version and click <span class="click">View immutable snapshot</span>.</td><td>Confirm line <span class="value">1.01</span>, quantity <span class="value">100 EA</span>, rate <span class="value">GHS 1,000</span>, amount <span class="value">GHS 100,000</span>.</td><td>Snapshot matches the working BOQ. Capture the line and total.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.5 Submit BOQ</td><td><code>uat.qs.preparer</code></td><td>Close snapshot; on the version row open the three-dot menu → <span class="click">Submit for approval</span> → <span class="click">Submit</span>.</td><td>No comment is required by the submit dialog.</td><td>Version status becomes <span class="value">Pending Approval</span>. The working snapshot is immutable during review.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.6 First review</td><td><code>uat.qs.reviewer</code></td><td>Sign out/in → reopen project → Work Components → <span class="click">Versions</span> → three-dot menu → <span class="click">Approve current step</span>.</td><td>Approval comment: <span class="value">Quantities, classification, unit and rate checked for UAT.</span></td><td>The workflow advances. If the version remains Pending Approval, another stage remains.</td></tr>
+      <tr><td class="check">☐</td><td class="step">3.7 Final approval</td><td><code>uat.qs.approver</code></td><td>Sign out/in and repeat <span class="click">Versions → Approve current step → Approve</span>.</td><td>Comment: <span class="value">Final independent BOQ approval for QS UAT.</span></td><td>Version becomes <span class="value">Approved</span> and shows <span class="value">Published</span>. Record the version number.</td></tr>
+    </tbody></table>
 
-            <h2 id="change">D. Process a variation and a contractor claim</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D1. Raise variation</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 3. Variations and claims → Variations</span></td>
-                        <td>
-                            In Commercial Admin, select 3. Variations and claims,
-                            then create one UAT direct variation against the active Works contract and
-                            approved BOQ. Attach clean governed evidence, then
-                            submit.
-                        </td>
-                        <td>
-                            Variation is Pending Approval. It must retain its
-                            evidence when opened again.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D2. Review and approve variation</td>
-                        <td>
-                            <code>uat.qs.reviewer</code>, then
-                            <code>uat.qs.approver</code>
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 3. Variations and claims → open submitted variation</span></td>
-                        <td>
-                            Technical reviewer approves first; independent
-                            approver approves second.
-                        </td>
-                        <td>
-                            Variation applies once only. A contract amendment,
-                            revised BOQ/budget/forecast are produced through
-                            their existing owners; prior versions remain
-                            history.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D3. Approve revised BOQ</td>
-                        <td>
-                            <code>uat.qs.preparer</code>,
-                            <code>uat.qs.reviewer</code>,
-                            <code>uat.qs.approver</code>
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Work Components → BOQ Version Actions</span></td>
-                        <td>
-                            Prepare the required revised BOQ version, submit it,
-                            then complete technical and final approval in order.
-                        </td>
-                        <td>
-                            One active revised approved BOQ reflects the
-                            approved variation. Check Variation Log and forecast
-                            rather than manually changing the contract value.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D4. Raise claim</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 3. Variations and claims → Claims</span></td>
-                        <td>
-                            In Commercial Admin, select 3. Variations and claims,
-                            then create a staff claim, attach clean evidence,
-                            save and submit.
-                        </td>
-                        <td>
-                            Claim reference and Pending review status. It is
-                            visible only in the assigned project/contract scope.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D5. Assess claim</td>
-                        <td><code>uat.qs.reviewer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 3. Variations and claims → open submitted claim</span></td>
-                        <td>
-                            Record the QS assessment: approved and rejected
-                            amounts, with a clear UAT note; then route it
-                            onward.
-                        </td>
-                        <td>
-                            Claim moves to technical/final approval. The
-                            reviewer is recorded separately from the preparer.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            D6. Technical and final claim approval
-                        </td>
-                        <td>
-                            <code>uat.qs.approver</code>, then a configured
-                            independent final approver
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Commercial Admin → 3. Variations and claims → open assessed claim</span></td>
-                        <td>
-                            Complete the distinct technical and final workflow
-                            steps. Use <code>admin</code> only when it is the
-                            actual configured final assignee, not as a
-                            workaround.
-                        </td>
-                        <td>
-                            Claim shows approved/rejected/settled values and
-                            completed workflow. Finance settlement remains
-                            separate.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">D7. Review QS registers</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/reports/quantity-survey">Reports → Quantity Survey Reports</a> → choose each register in the report navigator</span></td>
-                        <td>
-                            Open Reports → Quantity Survey Reports: Variation Log,
-                            Certificate Register, Retention Register and Audit
-                            Trail.
-                        </td>
-                        <td>
-                            Each new record appears with correct
-                            project/contract scope and actor history.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="procurement">4. Obtain the project-linked Works contract</h2>
+    <p class="stage-note">This section keeps the QS scenario values together. Policy-specific workflow stages and tender-document controls still follow the active Procurement configuration. For additional screenshots and exception paths, use <code>docs/TDC_CUSTOMER_PROCUREMENT_STORES_WALKTHROUGH.html</code>.</p>
+    <aside class="callout warnbox"><strong>Budget boundary.</strong> The project could be created with Estimated Budget blank. Before tender/award, create or select a real approved Procurement budget and plan. Do not use the project Estimated Budget as spending authority.</aside>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">4.1 Budget</td><td><code>procurementofficer</code></td><td><span class="route">Procurement → Planning → Budgets → New</span>Create the UAT procurement budget and save/submit it.</td><td>Title/description: <span class="value">QS-UAT-20260930-01 Works Budget</span><br>Currency: <span class="value">GHS</span><br>Amount: <span class="value">120000</span><br>Period/department/cost centre/funding: select the current controlled UAT values<br>Note: <span class="value">Approved spending envelope for QS UAT tender only.</span></td><td>Budget receives a reference and enters its configured approval route.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.2 Approve budget</td><td>Assigned Finance reviewer, normally <code>financereviewer</code></td><td>Sign out/in → Procurement → Planning → Budgets → open the reference → click current <span class="click">Approve</span>.</td><td>Comment: <span class="value">GHS 120,000 UAT allocation reviewed.</span></td><td>Budget becomes <span class="value">Approved</span>. Capture allocation and available balance.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.3 Plan</td><td><code>procurementofficer</code></td><td><span class="route">Procurement → Planning → Procurement Plans → New</span>Create the plan, link the approved budget, add one Works item, save, and submit.</td><td>Plan: <span class="value">QS-UAT-20260930-01 Works Plan</span><br>Type: <span class="value">Annual</span><br>Plan cap/item estimate: <span class="value">100000 GHS</span><br>Item description: <span class="value">Community Office measured Works</span><br>Project: select the project code from step 2<br>Method: accept the current policy recommendation; do not force NCT/QBS/QCBS.</td><td>Plan follows all configured reviews and becomes approved/published. Record plan and item references.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.4 Plan reviews</td><td>Each actor shown by the active workflow</td><td>For each current task: sign in as the named assignee, open the same plan, inspect budget/project/item, enter a clear comment, click <span class="click">Approve</span>, and sign out.</td><td>Use comment pattern: <span class="value">QS-UAT-20260930-01 plan stage reviewed.</span></td><td>Every stage shows a different authorized actor where SOD requires it; final status is Published/Approved.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.5 Purchase request</td><td><code>procurementofficer</code></td><td><span class="route">Procurement → Purchasing → Purchase Requests → New</span>Create from the approved plan item; save and submit.</td><td>Title: <span class="value">QS-UAT-20260930-01 Community Office Works</span><br>Type/category: <span class="value">Works</span><br>Quantity: <span class="value">1</span><br>Estimated unit/total: <span class="value">100000 GHS</span><br>Required date: <span class="value">01/10/2026</span> or the next valid future UAT date<br>Project and plan item: select this run's records<br>Justification: <span class="value">Procure the approved QS UAT BOQ scope.</span></td><td>PR enters approval; after assigned approvals it becomes Approved. Record PR number.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.6 Create tender</td><td><code>procurementofficer</code></td><td>Open the approved PR → inspect the policy recommendation → click <span class="click">Create Tender</span> only when that is the approved sourcing route.</td><td>Title: <span class="value">QS-UAT-20260930-01 Community Office Works Tender</span><br>Procurement type: <span class="value">Works</span><br>Currency: <span class="value">GHS</span><br>Estimate: <span class="value">100000</span><br>Project/PR/plan/BOQ: select this run's linked records<br>Bid validity: <span class="value">30 calendar days</span> for this UAT example if permitted by tender terms.</td><td>One Draft tender is created from the PR. Record tender number; no duplicate sourcing case exists.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.7 Dates and criteria</td><td><code>procurementofficer</code></td><td>In the tender wizard complete Basic Information, Items/BOQ, Evaluation Strategy, Committee/Workflow, and Terms.</td><td>Submission deadline: choose a real future UAT time. Example when starting 30/09/2026 09:00: <span class="value">30/09/2026 12:00</span><br>Opening: <span class="value">30/09/2026 12:30</span><br>Do not reuse these dates after they expire.<br>BOQ scope: one line <span class="value">100 EA × GHS 1,000</span>.</td><td>Draft saves with linked approved BOQ and no date validation errors.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.8 Tender approval</td><td><code>procurementofficer</code>, then assigned approver(s)</td><td>Submit the tender. Each assigned actor signs in, opens the same tender, reviews, and clicks the current approval action.</td><td>Maker comment: <span class="value">Submit QS UAT Works tender.</span><br>Approver comment: <span class="value">Scope, dates, method and BOQ checked.</span></td><td>Tender becomes Approved, not yet Published.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.9 Tender document</td><td><code>procurementofficer</code></td><td>Open the tender process-flow sidebar → <span class="click">Open document register</span>. Create/clone a compatible Draft, click <span class="click">Start document preparation</span>, upload the UAT tender document, submit/approve/publish it through its own workflow, return to tender, refresh, and click <span class="click">Bind approved version</span>.</td><td>Document title: <span class="value">QS-UAT-20260930-01 Works Tender Document</span>. Use a clean UAT-only PDF. Match the tender's policy, method, profile, and workflow exactly.</td><td>One Published compatible document version is bound. Publishing the document has not yet published the tender.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.10 Publish tender</td><td><code>procurementofficer</code></td><td>Return to the tender → process-flow sidebar → <span class="click">Tender</span> → <span class="click">Publish Tender</span>. Review checks, add required advertisement evidence, then confirm.</td><td>Publication note: <span class="value">QS-UAT-20260930-01 controlled UAT publication.</span></td><td>Tender status becomes <span class="value">Published</span>. Capture the tender header and deadline.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.11 Contractor bid</td><td><code>uat.qs.contractor</code></td><td>Sign out/in → <span class="route">External Portal → Available Tenders</span>Open this tender → create bid → complete the BOQ line → upload separate technical/commercial UAT PDFs → click <span class="click">Submit</span> once.</td><td>Line quantity: <span class="value">100 EA</span><br>Unit price: <span class="value">1000 GHS</span><br>Total: <span class="value">100000 GHS</span><br>Delivery/completion: <span class="value">365 days</span><br>Validity: match the tender.</td><td>A Submitted bid receipt/reference appears under My Tender Bids. Contractor sees only its own bid.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.12 Close and open</td><td><code>procurementofficer</code> and appointed committee</td><td>After the real deadline, record each committee member's attendance, confirm quorum, click tender <span class="click">Close</span>, then open Bids → View Details → <span class="click">Open bid</span> → <span class="click">Mark Bid as Opened</span>.</td><td>Use only the tender's actual appointed users. Do not backdate, reopen an expired historical tender, or have one user impersonate the committee.</td><td>Tender is Closed and the bid is formally Opened with attendance/quorum history.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.13 Evaluate</td><td><code>tdc0102-checker-201531</code>, <code>procurementevaluator</code>, <code>finance.manager</code> as assigned</td><td>Each member signs in separately → Procurement → My Assigned Tenders/Evaluations → opens the tender → scores every criterion → enters a comment → submits their evaluation.</td><td>Comment pattern: <span class="value">QS-UAT-20260930-01 criterion assessed against submitted evidence.</span></td><td>Every appointed member has one submitted evaluation. Committee totals and recommendation become available.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.14 Award</td><td><code>procurementofficer</code>, then <code>procurementapprover</code> or assigned approver</td><td>Open Award/Award Readiness → select the evaluated bid → complete required bidder verification/evidence → prepare award → submit. Assigned approver opens the same award and approves.</td><td>Recommended amount: <span class="value">GHS 100,000</span><br>Reason: <span class="value">Responsive QS UAT bid matching the approved BOQ.</span></td><td>Award is Approved and retains tender, bid, contractor, BOQ, evaluation, and actor lineage.</td></tr>
+      <tr><td class="check">☐</td><td class="step">4.15 Works contract</td><td><code>procurementofficer</code>, then assigned approver</td><td>From the approved award click <span class="click">Create Purchase Order / Contract</span> → choose Contract/Works contract. Complete terms, submit, and complete assigned approvals/activation.</td><td>Title: <span class="value">QS-UAT-20260930-01 Community Office Works Contract</span><br>Type: <span class="value">Works</span><br>Contractor: <span class="value">QS-UAT-CONT-001</span><br>Original sum: <span class="value">100000 GHS</span><br>Start/end: <span class="value">01/10/2026</span> / <span class="value">30/09/2027</span><br>Retention: <span class="value">5%</span><br>Completion: <span class="value">365 days</span><br>Project and approved BOQ: this run.</td><td>Contract becomes Active/Approved and appears as an <strong>Active Works contract</strong> in project QS selectors. Record contract number.</td></tr>
+    </tbody></table>
 
-            <h2 id="handover">E. Handover, defects and controlled closeout</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / evidence</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">E1. Record practical completion</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Handover<br><code>/development/projects/&lt;project-id&gt;/handover</code></span></td>
-                        <td>
-                            Project → Handover. Create practical-completion
-                            evidence only when it is genuinely authorised for
-                            the UAT case. Save the record, then edit and
-                            complete the same record.
-                        </td>
-                        <td>
-                            One completed handover reference with supporting DMS
-                            evidence. Do not create a duplicate to correct an
-                            entry.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">E2. Record and close defects</td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Projects → Projects → open project → Defects<br><code>/development/projects/&lt;project-id&gt;/defects</code></span></td>
-                        <td>
-                            Project → Defects. Create a UAT snag/defect; record
-                            resolution and closure on the same record. Do not
-                            create charges, jobs, work orders or payments unless
-                            that is an approved UAT scope.
-                        </td>
-                        <td>
-                            Closed defect history, with zero financial exposure
-                            unless separately authorised.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">E3. Initial takeover readiness</td>
-                        <td><code>procurementapprover</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/procurement/contracts">Procurement → Tendering → Contracts</a> → open linked Works contract → Works Closeout</span></td>
-                        <td>
-                            Open the linked
-                            <a
-                                href="http://localhost:3000/procurement/contracts"
-                                >Procurement Contract</a
-                            >
-                            → Works Closeout. Select completed
-                            practical-completion record and the required
-                            documents; check readiness before submission.
-                        </td>
-                        <td>
-                            All configuration, authority, DMS, project and
-                            retention checks pass before an action is submitted.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">
-                            E4. Initial/final takeover decisions
-                        </td>
-                        <td>
-                            Actual workflow-assigned independent approver(s)
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Procurement → Tendering → Contracts → open linked Works contract → Works Closeout → current workflow action</span></td>
-                        <td>
-                            Submit only when the page shows an active published
-                            closeout configuration and a valid authority route.
-                            Complete initial takeover, final takeover and final
-                            closeout through their assigned owners.
-                        </td>
-                        <td>
-                            Complete controlled closeout history. A QS preparer
-                            must not approve its own closeout.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">E5. Retention release</td>
-                        <td>
-                            Authorised QS/Finance/contract owner as configured
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Project → Commercial Admin → 4. Retention and closeout; then open the linked contract → Works Closeout</span></td>
-                        <td>
-                            Release retention only when the contract,
-                            certificate, defects and closeout controls permit
-                            it.
-                        </td>
-                        <td>
-                            Retention Register shows controlled
-                            held/released/balance values. Never invent a
-                            retention release to complete UAT.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="measurement">5. Record and freeze the site measurement</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">5.1 Open sheets</td><td><code>uat.qs.preparer</code></td><td><span class="route">Projects → Projects → open project → Work Components</span>Click <span class="click">Measurements</span>, then <span class="click">New</span>.</td><td>Confirm dialog title <span class="value">Taking-off and measurement sheets</span>.</td><td>The approved BOQ line is selectable.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.2 Header</td><td><code>uat.qs.preparer</code></td><td>Complete the measurement header.</td><td>Approved BOQ item: select <span class="value">1.01 · QS UAT controlled general Works item</span><br>Measurement Source: <span class="value">Site</span><br>Title: <span class="value">QS-UAT-20260930-01 Site measurement 1</span><br>Measurement Date: <span class="value">02/10/2026</span><br>Approved drawing: <span class="value">No drawing</span><br>Site location: <span class="value">QS UAT Community Office Site</span></td><td>No design drawing is demanded because source is Site; site location is required.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.3 Dimension row</td><td><code>uat.qs.preparer</code></td><td>In Server-calculated dimension rows, use the existing first row.</td><td>Description: <span class="value">Count of completed UAT Works units</span><br>Formula Type: <span class="value">Count</span><br>Timesing: <span class="value">20</span><br>Deduction: unchecked<br>Notes: <span class="value">Joint UAT count at fictional site.</span></td><td>Calculated net quantity displays <span class="value">20.0000</span>.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.4 Create sheet</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Create sheet</span> once.</td><td>No new values.</td><td>A Draft sheet reference appears in Project sheets with 20 EA.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.5 Attach evidence</td><td><code>uat.qs.preparer</code></td><td>Select the Draft sheet. In Central-DMS evidence choose type, title, and file; click <span class="click">Scan &amp; attach evidence</span>.</td><td>Evidence Type: <span class="value">SitePhoto</span><br>Title: <span class="value">QS UAT site count 20 EA</span><br>File: <span class="value">QS-UAT-20260930-01-site-measurement.jpg</span></td><td>Toast says clean-scanned evidence linked; evidence count becomes 1. Capture it.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.6 Edit check</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Edit draft</span>, confirm values are retained, add <span class="value">Verified during UAT</span> to Notes, then click <span class="click">Update draft</span>.</td><td>Keep quantity at 20.</td><td>The edited note remains after closing/reopening the dialog.</td></tr>
+      <tr><td class="check">☐</td><td class="step">5.7 Freeze</td><td><code>uat.qs.preparer</code></td><td>Select the Draft sheet and click <span class="click">Record &amp; freeze</span> once.</td><td>No additional values.</td><td>Status becomes <span class="value">Recorded</span>. Edit is no longer available. Open History and capture actor/time.</td></tr>
+    </tbody></table>
 
-            <h2 id="finance">F. Finance/AP boundary — record, do not bypass</h2>
-            <p>
-                The QS certificate is designed to create a source-linked Finance
-                AP draft. Its posting, payment and reconciliation belong to
-                Finance. These steps are part of the end-to-end design, but they
-                are
-                <span class="hold"
-                    >not currently ready in this UAT environment</span
-                >
-                until Finance confirms the adopted-budget and AccountingBooks
-                prerequisites.
-            </p>
-            <table>
-                <thead>
-                    <tr>
-                        <th class="check">Done</th>
-                        <th>Step</th>
-                        <th>Sign in as</th>
-                        <th>Where to go</th>
-                        <th>Action</th>
-                        <th>Expected result / stop rule</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">F1. Confirm AP draft</td>
-                        <td><code>ap.officer</code></td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> <a href="http://localhost:3000/finance/ap/invoices">Finance → Accounts Payable → Invoices</a> → search by certificate or supplier → open invoice</span></td>
-                        <td>
-                            Open the source-linked vendor invoice from the
-                            approved certificate.
-                        </td>
-                        <td>
-                            Supplier, service line, tax, total and QS source are
-                            visible. <span class="stop">Stop</span> if the page
-                            reports missing Finance budget/accounting
-                            configuration; log the exact message.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">F2. Finance posting workflow</td>
-                        <td>
-                            Actual Finance workflow assignees, normally
-                            <code>ap.officer</code> then
-                            <code>financereviewer</code>/<code
-                                >financeapprover</code
-                            >
-                        </td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Finance → Accounts Payable → Invoices → open the QS-sourced invoice → use the current workflow action</span></td>
-                        <td>
-                            Only after Finance authorises readiness: submit,
-                            review/approve, post and pay through the Finance UAT
-                            script.
-                        </td>
-                        <td>
-                            QS record reads the live Finance status and
-                            paid/balance value. No QS user should manually alter
-                            the invoice or certificate to simulate payment.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>☐</td>
-                        <td class="step">F3. Reconcile final result</td>
-                        <td><code>uat.qs.preparer</code> and Finance owner</td>
-                        <td class="navigation"><span class="nav-path"><strong>Go to:</strong> Project → Commercial Admin → 2. Certificates and payments and 4. Retention and closeout; then Reports → Quantity Survey Reports</span></td>
-                        <td>
-                            Return to Certificate Register, Retention Register
-                            and contract-cost/reconciliation views.
-                        </td>
-                        <td>
-                            Certificate, invoice, payment and retention outcomes
-                            agree across QS and Finance. Record references and
-                            amounts in the UAT evidence pack.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="valuation">6. Contractor claim, QS valuation, consultant endorsement, and approval</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">6.1 Prepare worksheet</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Commercial Admin → 1. Valuations</span>Open the valuation record and click <span class="click">Worksheet</span>.</td><td>Approved BOQ Version: this run's published version<br>Contractor: <span class="value">Fictional QS UAT Contractor</span><br>Consultant: <span class="value">Fictional QS UAT Consultant</span><br>Retention %: <span class="value">5</span><br>Current certified: leave <span class="value">0</span> until contractor submits if contractor submission is required.</td><td>Recorded measurement shows 20 EA. Click <span class="click">Save worksheet</span>; a Draft valuation is created.</td></tr>
+      <tr><td class="check">☐</td><td class="step">6.2 Contractor claim</td><td><code>uat.qs.contractor</code></td><td>Sign out/in → <span class="route">External Portal → Projects → open this project → Interim valuation claims</span>Select the Draft valuation.</td><td>Current claimed: <span class="value">20</span><br>Click <span class="click">Save contractor claim</span>.<br>Evidence Type: <span class="value">Contractor Claim</span><br>Title: <span class="value">QS-UAT-20260930-01 contractor valuation 1</span><br>File: <span class="value">QS-UAT-20260930-01-valuation.pdf</span><br>Notes: <span class="value">I attest this UAT claim represents 20 measured units.</span></td><td>Claimed value is GHS 20,000. Click <span class="click">Upload</span>, then <span class="click">Submit contractor claim</span>. Status becomes Contractor Submitted.</td></tr>
+      <tr><td class="check">☐</td><td class="step">6.3 QS assess</td><td><code>uat.qs.reviewer</code></td><td>Sign out/in → Project → Commercial Admin → Valuations → <span class="click">Worksheet</span>.</td><td>Current claimed: <span class="value">20</span><br>Current certified: <span class="value">18</span><br>Review note: <span class="value">Certify 18 EA; 2 EA require further supporting evidence.</span><br>Lifecycle reason: <span class="value">QS assessment completed against recorded site measurement.</span><br>Click <span class="click">Save worksheet</span>, then <span class="click">Vet valuation</span>.</td><td>Disputed quantity is 2; gross GHS 18,000; retention GHS 900; net current GHS 17,100. Status becomes QS Vetted.</td></tr>
+      <tr><td class="check">☐</td><td class="step">6.4 Consultant endorse</td><td><code>uat.qs.consultant</code></td><td>Sign out/in → External Portal → Projects → this project → Interim valuation claims → select the QS-vetted record.</td><td>Evidence Type: <span class="value">Consultant Review</span><br>Title: <span class="value">QS UAT consultant review</span><br>Upload a clean UAT PDF if required.<br>Notes: <span class="value">Independent UAT endorsement of 18 certified units.</span><br>Click <span class="click">Endorse as consultant</span>.</td><td>Status becomes Consultant Endorsed. Consultant cannot change contractor or QS quantities.</td></tr>
+      <tr><td class="check">☐</td><td class="step">6.5 Submit approval</td><td><code>uat.qs.reviewer</code></td><td>Sign out/in → reopen Worksheet.</td><td>Lifecycle reason: <span class="value">Submit endorsed QS valuation for independent approval.</span><br>Click <span class="click">Submit approval</span>.</td><td>Status becomes Pending Approval.</td></tr>
+      <tr><td class="check">☐</td><td class="step">6.6 Approve</td><td><code>uat.qs.approver</code></td><td>Sign out/in → reopen the same Worksheet → inspect evidence, 18 certified, 2 disputed, retention 5% → enter reason → click <span class="click">Approve</span>.</td><td>Reason: <span class="value">Independent approval of QS-UAT-20260930-01 valuation 1.</span></td><td>Status becomes Approved and badge shows <span class="value">Certificate ready</span>. Open History and capture all actors.</td></tr>
+    </tbody></table>
 
-            <h2>Completed-fixture demonstration path</h2>
-            <p>
-                For a short demonstration, do not repeat the fresh run. Use
-                these preserved records in review-only mode:
-            </p>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Open</th>
-                        <th>What to show</th>
-                        <th>Account</th>
-                        <th>Do not do</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>
-                            <a
-                                href="http://localhost:3000/development/projects/cb23b1c6-d663-4017-b86a-976933fa98b7/overview"
-                                >PRJ-2026-0003 overview</a
-                            >
-                        </td>
-                        <td>
-                            Approved project, linked Works contract, approved
-                            BOQ history and GHS 11,000 forecast.
-                        </td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td>Do not edit or resubmit.</td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <a
-                                href="http://localhost:3000/development/projects/cb23b1c6-d663-4017-b86a-976933fa98b7/commercial-admin"
-                                >Commercial Admin</a
-                            >
-                        </td>
-                        <td>
-                            Approved valuation/certificate, applied variation
-                            and independently approved claim.
-                        </td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td>
-                            Do not create another certificate, variation or
-                            claim.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <a
-                                href="http://localhost:3000/reports/quantity-survey"
-                                >QS reports</a
-                            >
-                        </td>
-                        <td>
-                            Certificate Register, Variation Log, Retention
-                            Register and Audit Trail.
-                        </td>
-                        <td><code>uat.qs.preparer</code></td>
-                        <td>Do not claim Finance payment completed.</td>
-                    </tr>
-                    <tr>
-                        <td>
-                            <a
-                                href="http://localhost:3000/procurement/contracts/9c957633-fc63-44f4-b3ed-5f47fbd21016?tab=works-closeout"
-                                >CTR-2026-00003 closeout</a
-                            >
-                        </td>
-                        <td>
-                            Practical completion and evidence are present;
-                            explain the remaining owner-gated
-                            configuration/authority checks.
-                        </td>
-                        <td><code>procurementapprover</code></td>
-                        <td>
-                            Do not submit takeover/closeout while readiness is
-                            failed.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="certificate">7. Generate the certificate and create the Finance-owned AP invoice</h2>
+    <aside class="callout"><strong>Vendor-invoice route for QS.</strong> Do not manually create this certificate invoice in the Procurement Supplier Invoice page. The approved QS certificate creates one source-linked Finance AP vendor invoice through <span class="click">Create AP invoice</span>.</aside>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">7.1 Generate draft</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Commercial Admin → 2. Certificates and payments</span>Click <span class="click">Payment certificate workspace</span>.</td><td>Certificate-ready valuation: step 6<br>Payment Due Date: <span class="value">30/10/2026</span><br>Advance recovery: <span class="value">No advance recovery</span><br>Material reconciliation: <span class="value">No governed material values</span><br>Other deductions: <span class="value">0</span><br>Notes: <span class="value">QS-UAT-20260930-01 certificate 1 for 18 certified units.</span><br>Click <span class="click">Generate controlled draft</span>.</td><td>A server-generated certificate number appears in Draft. Gross is GHS 18,000 and retention is sourced from valuation/configuration.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.2 Review calculation</td><td><code>uat.qs.preparer</code></td><td>Read Current gross, Tax, Net payable, Finance AP, and Finance reconciliation cards.</td><td>Expected before configured tax: gross <span class="value">18,000</span>, retention <span class="value">900</span>, other deductions <span class="value">0</span>. Record displayed tax handling and final net; do not overwrite it.</td><td>Certificate values reconcile to the approved valuation. Capture the cards.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.3 Save and submit</td><td><code>uat.qs.preparer</code></td><td>Action Reason: enter the example. Click <span class="click">Save draft</span>, refresh, confirm values, then click <span class="click">Submit</span>.</td><td><span class="value">Submit QS-UAT-20260930-01 certificate 1 for independent approval.</span></td><td>Status becomes Issued/Pending approval according to configured route.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.4 Review stage</td><td><code>uat.qs.reviewer</code></td><td>Sign out/in → reopen certificate. If <span class="click">Approve</span> is available for the current stage, inspect and approve.</td><td>Reason: <span class="value">QS certificate figures and evidence reviewed.</span></td><td>Workflow advances; certificate may remain Issued until final stage.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.5 Final approval</td><td><code>uat.qs.approver</code></td><td>Sign out/in → reopen certificate → enter reason → click <span class="click">Approve</span>.</td><td><span class="value">Final independent approval for QS UAT certificate 1.</span></td><td>Status becomes Approved. <span class="click">Preview PDF</span> and <span class="click">History</span> are available; capture both.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.6 AP handoff</td><td><code>uat.qs.preparer</code></td><td>Sign out/in → reopen Approved certificate → Action Reason → click <span class="click">Create AP invoice</span> once.</td><td><span class="value">Create one Finance AP invoice from approved QS certificate.</span></td><td>Finance AP card shows a vendor invoice number. Reopening certificate must not offer a second duplicate handoff.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.7 Verify AP source</td><td><code>ap.officer</code></td><td>Sign out/in → <span class="route">Finance → Accounts Payable → Invoices</span>Search certificate number or <span class="value">QS-UAT-CONT-001</span>; open invoice.</td><td>Verify supplier, GHS, Works line, certificate source, tax, gross/deductions/net, due date, and account/book mapping. Do not create another invoice.</td><td>Finance invoice is Draft/source-linked and amounts match certificate. Capture header, distribution, source reference, workflow status.</td></tr>
+      <tr><td class="check">☐</td><td class="step">7.8 Finance lifecycle</td><td><code>ap.officer</code>, <code>financereviewer</code>, <code>financeapprover</code> as assigned</td><td>Use Finance workflow actions in order: validate/save → submit → review/approve → post → pay only when UAT scope and open period allow them.</td><td>Reason pattern: <span class="value">QS-UAT-20260930-01 certificate invoice stage completed.</span>. Use system-derived distributions; do not type balancing lines to force a pass.</td><td>Posted voucher is balanced and payment references same invoice. If Finance configuration blocks a stage, preserve Draft and record exact error.</td></tr>
+    </tbody></table>
 
-            <h2 id="troubleshooting">If a step does not behave as expected</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>What you see</th>
-                        <th>What to do</th>
-                        <th>Do not do</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td>Approve/submit button missing</td>
-                        <td>
-                            Confirm the signed-in username, DEFAULT tenant,
-                            record status and workflow assignment. Refresh once
-                            after a normal sign-in.
-                        </td>
-                        <td>
-                            Use admin or alter a role to bypass the assignment.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>"Workflow required" or no valid route</td>
-                        <td>
-                            Record the process, exact message and screenshot.
-                            Administrator checks published workflow setup; the
-                            process owner decides the fix.
-                        </td>
-                        <td>
-                            Create a fake approval or change a status directly.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Contract/BOQ/measurement selector is empty</td>
-                        <td>
-                            Check project, tenant, active Works contract and
-                            approved BOQ prerequisites in order.
-                        </td>
-                        <td>
-                            Use a Supply contract or manually enter a foreign
-                            ID.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>DMS file does not become clean</td>
-                        <td>
-                            Wait for scan status, refresh and retain the
-                            uploaded evidence record. Escalate an unavailable
-                            antivirus/scan service.
-                        </td>
-                        <td>Mark evidence complete without a clean scan.</td>
-                    </tr>
-                    <tr>
-                        <td>Finance invoice cannot submit/post</td>
-                        <td>
-                            Stop at the Finance boundary and give the exact
-                            message to Finance. Preserve the linked Draft
-                            invoice.
-                        </td>
-                        <td>
-                            Create a replacement invoice, alter the QS
-                            certificate or record a payment manually.
-                        </td>
-                    </tr>
-                    <tr>
-                        <td>Browser is slow or page times out</td>
-                        <td>
-                            Record time, URL and visible error; reload once.
-                            Verify backend/frontend availability before
-                            repeating a mutation.
-                        </td>
-                        <td>
-                            Click an action repeatedly; this can create
-                            duplicate requests.
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+    <h2 id="variation">8. Create, evidence, approve, and apply a variation</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">8.1 Open variation</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Commercial Admin → 3. Changes and claims</span>Click <span class="click">Governed variation</span>.</td><td>Dialog title: <span class="value">Variation and change-order control</span>.</td><td>Active Works contract and approved BOQ line are selectable.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.2 Header</td><td><code>uat.qs.preparer</code></td><td>Complete the variation header.</td><td>Contract: this run<br>Source Type: <span class="value">Direct variation</span><br>Source record: <span class="value">No source record required</span><br>Title: <span class="value">QS-UAT-20260930-01 add five Works units</span><br>Record type: <span class="value">Quantity Adjustment</span><br>Schedule impact: <span class="value">2</span> days<br>Reason/scope: <span class="value">UAT instruction to add five units to the approved measured Works line.</span></td><td>No governed source is required for Direct variation.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.3 Valuation line</td><td><code>uat.qs.preparer</code></td><td>Use first Valuation line.</td><td>BOQ line: <span class="value">1.01</span><br>Quantity change: <span class="value">5</span><br>Unit rate: keep <span class="value">1000</span><br>Line reason: <span class="value">Use approved BOQ rate for five additional units.</span></td><td>Amount displays <span class="value">GHS 5,000</span>.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.4 Save/evidence</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Save Draft</span>. Select saved variation, enter evidence title/file, click <span class="click">Upload evidence</span>.</td><td>Title: <span class="value">UAT variation instruction and estimate</span><br>File: <span class="value">QS-UAT-20260930-01-variation.pdf</span></td><td>Draft reference is generated; evidence count becomes 1 and DMS scan succeeds.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.5 Submit</td><td><code>uat.qs.preparer</code></td><td>Action Reason → enter example → click <span class="click">Submit</span>.</td><td><span class="value">Submit GHS 5,000 QS UAT variation for independent review.</span></td><td>Status becomes Pending Approval.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.6 Review/approve</td><td><code>uat.qs.reviewer</code>, then <code>uat.qs.approver</code> as workflow assigns</td><td>Each actor signs in separately, opens same variation, checks source/line/amount/evidence, enters reason, and clicks <span class="click">Approve review</span> or current approval action.</td><td>Reviewer: <span class="value">BOQ rate and five-unit calculation checked.</span><br>Approver: <span class="value">Independent approval of GHS 5,000 UAT variation.</span></td><td>Variation becomes Approved and Downstream application becomes Applied. Revised sum shows <span class="value">GHS 105,000</span>.</td></tr>
+      <tr><td class="check">☐</td><td class="step">8.7 Revised BOQ</td><td><code>uat.qs.preparer</code>, reviewer, approver</td><td>Return to Work Components → <span class="click">Versions</span>. Open variation-created revised BOQ candidate; view comparison, submit, and complete assigned approvals.</td><td>Compare prior quantity <span class="value">100</span> with new quantity <span class="value">105</span>; change summary identifies approved variation.</td><td>New Approved/Published BOQ version exists. Prior version remains immutable and comparison shows +5.</td></tr>
+    </tbody></table>
 
-            <details>
-                <summary>Current known owner-gated prerequisites</summary>
-                <ul>
-                    <li>
-                        Finance must resolve adopted-budget and AccountingBooks
-                        schema/configuration readiness before F2 posting/payment
-                        can be accepted.
-                    </li>
-                    <li>
-                        Procurement and named owners must prepare, approve and
-                        publish the shared closeout configuration decisions; an
-                        empty draft is not a completed configuration.
-                    </li>
-                    <li>
-                        The Works authority route must cover the actual contract
-                        value before initial/final takeover. Do not reduce a
-                        real value to fit an authority limit.
-                    </li>
-                    <li>
-                        Retention release depends on applicable certificate,
-                        defect, takeover and Finance controls. The existing
-                        fixture has zero retention and must not be used to
-                        demonstrate a release.
-                    </li>
-                </ul>
-            </details>
+    <h2 id="claim">9. Contractor contract claim and QS decision</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">9.1 New claim</td><td><code>uat.qs.contractor</code></td><td>Sign out/in → <span class="route">External Portal → Projects → this project → Contract claims</span>Click <span class="click">New claim</span>.</td><td>Contract: this run<br>Claim Type: <span class="value">Loss And Expense</span><br>Approved BOQ: latest approved<br>Title: <span class="value">QS-UAT-20260930-01 temporary access cost</span><br>Claimed amount: <span class="value">2500</span><br>Basis: <span class="value">Fictional UAT claim for temporary access arrangement during the measured Works period.</span></td><td>Click <span class="click">Save Draft</span>; claim number is generated.</td></tr>
+      <tr><td class="check">☐</td><td class="step">9.2 Evidence/submit</td><td><code>uat.qs.contractor</code></td><td>Enter evidence title/file → <span class="click">Upload evidence</span>. Enter action reason → <span class="click">Submit to QS</span>.</td><td>Evidence title: <span class="value">UAT claim particulars</span><br>File: <span class="value">QS-UAT-20260930-01-claim.pdf</span><br>Reason: <span class="value">Submit fictional UAT claim for QS assessment.</span></td><td>Status becomes Submitted; evidence is clean and visible.</td></tr>
+      <tr><td class="check">☐</td><td class="step">9.3 QS vet</td><td><code>uat.qs.reviewer</code></td><td>Sign out/in → Project → Commercial Admin → Changes and claims → Contract claims → submitted claim.</td><td>QS Assessed Amount: <span class="value">2000</span><br>Review note: <span class="value">Assess GHS 2,000; GHS 500 is unsupported in the UAT particulars.</span><br>Click <span class="click">Record QS vetting</span>.</td><td>Status becomes Vetted; claimed and assessed remain separately visible.</td></tr>
+      <tr><td class="check">☐</td><td class="step">9.4 Submit approval</td><td><code>uat.qs.reviewer</code></td><td>On Vetted claim enter reason and click <span class="click">Submit approval</span>.</td><td><span class="value">Submit GHS 2,000 QS-assessed claim for independent approval.</span></td><td>Status becomes Pending Approval.</td></tr>
+      <tr><td class="check">☐</td><td class="step">9.5 Approve</td><td><code>uat.qs.approver</code></td><td>Sign out/in → same claim → inspect basis/evidence/amounts → enter reason → click <span class="click">Approve</span>.</td><td><span class="value">Approve GHS 2,000 assessed UAT claim.</span></td><td>Status becomes Approved; Approved/Rejected displays <span class="value">GHS 2,000 / GHS 500</span>.</td></tr>
+      <tr><td class="check">☐</td><td class="step">9.6 Settlement boundary</td><td>Finance owner, then authorized QS recorder</td><td>Do not click <span class="click">Record settlement</span> until a real Finance UAT settlement reference exists. When it exists, enter settled total, reference, date, and reason once.</td><td>Example only after Finance: settled <span class="value">2000</span>; reference <span class="value">PAY-QS-UAT-20260930-01</span>; date <span class="value">30/10/2026</span>.</td><td>Claim settlement reconciles to Finance. If no payment exists, leave Pending and mark Not Executed.</td></tr>
+    </tbody></table>
 
-            <p class="callout">
-                <strong>UAT completion rule:</strong> mark a step Passed only
-                after the expected status, record reference, correct actor and
-                audit/history are visible. A green browser toast alone is not
-                sufficient evidence for an approval, DMS upload, Finance handoff
-                or closeout action.
-            </p>
-        </main>
-        <footer>
-            TDC ERP · Quantity Survey UAT walkthrough · source records and
-            outstanding owner actions:
-            <a href="TDC_QS_STREAMLINING_TRACKER.md">QS tracker</a> and
-            <a href="TDC_QS_CLOSEOUT_HANDOFF.md">QS closeout handoff</a>.
-        </footer>
-    </body>
+    <h2 id="closeout">10. Handover, defects, retention, and final account</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Where and what to click</th><th>Example values / selections</th><th>Expected result and evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">10.1 Handover draft</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Handover → Handover Register → Add Handover Item</span>Complete fields and click <span class="click">Add Handover Item</span>.</td><td>Title: <span class="value">QS-UAT-20260930-01 practical completion</span><br>Type: <span class="value">Practical Completion</span><br>Status: <span class="value">Planned</span><br>Unit: <span class="value">Whole project</span><br>Batch: <span class="value">No batch</span><br>Responsible: <span class="value">Fictional QS UAT Contractor</span><br>Reference: <span class="value">PC-QS-UAT-20260930-01</span><br>Target: <span class="value">30/09/2027</span><br>Completed: blank<br>Notes: <span class="value">UAT-only planned practical completion record.</span></td><td>One Planned handover item is visible.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.2 Complete same item</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Edit handover</span>. Do not create another item.</td><td>Status: <span class="value">Completed</span><br>Completed date: authorized simulated completion date, example <span class="value">30/09/2027</span><br>Append note: <span class="value">Completion confirmed for the UAT closeout scenario.</span><br>Click <span class="click">Save handover changes</span>.</td><td>Same reference shows Completed with preserved history.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.3 Add snag</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Defects → Snag Register → Add Snag Item</span>Complete fields and click <span class="click">Add Snag Item</span>.</td><td>Title: <span class="value">QS-UAT-20260930-01 minor paint touch-up</span><br>Severity: <span class="value">Low</span><br>Status: <span class="value">Open</span><br>Unit: <span class="value">Whole project</span><br>Reported: <span class="value">30/09/2027</span><br>Target Closure: <span class="value">02/10/2027</span><br>Closed: blank<br>Raised By: <span class="value">UAT QS reviewer</span><br>Responsible: <span class="value">Fictional QS UAT Contractor</span><br>Description: <span class="value">Small UAT-only paint touch-up at fictional entrance.</span><br>Notes: <span class="value">No financial charge.</span></td><td>One Open, Low snag is visible.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.4 Close snag</td><td><code>uat.qs.preparer</code></td><td>On same snag click <span class="click">Edit</span>.</td><td>Status: <span class="value">Closed</span><br>Closed: <span class="value">02/10/2027</span><br>Append note: <span class="value">Touch-up verified for UAT.</span><br>Click <span class="click">Save Snag Item</span>.</td><td>Same snag shows Closed. No duplicate or unapproved charge is created.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.5 Closeout readiness</td><td><code>procurementapprover</code></td><td><span class="route">Procurement → Tendering → Contracts → this Works contract → Works Closeout</span>Refresh readiness. Select completed practical-completion record and required current documents where asked.</td><td>Use this run's contract, project, handover, certificate, and clean evidence only.</td><td>Record every readiness check. Do not submit while a required document, authority, defect, payment, or retention control fails.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.6 Takeover actions</td><td>Current workflow assignee(s)</td><td>When readiness passes: submit initial takeover, complete each assigned approval, then repeat governed final takeover/closeout actions in displayed order.</td><td>Comment: <span class="value">QS-UAT-20260930-01 closeout stage reviewed against completed handover.</span></td><td>Initial/final decisions show separate actors and immutable history. If readiness is not met, mark Not Executed.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.7 Retention register</td><td><code>uat.qs.preparer</code></td><td><span class="route">Project → Commercial Admin → 4. Retention and closeout</span>Review Retention Held, Released, Outstanding.</td><td>Expected held from certificate 1: <span class="value">GHS 900</span> before release.</td><td>Retention equals certificate history. Do not type a release without eligibility and Finance route.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.8 Prepare final account</td><td><code>uat.qs.preparer</code></td><td>Click <span class="click">Final account workspace</span> → choose Works contract.</td><td>Settlement Date: <span class="value">30/09/2027</span> for this simulated UAT closeout<br>Notes: <span class="value">QS-UAT-20260930-01 final account reconciliation.</span><br>Reason: <span class="value">Prepare UAT final account from governed contract sources.</span><br>Click <span class="click">Prepare final account</span>.</td><td>Gross, deductions, net, Finance paid, certificates, retention, variation, and claim appear as source lines. Capture blockers.</td></tr>
+      <tr><td class="check">☐</td><td class="step">10.9 Final account workflow</td><td><code>uat.qs.preparer</code>, reviewer, approver</td><td>If no blockers: enter Lifecycle reason → <span class="click">Submit</span>. Assigned independent actor(s) click <span class="click">Approve</span>; authorized closer clicks <span class="click">Close</span>.</td><td>Submit: <span class="value">Submit reconciled QS UAT final account.</span><br>Approve: <span class="value">Independent final-account reconciliation approved.</span><br>Close: <span class="value">All UAT closeout prerequisites reconciled.</span></td><td>Close is enabled only when allowed. If blockers remain, leave current status and record every blocker.</td></tr>
+    </tbody></table>
+
+    <h2 id="reports">11. Reports, reconciliation, and sign-off</h2>
+    <table><thead><tr><th class="check">Done</th><th class="step">Step</th><th class="actor">Actor</th><th>Action</th><th>Expected result / evidence</th></tr></thead><tbody>
+      <tr><td class="check">☐</td><td class="step">11.1 BOQ</td><td><code>uat.qs.preparer</code></td><td><span class="route">Reports → Quantity Survey Reports</span>Select BOQ report, filter by this project, run it, and export PDF/Excel if available.</td><td>Original 100 EA/GHS 100,000 and approved revised +5 EA/GHS 5,000 are distinguishable by version.</td></tr>
+      <tr><td class="check">☐</td><td class="step">11.2 Certificates</td><td><code>uat.qs.preparer</code></td><td>Run Certificate Register for this project/contract and open certificate PDF/history.</td><td>Recorded 20, claimed 20, certified 18, retention 900, configured tax, net, AP invoice, and payment status reconcile.</td></tr>
+      <tr><td class="check">☐</td><td class="step">11.3 Variation/claim</td><td><code>uat.qs.preparer</code></td><td>Run Variation Log and claim/audit views filtered to project.</td><td>Variation GHS 5,000 is Applied; claim shows 2,500 claimed, 2,000 assessed/approved, 500 rejected.</td></tr>
+      <tr><td class="check">☐</td><td class="step">11.4 Retention/final</td><td><code>uat.qs.preparer</code> and Finance owner</td><td>Run Retention Register and Final Account/contract-cost views.</td><td>Held/released/outstanding, paid/balance, approved changes, and final account agree.</td></tr>
+      <tr><td class="check">☐</td><td class="step">11.5 Audit</td><td>Authorized audit/read user</td><td>Open audit/history for project, BOQ, measurement, valuation, certificate, AP, variation, claim, final account.</td><td>Every mutation identifies actor, time, action, status, and reason/correlation ID; maker and approver are separate.</td></tr>
+      <tr><td class="check">☐</td><td class="step">11.6 Sign-off</td><td>QS, Procurement, Finance, Project/Engineering owners</td><td>Complete sign-off below. Mark unfinished controls <span class="value">Not Executed</span> or <span class="value">Failed</span>; do not call them Passed.</td><td>Every result points to a reference and screenshot/export.</td></tr>
+    </tbody></table>
+
+    <h3>UAT sign-off</h3>
+    <table><thead><tr><th>Area owner</th><th>Name</th><th>Pass / Fail / Not Executed</th><th>Date</th><th>Evidence or defect reference</th></tr></thead><tbody><tr><td>Quantity Surveying</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Projects / Civil Engineering</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Procurement</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Finance / AP</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr><tr><td>Internal Audit / UAT manager</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr></tbody></table>
+
+    <h2 id="problems">12. If something goes wrong</h2>
+    <table><thead><tr><th>What you see</th><th>Check in this order</th><th>Correct action</th></tr></thead><tbody>
+      <tr><td>Demarcated Land is empty</td><td>DEFAULT tenant → Estate portion verified/ready → not assigned → user can read project-ready land.</td><td>Record empty selector and ask Estate owner to prepare/verify unused portion. Do not type land ID or remove another assignment.</td></tr>
+      <tr><td>Project approve returns 403</td><td>Username → record Pending Approval → Workflow panel current assignee → actual project approval access.</td><td>Use current assigned approver. Capture ProblemDetails code, URL, trace/correlation ID, status. Do not grant SuperAdmin as workaround.</td></tr>
+      <tr><td>BOQ classifications missing</td><td>Look for <code>QS-UAT-PRELIM</code>, <code>QS-UAT-GENERAL</code>, <code>QS-UAT-001</code>, <code>QS-UAT-COUNT</code>, active <code>EA</code>.</td><td>Stop BOQ entry and report missing QS UAT catalogue seeding.</td></tr>
+      <tr><td>Active Works contract empty</td><td>Type Works → Approved/Active → linked same project/contractor → user/project scope.</td><td>Return to 4.15. Do not select Supply contract.</td></tr>
+      <tr><td>Measurement absent from valuation</td><td>Sheet Recorded → same approved BOQ → positive quantity → project/tenant match.</td><td>Refresh Worksheet once. Do not create duplicate before checking History.</td></tr>
+      <tr><td>Consultant cannot see valuation</td><td>Consultant selected before contractor submission → external account linked to <code>QS-UAT-CONS-001</code> → status QS Vetted.</td><td>Correct via governed Draft/rework path. Do not share contractor login.</td></tr>
+      <tr><td>Create AP invoice fails</td><td>Certificate Approved → no invoice → contractor AP profile effective → tax/account/book mapping → posting configuration.</td><td>Preserve approved certificate and exact error. Finance corrects configuration; do not create manual duplicate supplier invoice.</td></tr>
+      <tr><td>DMS upload pending/fails</td><td>File non-empty/supported → scanner healthy → DMS reachable → wait/refresh once.</td><td>Record filename/message. Failed or unscanned file does not satisfy evidence.</td></tr>
+      <tr><td>Button missing</td><td>Username → DEFAULT → status → permission → workflow assignment → refresh.</td><td>Use account assigned to current stage. Do not update status directly.</td></tr>
+      <tr><td>Final account Close disabled</td><td>Read every Closure blocker: AP/payment, retention, defects, handover, contract, evidence, approval.</td><td>Complete owner prerequisite or mark Not Executed. Do not delete history.</td></tr>
+      <tr><td>Page slow after Save/Submit</td><td>Wait → inspect toast/status → refresh same record → see whether reference/status changed.</td><td>Do not click repeatedly. Reuse saved record and retain first reference.</td></tr>
+    </tbody></table>
+
+    <details><summary>Short demonstration path when there is not enough time for a fresh tender</summary><p>Use preserved project <code>PRJ-2026-0003</code> in read-only mode to show approved project, linked Works contract, BOQ history, Commercial Admin records, and QS reports. Do not edit, submit, approve, create another certificate, post its Draft invoice, or claim this read-only demonstration proves a fresh end-to-end UAT.</p></details>
+  </main>
+  <footer>TDC ERP Quantity Survey UAT operator walkthrough · use only in the approved non-production UAT environment</footer>
+</body>
 </html>

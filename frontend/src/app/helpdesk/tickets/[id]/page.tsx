@@ -64,7 +64,6 @@ export default function HelpdeskTicketDetailPage() {
 
   const [nowTs, setNowTs] = useState(() => Date.now());
   const [assignedOrganizationUnitId, setAssignedOrganizationUnitId] = useState<string>('');
-  const [assignedToUserId, setAssignedToUserId] = useState<string>('');
   const [targetStatus, setTargetStatus] = useState<EhcTicketStatus>('InProgress');
   const [workflowTransitionId, setWorkflowTransitionId] = useState<string | null>(null);
   const [workflowTransitionName, setWorkflowTransitionName] = useState<string | null>(null);
@@ -114,11 +113,6 @@ export default function HelpdeskTicketDetailPage() {
   const { data: myOrganizationUnit } = useQuery({
     queryKey: ['ehc', 'internal', 'my-organization-unit'],
     queryFn: () => ehcInternalTicketService.getMyOrganizationUnit(),
-  });
-
-  const { data: agents } = useQuery({
-    queryKey: ['ehc', 'internal', 'agents'],
-    queryFn: () => ehcInternalTicketService.listAgents(),
   });
 
   const { data: isWatching } = useQuery({
@@ -192,7 +186,6 @@ export default function HelpdeskTicketDetailPage() {
     if (!ticket) return;
 
     setAssignedOrganizationUnitId((prev) => prev || ticket.assignedOrganizationUnitId || myOrganizationUnit?.id || '');
-    setAssignedToUserId((prev) => prev || ticket.assignedToUserId || '');
   }, [ticket, myOrganizationUnit?.id]);
 
   useEffect(() => {
@@ -354,13 +347,13 @@ export default function HelpdeskTicketDetailPage() {
 
   const assign = useMutation({
     mutationFn: async () => {
-      if (!assignedToUserId) throw new Error('Assignee required');
-      await ehcInternalTicketService.assignTicket(ticketId, assignedToUserId, assignedOrganizationUnitId || null);
+      if (!assignedOrganizationUnitId) throw new Error('Destination department is required');
+      await ehcInternalTicketService.routeTicket(ticketId, assignedOrganizationUnitId);
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId] });
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId, 'allowed-transitions'] });
-      toast({ title: 'Saved', description: 'Assignment updated.', variant: 'success' });
+      toast({ title: 'Saved', description: 'Ticket routed to the selected department.', variant: 'success' });
     },
     onError: (err) => {
       toast({ title: 'Error', description: getErrorMessage(err), variant: 'destructive' });
@@ -1489,19 +1482,19 @@ export default function HelpdeskTicketDetailPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Assignment</CardTitle>
-          <CardDescription>Set the HR organization unit and agent for accountability.</CardDescription>
+          <CardTitle>Route ticket</CardTitle>
+          <CardDescription>Select the destination department. Your signed-in account is recorded as the assigning owner.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="max-w-xl">
             <div className="space-y-2">
-              <Label>Organization unit</Label>
+              <Label>Destination department</Label>
               <select
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
                 value={assignedOrganizationUnitId}
                 onChange={(e) => setAssignedOrganizationUnitId(e.target.value)}
               >
-                <option value="">(optional)</option>
+                <option value="">Select department</option>
                 {(organizationUnits || []).map((unit) => (
                   <option key={unit.id} value={unit.id}>
                     {unit.name}
@@ -1509,28 +1502,13 @@ export default function HelpdeskTicketDetailPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-2">
-              <Label>Assignee</Label>
-              <select
-                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                value={assignedToUserId}
-                onChange={(e) => setAssignedToUserId(e.target.value)}
-              >
-                <option value="">Select agent</option>
-                {(agents || []).map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
-          <Button onClick={() => assign.mutate()} disabled={assign.isPending || !assignedToUserId}>
-            {assign.isPending ? 'Saving...' : 'Assign'}
+          <Button onClick={() => assign.mutate()} disabled={assign.isPending || !assignedOrganizationUnitId}>
+            {assign.isPending ? 'Routing...' : 'Route ticket'}
           </Button>
 
-          {assign.isError ? <div className="text-sm text-red-600">Failed to assign.</div> : null}
+          {assign.isError ? <div className="text-sm text-red-600">Failed to route ticket.</div> : null}
         </CardContent>
       </Card>
 

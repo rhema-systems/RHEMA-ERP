@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -179,6 +180,9 @@ namespace ErpSystem.Core.DTOs.Finance
     /// </summary>
     public class TaxCalculationRequestDto
     {
+        public string? CurrencyCode { get; set; }
+        public Guid? DocumentLineId { get; set; }
+
         /// <summary>
         /// Base amount to calculate taxes on
         /// </summary>
@@ -215,11 +219,32 @@ namespace ErpSystem.Core.DTOs.Finance
         public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
     }
 
+    public class TaxDocumentLineRequestDto
+    {
+        public Guid DocumentLineId { get; set; }
+        public decimal BaseAmount { get; set; }
+        public Guid? TaxGroupId { get; set; }
+        public List<Guid>? ManualTaxIds { get; set; }
+        public TaxTransactionType TransactionType { get; set; }
+    }
+
+    public class TaxDocumentCalculationRequestDto
+    {
+        public string CurrencyCode { get; set; } = string.Empty;
+        public DateTime TransactionDate { get; set; } = DateTime.UtcNow;
+        public Guid? BusinessPartnerId { get; set; }
+        public BusinessPartnerRoleType? BusinessPartnerRole { get; set; }
+        public List<TaxDocumentLineRequestDto> Lines { get; set; } = new();
+    }
+
     /// <summary>
     /// Tax calculation result DTO
     /// </summary>
     public class TaxCalculationResultDto
     {
+        public string CurrencyCode { get; set; } = string.Empty;
+        public int CurrencyDecimalPlaces { get; set; }
+
         /// <summary>
         /// Original base amount
         /// </summary>
@@ -239,6 +264,18 @@ namespace ErpSystem.Core.DTOs.Finance
         /// Effective tax rate (total tax / base * 100)
         /// </summary>
         public decimal EffectiveTaxRate { get; set; }
+
+        /// <summary>Accounting boundary used to round this result.</summary>
+        public TaxRoundingScope TaxRoundingScope { get; set; }
+
+        /// <summary>Direction used at the configured accounting boundary.</summary>
+        public GovernedRoundingMethod TaxRoundingMethod { get; set; }
+
+        /// <summary>Monetary increment used for tax rounding.</summary>
+        public decimal TaxRoundingIncrement { get; set; }
+
+        /// <summary>Difference between aggregate raw tax and the governed result.</summary>
+        public decimal TaxRoundingDelta { get; set; }
 
         /// <summary>
         /// Tax group used (if any)
@@ -266,7 +303,9 @@ namespace ErpSystem.Core.DTOs.Finance
     /// </summary>
     public class TaxBreakdownDto
     {
+        public Guid? DocumentLineId { get; set; }
         public Guid TaxId { get; set; }
+        public Guid? TaxGroupId { get; set; }
         public string TaxCode { get; set; } = string.Empty;
         public string TaxName { get; set; } = string.Empty;
         public TaxCategory TaxCategory { get; set; }
@@ -277,6 +316,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal TaxableAmount { get; set; }
         public decimal TaxRate { get; set; }
         public decimal TaxAmount { get; set; }
+        public decimal RawTaxAmount { get; set; }
+        public decimal RoundingAdjustment { get; set; }
+        public int AllocationSequence { get; set; }
         public CompoundBasis CompoundBasis { get; set; }
         public int CalculationOrder { get; set; }
         public List<string>? AppliedOnTaxCodes { get; set; }

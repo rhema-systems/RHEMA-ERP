@@ -107,6 +107,7 @@ export interface EstateManagedAsset {
   externalMonthlyRent?: number;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   rentBillingActivatedAt?: string;
   nextRentBillingDate?: string;
   lastRentInvoiceId?: string;
@@ -210,6 +211,7 @@ export interface EstateLandDemarcation {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -250,6 +252,7 @@ export interface UpdateEstateLandDemarcationDisposition {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -316,6 +319,7 @@ export interface UpdateEstateManagedAssetListing {
   externalMonthlyRent?: number | null;
   externalGroundRentRequired?: boolean | null;
   externalPremiumChargeRequired?: boolean | null;
+  externalPremiumChargeAmount?: number | null;
   externalLeaseTermMonths?: number | null;
   externalListingCurrency: string;
   externalListingNotes?: string | null;
@@ -357,7 +361,9 @@ export interface EstateManagedAssetQuery {
   availableForLease?: boolean;
   availableForSale?: boolean;
   portalListingCandidates?: boolean;
+  externalListingStatus?: string;
   publishedToExternalPortal?: boolean;
+  includeLandDemarcations?: boolean;
   skip?: number;
   take?: number;
 }
@@ -472,7 +478,9 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   availableForLease: query.availableForLease,
   availableForSale: query.availableForSale,
   portalListingCandidates: query.portalListingCandidates,
+  externalListingStatus: query.externalListingStatus,
   publishedToExternalPortal: query.publishedToExternalPortal,
+  includeLandDemarcations: query.includeLandDemarcations,
   skip: query.skip,
   take: query.take || 250,
 });
@@ -560,7 +568,8 @@ export class EstateLandManagementService {
   async getPortalListingDemarcations(
     search?: string,
     skip = 0,
-    take = 300
+    take = 300,
+    externalListingStatus?: string
   ): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets/portal-listing-demarcations',
@@ -568,6 +577,7 @@ export class EstateLandManagementService {
         search: search || undefined,
         skip,
         take,
+        externalListingStatus,
       }
     );
 

@@ -124,6 +124,8 @@ export default function FinanceSettingsPage() {
         whtStatutoryYearStartMonth: 1,
         whtStatutoryYearStartDay: 1,
         retainedEarningsAccountId: undefined,
+        supplierAdvanceAccountId: undefined,
+        customerAdvanceAccountId: undefined,
         unrealizedGainLossAccountId: undefined,
         unrealizedFxGainAccountId: undefined,
         unrealizedFxLossAccountId: undefined,
@@ -164,6 +166,17 @@ export default function FinanceSettingsPage() {
         requireDepreciationBeforePeriodClose: true,
         apInvoicePriceTolerancePercent: 1,
         apInvoiceQuantityTolerancePercent: 1,
+        unitPriceDecimalPlaces: 4,
+        exchangeRateInputDecimalPlaces: 10,
+        exchangeRateDisplayDecimalPlaces: 6,
+        taxPercentageDecimalPlaces: 4,
+        taxRoundingMethod: 'Nearest',
+        taxRoundingScope: 'Line',
+        invoiceRoundingEnabled: false,
+        invoiceRoundingMethod: 'Nearest',
+        settlementToleranceAmount: 0,
+        settlementTolerancePercentage: 0,
+        reportDisplayDecimalPlaces: 2,
     });
 
     useEffect(() => {
@@ -188,6 +201,8 @@ export default function FinanceSettingsPage() {
                 whtStatutoryYearStartMonth: data.whtStatutoryYearStartMonth ?? 1,
                 whtStatutoryYearStartDay: data.whtStatutoryYearStartDay ?? 1,
                 retainedEarningsAccountId: data.retainedEarningsAccountId,
+                supplierAdvanceAccountId: data.supplierAdvanceAccountId,
+                customerAdvanceAccountId: data.customerAdvanceAccountId,
                 unrealizedGainLossAccountId: data.unrealizedGainLossAccountId,
                 unrealizedFxGainAccountId: data.unrealizedFxGainAccountId,
                 unrealizedFxLossAccountId: data.unrealizedFxLossAccountId,
@@ -229,6 +244,21 @@ export default function FinanceSettingsPage() {
                 requireDepreciationBeforePeriodClose: data.requireDepreciationBeforePeriodClose ?? true,
                 apInvoicePriceTolerancePercent: data.apInvoicePriceTolerancePercent ?? 1,
                 apInvoiceQuantityTolerancePercent: data.apInvoiceQuantityTolerancePercent ?? 1,
+                unitPriceDecimalPlaces: data.unitPriceDecimalPlaces ?? 4,
+                exchangeRateInputDecimalPlaces: data.exchangeRateInputDecimalPlaces ?? 10,
+                exchangeRateDisplayDecimalPlaces: data.exchangeRateDisplayDecimalPlaces ?? 6,
+                taxPercentageDecimalPlaces: data.taxPercentageDecimalPlaces ?? 4,
+                taxRoundingMethod: data.taxRoundingMethod ?? 'Nearest',
+                taxRoundingScope: data.taxRoundingScope ?? 'Line',
+                taxRoundingIncrement: data.taxRoundingIncrement,
+                invoiceRoundingEnabled: data.invoiceRoundingEnabled ?? false,
+                invoiceRoundingIncrement: data.invoiceRoundingIncrement,
+                invoiceRoundingMethod: data.invoiceRoundingMethod ?? 'Nearest',
+                invoiceRoundingGainAccountId: data.invoiceRoundingGainAccountId,
+                invoiceRoundingLossAccountId: data.invoiceRoundingLossAccountId,
+                settlementToleranceAmount: data.settlementToleranceAmount ?? 0,
+                settlementTolerancePercentage: data.settlementTolerancePercentage ?? 0,
+                reportDisplayDecimalPlaces: data.reportDisplayDecimalPlaces ?? data.baseCurrencyDecimalPlaces ?? 2,
             });
 
             // Load accounts for the current COA type
@@ -289,6 +319,18 @@ export default function FinanceSettingsPage() {
             });
             return;
         }
+        if ((formData.unitPriceDecimalPlaces ?? 4) < 0 || (formData.unitPriceDecimalPlaces ?? 4) > 6 ||
+            (formData.exchangeRateInputDecimalPlaces ?? 10) < 6 || (formData.exchangeRateInputDecimalPlaces ?? 10) > 10 ||
+            (formData.exchangeRateDisplayDecimalPlaces ?? 6) < 6 || (formData.exchangeRateDisplayDecimalPlaces ?? 6) > 10 ||
+            (formData.taxPercentageDecimalPlaces ?? 4) < 0 || (formData.taxPercentageDecimalPlaces ?? 4) > 6 ||
+            (formData.reportDisplayDecimalPlaces ?? 2) < 0 || (formData.reportDisplayDecimalPlaces ?? 2) > 4) {
+            toast({ title: 'Invalid precision', description: 'Review the permitted decimal ranges in Precision and Rounding.', variant: 'destructive' });
+            return;
+        }
+        if (formData.invoiceRoundingEnabled && (!formData.invoiceRoundingIncrement || !formData.invoiceRoundingGainAccountId || !formData.invoiceRoundingLossAccountId)) {
+            toast({ title: 'Invoice rounding is not ready', description: 'Configure a positive increment and both rounding gain and loss accounts before activation.', variant: 'destructive' });
+            return;
+        }
         try {
             setSaving(true);
             const updated = await financeDataService.updateFinanceSettings(formData);
@@ -312,6 +354,24 @@ export default function FinanceSettingsPage() {
             setSaving(false);
         }
     };
+
+    const roundingGainReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingGainAccountId &&
+        account.accountType === 'Revenue' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const roundingLossReady = accounts.some(account =>
+        account.id === formData.invoiceRoundingLossAccountId &&
+        account.accountType === 'Expense' &&
+        account.status === 'Active' &&
+        account.allowDirectPosting &&
+        !account.isControlAccount);
+    const invoiceRoundingReady = Boolean(
+        formData.invoiceRoundingIncrement &&
+        formData.invoiceRoundingIncrement > 0 &&
+        roundingGainReady &&
+        roundingLossReady);
 
     if (loading) {
         return (
@@ -479,6 +539,44 @@ export default function FinanceSettingsPage() {
 
             <Card>
                 <CardHeader>
+                    <CardTitle>Precision and Rounding</CardTitle>
+                    <CardDescription>Accounting precision, legal rounding and presentation are independent policies. Display decimals never change stored or posted amounts.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                    {settings?.precisionAccountingPolicyLocked && <Alert><Lock className="h-4 w-4" /><AlertTitle>Accounting policy locked after posted usage</AlertTitle><AlertDescription>Accounting-affecting precision settings require a governed effective-dated transition. Exchange-rate and report display remain presentation-only.</AlertDescription></Alert>}
+                    <div className="grid gap-4 md:grid-cols-3">
+                        <div className="space-y-2"><Label>Currency decimal places (ISO 4217)</Label><Input value={settings?.baseCurrencyDecimalPlaces ?? 2} readOnly aria-label="Currency decimal places (ISO 4217)" /><p className="text-xs text-muted-foreground">Locked for {settings?.baseCurrency ?? formData.baseCurrency}; used at the final ledger boundary.</p></div>
+                        <div className="space-y-2"><Label htmlFor="unitPricePrecision">Unit-price / cost decimals</Label><Input id="unitPricePrecision" type="number" min={0} max={6} disabled={settings?.precisionAccountingPolicyLocked} value={formData.unitPriceDecimalPlaces ?? 4} onChange={event => setFormData({ ...formData, unitPriceDecimalPlaces: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Intermediate precision only; final money uses the currency.</p></div>
+                        <div className="space-y-2"><Label htmlFor="reportDisplayPrecision">Report display decimals</Label><Input id="reportDisplayPrecision" type="number" min={0} max={4} value={formData.reportDisplayDecimalPlaces ?? 2} onChange={event => setFormData({ ...formData, reportDisplayDecimalPlaces: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Presentation only; never changes ledger evidence.</p></div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2"><Label htmlFor="exchangeRateInputPrecision">Exchange-rate input decimals</Label><Input id="exchangeRateInputPrecision" type="number" min={6} max={10} disabled={settings?.precisionAccountingPolicyLocked} value={formData.exchangeRateInputDecimalPlaces ?? 10} onChange={event => setFormData({ ...formData, exchangeRateInputDecimalPlaces: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label htmlFor="exchangeRateDisplayPrecision">Exchange-rate display decimals</Label><Input id="exchangeRateDisplayPrecision" type="number" min={6} max={10} value={formData.exchangeRateDisplayDecimalPlaces ?? 6} onChange={event => setFormData({ ...formData, exchangeRateDisplayDecimalPlaces: Number(event.target.value) })} /></div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-4">
+                        <div className="space-y-2"><Label>Tax rounding method</Label><Select disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingMethod ?? 'Nearest'} onValueChange={value => setFormData({ ...formData, taxRoundingMethod: value as UpdateFinanceSettingsDto['taxRoundingMethod'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Nearest">Nearest</SelectItem><SelectItem value="Up">Up</SelectItem><SelectItem value="Down">Down</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label>Tax rounding scope</Label><Select disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingScope ?? 'Line'} onValueChange={value => setFormData({ ...formData, taxRoundingScope: value as UpdateFinanceSettingsDto['taxRoundingScope'] })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Line">Line</SelectItem><SelectItem value="TaxCodeGroup">Tax code / group</SelectItem><SelectItem value="Document">Document</SelectItem></SelectContent></Select></div>
+                        <div className="space-y-2"><Label htmlFor="taxPercentagePrecision">Tax percentage decimals</Label><Input id="taxPercentagePrecision" type="number" min={0} max={6} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxPercentageDecimalPlaces ?? 4} onChange={event => setFormData({ ...formData, taxPercentageDecimalPlaces: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label htmlFor="taxRoundingIncrement">Tax monetary increment</Label><Input id="taxRoundingIncrement" type="number" min={0.000001} step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.taxRoundingIncrement ?? ''} placeholder="Currency minor unit" onChange={event => setFormData({ ...formData, taxRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
+                    </div>
+                    <div className="rounded-md border p-4 space-y-4">
+                        <div className="flex items-center justify-between"><div><Label htmlFor="invoiceRounding">Invoice / cash rounding</Label><p className="text-xs text-muted-foreground">Posts each non-zero delta to the configured gain or loss account through the canonical Finance journal. Configure a positive increment and active direct-posting Revenue and Expense accounts before activation.</p></div><Switch id="invoiceRounding" disabled={settings?.precisionAccountingPolicyLocked || (!formData.invoiceRoundingEnabled && !invoiceRoundingReady)} checked={formData.invoiceRoundingEnabled ?? false} onCheckedChange={checked => setFormData({ ...formData, invoiceRoundingEnabled: checked })} /></div>
+                        <div className="grid gap-4 md:grid-cols-3">
+                            <div className="space-y-2"><Label htmlFor="invoiceIncrement">Increment</Label><Input id="invoiceIncrement" type="number" step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingIncrement ?? ''} onChange={event => setFormData({ ...formData, invoiceRoundingIncrement: event.target.value ? Number(event.target.value) : null })} /></div>
+                            <div className="space-y-2"><Label>Gain account</Label><AccountPicker id="invoiceRoundingGain" placeholder="Search revenue accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingGainAccountId ?? undefined} onChange={value => setFormData({ ...formData, invoiceRoundingGainAccountId: value ?? null })} /></div>
+                            <div className="space-y-2"><Label>Loss account</Label><AccountPicker id="invoiceRoundingLoss" placeholder="Search expense accounts" accounts={accounts} disabled={settings?.precisionAccountingPolicyLocked} value={formData.invoiceRoundingLossAccountId ?? undefined} onChange={value => setFormData({ ...formData, invoiceRoundingLossAccountId: value ?? null })} /></div>
+                        </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2"><Label htmlFor="settlementToleranceAmount">Settlement tolerance amount</Label><Input id="settlementToleranceAmount" type="number" min={0} step={0.0001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.settlementToleranceAmount ?? 0} onChange={event => setFormData({ ...formData, settlementToleranceAmount: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label htmlFor="settlementTolerancePercentage">Settlement tolerance percentage</Label><Input id="settlementTolerancePercentage" type="number" min={0} max={100} step={0.000001} disabled={settings?.precisionAccountingPolicyLocked} value={formData.settlementTolerancePercentage ?? 0} onChange={event => setFormData({ ...formData, settlementTolerancePercentage: Number(event.target.value) })} /></div>
+                    </div>
+                    <Alert><ShieldCheck className="h-4 w-4" /><AlertTitle>Accounting boundary</AlertTitle><AlertDescription>Quantity follows its Unit Type/UOM precision and increment. Exchange rates and percentages retain separate evidence precision. Settlement tolerance is explicit and never inferred from display rounding.</AlertDescription></Alert>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
                     <CardTitle>Withholding Tax Statutory Year</CardTitle>
                     <CardDescription>
                         Sets the annual boundary used for supplier contract/category threshold accumulation.
@@ -640,7 +738,7 @@ export default function FinanceSettingsPage() {
                 <CardContent className="space-y-5">
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
-                            <Label>Reversal date policy</Label>
+                            <Label>Default source-document reversal policy</Label>
                             <Select
                                 value={formData.reversalDatePolicy ?? 'CurrentOpenPeriod'}
                                 onValueChange={value => setFormData({ ...formData, reversalDatePolicy: value as UpdateFinanceSettingsDto['reversalDatePolicy'] })}
@@ -652,7 +750,7 @@ export default function FinanceSettingsPage() {
                                 </SelectContent>
                             </Select>
                             <p className="text-xs text-muted-foreground">
-                                Closed history is never reopened implicitly; corrections fall forward to the latest open period.
+                                Applies to AP, AR, cash, opening-balance, and asset corrections. Manual journal reversals require the user to choose timing on the transaction.
                             </p>
                         </div>
                         <div className="space-y-2">
@@ -829,15 +927,33 @@ export default function FinanceSettingsPage() {
                 </CardContent>
             </Card>
 
-            {/* Default Accounts */}
+            {/* System Accounts */}
             < Card >
                 <CardHeader>
-                    <CardTitle>Default Accounts</CardTitle>
+                    <CardTitle>System Accounts</CardTitle>
                     <CardDescription>
-                        Configure default GL accounts for system operations
+                        Configure GL accounts used by automated Finance operations
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                            <Label htmlFor="supplierAdvance">Supplier Advance Account</Label>
+                            <AccountPicker id="supplierAdvance" value={formData.supplierAdvanceAccountId}
+                                placeholder="Search supplier advance asset accounts..." allowClear={false}
+                                accounts={accounts.filter(a => a.accountType === 'Asset' && a.status === 'Active' && a.allowDirectPosting && !a.isControlAccount)}
+                                onChange={(value) => setFormData({ ...formData, supplierAdvanceAccountId: value })} />
+                            <p className="text-xs text-muted-foreground">Required for unapplied AP payments and supplier advances. Select an active, direct-posting asset account.</p>
+                        </div>
+                        <div className="space-y-2">
+                            <Label htmlFor="customerAdvance">Customer Advance Account</Label>
+                            <AccountPicker id="customerAdvance" value={formData.customerAdvanceAccountId}
+                                placeholder="Search customer advance liability accounts..." allowClear={false}
+                                accounts={accounts.filter(a => a.accountType === 'Liability' && a.status === 'Active' && a.allowDirectPosting && !a.isControlAccount)}
+                                onChange={(value) => setFormData({ ...formData, customerAdvanceAccountId: value })} />
+                            <p className="text-xs text-muted-foreground">Required for unapplied AR receipts and customer advances. Select an active, direct-posting liability account.</p>
+                        </div>
+                    </div>
                     <div className="space-y-2">
                         <Label htmlFor="retainedEarnings">Retained Earnings Account</Label>
                         <AccountPicker

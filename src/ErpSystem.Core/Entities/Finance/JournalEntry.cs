@@ -95,7 +95,7 @@ public class JournalEntry : BusinessEntity
     /// Must equal TotalCreditAmount for balanced entry.
     /// </summary>
     [Required]
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalDebitAmount { get; set; } = 0;
 
     /// <summary>
@@ -103,7 +103,7 @@ public class JournalEntry : BusinessEntity
     /// Must equal TotalDebitAmount for balanced entry.
     /// </summary>
     [Required]
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalCreditAmount { get; set; } = 0;
 
     /// <summary>
@@ -111,7 +111,7 @@ public class JournalEntry : BusinessEntity
     /// Should always be 0.00 for valid entries.
     /// Non-zero indicates out-of-balance condition requiring correction.
     /// </summary>
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal BalanceDifference { get; set; } = 0;
 
     /// <summary>

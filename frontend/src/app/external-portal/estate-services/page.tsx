@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
@@ -468,8 +469,11 @@ export default function ExternalEstateServicesPage() {
         current.applicantName || selectedCustomer?.partnerName || '',
       contact: current.contact || customerContact(selectedCustomer),
       propertyReference:
-        current.propertyReference ||
-        (selectedProperty ? propertyReference(selectedProperty) : ''),
+        current.propertyReference && ownedProperties.some(
+          (property) => propertyReference(property) === current.propertyReference
+        )
+          ? current.propertyReference
+          : selectedProperty ? propertyReference(selectedProperty) : '',
       location:
         current.location ||
         (selectedProperty ? propertyLocation(selectedProperty) : ''),
@@ -628,6 +632,13 @@ export default function ExternalEstateServicesPage() {
       return;
     }
 
+    if (form.propertyReference.trim() && !properties.some(
+      (property) => propertyReference(property) === form.propertyReference
+    )) {
+      toast.error('Select a property linked to your account.');
+      return;
+    }
+
     setIsSaving(true);
     try {
       const additionalValues = Object.fromEntries(
@@ -645,7 +656,7 @@ export default function ExternalEstateServicesPage() {
         propertyReference: form.propertyReference.trim(),
         location: form.location.trim(),
         category: form.category.trim() || selectedType?.category || '',
-        priority: form.priority,
+        priority: selectedType?.entityType === 'EstateFacilityMaintenance' ? '' : form.priority,
         serviceImpact: form.serviceImpact,
         description: form.description.trim(),
         additionalValues,
@@ -736,6 +747,7 @@ export default function ExternalEstateServicesPage() {
         <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Estate Service Request</DialogTitle>
+            <DialogDescription className="sr-only">Provide the request details for Estate Services.</DialogDescription>
           </DialogHeader>
           <form className="space-y-4" onSubmit={submitRequest}>
             <div className="grid gap-4 md:grid-cols-2">
@@ -776,40 +788,32 @@ export default function ExternalEstateServicesPage() {
                 <Input value={form.contact} readOnly />
               </div>
               <div className="space-y-2">
-                <Label>Property / unit / plot</Label>
-                {properties.length > 0 ? (
-                  <Select
-                    value={form.propertyReference || undefined}
-                    onValueChange={updatePropertyReference}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select your property" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {properties.map((property) => {
-                        const reference = propertyReference(property);
-                        return (
-                          <SelectItem key={property.id} value={reference}>
-                            {reference} · {property.name}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <Input
-                    value={form.propertyReference}
-                    onChange={(event) =>
-                      updateForm('propertyReference', event.target.value)
-                    }
-                  />
-                )}
+                <Label htmlFor="estate-service-property">Property / unit / plot</Label>
+                <Select
+                  value={form.propertyReference || undefined}
+                  onValueChange={updatePropertyReference}
+                  disabled={properties.length === 0}
+                >
+                  <SelectTrigger id="estate-service-property">
+                    <SelectValue placeholder={properties.length === 0 ? 'No linked properties' : 'Select your property'} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {properties.map((property) => {
+                      const reference = propertyReference(property);
+                      return (
+                        <SelectItem key={property.id} value={reference}>
+                          {reference} · {property.name}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
                 <Label>Location</Label>
                 <Input value={form.location} readOnly />
               </div>
-              <div className="space-y-2">
+              {selectedType?.entityType !== 'EstateFacilityMaintenance' ? <div className="space-y-2">
                 <Label>Urgency</Label>
                 <Select
                   value={form.priority}
@@ -826,7 +830,7 @@ export default function ExternalEstateServicesPage() {
                     ))}
                   </SelectContent>
                 </Select>
-              </div>
+              </div> : null}
             </div>
             {extraFields.length > 0 ? (
               <div className="grid gap-4 md:grid-cols-2">
@@ -860,8 +864,9 @@ export default function ExternalEstateServicesPage() {
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Description</Label>
+              <Label htmlFor="estate-service-description">{selectedType?.entityType === 'EstateFacilityMaintenance' ? 'Problem description' : 'Description'}</Label>
               <Textarea
+                id="estate-service-description"
                 className="min-h-[140px]"
                 value={form.description}
                 onChange={(event) =>

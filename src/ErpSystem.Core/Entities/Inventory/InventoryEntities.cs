@@ -58,6 +58,7 @@ public class InventoryItem : TenantEntity
 
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA"; // Each, KG, LB, FT, M, L, GAL, etc.
+    public Guid? UnitOfMeasureId { get; set; }
 
     public Guid? UnitOfMeasureScheduleId { get; set; }
     public virtual UnitOfMeasureSchedule? UnitOfMeasureSchedule { get; set; }
@@ -252,7 +253,7 @@ public class InventoryCategory : TenantEntity
 /// <summary>
 /// Records all stock movements (in/out transactions)
 /// </summary>
-public class StockMovement : TenantEntity
+public class StockMovement : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     public Guid? TransferDispatchAllocationId { get; set; }
     public Guid? TransferReceiptAllocationId { get; set; }
@@ -273,6 +274,10 @@ public class StockMovement : TenantEntity
 
     [Required]
     public decimal Quantity { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal UnitCost { get; set; } = 0;

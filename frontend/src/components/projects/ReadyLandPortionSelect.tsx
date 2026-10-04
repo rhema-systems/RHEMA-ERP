@@ -23,11 +23,6 @@ type ReadyLandPortionSelectProps = {
 };
 
 const formatReadyLandPortionLabel = (portion: ProjectReadyLandDemarcation) => {
-  const isWholeParcel =
-    portion.description.trim().toLowerCase() === 'whole parcel';
-  const portionName = isWholeParcel
-    ? 'Whole Parcel'
-    : `Portion ${portion.demarcationNumber}: ${portion.description}`;
   const acres = portion.areaSquareFeet / 43560;
   const area =
     acres >= 0.01
@@ -37,10 +32,9 @@ const formatReadyLandPortionLabel = (portion: ProjectReadyLandDemarcation) => {
       : `${portion.areaSquareFeet.toLocaleString(undefined, {
           maximumFractionDigits: 0,
         })} sq ft`;
-  const parent = [portion.assetCode, portion.assetName, portion.assetLocation]
-    .filter(Boolean)
-    .join(' - ');
-  return `${portionName} - ${area} (${parent})${
+  return `${portion.landReference} - ${portion.description} - ${area}${
+    portion.assetLocation ? ` (${portion.assetLocation})` : ''
+  }${
     portion.isCurrentProjectSelection ? ' - Current selection' : ''
   }`;
 };

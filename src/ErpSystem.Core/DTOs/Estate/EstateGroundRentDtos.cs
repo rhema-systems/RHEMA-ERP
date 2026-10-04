@@ -15,7 +15,8 @@ public sealed record EstateGroundRentAssetOptionDto(
     decimal? ApprovedAnnualGroundRent,
     decimal? ApprovedRatePerAcre,
     string CurrencyCode,
-    bool HasGroundRentAccount);
+    bool HasGroundRentAccount,
+    string AssetType = "Land");
 
 public sealed record EstateGroundRentIncomeAccountOptionDto(
     Guid Id,
@@ -27,6 +28,7 @@ public sealed class AssessEstateGroundRentDto
 {
     public Guid EstateManagedAssetId { get; set; }
     public decimal RatePerAcre { get; set; }
+    public decimal? AnnualAmount { get; set; }
     public string CurrencyCode { get; set; } = "GHS";
 }
 

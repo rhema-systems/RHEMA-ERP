@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.Entities.Finance
 {
@@ -39,7 +40,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// Current tax rate percentage (e.g., 15.00 for 15%)
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,4)")]
+        [Column(TypeName = "decimal(18,6)")]
         public decimal Rate { get; set; }
 
         /// <summary>
@@ -129,7 +130,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// Rate percentage at this point in time
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,4)")]
+        [Column(TypeName = "decimal(18,6)")]
         public decimal Rate { get; set; }
 
         /// <summary>
@@ -182,7 +183,7 @@ namespace ErpSystem.Core.Entities.Finance
         public string? Description { get; set; }
 
         [Required]
-        [Column(TypeName = "decimal(18,4)")]
+        [Column(TypeName = "decimal(18,6)")]
         public decimal Rate { get; set; }
 
         [Required]
@@ -434,33 +435,52 @@ namespace ErpSystem.Core.Entities.Finance
         /// <summary>Immutable posting account selected for this tax component.</summary>
         public Guid? PostingAccountId { get; set; }
 
+        [StringLength(3)]
+        public string? CurrencyCode { get; set; }
+
+        public int? CurrencyDecimalPlaces { get; set; }
+
         /// <summary>
         /// Base amount
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal BaseAmount { get; set; }
 
         /// <summary>
         /// Taxable amount (may differ from base for compound taxes)
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,10)")]
         public decimal TaxableAmount { get; set; }
 
         /// <summary>
         /// Tax rate applied
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,4)")]
+        [Column(TypeName = "decimal(18,6)")]
         public decimal TaxRate { get; set; }
 
         /// <summary>
         /// Tax amount calculated
         /// </summary>
         [Required]
-        [Column(TypeName = "decimal(18,2)")]
+        [Column(TypeName = "decimal(20,4)")]
         public decimal TaxAmount { get; set; }
+
+        [Column(TypeName = "decimal(20,10)")]
+        public decimal? RawTaxAmount { get; set; }
+
+        [Column(TypeName = "decimal(20,10)")]
+        public decimal? RoundingAdjustment { get; set; }
+
+        public int? AllocationSequence { get; set; }
+
+        public TaxRoundingScope? TaxRoundingScope { get; set; }
+        public GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+
+        [Column(TypeName = "decimal(20,4)")]
+        public decimal? TaxRoundingIncrement { get; set; }
 
         /// <summary>
         /// Compound basis used

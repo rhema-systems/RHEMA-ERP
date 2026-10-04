@@ -69,6 +69,10 @@ public class DeliveryNoteLineDto
     public decimal DeliveredQuantity { get; set; }
     public decimal DamagedQuantity { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public Guid? WarehouseId { get; set; }
     public string? WarehouseName { get; set; }
     public Guid? LocationId { get; set; }

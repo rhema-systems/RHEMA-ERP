@@ -21,6 +21,7 @@ export interface UnitType {
     name: string;
     description?: string;
     decimalPlaces: number;
+    roundingIncrement?: number;
     isActive: boolean;
     createdAt: string;
     createdBy: string;
@@ -138,12 +139,14 @@ export interface CreateUnitTypeDto {
     name: string;
     description?: string;
     decimalPlaces: number;
+    roundingIncrement?: number;
 }
 
 export interface UpdateUnitTypeDto {
     name?: string;
     description?: string;
     decimalPlaces?: number;
+    roundingIncrement?: number | null;
     isActive?: boolean;
 }
 

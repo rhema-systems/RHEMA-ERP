@@ -31,6 +31,7 @@ public class CashTransactionService : ICashTransactionService
     private readonly IWorkflowIntegrationService? _workflowIntegrationService;
     private readonly IFinanceControlledDocumentIssueService? _controlledDocumentIssueService;
     private readonly IFinanceSourceDimensionService? _sourceDimensions;
+    private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
     public CashTransactionService(
         ApplicationDbContext context,
@@ -44,7 +45,8 @@ public class CashTransactionService : ICashTransactionService
         IFinanceAuditService? financeAuditService = null,
         IWorkflowIntegrationService? workflowIntegrationService = null,
         IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null,
-        IFinanceSourceDimensionService? sourceDimensions = null)
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
     {
         _context = context;
         _tenantSettingsService = tenantSettingsService;
@@ -57,6 +59,7 @@ public class CashTransactionService : ICashTransactionService
         _workflowIntegrationService = workflowIntegrationService;
         _controlledDocumentIssueService = controlledDocumentIssueService;
         _sourceDimensions = sourceDimensions;
+        _sourceBookAuthority = sourceBookAuthority;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -85,6 +88,8 @@ public class CashTransactionService : ICashTransactionService
                 TransferPairId = t.TransferPairId,
                 TransferLeg = t.TransferLeg,
                 Amount = t.Amount,
+                RoundingAdjustmentAmount = t.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = t.FinanceRoundingEvidenceId,
                 Currency = t.Currency,
                 ExchangeRate = t.ExchangeRate,
                 ExchangeRateId = t.ExchangeRateId,
@@ -194,6 +199,8 @@ public class CashTransactionService : ICashTransactionService
                 BankAccountId = t.BankAccountId,
                 BankAccountName = t.BankAccount.AccountName,
                 Amount = t.Amount,
+                RoundingAdjustmentAmount = t.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = t.FinanceRoundingEvidenceId,
                 Currency = t.Currency,
                 PayeeOrPayer = t.PayeeOrPayer,
                 Description = t.Description,
@@ -247,6 +254,8 @@ public class CashTransactionService : ICashTransactionService
                 TransactionDate = t.TransactionDate,
                 TransactionType = t.TransactionType,
                 Amount = t.Amount,
+                RoundingAdjustmentAmount = t.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = t.FinanceRoundingEvidenceId,
                 Currency = t.Currency,
                 PayeeOrPayer = t.PayeeOrPayer,
                 Description = t.Description,
@@ -298,6 +307,8 @@ public class CashTransactionService : ICashTransactionService
                 TransactionDate = t.TransactionDate,
                 TransactionType = t.TransactionType,
                 Amount = t.Amount,
+                RoundingAdjustmentAmount = t.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = t.FinanceRoundingEvidenceId,
                 Currency = t.Currency,
                 PayeeOrPayer = t.PayeeOrPayer,
                 Description = t.Description,
@@ -695,8 +706,11 @@ public class CashTransactionService : ICashTransactionService
 
     public async Task<CashTransactionDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
     {
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
         var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Operate, cancellationToken);
         transaction = await ResolvePostingSourceTransactionAsync(transaction, cancellationToken);
+        var priorStatus = transaction.ApprovalStatus;
         if (transaction.IsPosted || transaction.ApprovalStatus == CashTransactionApprovalStatus.Posted)
         {
             throw new InvalidOperationException("Posted cash/bank transactions cannot be submitted.");
@@ -712,10 +726,8 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("Only captured or returned cash/bank transactions can be submitted.");
         }
 
-        await ValidateAndFreezeCashDimensionsAsync(
-            transaction,
-            await ResolveCashProducerAsync(transaction, requestedProducer: null, cancellationToken),
-            cancellationToken);
+        var producer = await ResolveCashProducerAsync(transaction, requestedProducer: null, cancellationToken);
+        await ValidateAndFreezeCashDimensionsAsync(transaction, producer, cancellationToken);
 
         var workflow = RequireWorkflowIntegration();
         var workflowResult = await workflow.SubmitAsync(CashTransactionWorkflowEntityType, transaction.Id);
@@ -735,6 +747,27 @@ public class CashTransactionService : ICashTransactionService
         transaction.UpdatedAt = now;
         transaction.UpdatedBy = _currentUserService.UserName;
 
+        var request = await CashAuthorityRequestAsync(
+            transaction,
+            producer,
+            workflowResult.Outcome == WorkflowOutcome.Pending ? "Submitted" : "Authorized",
+            cancellationToken);
+        var authority = priorStatus == CashTransactionApprovalStatus.Returned
+            ? await RequireSourceBookAuthority().FreezeResubmissionAsync(
+                request,
+                transaction.SourceBookAuthorityId
+                    ?? throw new InvalidOperationException(
+                        "SOURCE_BOOK_AUTHORITY_MISSING: returned cash transactions require their prior frozen authority."),
+                cancellationToken)
+            : await RequireSourceBookAuthority().FreezeInitialPrimaryAsync(request, cancellationToken);
+        transaction.SourceBookAuthorityId = authority.AuthorityId;
+        if (transaction.TransactionType == CashTransactionType.Transfer)
+        {
+            var linkedTransferLeg = await FindLinkedTransferLegAsync(transaction, cancellationToken);
+            if (linkedTransferLeg is not null)
+                linkedTransferLeg.SourceBookAuthorityId = authority.AuthorityId;
+        }
+
         await _context.SaveChangesAsync(cancellationToken);
         await RecordCashBankAuditAsync(
             FinanceAuditEvents.CashBankTransactionSubmitted,
@@ -748,6 +781,7 @@ public class CashTransactionService : ICashTransactionService
             },
             comment: "Cash/bank transaction submitted through the configured workflow engine.",
             cancellationToken: cancellationToken);
+        await dbTransaction.CommitAsync(cancellationToken);
 
         return await GetByIdAsync(transaction.Id) ?? throw new Exception("Failed to load submitted cash/bank transaction");
     }
@@ -968,6 +1002,8 @@ public class CashTransactionService : ICashTransactionService
         {
             throw new InvalidOperationException("Central finance posting engine is not configured for cash/bank transaction posting.");
         }
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
 
         var requestedTransaction = await LoadCashTransactionForPostingAsync(id, cancellationToken);
         var sourceTransaction = await ResolvePostingSourceTransactionAsync(requestedTransaction, cancellationToken);
@@ -979,14 +1015,13 @@ public class CashTransactionService : ICashTransactionService
         await EnforceCashBankPostingEligibilityAsync(sourceTransaction, cancellationToken);
         await ValidateAndFreezeCashDimensionsAsync(sourceTransaction, producer, cancellationToken);
 
-        // Keep the posting engine, cash transaction flags, and bank read-side
-        // balance snapshots in one commit so retry/idempotency cannot strand them.
-        await using var dbTransaction = await _context.Database.BeginTransactionAsync(cancellationToken);
-
         try
         {
+            var authority = await RequireCashPostingAuthorityAsync(
+                sourceTransaction, producer, cancellationToken);
             var postingRequest = await BuildCashBankPostingRequestAsync(
                 sourceTransaction, producer, cancellationToken);
+            postingRequest.AccountingBookCode = authority.AccountingBookCode;
             var postingResult = await _financePostingEngine.PostAsync(
                 postingRequest, producer, cancellationToken);
 
@@ -1005,6 +1040,7 @@ public class CashTransactionService : ICashTransactionService
             sourceTransaction.PostedBy = postedBy;
             sourceTransaction.UpdatedAt = postedAt;
             sourceTransaction.UpdatedBy = _currentUserService.UserName;
+            sourceTransaction.SourceBookAuthorityId = authority.AuthorityId;
 
             var linkedTransferLeg = sourceTransaction.TransactionType == CashTransactionType.Transfer
                 ? await FindLinkedTransferLegAsync(sourceTransaction, cancellationToken)
@@ -1019,7 +1055,14 @@ public class CashTransactionService : ICashTransactionService
                 linkedTransferLeg.PostedBy = postedBy;
                 linkedTransferLeg.UpdatedAt = postedAt;
                 linkedTransferLeg.UpdatedBy = _currentUserService.UserName;
+                linkedTransferLeg.SourceBookAuthorityId = authority.AuthorityId;
             }
+
+            await RequireSourceBookAuthority().BindOriginalPostingAsync(
+                authority.AuthorityId,
+                postingResult.PostingEventId,
+                postingResult.JournalEntryId,
+                cancellationToken);
 
             await ApplyPostedCashBankBalanceSnapshotAsync(
                 sourceTransaction,
@@ -1345,6 +1388,11 @@ public class CashTransactionService : ICashTransactionService
                     "This transaction was not posted by the Cash/Bank workflow. Reverse it from its owning Finance subledger instead.");
             if (originalPosting.JournalEntryId != source.JournalEntryId)
                 throw new InvalidOperationException("Cash/bank source and posting-event journal links are inconsistent.");
+            var originalAuthority = await RequireCashBoundAuthorityAsync(
+                source,
+                await ResolveCashProducerAsync(source, requestedProducer: null, cancellationToken),
+                originalPosting,
+                cancellationToken);
 
             var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
                 originalPosting.Id,
@@ -1362,7 +1410,7 @@ public class CashTransactionService : ICashTransactionService
                 Description = $"Reverse {source.TransactionNumber}: {policy.Reason}",
                 PostingDate = policy.ReversalDate,
                 JournalType = $"{GetCashBankJournalType(source)} Reversal",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = originalAuthority.AccountingBookCode,
                 FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                 ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                 ReversalReason = policy.Reason,
@@ -1953,6 +2001,85 @@ public class CashTransactionService : ICashTransactionService
                 "This cash/bank transaction is outside the certified Finance dimension routes.")
         });
 
+    private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
+        _sourceBookAuthority
+        ?? throw new InvalidOperationException(
+            "Finance source-book authority is not configured for cash/bank posting.");
+
+    private async Task<FinanceSourceBookAuthorityFreezeRequest> CashAuthorityRequestAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        string freezeStage,
+        CancellationToken cancellationToken)
+    {
+        var transactionCurrency = NormalizeCurrency(source.Currency);
+        if (source.TransactionType == CashTransactionType.Transfer)
+        {
+            var linked = await FindLinkedTransferLegAsync(source, cancellationToken);
+            if (linked is not null
+                && !transactionCurrency.Equals(NormalizeCurrency(linked.Currency), StringComparison.OrdinalIgnoreCase))
+                transactionCurrency = NormalizeCurrency(await _tenantSettingsService.GetBaseCurrencyAsync());
+        }
+        return new FinanceSourceBookAuthorityFreezeRequest
+        {
+            OriginModuleCode = ErpSystem.Core.Finance.FinanceModuleLockCatalog.ResolveOriginModuleCode(
+                producer.Definition.ProducerModule),
+            SourceDocumentType = producer.Definition.DocumentType,
+            SourceDocumentId = source.Id,
+            PostingAction = "Post",
+            EffectiveDate = source.TransactionDate,
+            TransactionCurrencyCode = transactionCurrency,
+            FreezeStage = freezeStage,
+            SourceWorkflowInstanceId = source.WorkflowInstanceId,
+            SourceWorkflowEntityType = CashTransactionWorkflowEntityType
+        };
+    }
+
+    private async Task<FinanceSourceBookAuthorityResult> RequireCashPostingAuthorityAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken)
+    {
+        if (!source.SourceBookAuthorityId.HasValue)
+            throw new InvalidOperationException(
+                "SOURCE_BOOK_AUTHORITY_MISSING: unposted legacy cash/bank transactions require governed resubmission.");
+        var retained = await _context.FinanceSourceBookAuthorities.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == source.SourceBookAuthorityId.Value && !item.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("SOURCE_BOOK_AUTHORITY_MISSING: retained cash/bank authority was not found.");
+        return await RequireSourceBookAuthority().RequireForPostingAsync(
+            await CashAuthorityRequestAsync(source, producer, retained.FreezeStage, cancellationToken),
+            cancellationToken);
+    }
+
+    private async Task<FinanceSourceBookAuthorityResult> RequireCashBoundAuthorityAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        FinancePostingEvent originalPosting,
+        CancellationToken cancellationToken)
+    {
+        var authorityService = RequireSourceBookAuthority();
+        if (!source.SourceBookAuthorityId.HasValue)
+        {
+            var retained = await authorityService.RetainExistingPostedOriginalAsync(
+                await CashAuthorityRequestAsync(source, producer, "LegacyPosted", cancellationToken),
+                source.JournalEntryId
+                    ?? throw new InvalidOperationException("Cash/bank original journal evidence is missing."),
+                originalPosting.Id,
+                cancellationToken);
+            source.SourceBookAuthorityId = retained.AuthorityId;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        var authority = await authorityService.RequireBoundOriginalAsync(
+            source.SourceBookAuthorityId.Value,
+            cancellationToken);
+        if (authority.OriginalFinancePostingEventId != originalPosting.Id
+            || authority.OriginalJournalEntryId != source.JournalEntryId)
+            throw new InvalidOperationException(
+                "SOURCE_BOOK_AUTHORITY_ORIGINAL_MISMATCH: cash/bank reversal evidence differs from the retained original.");
+        return authority;
+    }
+
     private async Task<CashTransaction> ResolvePostingSourceTransactionAsync(
         CashTransaction transaction,
         CancellationToken cancellationToken)
@@ -2140,7 +2267,7 @@ public class CashTransactionService : ICashTransactionService
             Description = description,
             PostingDate = transaction.TransactionDate.Date,
             JournalType = GetCashBankJournalType(transaction),
-            AccountingBookCode = "IFRS",
+            AccountingBookCode = string.Empty,
             FunctionalCurrencyCode = baseCurrencyCode,
             IdempotencyKey = $"CASHBANK:{sourceDocumentType}:{tenantId:N}:{transaction.Id:N}:Post",
             ReturnExistingOnDuplicate = true,

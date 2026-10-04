@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { settingsService, type SessionRuntimeSettings } from '../services/settings';
 import { tokenRefreshService } from '../services/token-refresh.service';
 import { authService } from '../services/auth';
+import { browserSessionCoordinator } from '../services/browser-session-coordinator';
 
 export interface SessionTimeoutState {
   isActive: boolean;
@@ -14,24 +15,45 @@ export interface SessionTimeoutState {
   lastActivity: number;
 }
 
-const DEFAULT_SESSION_TIMEOUT = 30; // 30 minutes
-const WARNING_TIME = 120; // Show warning 2 minutes (120 seconds) before timeout
+const DEFAULT_SESSION_TIMEOUT = 30;
+const WARNING_TIME = 120;
+const ACTIVITY_BROADCAST_THROTTLE_MS = 15_000;
+
+export interface SessionTiming {
+  expired: boolean;
+  showWarning: boolean;
+  remainingSeconds: number;
+}
+
+export const calculateSessionTiming = (
+  lastActivity: number,
+  now: number,
+  timeoutMs: number,
+  warningSeconds = WARNING_TIME,
+): SessionTiming => {
+  const remainingMs = Math.max(0, lastActivity + timeoutMs - now);
+  return {
+    expired: remainingMs <= 0,
+    showWarning: remainingMs > 0 && remainingMs <= warningSeconds * 1000,
+    remainingSeconds: Math.max(0, Math.ceil(remainingMs / 1000)),
+  };
+};
 
 export function useSessionTimeout() {
+  const initialActivity = Date.now();
   const [sessionState, setSessionState] = useState<SessionTimeoutState>({
     isActive: true,
     showWarning: false,
     remainingSeconds: WARNING_TIME,
     sessionTimeoutMinutes: DEFAULT_SESSION_TIMEOUT,
-    lastActivity: Date.now(),
+    lastActivity: initialActivity,
   });
 
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const warningTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const activityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastActivityBroadcastRef = useRef(0);
+  const logoutInProgressRef = useRef(false);
 
-  // Fetch session timeout settings from security settings - only if authenticated
-  const { data: sessionRuntimeSettings, isLoading: isLoadingSettings } = useQuery<SessionRuntimeSettings>({
+  const { data: sessionRuntimeSettings } = useQuery<SessionRuntimeSettings>({
     queryKey: ['sessionRuntimeSettings'],
     queryFn: () => settingsService.getSessionSettings(),
     staleTime: 30 * 60 * 1000,
@@ -42,208 +64,165 @@ export function useSessionTimeout() {
     refetchInterval: 30 * 60 * 1000,
     enabled: typeof window !== 'undefined' && authService.isAuthenticated(),
     retry: (failureCount, error: any) => {
-      // Don't retry on 401 errors - user is not authenticated
-      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) {
-        return false;
-      }
+      if (error?.message?.includes('401') || error?.message?.includes('Unauthorized')) return false;
       return failureCount < 2;
     },
   });
 
-  // Use the actual session timeout from settings, or default if still loading
   const sessionTimeoutMinutes = sessionRuntimeSettings?.sessionTimeoutMinutes || DEFAULT_SESSION_TIMEOUT;
-  const shouldInitializeTimers = !isLoadingSettings || sessionRuntimeSettings !== undefined;
   const sessionTimeoutMs = sessionTimeoutMinutes * 60 * 1000;
-  const warningTimeMs = WARNING_TIME * 1000;
 
-  const resetActivity = useCallback(() => {
-    const now = Date.now();
-    setSessionState(prev => ({
-      ...prev,
-      lastActivity: now,
+  const clearTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const terminateSession = useCallback(async (reason: 'logout' | 'session-expired') => {
+    if (logoutInProgressRef.current || typeof window === 'undefined') return;
+    logoutInProgressRef.current = true;
+    clearTimer();
+    const sharedActivity = browserSessionCoordinator.getLastActivity(0);
+    setSessionState(previous => ({
+      ...previous,
+      isActive: false,
       showWarning: false,
-      sessionTimeoutMinutes: sessionTimeoutMinutes, // Update state with current timeout
+      remainingSeconds: 0,
+      lastActivity: sharedActivity,
+      sessionTimeoutMinutes,
     }));
 
-    // Clear existing timers
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-    if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
+    try {
+      await authService.logout(reason);
+    } catch (error) {
+      console.warn('Backend logout failed during session cleanup:', error);
+      tokenRefreshService.clearTokens();
+      browserSessionCoordinator.publish(reason);
+    }
 
-    // Don't initialize timers until we have the actual settings loaded
-    if (!shouldInitializeTimers) {
+    window.location.assign('/login');
+  }, [clearTimer, sessionTimeoutMinutes]);
+
+  const expireSession = useCallback(async () => {
+    if (logoutInProgressRef.current || typeof window === 'undefined') return;
+
+    // Re-read the shared timestamp immediately before logout. A background tab may have resumed
+    // after its timer was throttled while another ERP tab continued to receive user activity.
+    const sharedActivity = browserSessionCoordinator.getLastActivity(0);
+    if (Date.now() < sharedActivity + sessionTimeoutMs) return;
+
+    await terminateSession('session-expired');
+  }, [sessionTimeoutMs, terminateSession]);
+
+  const reconcileSession = useCallback((now = Date.now()) => {
+    if (typeof window === 'undefined' || !authService.isAuthenticated()) return;
+
+    clearTimer();
+    const lastActivity = browserSessionCoordinator.getLastActivity(now);
+    const timing = calculateSessionTiming(lastActivity, now, sessionTimeoutMs);
+
+    setSessionState(previous => ({
+      ...previous,
+      isActive: !timing.expired,
+      showWarning: timing.showWarning,
+      remainingSeconds: timing.remainingSeconds,
+      sessionTimeoutMinutes,
+      lastActivity,
+    }));
+
+    if (timing.expired) {
+      void expireSession();
       return;
     }
 
-    // Set warning timer (show warning 2 minutes before timeout)
-    warningTimeoutRef.current = setTimeout(() => {
-      setSessionState(prev => ({
-        ...prev,
-        showWarning: true,
-        remainingSeconds: WARNING_TIME,
-      }));
+    // Timers only wake the calculation. Correctness comes from comparing timestamps whenever the
+    // tab runs again, receives a cross-tab event, or becomes visible.
+    const nextDelay = timing.showWarning
+      ? Math.min(1000, timing.remainingSeconds * 1000)
+      : Math.max(1, timing.remainingSeconds * 1000 - WARNING_TIME * 1000);
+    timerRef.current = setTimeout(() => reconcileSession(), nextDelay);
+  }, [clearTimer, expireSession, sessionTimeoutMinutes, sessionTimeoutMs]);
 
-      // Set final timeout timer
-      timeoutRef.current = setTimeout(() => {
-        handleSessionTimeout();
-      }, warningTimeMs);
+  const resetActivity = useCallback(() => {
+    if (typeof window === 'undefined' || !authService.isAuthenticated()) return;
+    const now = Date.now();
+    const sharedActivity = browserSessionCoordinator.recordActivity(now);
+    lastActivityBroadcastRef.current = sharedActivity;
+    reconcileSession(now);
+  }, [reconcileSession]);
 
-    }, sessionTimeoutMs - warningTimeMs);
-
-  }, [sessionTimeoutMinutes, sessionTimeoutMs, warningTimeMs, shouldInitializeTimers]);
-
-  const handleSessionTimeout = useCallback(async () => {
-    // Clear all timers
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-    if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
-
-    // Update state immediately
-    setSessionState(prev => ({
-      ...prev,
-      isActive: false,
-      showWarning: false,
-    }));
-
-    // Call proper logout which handles backend cleanup
-    try {
-      await authService.logout();
-    } catch (error) {
-      console.warn('Backend logout failed during session timeout cleanup:', error);
-      // Still clear tokens locally even if backend fails
-      tokenRefreshService.clearTokens();
-    }
-
-    // Redirect to login
-    window.location.href = '/login';
-  }, []);
+  const handleActivity = useCallback(() => {
+    const now = Date.now();
+    if (now - lastActivityBroadcastRef.current < ACTIVITY_BROADCAST_THROTTLE_MS) return;
+    resetActivity();
+  }, [resetActivity]);
 
   const extendSession = useCallback(async () => {
     try {
-      // Try to refresh the token to extend the session
       if (tokenRefreshService.hasRefreshToken()) {
         await tokenRefreshService.refreshToken();
       }
-      
-      // Reset activity timers
       resetActivity();
     } catch (error) {
       console.error('Failed to extend session:', error);
-      handleSessionTimeout();
+      await terminateSession('session-expired');
     }
-  }, [resetActivity, handleSessionTimeout]);
+  }, [resetActivity, terminateSession]);
 
   const logout = useCallback(async () => {
-    await handleSessionTimeout();
-  }, [handleSessionTimeout]);
+    await terminateSession('logout');
+  }, [terminateSession]);
 
-  // Activity event handlers
-  const handleActivity = useCallback(() => {
-    // Throttle activity updates to prevent excessive timer resets
-    if (activityTimeoutRef.current) return;
-    
-    activityTimeoutRef.current = setTimeout(() => {
-      resetActivity();
-      activityTimeoutRef.current = null;
-    }, 1000); // Throttle to once per second
-  }, [resetActivity]);
-
-  // Set up activity listeners - only if authenticated
   useEffect(() => {
-    // Don't set up activity monitoring if not authenticated
-    if (typeof window === 'undefined' || !authService.isAuthenticated()) {
-      return;
-    }
+    if (typeof window === 'undefined' || !authService.isAuthenticated()) return;
 
-    const events = [
-      'mousedown',
-      'mousemove',
-      'keypress',
-      'scroll',
-      'touchstart',
-      'click',
-    ];
+    const events = ['mousedown', 'mousemove', 'keypress', 'scroll', 'touchstart', 'click'];
+    events.forEach(event => document.addEventListener(event, handleActivity, { passive: true }));
 
-    // Add event listeners with passive option for better performance
-    events.forEach(event => {
-      document.addEventListener(event, handleActivity, { passive: true });
+    const unsubscribe = browserSessionCoordinator.subscribe(event => {
+      if (event.type === 'activity' || event.type === 'login' || event.type === 'token-refreshed') {
+        logoutInProgressRef.current = false;
+        reconcileSession();
+        return;
+      }
+
+      clearTimer();
+      setSessionState(previous => ({
+        ...previous,
+        isActive: false,
+        showWarning: false,
+        remainingSeconds: 0,
+      }));
+      if (window.location.pathname !== '/login') window.location.assign('/login');
     });
 
-    // Initial activity reset
+    const revalidateVisibleSession = () => {
+      if (document.visibilityState === 'visible') reconcileSession();
+    };
+    document.addEventListener('visibilitychange', revalidateVisibleSession);
+    window.addEventListener('focus', revalidateVisibleSession);
+
+    // Mounting or reloading an authenticated ERP page is legitimate browser-session activity.
     resetActivity();
+    const stopAutoRefresh = tokenRefreshService.setupAutoRefresh(
+      () => reconcileSession(),
+      () => void terminateSession('session-expired'),
+    );
 
     return () => {
-      // Cleanup event listeners
-      events.forEach(event => {
-        document.removeEventListener(event, handleActivity);
-      });
-
-      // Clear timers
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
-      if (activityTimeoutRef.current) clearTimeout(activityTimeoutRef.current);
+      events.forEach(event => document.removeEventListener(event, handleActivity));
+      document.removeEventListener('visibilitychange', revalidateVisibleSession);
+      window.removeEventListener('focus', revalidateVisibleSession);
+      unsubscribe();
+      stopAutoRefresh();
+      clearTimer();
     };
-  }, [handleActivity, resetActivity]);
+  }, [clearTimer, handleActivity, reconcileSession, resetActivity, terminateSession]);
 
-  // Initialize session timeout when security settings are first loaded
   useEffect(() => {
-    // Only initialize if we have settings and haven't initialized yet
-    if (sessionRuntimeSettings?.sessionTimeoutMinutes && shouldInitializeTimers) {
-      setSessionState(prev => ({
-        ...prev,
-        sessionTimeoutMinutes: sessionRuntimeSettings.sessionTimeoutMinutes,
-      }));
-      
-      // Initialize timers with the correct timeout
-      resetActivity();
-    }
-  }, [sessionRuntimeSettings?.sessionTimeoutMinutes, shouldInitializeTimers, resetActivity]);
+    reconcileSession();
+  }, [sessionTimeoutMinutes, reconcileSession]);
 
-  // Update session timeout when security settings change (after initial load)
-  useEffect(() => {
-    if (sessionRuntimeSettings?.sessionTimeoutMinutes && !isLoadingSettings) {
-      setSessionState(prev => ({
-        ...prev,
-        sessionTimeoutMinutes: sessionRuntimeSettings.sessionTimeoutMinutes,
-      }));
-      
-      // Reset activity to apply new timeout
-      resetActivity();
-    }
-  }, [sessionRuntimeSettings?.sessionTimeoutMinutes, isLoadingSettings, resetActivity]);
-
-  // Update remaining seconds countdown when warning is shown
-  useEffect(() => {
-    if (!sessionState.showWarning) return;
-
-    let remainingTime = WARNING_TIME;
-
-    const updateCountdown = () => {
-      remainingTime -= 1;
-      
-      setSessionState(prev => ({
-        ...prev,
-        remainingSeconds: Math.max(0, remainingTime),
-      }));
-
-      if (remainingTime <= 0) {
-        clearInterval(countdownInterval);
-      }
-    };
-
-    const countdownInterval: ReturnType<typeof setInterval> = setInterval(updateCountdown, 1000);
-
-    return () => {
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-      }
-    };
-  }, [sessionState.showWarning]);
-
-  return {
-    sessionState,
-    extendSession,
-    logout,
-    resetActivity,
-  };
+  return { sessionState, extendSession, logout, resetActivity };
 }

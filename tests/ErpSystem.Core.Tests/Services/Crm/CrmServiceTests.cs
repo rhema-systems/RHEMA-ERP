@@ -17,6 +17,50 @@ namespace ErpSystem.Core.Tests.Services.Crm;
 public class CrmServiceTests
 {
     [Fact]
+    public async Task GetLeadByIdAsync_ShouldExposeLinkedPropertyEnquiryCurrency()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var leadId = Guid.NewGuid();
+        var ticketId = Guid.NewGuid();
+        var fixture = new CrmServiceFixture(tenantId, userId);
+
+        fixture.Leads.Add(new Lead
+        {
+            Id = leadId,
+            TenantId = tenantId,
+            FirstName = "Akosua",
+            LastName = "Mensah",
+            LeadStatus = "Qualified",
+            LeadSource = "Property Enquiry"
+        });
+        fixture.EhcTickets.Add(new EhcTicket
+        {
+            Id = ticketId,
+            TenantId = tenantId,
+            TicketNumber = "EHC-PE-0007",
+            TicketType = EhcTicketType.Enquiry,
+            Description = "Published plot enquiry"
+        });
+        fixture.PropertyEnquiryProspects.Add(new EhcPropertyEnquiryProspect
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            TicketId = ticketId,
+            LeadId = leadId,
+            AgreedAmount = 275000m,
+            Currency = "GHS"
+        });
+
+        var result = await fixture.CreateService().GetLeadByIdAsync(leadId);
+
+        result.Should().NotBeNull();
+        result!.PropertyEnquiryTicketId.Should().Be(ticketId);
+        result.PropertyEnquiryTicketNumber.Should().Be("EHC-PE-0007");
+        result.PropertyEnquiryCurrency.Should().Be("GHS");
+    }
+
+    [Fact]
     public async Task GetOverviewAsync_ShouldAggregatePipelineAndAccountSignals()
     {
         var tenantId = Guid.NewGuid();
@@ -156,6 +200,57 @@ public class CrmServiceTests
             && x.ActiveContractCount == 1
             && x.TenderAwardCount == 1
             && x.IsAtRisk);
+        var account = result.Accounts.Single();
+        account.ProjectValuesByCurrency.Should().BeEmpty();
+        account.ProjectsWithoutCurrencyCount.Should().Be(1);
+        account.ContractValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 350000m);
+        account.TenderAwardedValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 250000m);
+    }
+
+    [Fact]
+    public async Task GetOverviewAsync_SeparatesCurrenciesAcrossThePipeline()
+    {
+        var tenantId = Guid.NewGuid();
+        var fixture = new CrmServiceFixture(tenantId, Guid.NewGuid());
+        var usdOpportunityId = Guid.NewGuid();
+        var ghsOpportunityId = Guid.NewGuid();
+        fixture.Opportunities.AddRange(new[]
+        {
+            new Opportunity
+            {
+                Id = usdOpportunityId, TenantId = tenantId, Name = "USD deal", Stage = "Proposal",
+                Amount = 100m, Probability = 50, Currency = "USD", ExpectedCloseDate = DateTime.UtcNow.AddDays(7)
+            },
+            new Opportunity
+            {
+                Id = ghsOpportunityId, TenantId = tenantId, Name = "GHS deal", Stage = "Proposal",
+                Amount = 200m, Probability = 25, Currency = "GHS", ExpectedCloseDate = DateTime.UtcNow.AddDays(8)
+            }
+        });
+        fixture.Quotes.AddRange(new[]
+        {
+            new Quote
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, OpportunityId = usdOpportunityId,
+                QuoteStatus = "Sent", Currency = "USD", TotalAmount = 90m
+            },
+            new Quote
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, OpportunityId = ghsOpportunityId,
+                QuoteStatus = "Sent", Currency = "GHS", TotalAmount = 180m
+            }
+        });
+
+        var result = await fixture.CreateService().GetOverviewAsync(1);
+
+        result.Opportunities.Should().HaveCount(2);
+        result.OpenOpportunityCount.Should().Be(2);
+        result.OpenOpportunityValuesByCurrency.Should().ContainSingle(x => x.Currency == "GHS" && x.Amount == 200m);
+        result.OpenOpportunityValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 100m);
+        result.WeightedPipelineValuesByCurrency.Should().ContainSingle(x => x.Currency == "GHS" && x.Amount == 50m);
+        result.WeightedPipelineValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 50m);
+        result.ActiveQuoteValuesByCurrency.Should().ContainSingle(x => x.Currency == "GHS" && x.Amount == 180m);
+        result.ActiveQuoteValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 90m);
     }
 
     [Fact]
@@ -316,7 +411,6 @@ public class CrmServiceTests
         var userId = Guid.NewGuid();
         var partnerId = Guid.NewGuid();
         var fixture = new CrmServiceFixture(tenantId, userId);
-
         fixture.BusinessPartners.Add(new BusinessPartner
         {
             Id = partnerId,
@@ -1507,6 +1601,17 @@ public class CrmServiceTests
         var userId = Guid.NewGuid();
         var partnerId = Guid.NewGuid();
         var fixture = new CrmServiceFixture(tenantId, userId);
+        var proposalStage = new OpportunityStageDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "OFFER", Name = "Offer Issued",
+            SortOrder = 30, IsActive = true, DefaultProbability = 50
+        };
+        var wonStage = new OpportunityStageDefinition
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "SIGNED", Name = "Agreement Signed",
+            SortOrder = 40, IsActive = true, IsClosed = true, IsWon = true, DefaultProbability = 100
+        };
+        fixture.OpportunityStages.AddRange(new[] { proposalStage, wonStage });
 
         fixture.BusinessPartners.Add(new BusinessPartner
         {
@@ -1524,7 +1629,7 @@ public class CrmServiceTests
         {
             Name = "Harbor expansion",
             BusinessPartnerId = partnerId,
-            Stage = "Proposal",
+            StageDefinitionId = proposalStage.Id,
             Amount = 450000m,
             Probability = 50,
             Currency = "USD",
@@ -1534,10 +1639,28 @@ public class CrmServiceTests
         });
 
         var paged = await service.GetOpportunitiesAsync();
+        var updated = await service.UpdateOpportunityAsync(created.OpportunityId, new UpdateCrmOpportunityDto
+        {
+            Name = created.Name,
+            BusinessPartnerId = partnerId,
+            StageDefinitionId = wonStage.Id,
+            Amount = created.Amount,
+            Probability = 100,
+            Currency = created.Currency,
+            ExpectedCloseDate = created.ExpectedCloseDate,
+            LeadSource = created.LeadSource,
+            OpportunityType = created.OpportunityType
+        });
 
         created.BusinessPartnerId.Should().Be(partnerId);
         created.BusinessPartnerName.Should().Be("Harbor Works");
+        created.StageDefinitionId.Should().Be(proposalStage.Id);
         paged.Items.Should().ContainSingle(x => x.BusinessPartnerId == partnerId && x.Name == "Harbor expansion");
+        updated.StageDefinitionId.Should().Be(wonStage.Id);
+        updated.ActualCloseDate.Should().NotBeNull();
+        fixture.OpportunityStageHistories.Should().HaveCount(2);
+        fixture.OpportunityStageHistories.Select(history => history.StageDefinitionId)
+            .Should().ContainInOrder(proposalStage.Id, wonStage.Id);
     }
 
     [Fact]
@@ -2726,7 +2849,7 @@ public class CrmServiceTests
                 Stage = "Proposal",
                 Amount = 90000m,
                 Probability = 60,
-                Currency = "USD",
+                Currency = "GHS",
                 ExpectedCloseDate = DateTime.UtcNow.AddDays(12),
                 OpportunityType = "New Business",
                 LeadSource = "Campaign"
@@ -2791,6 +2914,10 @@ public class CrmServiceTests
         result.ProjectBackedOpportunityCount.Should().Be(1);
         result.LeadToOpportunityRate.Should().Be(66.7m);
         result.OpportunityToQuoteRate.Should().Be(50m);
+        result.TotalOpportunityValuesByCurrency.Should().ContainSingle(x => x.Currency == "GHS" && x.Amount == 90000m);
+        result.TotalOpportunityValuesByCurrency.Should().ContainSingle(x => x.Currency == "USD" && x.Amount == 180000m);
+        result.WeightedPipelineValuesByCurrency.Should().ContainSingle(x => x.Currency == "GHS" && x.Amount == 54000m);
+        result.Funnel.Should().ContainSingle(x => x.Stage == "Project" && x.UnspecifiedCurrencyCount == 1);
         result.Funnel.Should().ContainSingle(x => x.Stage == "Quote" && x.EntityCount == 1);
         result.Journeys.Should().Contain(x => x.OpportunityId == healthyOpportunityId && x.CoverageStatus == "Project Live");
         result.Journeys.Should().Contain(x =>
@@ -2922,7 +3049,15 @@ public class CrmServiceTests
     {
         public List<Lead> Leads { get; } = new();
         public List<Opportunity> Opportunities { get; } = new();
+        public List<OpportunityStageDefinition> OpportunityStages { get; } = new();
+        public List<OpportunityStageHistory> OpportunityStageHistories { get; } = new();
         public List<Quote> Quotes { get; } = new();
+        public List<SalesOrder> SalesOrders { get; } = new();
+        public List<SalesAgreement> SalesAgreements { get; } = new();
+        public List<SalesAllocation> SalesAllocations { get; } = new();
+        public List<ReturnOrder> ReturnOrders { get; } = new();
+        public List<CreditNote> CreditNotes { get; } = new();
+        public List<Refund> Refunds { get; } = new();
         public List<Activity> Activities { get; } = new();
         public List<BusinessPartner> BusinessPartners { get; } = new();
         public List<Project> Projects { get; } = new();
@@ -2939,6 +3074,7 @@ public class CrmServiceTests
         public List<BusinessPartnerUser> BusinessPartnerUsers { get; } = new();
         public List<TenderAssignment> TenderAssignments { get; } = new();
         public List<EhcTicket> EhcTickets { get; } = new();
+        public List<EhcPropertyEnquiryProspect> PropertyEnquiryProspects { get; } = new();
         public List<EhcProblem> EhcProblems { get; } = new();
         public List<EhcProblemTicketLink> EhcProblemTicketLinks { get; } = new();
         public List<Campaign> Campaigns { get; } = new();
@@ -2951,7 +3087,15 @@ public class CrmServiceTests
         {
             _unitOfWork.Setup(x => x.Repository<Lead>()).Returns(CreateRepository(Leads).Object);
             _unitOfWork.Setup(x => x.Repository<Opportunity>()).Returns(CreateRepository(Opportunities).Object);
+            _unitOfWork.Setup(x => x.Repository<OpportunityStageDefinition>()).Returns(CreateRepository(OpportunityStages).Object);
+            _unitOfWork.Setup(x => x.Repository<OpportunityStageHistory>()).Returns(CreateRepository(OpportunityStageHistories).Object);
             _unitOfWork.Setup(x => x.Repository<Quote>()).Returns(CreateRepository(Quotes).Object);
+            _unitOfWork.Setup(x => x.Repository<SalesOrder>()).Returns(CreateRepository(SalesOrders).Object);
+            _unitOfWork.Setup(x => x.Repository<SalesAgreement>()).Returns(CreateRepository(SalesAgreements).Object);
+            _unitOfWork.Setup(x => x.Repository<SalesAllocation>()).Returns(CreateRepository(SalesAllocations).Object);
+            _unitOfWork.Setup(x => x.Repository<ReturnOrder>()).Returns(CreateRepository(ReturnOrders).Object);
+            _unitOfWork.Setup(x => x.Repository<CreditNote>()).Returns(CreateRepository(CreditNotes).Object);
+            _unitOfWork.Setup(x => x.Repository<Refund>()).Returns(CreateRepository(Refunds).Object);
             _unitOfWork.Setup(x => x.Repository<Activity>()).Returns(CreateRepository(Activities).Object);
             _unitOfWork.Setup(x => x.Repository<BusinessPartner>()).Returns(CreateRepository(BusinessPartners).Object);
             _unitOfWork.Setup(x => x.Repository<Project>()).Returns(CreateRepository(Projects).Object);
@@ -2968,6 +3112,7 @@ public class CrmServiceTests
             _unitOfWork.Setup(x => x.Repository<BusinessPartnerUser>()).Returns(CreateRepository(BusinessPartnerUsers).Object);
             _unitOfWork.Setup(x => x.Repository<TenderAssignment>()).Returns(CreateRepository(TenderAssignments).Object);
             _unitOfWork.Setup(x => x.Repository<EhcTicket>()).Returns(CreateRepository(EhcTickets).Object);
+            _unitOfWork.Setup(x => x.Repository<EhcPropertyEnquiryProspect>()).Returns(CreateRepository(PropertyEnquiryProspects).Object);
             _unitOfWork.Setup(x => x.Repository<EhcProblem>()).Returns(CreateRepository(EhcProblems).Object);
             _unitOfWork.Setup(x => x.Repository<EhcProblemTicketLink>()).Returns(CreateRepository(EhcProblemTicketLinks).Object);
             _unitOfWork.Setup(x => x.Repository<Campaign>()).Returns(CreateRepository(Campaigns).Object);

@@ -90,10 +90,11 @@ public class ActivityService : IActivityService
         var activity = await _activityRepo.GetByIdAsync(id,
             a => a.AssignedTo!,
             a => a.Lead!,
-            a => a.Customer!,
             a => a.Opportunity!);
 
-        return activity == null ? null : MapToDetailDto(activity);
+        if (activity == null) return null;
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, new[] { activity.CustomerId });
+        return MapToDetailDto(activity, customerNames);
     }
 
     public async Task<PagedResult<ActivitySummaryDto>> GetAllAsync(
@@ -127,16 +128,17 @@ public class ActivityService : IActivityService
         var items = await query
             .Include(a => a.AssignedTo)
             .Include(a => a.Lead)
-            .Include(a => a.Customer)
             .Include(a => a.Opportunity)
             .OrderByDescending(a => a.ActivityDate)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
 
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+
         return new PagedResult<ActivitySummaryDto>
         {
-            Items = items.Select(MapToSummaryDto).ToList(),
+            Items = items.Select(item => MapToSummaryDto(item, customerNames)).ToList(),
             TotalCount = totalCount,
             Page = page,
             PageSize = pageSize
@@ -198,7 +200,8 @@ public class ActivityService : IActivityService
             .Take(50)
             .ToListAsync();
 
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     public async Task<List<ActivitySummaryDto>> GetUpcomingAsync(int daysAhead = 7, Guid? assignedToId = null)
@@ -213,11 +216,11 @@ public class ActivityService : IActivityService
         var items = await query
             .Include(a => a.AssignedTo)
             .Include(a => a.Lead)
-            .Include(a => a.Customer)
             .OrderBy(a => a.DueDate)
             .ToListAsync();
 
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     public async Task<List<ActivitySummaryDto>> GetOverdueAsync(Guid? assignedToId = null)
@@ -231,18 +234,18 @@ public class ActivityService : IActivityService
         var items = await query
             .Include(a => a.AssignedTo)
             .Include(a => a.Lead)
-            .Include(a => a.Customer)
             .OrderBy(a => a.DueDate)
             .ToListAsync();
 
-        return items.Select(MapToSummaryDto).ToList();
+        var customerNames = await SalesBusinessPartnerNames.LoadAsync(_unitOfWork, _currentUserProvider.TenantId, items.Select(item => item.CustomerId));
+        return items.Select(item => MapToSummaryDto(item, customerNames)).ToList();
     }
 
     #endregion
 
     #region Mapping
 
-    private static ActivitySummaryDto MapToSummaryDto(Activity a) => new()
+    private static ActivitySummaryDto MapToSummaryDto(Activity a, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = a.Id,
         Subject = a.Subject,
@@ -253,14 +256,14 @@ public class ActivityService : IActivityService
         Priority = a.Priority,
         AssignedToName = a.AssignedTo?.UserName,
         LeadName = a.Lead != null ? a.Lead.FullName : null,
-        CustomerName = a.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(a.CustomerId ?? Guid.Empty),
         OpportunityName = a.Opportunity?.Name,
         Outcome = a.Outcome,
         RequiresFollowUp = a.RequiresFollowUp,
         CreatedAt = a.CreatedAt
     };
 
-    private static ActivityDetailDto MapToDetailDto(Activity a) => new()
+    private static ActivityDetailDto MapToDetailDto(Activity a, IReadOnlyDictionary<Guid, string> customerNames) => new()
     {
         Id = a.Id,
         Subject = a.Subject,
@@ -276,7 +279,7 @@ public class ActivityService : IActivityService
         LeadId = a.LeadId,
         LeadName = a.Lead != null ? a.Lead.FullName : null,
         CustomerId = a.CustomerId,
-        CustomerName = a.Customer?.CustomerName,
+        CustomerName = customerNames.GetValueOrDefault(a.CustomerId ?? Guid.Empty),
         OpportunityId = a.OpportunityId,
         OpportunityName = a.Opportunity?.Name,
         Location = a.Location,

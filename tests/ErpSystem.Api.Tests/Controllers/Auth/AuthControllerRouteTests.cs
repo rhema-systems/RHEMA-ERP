@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
+using ErpSystem.Api.Controllers;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Services;
 using FluentAssertions;
@@ -9,6 +11,7 @@ using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -43,10 +46,24 @@ public class AuthControllerRouteTests
         payload.JwtTokenLifetimeMinutes.Should().Be(120);
     }
 
+    [Fact]
+    public void GetPublicLoginConfiguration_ShouldRemainAnonymousAtStableRoute()
+    {
+        var method = typeof(AuthController).GetMethod(
+            nameof(AuthController.GetPublicLoginConfiguration),
+            BindingFlags.Public | BindingFlags.Instance);
+
+        method.Should().NotBeNull();
+        method!.GetCustomAttribute<AllowAnonymousAttribute>().Should().NotBeNull();
+        method.GetCustomAttribute<HttpGetAttribute>()?.Template
+            .Should().Be("/api/public/config/login");
+    }
+
     private static WebApplicationFactory<Program> CreateFactory(Mock<ISettingsService> settingsService)
         => new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
         {
             builder.UseEnvironment("Testing");
+            builder.UseSetting("CandidatePortal:PortalUrl", "https://candidate.example.test");
             builder.ConfigureServices(services =>
             {
                 services.RemoveAll<IHostedService>();

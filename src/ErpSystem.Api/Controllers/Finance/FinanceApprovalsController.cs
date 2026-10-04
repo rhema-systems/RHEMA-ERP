@@ -102,6 +102,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IProcurementInvoicePaymentSodService? _invoicePaymentSod;
     private readonly IVendorPaymentService? _vendorPaymentService;
     private readonly IFinanceBudgetControlService? _budgetControl;
+    private readonly ILeaseAccountingService? _leaseAccountingService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -118,7 +119,8 @@ public class FinanceApprovalsController : ControllerBase
         IFinanceAuditService? financeAuditService = null,
         IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
         IVendorPaymentService? vendorPaymentService = null,
-        IFinanceBudgetControlService? budgetControl = null)
+        IFinanceBudgetControlService? budgetControl = null,
+        ILeaseAccountingService? leaseAccountingService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -135,6 +137,7 @@ public class FinanceApprovalsController : ControllerBase
         _invoicePaymentSod = invoicePaymentSod;
         _vendorPaymentService = vendorPaymentService;
         _budgetControl = budgetControl;
+        _leaseAccountingService = leaseAccountingService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -873,9 +876,11 @@ public class FinanceApprovalsController : ControllerBase
         WorkflowInstance instance,
         CancellationToken cancellationToken)
     {
+        var cycle = await _db.FixedAssetCapitalizationCycles.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted, cancellationToken);
+        var assetId = cycle?.FixedAssetId ?? instance.EntityId;
         var asset = await _db.FixedAssets.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted,
-            cancellationToken);
+            item.TenantId == tenantId && item.Id == assetId && !item.IsDeleted, cancellationToken);
         if (asset == null)
             return "The fixed asset no longer exists for this tenant.";
         if (asset.Status != FixedAssetStatus.PendingApproval)
@@ -883,6 +888,11 @@ public class FinanceApprovalsController : ControllerBase
         if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
             string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
             return "The fixed asset has no immutable capitalization journal snapshot. Return it to Draft and resubmit the exact posting proposal.";
+
+        if (cycle is not null && (cycle.WorkflowInstanceId != instance.Id ||
+            !cycle.SourceBookAuthorityId.HasValue || cycle.Status != "Submitted" ||
+            !string.Equals(cycle.ApprovalEvidenceHash, asset.CapitalizationApprovalSnapshotHash, StringComparison.Ordinal)))
+            return "The fixed-asset capitalization cycle does not match its exact workflow and frozen authority evidence.";
 
         var calculatedHash = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
@@ -981,7 +991,7 @@ public class FinanceApprovalsController : ControllerBase
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            var isolationLevel = Normalize(entityType) == Normalize("ExchangeRate")
+            var isolationLevel = RequiresSerializableOutcomeTransaction(entityType)
                 ? IsolationLevel.Serializable
                 : IsolationLevel.ReadCommitted;
             await using var transaction = await _db.Database.BeginTransactionAsync(
@@ -1008,6 +1018,9 @@ public class FinanceApprovalsController : ControllerBase
             }
         });
     }
+
+    internal static bool RequiresSerializableOutcomeTransaction(string entityType)
+        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE";
 
     internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
         string entityType,
@@ -1336,7 +1349,8 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var cycle = await _db.FixedAssetCapitalizationCycles.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == (cycle != null ? cycle.FixedAssetId : entityId), cancellationToken);
             if (item == null)
                 return FinanceApprovalFacts.Empty;
 
@@ -1550,16 +1564,14 @@ public class FinanceApprovalsController : ControllerBase
                         comments,
                         cancellationToken);
 
-                    var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+                    var trustedProducer = await ResolveTrustedCustomerInvoiceProducerAsync(
                         tenantId,
-                        "CustomerInvoice",
                         entityId,
-                        FinanceDimensionRouteId.FinanceArCustomerInvoice,
                         cancellationToken);
-                    if (trustedManualRoute)
+                    if (trustedProducer is not null)
                         await _invoiceService.SendInvoiceAsync(
                             entityId,
-                            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                            trustedProducer,
                             cancellationToken);
                     else
                         await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
@@ -2008,7 +2020,9 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, entityId, item =>
+            var cycle = await _db.FixedAssetCapitalizationCycles.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var assetId = cycle?.FixedAssetId ?? entityId;
+            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, assetId, item =>
             {
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
@@ -2021,6 +2035,8 @@ public class FinanceApprovalsController : ControllerBase
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
             }, cancellationToken);
+            if (cycle is not null) { cycle.Status = "Approved"; cycle.UpdatedAt = DateTime.UtcNow; }
+            if (cycle is not null) await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FA",
@@ -2121,7 +2137,11 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("LeaseContract"))
         {
-            await UpdateIfFoundAsync(_db.LeaseContracts, tenantId, entityId, item => item.Status = LeaseStatus.Active, cancellationToken);
+            if (_leaseAccountingService == null)
+                throw new InvalidOperationException(
+                    "Lease activation completion service is not configured; approval cannot mutate the ledger.");
+            await _leaseAccountingService.CompleteApprovedActivationAsync(
+                entityId, userId, cancellationToken);
         }
     }
 
@@ -2586,7 +2606,9 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("FixedAsset"))
         {
-            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, entityId, item =>
+            var cycle = await _db.FixedAssetCapitalizationCycles.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+            var assetId = cycle?.FixedAssetId ?? entityId;
+            await UpdateIfFoundAsync(_db.FixedAssets, tenantId, assetId, item =>
             {
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
@@ -2597,6 +2619,8 @@ public class FinanceApprovalsController : ControllerBase
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
             }, cancellationToken);
+            if (cycle is not null) { cycle.Status = "Rejected"; cycle.UpdatedAt = DateTime.UtcNow; }
+            if (cycle is not null) await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FA",
@@ -2785,6 +2809,35 @@ public class FinanceApprovalsController : ControllerBase
             && item.SourceLineId == null
             && !item.IsDeleted,
             cancellationToken);
+
+    private async Task<FinancePostingProducerContext?> ResolveTrustedCustomerInvoiceProducerAsync(
+        Guid tenantId,
+        Guid invoiceId,
+        CancellationToken cancellationToken)
+    {
+        var supportedRoutes = new[]
+        {
+            FinanceDimensionRouteId.FinanceArCustomerInvoice,
+            FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice,
+            FinanceDimensionRouteId.InventoryDisposalAuctionInvoice,
+            FinanceDimensionRouteId.SalesOrderCustomerInvoice
+        };
+        var routes = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item =>
+                item.TenantId == tenantId
+                && item.SourceDocumentId == invoiceId
+                && item.SourceLineId == null
+                && supportedRoutes.Contains(item.RouteId)
+                && !item.IsDeleted)
+            .Select(item => item.RouteId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        if (routes.Count > 1)
+            throw new InvalidOperationException("Customer invoice has conflicting trusted producer routes.");
+
+        return routes.Count == 1 ? new FinancePostingProducerContext(routes[0]) : null;
+    }
 
     private async Task RecordFinanceWorkflowAuditAsync(
         Guid tenantId,
@@ -3076,6 +3129,7 @@ public class FinanceApprovalsController : ControllerBase
             or "FIXEDASSETDEPRECIATIONRUN"
             or "ASSETDEPRECIATIONSCHEDULE"
             or "ASSETVALUATION"
+            or "CAPITALPROJECT"
             or "RECURRINGJOURNALTEMPLATE"
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";

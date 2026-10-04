@@ -95,7 +95,14 @@ public interface ICrmService
         string? stage = null,
         Guid? businessPartnerId = null,
         Guid? leadId = null,
-        string? opportunityType = null);
+        string? opportunityType = null,
+        Guid? stageDefinitionId = null,
+        Guid? reachedStageDefinitionId = null,
+        DateTime? stageEnteredFrom = null,
+        DateTime? stageEnteredTo = null);
+
+    Task<IReadOnlyList<CrmOpportunityStageDefinitionDto>> GetOpportunityStagesAsync(bool includeInactive = false);
+    Task<IReadOnlyList<CrmOpportunityStageDefinitionDto>> UpdateOpportunityStagesAsync(UpdateCrmOpportunityStagesDto dto);
 
     Task<CrmOpportunityDetailDto?> GetOpportunityByIdAsync(Guid opportunityId);
     Task<CrmOpportunityDetailDto> CreateOpportunityAsync(CreateCrmOpportunityDto dto);

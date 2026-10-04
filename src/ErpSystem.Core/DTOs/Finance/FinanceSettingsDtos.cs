@@ -1,5 +1,7 @@
 using System;
+using System.Text.Json.Serialization;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.DTOs.Finance
 {
@@ -80,10 +82,30 @@ namespace ErpSystem.Core.DTOs.Finance
         public int MinimumReversalReasonLength { get; set; } = 20;
         public bool EnforceFinanceAccessScopes { get; set; }
         public bool RequireDepreciationBeforePeriodClose { get; set; } = true;
+        public int UnitPriceDecimalPlaces { get; set; } = 4;
+        public int ExchangeRateInputDecimalPlaces { get; set; } = 10;
+        public int ExchangeRateDisplayDecimalPlaces { get; set; } = 6;
+        public int TaxPercentageDecimalPlaces { get; set; } = 4;
+        public GovernedRoundingMethod TaxRoundingMethod { get; set; } = GovernedRoundingMethod.Nearest;
+        public TaxRoundingScope TaxRoundingScope { get; set; } = TaxRoundingScope.Line;
+        public decimal? TaxRoundingIncrement { get; set; }
+        public bool InvoiceRoundingEnabled { get; set; }
+        public decimal? InvoiceRoundingIncrement { get; set; }
+        public GovernedRoundingMethod InvoiceRoundingMethod { get; set; } = GovernedRoundingMethod.Nearest;
+        public Guid? InvoiceRoundingGainAccountId { get; set; }
+        public Guid? InvoiceRoundingLossAccountId { get; set; }
+        public decimal SettlementToleranceAmount { get; set; }
+        public decimal SettlementTolerancePercentage { get; set; }
+        public int ReportDisplayDecimalPlaces { get; set; } = 2;
+        public bool PrecisionAccountingPolicyLocked { get; set; }
     }
 
     public class UpdateFinanceSettingsDto
     {
+        private decimal? _taxRoundingIncrement;
+        private decimal? _invoiceRoundingIncrement;
+        private Guid? _invoiceRoundingGainAccountId;
+        private Guid? _invoiceRoundingLossAccountId;
         public Guid? ReturnToVendorClearingAccountId { get; set; }
         public Guid? PurchaseReturnVarianceAccountId { get; set; }
         public string? CoaType { get; set; }
@@ -141,5 +163,60 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool? RequireDepreciationBeforePeriodClose { get; set; }
         public decimal? ApInvoicePriceTolerancePercent { get; set; }
         public decimal? ApInvoiceQuantityTolerancePercent { get; set; }
+        public int? UnitPriceDecimalPlaces { get; set; }
+        public int? ExchangeRateInputDecimalPlaces { get; set; }
+        public int? ExchangeRateDisplayDecimalPlaces { get; set; }
+        public int? TaxPercentageDecimalPlaces { get; set; }
+        public GovernedRoundingMethod? TaxRoundingMethod { get; set; }
+        public TaxRoundingScope? TaxRoundingScope { get; set; }
+        public decimal? TaxRoundingIncrement
+        {
+            get => _taxRoundingIncrement;
+            set
+            {
+                _taxRoundingIncrement = value;
+                TaxRoundingIncrementSpecified = true;
+            }
+        }
+        [JsonIgnore]
+        public bool TaxRoundingIncrementSpecified { get; private set; }
+        public bool? InvoiceRoundingEnabled { get; set; }
+        public decimal? InvoiceRoundingIncrement
+        {
+            get => _invoiceRoundingIncrement;
+            set
+            {
+                _invoiceRoundingIncrement = value;
+                InvoiceRoundingIncrementSpecified = true;
+            }
+        }
+        [JsonIgnore]
+        public bool InvoiceRoundingIncrementSpecified { get; private set; }
+        public GovernedRoundingMethod? InvoiceRoundingMethod { get; set; }
+        public Guid? InvoiceRoundingGainAccountId
+        {
+            get => _invoiceRoundingGainAccountId;
+            set
+            {
+                _invoiceRoundingGainAccountId = value;
+                InvoiceRoundingGainAccountIdSpecified = true;
+            }
+        }
+        [JsonIgnore]
+        public bool InvoiceRoundingGainAccountIdSpecified { get; private set; }
+        public Guid? InvoiceRoundingLossAccountId
+        {
+            get => _invoiceRoundingLossAccountId;
+            set
+            {
+                _invoiceRoundingLossAccountId = value;
+                InvoiceRoundingLossAccountIdSpecified = true;
+            }
+        }
+        [JsonIgnore]
+        public bool InvoiceRoundingLossAccountIdSpecified { get; private set; }
+        public decimal? SettlementToleranceAmount { get; set; }
+        public decimal? SettlementTolerancePercentage { get; set; }
+        public int? ReportDisplayDecimalPlaces { get; set; }
     }
 }

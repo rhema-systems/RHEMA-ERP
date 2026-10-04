@@ -26,6 +26,7 @@ const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string
     { value: 'Budget', label: 'Budget' },
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Spot', label: 'Spot' },
+    { value: 'GhanaStatutory', label: 'Ghana statutory tax - BoG reference' },
 ];
 const ENTRY_RATE_TYPE_OPTIONS = EXCHANGE_RATE_TYPE_OPTIONS.filter(
     option => option.value !== 'Budget' && option.value !== 'Spot'
@@ -35,6 +36,16 @@ const QUOTE_SIDE_OPTIONS: Array<{ value: ExchangeRateQuoteSide; label: string }>
     { value: 'Buying', label: 'Buying (bank buys foreign currency)' },
     { value: 'Selling', label: 'Selling (bank sells foreign currency)' },
 ];
+
+const requiresMidQuote = (rateType: ExchangeRateType) => rateType !== 'Daily';
+
+const toCanonicalRate = (foreignToFunctionalRate: string) => {
+    const parsed = Number.parseFloat(foreignToFunctionalRate);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error('Enter a positive exchange rate.');
+    }
+    return 1 / parsed;
+};
 
 const formatRateType = (rateType: ExchangeRateType | string) =>
     EXCHANGE_RATE_TYPE_OPTIONS.find((option) => option.value === rateType)?.label ?? rateType;
@@ -111,7 +122,9 @@ export default function ExchangeRatesPage() {
             const newRate = await financeService.createExchangeRate({
             baseCurrencyCode: formData.baseCurrencyCode,
             targetCurrencyCode: formData.targetCurrencyCode,
-            rate: parseFloat(formData.rate),
+            // The UI follows the provider convention (1 foreign = X functional).
+            // The API contract remains canonical (1 functional = X foreign).
+            rate: toCanonicalRate(formData.rate),
             effectiveDate: new Date(formData.effectiveDate).toISOString(),
             rateType: formData.rateType,
             quoteSide: formData.quoteSide,
@@ -133,7 +146,7 @@ export default function ExchangeRatesPage() {
             const updated = await financeService.updateExchangeRate(editingRate.id, {
                 baseCurrencyCode: formData.baseCurrencyCode,
                 targetCurrencyCode: formData.targetCurrencyCode,
-                rate: parseFloat(formData.rate),
+                rate: toCanonicalRate(formData.rate),
                 effectiveDate: new Date(formData.effectiveDate).toISOString(),
                 rateType: formData.rateType,
                 quoteSide: formData.quoteSide,
@@ -167,7 +180,7 @@ export default function ExchangeRatesPage() {
         setFormData({
             baseCurrencyCode: rate.baseCurrencyCode,
             targetCurrencyCode: rate.targetCurrencyCode,
-            rate: rate.rate.toString(),
+            rate: rate.inverseRate.toString(),
             effectiveDate: rate.effectiveDate.split('T')[0],
             rateType: rate.rateType,
             quoteSide: rate.quoteSide || 'Mid',
@@ -317,8 +330,8 @@ export default function ExchangeRatesPage() {
                                 Bulk Upload
                             </Button>
                         </DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader>
+                        <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden p-0">
+                            <DialogHeader className="px-6 pt-6">
                                 <DialogTitle>Bulk Upload Exchange Rates</DialogTitle>
                                 <DialogDescription>
                                     Upload multiple exchange rates from a CSV or Excel file
@@ -456,10 +469,26 @@ export default function ExchangeRatesPage() {
                                     Submit a new exchange rate for approval. The approved schedule remains unchanged until approval completes.
                                 </DialogDescription>
                             </DialogHeader>
-                            <div className="space-y-4 py-4">
-                                <div className="grid grid-cols-2 gap-4">
+                            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+                                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <div className="space-y-2">
-                                        <Label htmlFor="baseCurrencyCode">Base Currency</Label>
+                                        <Label htmlFor="targetCurrencyCode">Foreign Currency</Label>
+                                        <Select
+                                            value={formData.targetCurrencyCode}
+                                            onValueChange={(value) => setFormData({ ...formData, targetCurrencyCode: value })}
+                                        >
+                                            <SelectTrigger id="targetCurrencyCode">
+                                                <SelectValue placeholder="Select currency" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
+                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
+                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label htmlFor="baseCurrencyCode">Functional Currency</Label>
                                         <Select
                                             value={formData.baseCurrencyCode}
                                             onValueChange={(value) => setFormData({ ...formData, baseCurrencyCode: value })}
@@ -472,24 +501,6 @@ export default function ExchangeRatesPage() {
                                             </SelectContent>
                                         </Select>
                                     </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="targetCurrencyCode">Target Currency</Label>
-                                        <Select
-                                            value={formData.targetCurrencyCode}
-                                            onValueChange={(value) =>
-                                                setFormData({ ...formData, targetCurrencyCode: value })
-                                            }
-                                        >
-                                            <SelectTrigger id="targetCurrencyCode">
-                                                <SelectValue placeholder="Select currency" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                <SelectItem value="USD">USD - US Dollar</SelectItem>
-                                                <SelectItem value="EUR">EUR - Euro</SelectItem>
-                                                <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="rate">Exchange Rate</Label>
@@ -497,10 +508,13 @@ export default function ExchangeRatesPage() {
                                         id="rate"
                                         type="number"
                                         step="0.0001"
-                                        placeholder="12.5000"
+                                        placeholder="11.7100"
                                         value={formData.rate}
                                         onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
                                     />
+                                    <p className="text-xs text-muted-foreground">
+                                        Enter functional currency per 1 foreign currency (for example, USD 1 = GHS 11.7100).
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="effectiveDate">Effective Date</Label>
@@ -515,7 +529,14 @@ export default function ExchangeRatesPage() {
                                     <Label htmlFor="rateType">Rate Type</Label>
                                     <Select
                                         value={formData.rateType}
-                                        onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
+                                        onValueChange={(value: ExchangeRateType) => setFormData({
+                                            ...formData,
+                                            rateType: value,
+                                            quoteSide: requiresMidQuote(value) ? 'Mid' : formData.quoteSide,
+                                            rateSource: value === 'GhanaStatutory'
+                                                ? 'Bank of Ghana'
+                                                : formData.rateSource,
+                                        })}
                                     >
                                         <SelectTrigger id="rateType">
                                             <SelectValue />
@@ -529,7 +550,7 @@ export default function ExchangeRatesPage() {
                                         </SelectContent>
                                     </Select>
                                     <p className="text-xs text-muted-foreground">
-                                        Month End must use the calendar month-end date. Quarter End and Year End must match the configured fiscal calendar. Budget and Spot remain hidden until supported workflows exist.
+                                        Closing rates must match their calendar or configured fiscal boundary. Ghana statutory rates require BoG Mid / Reference evidence and a source reference.
                                     </p>
                                 </div>
                                 <div className="space-y-2">
@@ -537,6 +558,7 @@ export default function ExchangeRatesPage() {
                                     <Select
                                         value={formData.quoteSide}
                                         onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                        disabled={requiresMidQuote(formData.rateType)}
                                     >
                                         <SelectTrigger id="quoteSide"><SelectValue /></SelectTrigger>
                                         <SelectContent>
@@ -545,7 +567,7 @@ export default function ExchangeRatesPage() {
                                             ))}
                                         </SelectContent>
                                     </Select>
-                                    <p className="text-xs text-muted-foreground">Buying and selling are defined from the bank/provider perspective.</p>
+                                    <p className="text-xs text-muted-foreground">{requiresMidQuote(formData.rateType) ? 'This accounting rate type uses the neutral Mid / Reference quote.' : 'Daily rates may retain the provider’s Mid, Buying, or Selling quote.'}</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="rateSource">Source</Label>
@@ -567,7 +589,7 @@ export default function ExchangeRatesPage() {
                                     <p className="text-xs text-muted-foreground">Retained as approval and audit evidence.</p>
                                 </div>
                             </div>
-                            <DialogFooter>
+                            <DialogFooter className="border-t px-6 py-4">
                                 <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
                                     Cancel
                                 </Button>
@@ -629,7 +651,7 @@ export default function ExchangeRatesPage() {
                 <CardContent>
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
                         <div className="space-y-2">
-                            <Label htmlFor="filterFrom">Base Currency</Label>
+                            <Label htmlFor="filterFrom">Functional Currency</Label>
                             <Select
                                 value={filters.fromCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, fromCurrency: value })}
@@ -661,7 +683,7 @@ export default function ExchangeRatesPage() {
                             </Select>
                         </div>
                         <div className="space-y-2">
-                            <Label htmlFor="filterTo">Target Currency</Label>
+                            <Label htmlFor="filterTo">Foreign Currency</Label>
                             <Select
                                 value={filters.toCurrency}
                                 onValueChange={(value) => setFilters({ ...filters, toCurrency: value })}
@@ -713,8 +735,8 @@ export default function ExchangeRatesPage() {
                         <table className="w-full">
                             <thead>
                                 <tr className="border-b bg-muted/50">
-                                    <th className="p-4 text-left font-medium">Currency Pair</th>
-                                    <th className="p-4 text-right font-medium">Rate</th>
+                                    <th className="p-4 text-left font-medium">Foreign / Functional</th>
+                                    <th className="p-4 text-right font-medium">Functional per 1 Foreign</th>
                                     <th className="p-4 text-left font-medium">Effective From</th>
                                     <th className="p-4 text-left font-medium">Effective To</th>
                                     <th className="p-4 text-left font-medium">Type</th>
@@ -742,8 +764,8 @@ export default function ExchangeRatesPage() {
                                 )}
                                 {!isLoadingRates && !rateLoadError && filteredRates.map((rate) => (
                                     <tr key={rate.id} className="border-b hover:bg-muted/50">
-                                        <td className="p-4 font-mono font-semibold">{rate.baseCurrencyCode}/{rate.targetCurrencyCode}</td>
-                                        <td className="p-4 text-right font-mono">{rate.rate.toFixed(4)}</td>
+                                        <td className="p-4 font-mono font-semibold">{rate.targetCurrencyCode}/{rate.baseCurrencyCode}</td>
+                                        <td className="p-4 text-right font-mono">{rate.inverseRate.toFixed(4)}</td>
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
                                         <td className="p-4">{rate.expiryDate ? formatDate(rate.expiryDate) : 'Open-ended'}</td>
                                         <td className="p-4">
@@ -772,27 +794,27 @@ export default function ExchangeRatesPage() {
                                                         onClick={() => openEditDialog(rate)}
                                                         disabled={rate.usageLocked || (rate.approvalStatus !== 'Pending' && rate.approvalStatus !== 'Rejected')}
                                                         title={rate.approvalStatus === 'Approved' || rate.approvalStatus === 'AutoApproved' ? 'Approved accounting evidence is immutable' : 'Edit submission'}
-                                                        aria-label={`Edit ${rate.baseCurrencyCode}/${rate.targetCurrencyCode} exchange rate`}
+                                                        aria-label={`Edit ${rate.targetCurrencyCode}/${rate.baseCurrencyCode} exchange rate`}
                                                     >
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
                                                 </DialogTrigger>
-                                                <DialogContent>
-                                                    <DialogHeader>
+                                                <DialogContent className="flex max-h-[90vh] max-w-2xl flex-col overflow-hidden p-0">
+                                                    <DialogHeader className="px-6 pt-6">
                                                         <DialogTitle>Edit Exchange Rate</DialogTitle>
                                                         <DialogDescription>
                                                             Update exchange rate details
                                                         </DialogDescription>
                                                     </DialogHeader>
-                                                    <div className="space-y-4 py-4">
-                                                        <div className="grid grid-cols-2 gap-4">
+                                                    <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-4">
+                                                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                                             <div className="space-y-2">
-                                                                <Label>Base Currency</Label>
-                                                                <Input value={formData.baseCurrencyCode} disabled />
+                                                                <Label>Foreign Currency</Label>
+                                                                <Input value={formData.targetCurrencyCode} disabled />
                                                             </div>
                                                             <div className="space-y-2">
-                                                                <Label>Target Currency</Label>
-                                                                <Input value={formData.targetCurrencyCode} disabled />
+                                                                <Label>Functional Currency</Label>
+                                                                <Input value={formData.baseCurrencyCode} disabled />
                                                             </div>
                                                         </div>
                                                         <div className="space-y-2">
@@ -804,6 +826,9 @@ export default function ExchangeRatesPage() {
                                                                 value={formData.rate}
                                                                 onChange={(e) => setFormData({ ...formData, rate: e.target.value })}
                                                             />
+                                                            <p className="text-xs text-muted-foreground">
+                                                                Functional currency per 1 foreign currency.
+                                                            </p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-effectiveDate">Effective Date</Label>
@@ -819,7 +844,14 @@ export default function ExchangeRatesPage() {
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
                                                             <Select
                                                                 value={formData.rateType}
-                                                                onValueChange={(value: ExchangeRateType) => setFormData({ ...formData, rateType: value })}
+                                                                onValueChange={(value: ExchangeRateType) => setFormData({
+                                                                    ...formData,
+                                                                    rateType: value,
+                                                                    quoteSide: requiresMidQuote(value) ? 'Mid' : formData.quoteSide,
+                                                                    rateSource: value === 'GhanaStatutory'
+                                                                        ? 'Bank of Ghana'
+                                                                        : formData.rateSource,
+                                                                })}
                                                             >
                                                                 <SelectTrigger id="edit-rateType">
                                                                     <SelectValue />
@@ -844,6 +876,7 @@ export default function ExchangeRatesPage() {
                                                             <Select
                                                                 value={formData.quoteSide}
                                                                 onValueChange={(value: ExchangeRateQuoteSide) => setFormData({ ...formData, quoteSide: value })}
+                                                                disabled={requiresMidQuote(formData.rateType)}
                                                             >
                                                                 <SelectTrigger id="edit-quoteSide"><SelectValue /></SelectTrigger>
                                                                 <SelectContent>
@@ -870,7 +903,7 @@ export default function ExchangeRatesPage() {
                                                             />
                                                         </div>
                                                     </div>
-                                                    <DialogFooter>
+                                                    <DialogFooter className="border-t px-6 py-4">
                                                         <Button variant="outline" onClick={() => setEditingRate(null)}>
                                                             Cancel
                                                         </Button>

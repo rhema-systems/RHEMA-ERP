@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, use } from 'react';
+import React, { useState, useEffect, use, useMemo } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -12,14 +12,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { BarChart3, ChevronRight, Landmark, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2 } from 'lucide-react';
+import { BarChart3, ChevronRight, Landmark, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2, ShieldCheck } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { BudgetScenario, BudgetReturn, BudgetAssignee, BudgetAuditEvent, CreateBudgetReturnDto } from '@/types/budget';
-import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
+import type { FinanceDimensionDefinition } from '@/types/finance';
 
 interface PageProps {
     params: Promise<{
@@ -33,6 +33,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
     const { hasPermission } = useAuth();
     const canMaintainBudget = hasPermission('Finance.Budgeting.Write');
     const canAssignReturns = hasPermission('Finance.BudgetReturns.Assign');
+    const canApproveReturns = hasPermission('Finance.BudgetReturns.Approve');
     const canLockBudget = hasPermission('Finance.Budgeting.Lock');
     const [scenario, setScenario] = useState<BudgetScenario | null>(null);
     const [returns, setReturns] = useState<BudgetReturn[]>([]);
@@ -42,12 +43,11 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
 
     // Create Return Dialog State
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
-    const [segments, setSegments] = useState<SegmentStructure[]>([]);
-    const [segmentValues, setSegmentValues] = useState<SegmentLookupValue[]>([]);
-    const [selectedSegmentId, setSelectedSegmentId] = useState<string>('');
+    const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [selectedDimensionId, setSelectedDimensionId] = useState<string>('');
     const [newReturnData, setNewReturnData] = useState<CreateBudgetReturnDto>({
         budgetScenarioId: id,
-        segmentValueId: '',
+        distributionDimensionValueId: undefined,
         notes: ''
     });
     const [isAssignDialogOpen, setIsAssignDialogOpen] = useState(false);
@@ -63,14 +63,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
 
     useEffect(() => {
         loadData();
-        loadSegments();
     }, [id, canAssignReturns]);
-
-    useEffect(() => {
-        if (selectedSegmentId) {
-            loadSegmentValues(selectedSegmentId);
-        }
-    }, [selectedSegmentId]);
 
     const loadData = async () => {
         try {
@@ -82,16 +75,22 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                     email: user.email || '',
                 })))
                 : Promise.resolve([]);
-            const [scenarioData, returnsData, assigneeData, auditData] = await Promise.all([
+            const [scenarioData, returnsData, assigneeData, auditData, dimensionData] = await Promise.all([
                 budgetDataService.getScenarioById(id),
                 budgetDataService.getReturns(id),
                 assigneePromise,
                 budgetDataService.getScenarioAuditHistory(id).catch(() => []),
+                financeDataService.getFinanceDimensions(true),
             ]);
             setScenario(scenarioData);
             setReturns(returnsData);
             setAssignees(assigneeData);
             setAuditHistory(auditData);
+            setFinanceDimensions(dimensionData);
+            setSelectedDimensionId(current => {
+                const allowedIds = scenarioData.controlDimensions.map(item => item.financeDimensionDefinitionId);
+                return allowedIds.includes(current) ? current : (allowedIds[0] || '');
+            });
         } catch (error) {
             console.error('Failed to load scenario details:', error);
             toast({
@@ -104,35 +103,11 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         }
     };
 
-    const loadSegments = async () => {
-        try {
-            const data = await financeDataService.getSegmentStructures();
-            setSegments(data);
-            // Default to the first segment if available (usually Entity or Department)
-            if (data.length > 0) {
-                // Try to find one named "Department" or "Cost Center", else take the second one (first is usually balancing segment)
-                const deptSegment = data.find(s => s.segmentName.includes('Department') || s.segmentName.includes('Cost'));
-                setSelectedSegmentId(deptSegment?.id || data[0].id);
-            }
-        } catch (error) {
-            console.error('Failed to load segments:', error);
-        }
-    };
-
-    const loadSegmentValues = async (segmentId: string) => {
-        try {
-            const values = await financeDataService.getSegmentLookupValues(segmentId);
-            setSegmentValues(values);
-        } catch (error) {
-            console.error('Failed to load segment values:', error);
-        }
-    };
-
     const handleCreateReturn = async () => {
-        if (!newReturnData.segmentValueId) {
+        if (scenario?.controlDimensions.length && !newReturnData.distributionDimensionValueId) {
             toast({
                 title: 'Validation Error',
-                description: 'Please select a department/segment.',
+                description: 'Please select a value for the worksheet distribution dimension.',
                 variant: 'destructive',
             });
             return;
@@ -148,7 +123,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                 description: 'Budget return created successfully.',
             });
             setIsCreateDialogOpen(false);
-            setNewReturnData(prev => ({ ...prev, segmentValueId: '', assignedToUserId: undefined, notes: '' }));
+            setNewReturnData(prev => ({ ...prev, distributionDimensionValueId: undefined, assignedToUserId: undefined, notes: '' }));
             loadData();
         } catch (error) {
             console.error('Failed to create return:', error);
@@ -213,6 +188,19 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         budgetReturn.assignedToUserName ||
         assignees.find(user => user.id === budgetReturn.assignedToUserId)?.displayName ||
         'Unassigned';
+
+    const scenarioDimensions = useMemo(() => {
+        const configured = new Set(
+            scenario?.controlDimensions.map(item => item.financeDimensionDefinitionId) ?? [],
+        );
+        return financeDimensions
+            .filter(dimension => configured.has(dimension.id))
+            .sort((left, right) => left.displayOrder - right.displayOrder || left.code.localeCompare(right.code));
+    }, [financeDimensions, scenario?.controlDimensions]);
+    const selectedDimension = scenarioDimensions.find(dimension => dimension.id === selectedDimensionId);
+    const distributionValues = (selectedDimension?.values ?? [])
+        .filter(value => value.isActive)
+        .sort((left, right) => left.displayOrder - right.displayOrder || left.code.localeCompare(right.code));
 
     const handleOpenScenario = async () => {
         if (!scenario || !confirm('Open this scenario for distributed budget collection?')) return;
@@ -305,6 +293,9 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
 
     if (isLoading) return <div className="p-8 text-center">Loading scenario details...</div>;
     if (!scenario) return <div className="p-8 text-center text-red-500">Scenario not found.</div>;
+    const approvedReturnCount = returns.filter(item => item.status === 'Approved').length;
+    const submittedReturnCount = returns.filter(item => item.status === 'Submitted').length;
+    const scenarioReadyForSubmission = returns.length > 0 && approvedReturnCount === returns.length;
 
     return (
         <div className="space-y-6">
@@ -365,7 +356,14 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                             </Button>
                         )}
                         {scenario.status === 'Collecting' && canLockBudget && (
-                            <Button variant="outline" onClick={handleSubmitScenario}>
+                            <Button
+                                variant="outline"
+                                onClick={handleSubmitScenario}
+                                disabled={!scenarioReadyForSubmission}
+                                title={scenarioReadyForSubmission
+                                    ? 'Submit the approved scenario to the Finance approval workflow.'
+                                    : 'Every budget return must be approved before the scenario can be submitted.'}
+                            >
                                 <Lock className="mr-2 h-4 w-4" />
                                 Submit Scenario
                             </Button>
@@ -397,33 +395,50 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                     </DialogHeader>
                                     <div className="space-y-4 py-4">
                                         <div className="space-y-2">
-                                            <Label htmlFor="segment">Segment Type</Label>
-                                            <Select value={selectedSegmentId} onValueChange={setSelectedSegmentId}>
+                                            <Label htmlFor="distributionDimension">Worksheet distribution dimension</Label>
+                                            <Select
+                                                value={selectedDimensionId}
+                                                onValueChange={(value) => {
+                                                    setSelectedDimensionId(value);
+                                                    setNewReturnData(current => ({ ...current, distributionDimensionValueId: '' }));
+                                                }}
+                                            >
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="Select Segment Type" />
+                                                    <SelectValue placeholder="Select a scenario dimension" />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {segments.map(s => (
-                                                        <SelectItem key={s.id} value={s.id}>{s.segmentName}</SelectItem>
+                                                    {scenarioDimensions.map(dimension => (
+                                                        <SelectItem key={dimension.id} value={dimension.id}>
+                                                            {dimension.code} — {dimension.name}
+                                                        </SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
                                         </div>
                                         <div className="space-y-2">
-                                            <Label htmlFor="value">Department / Unit <span className="text-red-500">*</span></Label>
+                                            <Label htmlFor="value">
+                                                {selectedDimension?.name ?? 'Distribution value'}
+                                                {scenarioDimensions.length > 0 && <span className="text-red-500"> *</span>}
+                                            </Label>
                                             <Select
-                                                value={newReturnData.segmentValueId}
-                                                onValueChange={(val) => setNewReturnData(prev => ({ ...prev, segmentValueId: val }))}
+                                                value={newReturnData.distributionDimensionValueId}
+                                                onValueChange={(val) => setNewReturnData(prev => ({ ...prev, distributionDimensionValueId: val }))}
+                                                disabled={!selectedDimension || distributionValues.length === 0}
                                             >
                                                 <SelectTrigger>
-                                                    <SelectValue placeholder="Select Department" />
+                                                    <SelectValue placeholder={selectedDimension ? `Select ${selectedDimension.name}` : 'Select a scenario dimension first'} />
                                                 </SelectTrigger>
                                                 <SelectContent>
-                                                    {segmentValues.map(v => (
-                                                        <SelectItem key={v.id} value={v.id}>{v.segmentValue} - {v.description}</SelectItem>
+                                                    {distributionValues.map(value => (
+                                                        <SelectItem key={value.id} value={value.id}>{value.code} — {value.name}</SelectItem>
                                                     ))}
                                                 </SelectContent>
                                             </Select>
+                                            {selectedDimension && distributionValues.length === 0 && (
+                                                <p className="text-sm text-destructive">
+                                                    No active values are configured for {selectedDimension.name}.
+                                                </p>
+                                            )}
                                         </div>
                                         {canAssignReturns && (
                                             <div className="space-y-2">
@@ -469,6 +484,27 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                 </div>
             </div>
 
+            {scenario.status === 'Collecting' && (
+                <div className="flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50/60 p-4 text-sm text-blue-950 md:flex-row md:items-center md:justify-between">
+                    <div>
+                        <p className="font-semibold">Review submitted returns before submitting the scenario</p>
+                        <p className="mt-1 text-blue-800">
+                            {approvedReturnCount} of {returns.length} returns approved
+                            {submittedReturnCount > 0 ? ` · ${submittedReturnCount} awaiting approval` : ''}.
+                            {' '}Submit Scenario becomes available only after every return is approved.
+                        </p>
+                    </div>
+                    {submittedReturnCount > 0 && canApproveReturns && (
+                        <Button variant="outline" asChild className="border-blue-300 bg-white">
+                            <Link href="/finance/approvals">
+                                <ShieldCheck className="mr-2 h-4 w-4" />
+                                Review in Approval Inbox
+                            </Link>
+                        </Button>
+                    )}
+                </div>
+            )}
+
             {/* Returns List */}
             <Card>
                 <CardHeader>
@@ -499,7 +535,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                 returns.map((ret) => (
                                     <TableRow key={ret.id}>
                                         <TableCell className="font-medium">
-                                            {ret.segmentValueName || 'Unknown Segment'}
+                                            {ret.distributionDimensionName || ret.segmentValueName || 'Unassigned distribution'}
                                         </TableCell>
                                         <TableCell>{getAssigneeName(ret)}</TableCell>
                                         <TableCell>{getStatusBadge(ret.status)}</TableCell>
@@ -510,6 +546,14 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                                     <Button size="sm" variant="outline" onClick={() => openAssignmentDialog(ret)}>
                                                         <UserRoundPlus className="mr-2 h-4 w-4" />
                                                         {ret.assignedToUserId ? 'Reassign' : 'Assign'}
+                                                    </Button>
+                                                )}
+                                                {ret.status === 'Submitted' && canApproveReturns && (
+                                                    <Button size="sm" asChild>
+                                                        <Link href="/finance/approvals">
+                                                            <ShieldCheck className="mr-2 h-4 w-4" />
+                                                            Review Approval
+                                                        </Link>
                                                     </Button>
                                                 )}
                                                 <Link href={`/finance/budgeting/returns/${ret.id}`}>
@@ -592,7 +636,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                     <DialogHeader>
                         <DialogTitle>Assign Budget Return</DialogTitle>
                         <DialogDescription>
-                            Select the user responsible for completing the {returnBeingAssigned?.segmentValueName || 'selected'} worksheet.
+                            Select the user responsible for completing the {returnBeingAssigned?.distributionDimensionName || returnBeingAssigned?.segmentValueName || 'selected'} worksheet.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2 py-4">

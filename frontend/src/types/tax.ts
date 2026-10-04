@@ -15,7 +15,10 @@ export enum TaxCategory {
     Withholding = 'Withholding',
     VatWithholding = 'VatWithholding',
     Levy = 'Levy',
-    Excise = 'Excise'
+    Exempt = 'Exempt',
+    ZeroRated = 'ZeroRated',
+    OutOfScope = 'OutOfScope',
+    ReverseCharge = 'ReverseCharge'
 }
 
 export enum TaxCalculationMethod {
@@ -248,6 +251,7 @@ export interface GenerateWhtCertificateDto {
 }
 
 export interface WhtCalculationRequest {
+    invoiceSettlements?: { vendorInvoiceId: string; grossSettlementAmount: number; exchangeRateId?: string }[];
     taxId: string;
     businessPartnerId: string;
     paymentDate: string;
@@ -259,6 +263,9 @@ export interface WhtCalculationRequest {
 }
 
 export interface WhtCalculationResult {
+    currentPaymentTaxableBase?: number;
+    catchUpTaxableBase?: number;
+    catchUpWithholdingAmount?: number;
     taxId: string;
     taxCode: string;
     taxName: string;

@@ -10,6 +10,7 @@ import {
   EyeOff,
   Home,
   Loader2,
+  MoreHorizontal,
   RefreshCw,
   Search,
 } from 'lucide-react';
@@ -27,6 +28,12 @@ import {
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
 import { Label } from '@/components/ui/label';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Select,
   SelectContent,
@@ -495,27 +502,26 @@ export function OccupancyAvailabilityWorkspace() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => chooseAsset(asset)}
-                            >
-                              Update
-                            </Button>
-                            <Button asChild size="sm" variant="ghost">
-                              <Link href={buildHandoverHref(asset)}>
-                                Handover
-                              </Link>
-                            </Button>
-                            <Button asChild size="sm" variant="ghost">
-                              <Link href={buildBillingHref(asset)}>
-                                <CreditCard className="mr-1 h-3.5 w-3.5" />
-                                Billing
-                              </Link>
-                            </Button>
-                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button type="button" size="icon" variant="ghost" title={`Actions for ${asset.name}`} aria-label={`Actions for ${asset.name}`}>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onSelect={() => chooseAsset(asset)}>
+                                Update status
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={buildHandoverHref(asset)}>Handover</Link>
+                              </DropdownMenuItem>
+                              <DropdownMenuItem asChild>
+                                <Link href={buildBillingHref(asset)}>
+                                  <CreditCard className="mr-2 h-4 w-4" /> Billing
+                                </Link>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -609,8 +615,11 @@ export function OccupancyAvailabilityWorkspace() {
               </div>
             ) : (
               <div className="rounded-md border bg-muted/20 p-3 text-xs text-muted-foreground">
-                Reserved, occupied, sold, blocked, maintenance, and retired
-                statuses hide the portal listing and block new requests.
+                Only Available properties can enter Portal Listings. All other
+                statuses hide the listing and block new requests.
+                {[EstateManagedAssetStatus.Reserved, EstateManagedAssetStatus.Blocked, EstateManagedAssetStatus.Retired].includes(nextStatus)
+                  ? ' Future rent and ground-rent billing will be paused, and future staff duties cancelled. Existing invoices and attendance remain.'
+                  : ''}
               </div>
             )}
 
@@ -631,6 +640,14 @@ export function OccupancyAvailabilityWorkspace() {
                 </div>
               </div>
             ) : null}
+
+            {selectedAsset && nextStatus === EstateManagedAssetStatus.Reserved
+              && !selectedAsset.customerBusinessPartnerId && !selectedAsset.lesseeName ? (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs text-amber-900">
+                  Link the customer in Lease Management before reserving this property.{' '}
+                  <Link className="underline" href="/estate/property-management/EstatePropertyManagementLease">Open Lease Management</Link>
+                </div>
+              ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="occupancy-notes">Notes</Label>

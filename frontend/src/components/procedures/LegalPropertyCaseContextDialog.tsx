@@ -1,7 +1,8 @@
 'use client';
 
+import dynamic from 'next/dynamic';
 import React from 'react';
-import { ExternalLink, FileText, Loader2 } from 'lucide-react';
+import { ExternalLink, Eye, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { estateLandManagementService } from '@/services/estate-land-management.service';
 import { procedureCaseService, type LegalPropertyCaseContext } from '@/services/procedure-case.service';
+
+const ProcedurePdfViewer = dynamic(
+  () => import('@/components/procedures/ProcedurePdfViewer'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-md border border-border bg-background p-4 text-sm text-muted-foreground">
+        Loading PDF viewer...
+      </div>
+    ),
+  }
+);
 
 interface Props {
   legalCaseId: string;
@@ -31,12 +44,18 @@ export function LegalPropertyCaseContextDialog({ legalCaseId, open, onOpenChange
   const [context, setContext] = React.useState<LegalPropertyCaseContext | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [preview, setPreview] = React.useState<{ key: string; url: string; name: string } | null>(null);
+  const [previewLoadingKey, setPreviewLoadingKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
     let active = true;
     setLoading(true);
     setError(null);
+    setPreview((current) => {
+      if (current?.url) URL.revokeObjectURL(current.url);
+      return null;
+    });
     void procedureCaseService.getLegalPropertyContext(legalCaseId)
       .then((data) => { if (active) setContext(data); })
       .catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : 'Unable to load case details.'); })
@@ -44,14 +63,26 @@ export function LegalPropertyCaseContextDialog({ legalCaseId, open, onOpenChange
     return () => { active = false; };
   }, [legalCaseId, open]);
 
-  const viewFile = async (download: () => Promise<Blob>) => {
+  React.useEffect(
+    () => () => {
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+    },
+    [preview?.url]
+  );
+
+  const viewFile = async (key: string, fileName: string, download: () => Promise<Blob>) => {
     try {
+      setPreviewLoadingKey(key);
       const blob = await download();
       const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      setPreview((current) => {
+        if (current?.url) URL.revokeObjectURL(current.url);
+        return { key, url, name: fileName };
+      });
     } catch (caught) {
       toast.error(caught instanceof Error ? caught.message : 'Unable to open document.');
+    } finally {
+      setPreviewLoadingKey(null);
     }
   };
 
@@ -130,11 +161,26 @@ export function LegalPropertyCaseContextDialog({ legalCaseId, open, onOpenChange
                   {context.sourceCase.documents.length === 0 ? <p className="text-sm text-muted-foreground">No documents attached.</p> : null}
                   {context.sourceCase.documents.map((document) => <div key={document.id} className="flex items-center justify-between gap-3 border-b py-2 text-sm">
                     <div className="min-w-0"><div className="font-medium">{document.name}</div><div className="truncate text-xs text-muted-foreground">{document.fileName}</div></div>
-                    <Button size="sm" variant="outline" onClick={() => document.dmsUrl
-                      ? window.open(document.dmsUrl, '_blank', 'noopener,noreferrer')
-                      : void viewFile(() => procedureCaseService.downloadLegalSourceDocument(legalCaseId, document.id))}>
-                      <ExternalLink className="mr-2 h-4 w-4" /> View
-                    </Button>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={previewLoadingKey === `source-${document.id}`}
+                        onClick={() => void viewFile(
+                          `source-${document.id}`,
+                          document.fileName || document.name,
+                          () => procedureCaseService.downloadLegalSourceDocument(legalCaseId, document.id)
+                        )}
+                      >
+                        {previewLoadingKey === `source-${document.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                        View PDF
+                      </Button>
+                      {document.dmsUrl ? (
+                        <Button size="sm" variant="outline" onClick={() => window.open(document.dmsUrl ?? undefined, '_blank', 'noopener,noreferrer')}>
+                          <ExternalLink className="mr-2 h-4 w-4" /> Open DMS
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>)}
                 </section>
                 <section className="space-y-2">
@@ -142,11 +188,28 @@ export function LegalPropertyCaseContextDialog({ legalCaseId, open, onOpenChange
                   {context.assetDocuments.length === 0 ? <p className="text-sm text-muted-foreground">No documents attached.</p> : null}
                   {context.assetDocuments.map((document) => <div key={document.id} className="flex items-center justify-between gap-3 border-b py-2 text-sm">
                     <div className="min-w-0"><div className="font-medium">{document.documentName || document.documentType}</div><div className="truncate text-xs text-muted-foreground">{document.fileName}{document.centralDocumentReference ? ` · ${document.centralDocumentReference}` : ''}</div></div>
-                    {context.asset ? <Button size="sm" variant="outline" onClick={() => document.centralDocumentRecordId
-                      ? window.open(`/document-management/records/${document.centralDocumentRecordId}`, '_blank', 'noopener,noreferrer')
-                      : void viewFile(() => estateLandManagementService.downloadDocument(context.asset?.id ?? '', document.id))}>
-                      <ExternalLink className="mr-2 h-4 w-4" /> View
-                    </Button> : null}
+                    {context.asset ? (
+                      <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={previewLoadingKey === `asset-${document.id}`}
+                          onClick={() => void viewFile(
+                            `asset-${document.id}`,
+                            document.fileName || document.documentName || document.documentType,
+                            () => estateLandManagementService.downloadDocument(context.asset?.id ?? '', document.id)
+                          )}
+                        >
+                          {previewLoadingKey === `asset-${document.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                          View PDF
+                        </Button>
+                        {document.centralDocumentRecordId ? (
+                          <Button size="sm" variant="outline" onClick={() => window.open(`/document-management/records/${document.centralDocumentRecordId}`, '_blank', 'noopener,noreferrer')}>
+                            <ExternalLink className="mr-2 h-4 w-4" /> Open DMS
+                          </Button>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>)}
                 </section>
                 <section className="space-y-2">
@@ -154,11 +217,32 @@ export function LegalPropertyCaseContextDialog({ legalCaseId, open, onOpenChange
                   {context.inquiry.ticketAttachments.length === 0 ? <p className="text-sm text-muted-foreground">No attachments.</p> : null}
                   {context.inquiry.ticketAttachments.map((attachment) => <div key={attachment.id} className="flex items-center justify-between gap-3 border-b py-2 text-sm">
                     <div className="flex min-w-0 items-center gap-2"><FileText className="h-4 w-4 shrink-0" /><span className="truncate">{attachment.fileName}</span></div>
-                    <Button size="sm" variant="outline" onClick={() => void viewFile(() => procedureCaseService.downloadLegalInquiryAttachment(legalCaseId, attachment.id))}>
-                      <ExternalLink className="mr-2 h-4 w-4" /> View
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={previewLoadingKey === `inquiry-${attachment.id}`}
+                      onClick={() => void viewFile(
+                        `inquiry-${attachment.id}`,
+                        attachment.fileName,
+                        () => procedureCaseService.downloadLegalInquiryAttachment(legalCaseId, attachment.id)
+                      )}
+                    >
+                      {previewLoadingKey === `inquiry-${attachment.id}` ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Eye className="mr-2 h-4 w-4" />}
+                      View PDF
                     </Button>
                   </div>)}
                 </section>
+                {preview ? (
+                  <section className="space-y-2">
+                    <h3 className="text-sm font-semibold">PDF preview</h3>
+                    <ProcedurePdfViewer
+                      key={preview.key}
+                      fileUrl={preview.url}
+                      fileName={preview.name}
+                      height="620px"
+                    />
+                  </section>
+                ) : null}
               </TabsContent>
               <TabsContent value="history" className="space-y-5">
                 <section className="space-y-2"><h3 className="text-sm font-semibold">Estate case activity</h3>

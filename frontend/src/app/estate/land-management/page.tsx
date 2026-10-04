@@ -16,8 +16,9 @@ import {
   Link2,
   Loader2,
   MapPin,
-  Upload,
+  Plus,
   Search,
+  Upload,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -45,6 +46,7 @@ import {
   type LandAcquisitionItem,
 } from '@/services/estate-acquisition.service';
 import DemarcateLandDialog from './DemarcateLandDialog';
+import ExistingLandDialog from './ExistingLandDialog';
 import GisAssetLinkDialog from './GisAssetLinkDialog';
 import LandDocumentsPanel from './LandDocumentsPanel';
 
@@ -177,9 +179,8 @@ function DetailRow({
 }
 
 export default function EstateLandManagementPage() {
-  const { hasAnyRole, hasPermission } = useAuth();
+  const { hasAnyRole } = useAuth();
   const canLinkGis = hasAnyRole(GIS_LINK_ROLES);
-  const canMarkProjectReady = hasPermission('estate.land.project-readiness');
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [acquisitions, setAcquisitions] = React.useState<LandAcquisitionItem[]>(
     []
@@ -195,6 +196,7 @@ export default function EstateLandManagementPage() {
     React.useState<EstateManagedAsset | null>(null);
   const [gisLinkAsset, setGisLinkAsset] =
     React.useState<EstateManagedAsset | null>(null);
+  const [existingLandOpen, setExistingLandOpen] = React.useState(false);
   const [markingReadyKey, setMarkingReadyKey] = React.useState<string | null>(
     null
   );
@@ -337,22 +339,6 @@ export default function EstateLandManagementPage() {
               : undefined;
   const saleListingLabel = 'List Demarcation';
 
-  const markAssetProjectReady = async (asset: EstateManagedAsset) => {
-    const key = `asset:${asset.id}`;
-    try {
-      setMarkingReadyKey(key);
-      await estateLandManagementService.markReadyForProjectManagement(asset.id);
-      toast.success(
-        'Whole land is demarcated and ready for project management.'
-      );
-      await loadLandRecords(search);
-    } catch (error: any) {
-      toast.error(error?.message || 'Unable to make land ready.');
-    } finally {
-      setMarkingReadyKey(null);
-    }
-  };
-
   const publishAcquisitionToLandBank = async (item: LandAcquisitionItem) => {
     const key = `acquisition:${item.id}`;
     try {
@@ -411,6 +397,10 @@ export default function EstateLandManagementPage() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={() => setExistingLandOpen(true)}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add New Land
+          </Button>
           <Button asChild variant="outline">
             <Link href="/estate/gis">
               <Globe2 className="mr-2 h-4 w-4" />
@@ -718,7 +708,11 @@ export default function EstateLandManagementPage() {
                       {saleListingLabel}
                     </Button>
                   )}
-                  {selected.asset.isReadyForProjectManagement ? (
+                  {selectedDemarcations.some(
+                    (item) =>
+                      item.isReadyForProjectManagement &&
+                      !item.isAssignedToProject
+                  ) ? (
                     <Button asChild variant="outline">
                       <Link href="/development/projects">
                         <ExternalLink className="mr-2 h-4 w-4" />
@@ -728,39 +722,16 @@ export default function EstateLandManagementPage() {
                   ) : (
                     <Button
                       variant="outline"
-                      disabled={
-                        !canMarkProjectReady ||
-                        selected.asset.isPublishedToExternalPortal ||
-                        selected.asset.externalListingType !== 'None' ||
-                        !selected.asset.boundaryVerified ||
-                        selected.asset.demarcationCount === 0 ||
-                        selected.asset.verifiedDemarcationCount !==
-                          selected.asset.demarcationCount ||
-                        markingReadyKey === `asset:${selected.asset.id}`
-                      }
-                      onClick={() => void markAssetProjectReady(selected.asset)}
+                      disabled={selected.asset.demarcationCount === 0}
+                      onClick={() => setDemarcationAsset(selected.asset)}
                       title={
-                        !canMarkProjectReady
-                          ? 'Requires the Mark Land Project Ready permission assigned in Administration.'
-                          : selected.asset.isPublishedToExternalPortal ||
-                              selected.asset.externalListingType !== 'None'
-                            ? 'Withdraw the active external land listing before marking this land ready for a project.'
-                            : !selected.asset.boundaryVerified
-                              ? 'Verify the main cadastral boundary first.'
-                              : selected.asset.demarcationCount === 0
-                                ? 'Add at least one demarcation first.'
-                                : selected.asset.verifiedDemarcationCount !==
-                                    selected.asset.demarcationCount
-                                  ? 'Verify every demarcation first.'
-                                  : undefined
+                        selected.asset.demarcationCount === 0
+                          ? 'Add at least one demarcation first.'
+                          : 'Mark individual demarcations ready for projects.'
                       }
                     >
-                      {markingReadyKey === `asset:${selected.asset.id}` ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Building2 className="mr-2 h-4 w-4" />
-                      )}
-                      Mark Demarcated & Ready
+                      <Building2 className="mr-2 h-4 w-4" />
+                      Mark Parcel Ready
                     </Button>
                   )}
                 </div>
@@ -1025,6 +996,19 @@ export default function EstateLandManagementPage() {
           const assetId = gisLinkAsset?.id;
           await loadLandRecords(search);
           if (assetId) setSelectedKey(`asset:${assetId}`);
+        }}
+      />
+      <ExistingLandDialog
+        open={existingLandOpen}
+        onOpenChange={setExistingLandOpen}
+        onCreated={async (asset) => {
+          await loadLandRecords(search);
+          setAssets((current) => [
+            asset,
+            ...current.filter((item) => item.id !== asset.id),
+          ]);
+          setRecordPage(1);
+          setSelectedKey(`asset:${asset.id}`);
         }}
       />
     </div>

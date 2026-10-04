@@ -17,4 +17,10 @@ public sealed record EhcPropertyListingContextDto(
     string? ContactName,
     string? ContactEmail,
     string? ContactPhone,
-    string? ContactReference = null);
+    string? ContactReference = null,
+    string? AlternativePhoneNumber = null,
+    string? PreferredContactMethod = null,
+    Guid? PublicContactId = null)
+{
+    public string? AssetType { get; init; }
+}

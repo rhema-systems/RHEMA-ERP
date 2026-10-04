@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -778,7 +779,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ReversalType = "SourceDocument",
             IdempotencyKey = $"AP:SupplierDebitNote:{note.TenantId:N}:{note.Id:N}:Reverse",
             ReturnExistingOnDuplicate = true,
-            Lines = plan.ReversalLines.ToList()
+            Lines = plan.ReversalLines.ToList(),
+            TaxCalculationSnapshots = RemapReversalTaxSnapshots(
+                plan.ReversalTaxCalculationSnapshots,
+                "SupplierDebitNoteReversal",
+                note.Id)
         }, cancellationToken);
 
         note.Status = SupplierDebitNoteStatus.Reversed;
@@ -800,6 +805,36 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             cancellationToken: cancellationToken);
         return await GetRequiredAsync(note.Id, cancellationToken);
     }
+
+    private static IReadOnlyList<FinanceTaxCalculationSnapshotDto> RemapReversalTaxSnapshots(
+        IReadOnlyList<FinanceTaxCalculationSnapshotDto> snapshots,
+        string documentType,
+        Guid documentId) => snapshots.Select(snapshot => new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = documentType,
+            DocumentId = documentId,
+            DocumentLineId = snapshot.DocumentLineId,
+            TaxId = snapshot.TaxId,
+            TaxGroupId = snapshot.TaxGroupId,
+            PostingAccountId = snapshot.PostingAccountId,
+            CurrencyCode = snapshot.CurrencyCode,
+            CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+            BaseAmount = snapshot.BaseAmount,
+            TaxableAmount = snapshot.TaxableAmount,
+            TaxRate = snapshot.TaxRate,
+            TaxAmount = snapshot.TaxAmount,
+            RawTaxAmount = snapshot.RawTaxAmount,
+            RoundingAdjustment = snapshot.RoundingAdjustment,
+            AllocationSequence = snapshot.AllocationSequence,
+            TaxRoundingScope = snapshot.TaxRoundingScope,
+            TaxRoundingMethod = snapshot.TaxRoundingMethod,
+            TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
+            CompoundBasis = snapshot.CompoundBasis,
+            CalculationOrder = snapshot.CalculationOrder,
+            CalculationDate = snapshot.CalculationDate,
+            IsManualOverride = snapshot.IsManualOverride,
+            OverrideReason = snapshot.OverrideReason
+        }).ToArray();
 
     private IQueryable<SupplierDebitNote> BaseQuery(Guid tenantId) => _db.SupplierDebitNotes
         .Include(item => item.Vendor)
@@ -959,6 +994,15 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
     {
         if (lines.Count == 0)
             throw new InvalidOperationException("At least one supplier debit-note line is required.");
+        var currencyDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            note.CurrencyCode, cancellationToken);
+        var functionalCurrency = await _db.FinanceSettings.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .Select(item => item.BaseCurrency)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
+        var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            functionalCurrency, cancellationToken);
 
         var existingLines = note.LineItems.Where(line => !line.IsDeleted).ToDictionary(line => line.Id);
         var requestedIds = lines.Where(line => line.Id.HasValue).Select(line => line.Id!.Value).ToArray();
@@ -1032,7 +1076,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     dto,
                     sourceLine,
                     sourceTransactions,
-                    sourceTaxSnapshots);
+                    sourceTaxSnapshots,
+                    currencyDecimalPlaces);
                 var attachedLinkedLine = AttachOrUpdateLine(note, linkedLine, existingLines);
                 note.SubTotal += attachedLinkedLine.LineTotal - attachedLinkedLine.TaxAmount;
                 note.TaxAmount += attachedLinkedLine.TaxAmount;
@@ -1051,17 +1096,19 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             if (isWriteoff && account.AccountType is not (AccountType.Revenue or AccountType.Expense))
                 throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
 
-            var gross = Round(dto.Quantity * dto.UnitPrice);
-            var calculatedDiscount = dto.DiscountAmount ?? Round(gross * Math.Max(dto.DiscountPercentage, 0m) / 100m);
+            var gross = Round(dto.Quantity * dto.UnitPrice, currencyDecimalPlaces);
+            var calculatedDiscount = dto.DiscountAmount
+                ?? Round(gross * Math.Max(dto.DiscountPercentage, 0m) / 100m, currencyDecimalPlaces);
             if (calculatedDiscount < 0m || calculatedDiscount >= gross)
                 throw new InvalidOperationException($"Discount on debit-note line '{dto.Description}' must be less than the gross amount.");
-            var net = Round(gross - calculatedDiscount);
+            var net = Round(gross - calculatedDiscount, currencyDecimalPlaces);
             if (dto.TaxGroupId.HasValue)
                 await ValidatePurchaseTaxGroupAsync(dto.TaxGroupId.Value, cancellationToken);
 
             var taxResult = dto.TaxGroupId.HasValue
                 ? await _taxEngine.CalculateTaxesAsync(new TaxCalculationRequestDto
                 {
+                    CurrencyCode = note.CurrencyCode,
                     BaseAmount = net,
                     TaxGroupId = dto.TaxGroupId,
                     TransactionDate = note.DebitNoteDate,
@@ -1069,12 +1116,20 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     BusinessPartnerId = note.VendorId,
                     BusinessPartnerRole = BusinessPartnerRoleType.Supplier
                 }, cancellationToken)
-                : new TaxCalculationResultDto { BaseAmount = net, GrandTotal = net };
-            var calculatedTax = Round(taxResult.TotalTaxAmount);
-            var total = Round(net + calculatedTax);
-            EnsureOptionalAmountMatches(dto.DiscountAmount, calculatedDiscount, dto.Description, "discount");
-            EnsureOptionalAmountMatches(dto.TaxAmount, calculatedTax, dto.Description, "tax");
-            if (dto.LineTotal.HasValue && Math.Abs(Round(dto.LineTotal.Value - total)) > 0.01m)
+                : new TaxCalculationResultDto
+                {
+                    CurrencyCode = note.CurrencyCode,
+                    CurrencyDecimalPlaces = currencyDecimalPlaces,
+                    BaseAmount = net,
+                    GrandTotal = net
+                };
+            var calculatedTax = Round(taxResult.TotalTaxAmount, currencyDecimalPlaces);
+            var total = Round(net + calculatedTax, currencyDecimalPlaces);
+            EnsureOptionalAmountMatches(dto.DiscountAmount, calculatedDiscount, dto.Description, "discount", currencyDecimalPlaces);
+            EnsureOptionalAmountMatches(dto.TaxAmount, calculatedTax, dto.Description, "tax", currencyDecimalPlaces);
+            if (dto.LineTotal.HasValue
+                && Math.Abs(Round(dto.LineTotal.Value - total, currencyDecimalPlaces))
+                    >= CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces))
                 throw new InvalidOperationException($"Debit-note line '{dto.Description}' total does not match its quantity, price, discount and tax.");
 
             var line = new SupplierDebitNoteLineItem
@@ -1091,7 +1146,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 Quantity = dto.Quantity,
                 UnitPrice = dto.UnitPrice,
                 TaxGroupId = dto.TaxGroupId,
-                TaxRate = net > 0m ? decimal.Round(calculatedTax / net * 100m, 4, MidpointRounding.AwayFromZero) : 0m,
+                TaxRate = net > 0m ? decimal.Round(calculatedTax / net * 100m, 6, MidpointRounding.AwayFromZero) : 0m,
                 TaxAmount = calculatedTax,
                 DiscountPercentage = Math.Max(dto.DiscountPercentage, 0m),
                 DiscountAmount = calculatedDiscount,
@@ -1101,7 +1156,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
             };
 
-            foreach (var breakdown in taxResult.TaxBreakdowns.Where(item => Round(item.TaxAmount) > 0m))
+            foreach (var breakdown in taxResult.TaxBreakdowns.Where(
+                         item => Round(item.TaxAmount, currencyDecimalPlaces) > 0m))
             {
                 var taxAccountId = breakdown.IsInputTaxDeductible
                     ? breakdown.TaxReceivableAccountId
@@ -1123,9 +1179,17 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     TaxGroupId = taxResult.TaxGroupId,
                     ResolvedCreditAccountId = taxAccountId.Value,
                     BaseAmount = net,
-                    TaxableAmount = Round(breakdown.TaxableAmount),
+                    TaxableAmount = breakdown.TaxableAmount,
                     TaxRate = breakdown.TaxRate,
-                    TaxAmount = Round(breakdown.TaxAmount),
+                    TaxAmount = Round(breakdown.TaxAmount, currencyDecimalPlaces),
+                    CurrencyCode = taxResult.CurrencyCode,
+                    CurrencyDecimalPlaces = taxResult.CurrencyDecimalPlaces,
+                    RawTaxAmount = breakdown.RawTaxAmount,
+                    RoundingAdjustment = breakdown.RoundingAdjustment,
+                    AllocationSequence = breakdown.AllocationSequence,
+                    TaxRoundingScope = taxResult.TaxRoundingScope,
+                    TaxRoundingMethod = taxResult.TaxRoundingMethod,
+                    TaxRoundingIncrement = taxResult.TaxRoundingIncrement,
                     CompoundBasis = breakdown.CompoundBasis,
                     CalculationOrder = breakdown.CalculationOrder,
                     CreatedAt = DateTime.UtcNow,
@@ -1139,14 +1203,15 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             note.DiscountAmount += attachedLine.DiscountAmount;
         }
 
-        note.SubTotal = Round(note.SubTotal);
-        note.TaxAmount = Round(note.TaxAmount);
-        note.DiscountAmount = Round(note.DiscountAmount);
-        note.TotalAmount = Round(note.SubTotal + note.TaxAmount);
+        note.SubTotal = Round(note.SubTotal, currencyDecimalPlaces);
+        note.TaxAmount = Round(note.TaxAmount, currencyDecimalPlaces);
+        note.DiscountAmount = Round(note.DiscountAmount, currencyDecimalPlaces);
+        note.TotalAmount = Round(note.SubTotal + note.TaxAmount, currencyDecimalPlaces);
         if (note.ExchangeRate <= 0m)
             throw new InvalidOperationException(
                 "Supplier debit note has no valid frozen exchange-rate evidence.");
-        note.BaseCurrencyAmount = Round(note.TotalAmount * note.ExchangeRate);
+        note.BaseCurrencyAmount = Round(
+            note.TotalAmount * note.ExchangeRate, functionalDecimalPlaces);
     }
 
     private SupplierDebitNoteLineItem AttachOrUpdateLine(
@@ -1222,14 +1287,15 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         CreateSupplierDebitNoteLineItemDto dto,
         VendorInvoiceLineItem sourceLine,
         IReadOnlyCollection<AccountTransaction> sourceTransactions,
-        IReadOnlyCollection<TaxCalculation> sourceTaxSnapshots)
+        IReadOnlyCollection<TaxCalculation> sourceTaxSnapshots,
+        int currencyDecimalPlaces)
     {
         if (dto.GLAccountId.HasValue)
             throw new InvalidOperationException(
                 $"Debit-note line '{dto.Description}' is linked to an invoice and must reverse the source line's account; remove the manual GL account.");
         if (dto.Quantity > sourceLine.Quantity + 0.0001m)
             throw new InvalidOperationException($"Debit-note quantity for '{dto.Description}' exceeds the source invoice line quantity.");
-        if (Round(dto.UnitPrice) != Round(sourceLine.UnitPrice))
+        if (Round(dto.UnitPrice, currencyDecimalPlaces) != Round(sourceLine.UnitPrice, currencyDecimalPlaces))
             throw new InvalidOperationException($"Linked debit-note line '{dto.Description}' must use the immutable source invoice unit price.");
         var lineItemType = RequireLineItemType(
             sourceLine.LineItemType,
@@ -1251,16 +1317,16 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ? baseTransactions.FirstOrDefault(item => item.TransactionTag == "AP-GRV") ?? baseTransactions[0]
             : baseTransactions[0];
         var ratio = sourceLine.Quantity <= 0m ? 0m : dto.Quantity / sourceLine.Quantity;
-        var gross = Round(dto.Quantity * sourceLine.UnitPrice);
-        var discount = Round(sourceLine.DiscountAmount * ratio);
-        var net = Round(gross - discount);
+        var gross = Round(dto.Quantity * sourceLine.UnitPrice, currencyDecimalPlaces);
+        var discount = Round(sourceLine.DiscountAmount * ratio, currencyDecimalPlaces);
+        var net = Round(gross - discount, currencyDecimalPlaces);
 
         var snapshots = sourceTaxSnapshots
             .Where(item => item.DocumentLineId == sourceLine.Id)
             .OrderBy(item => item.CalculationOrder)
             .ThenBy(item => item.Id)
             .ToList();
-        if (Round(sourceLine.TaxAmount) > 0m && snapshots.Count == 0)
+        if (Round(sourceLine.TaxAmount, currencyDecimalPlaces) > 0m && snapshots.Count == 0)
             throw SourceLineageUnavailable(sourceLine, "server-derived tax component snapshots were not found");
 
         var line = new SupplierDebitNoteLineItem
@@ -1289,6 +1355,22 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         {
             if (!snapshot.PostingAccountId.HasValue)
                 throw SourceLineageUnavailable(sourceLine, $"tax component {snapshot.TaxId} has no frozen posting account");
+            if (string.IsNullOrWhiteSpace(snapshot.CurrencyCode)
+                || !snapshot.CurrencyDecimalPlaces.HasValue
+                || !snapshot.RawTaxAmount.HasValue
+                || !snapshot.RoundingAdjustment.HasValue
+                || !snapshot.AllocationSequence.HasValue
+                || !snapshot.TaxRoundingScope.HasValue
+                || !snapshot.TaxRoundingMethod.HasValue
+                || !snapshot.TaxRoundingIncrement.HasValue)
+                throw SourceLineageUnavailable(
+                    sourceLine,
+                    $"tax component {snapshot.TaxId} predates governed currency and rounding-policy evidence");
+            if (!string.Equals(snapshot.CurrencyCode, note.CurrencyCode, StringComparison.OrdinalIgnoreCase)
+                || snapshot.CurrencyDecimalPlaces.Value != currencyDecimalPlaces)
+                throw SourceLineageUnavailable(
+                    sourceLine,
+                    $"tax component {snapshot.TaxId} currency precision does not match the debit note");
             var taxToken = $"TaxId={snapshot.TaxId}";
             var candidates = sourceTransactions.Where(item =>
                     item.SourceDocumentLineId == sourceLine.Id &&
@@ -1300,6 +1382,8 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             if (candidates.Count != 1)
                 throw SourceLineageUnavailable(sourceLine, $"tax component {snapshot.TaxId} does not map to one original journal transaction");
 
+            var rawTaxAmount = snapshot.RawTaxAmount.Value * ratio;
+            var roundedTaxAmount = Round(snapshot.TaxAmount * ratio, currencyDecimalPlaces);
             line.TaxComponents.Add(new SupplierDebitNoteTaxComponent
             {
                 Id = Guid.NewGuid(),
@@ -1310,10 +1394,18 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 OriginalTaxCalculationId = snapshot.Id,
                 OriginalAccountTransactionId = candidates[0].Id,
                 ResolvedCreditAccountId = snapshot.PostingAccountId.Value,
-                BaseAmount = Round(snapshot.BaseAmount * ratio),
-                TaxableAmount = Round(snapshot.TaxableAmount * ratio),
+                BaseAmount = Round(snapshot.BaseAmount * ratio, currencyDecimalPlaces),
+                TaxableAmount = snapshot.TaxableAmount * ratio,
                 TaxRate = snapshot.TaxRate,
-                TaxAmount = Round(snapshot.TaxAmount * ratio),
+                TaxAmount = roundedTaxAmount,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
+                RawTaxAmount = rawTaxAmount,
+                RoundingAdjustment = roundedTaxAmount - rawTaxAmount,
+                AllocationSequence = snapshot.AllocationSequence.Value,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
                 CompoundBasis = snapshot.CompoundBasis,
                 CalculationOrder = snapshot.CalculationOrder,
                 CreatedAt = DateTime.UtcNow,
@@ -1322,12 +1414,18 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             });
         }
 
-        line.TaxAmount = Round(line.TaxComponents.Sum(item => item.TaxAmount));
-        line.TaxRate = net > 0m ? decimal.Round(line.TaxAmount / net * 100m, 4, MidpointRounding.AwayFromZero) : 0m;
-        line.LineTotal = Round(net + line.TaxAmount);
-        EnsureOptionalAmountMatches(dto.DiscountAmount, discount, dto.Description, "discount");
-        EnsureOptionalAmountMatches(dto.TaxAmount, line.TaxAmount, dto.Description, "tax");
-        EnsureOptionalAmountMatches(dto.LineTotal, line.LineTotal, dto.Description, "total");
+        line.TaxAmount = Round(
+            line.TaxComponents.Sum(item => item.TaxAmount), currencyDecimalPlaces);
+        line.TaxRate = net > 0m
+            ? decimal.Round(line.TaxAmount / net * 100m, 6, MidpointRounding.AwayFromZero)
+            : 0m;
+        line.LineTotal = Round(net + line.TaxAmount, currencyDecimalPlaces);
+        EnsureOptionalAmountMatches(
+            dto.DiscountAmount, discount, dto.Description, "discount", currencyDecimalPlaces);
+        EnsureOptionalAmountMatches(
+            dto.TaxAmount, line.TaxAmount, dto.Description, "tax", currencyDecimalPlaces);
+        EnsureOptionalAmountMatches(
+            dto.LineTotal, line.LineTotal, dto.Description, "total", currencyDecimalPlaces);
         if (dto.TaxRate > 0m && Math.Abs(dto.TaxRate - line.TaxRate) > 0.0001m)
             throw new InvalidOperationException($"Linked debit-note line '{dto.Description}' tax rate differs from the immutable source invoice tax evidence.");
         return line;
@@ -1346,6 +1444,10 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
         var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
         var currency = NormalizeCurrency(note.CurrencyCode, functionalCurrency);
+        var currencyDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            currency, cancellationToken);
+        var functionalDecimalPlaces = await ResolveCurrencyDecimalPlacesAsync(
+            functionalCurrency, cancellationToken);
         var linkedInvoice = note.OriginalVendorInvoice;
         var accountingBookCode = "IFRS";
         if (note.InventorySupplierReturnAccountingGroupId.HasValue)
@@ -1453,15 +1555,20 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     // Produce a net commercial principal for its clearing adapter;
                     // never replay the invoice's Inventory value adjustment here.
                     var sourceCost = originalTransactions.Values.Where(item => item.SourceDocumentLineId == sourceLine.Id && IsReceiptCostPurpose(item.TransactionTag)).ToArray();
-                    var originalNet = Round(sourceCost.Sum(item => item.DebitAmount - item.CreditAmount));
+                    var originalNet = Round(
+                        sourceCost.Sum(item => item.DebitAmount - item.CreditAmount),
+                        functionalDecimalPlaces);
                     if (sourceCost.Length == 0 || originalNet <= 0m)
                         throw SourceLineageUnavailable(sourceLine, "retained signed receipt-cost transactions are missing or nonpositive");
-                    principalAmount = Round(line.LineTotal - line.TaxAmount);
-                    if (Math.Abs(Round(originalNet * ratio) - Functional(principalAmount, currency, functionalCurrency, rate)) > 0.01m)
+                    principalAmount = Round(line.LineTotal - line.TaxAmount, currencyDecimalPlaces);
+                    if (Math.Abs(
+                            Round(originalNet * ratio, functionalDecimalPlaces)
+                            - Functional(principalAmount, currency, functionalCurrency, rate, functionalDecimalPlaces))
+                        >= CurrencyMinorUnitPolicy.MinorUnit(functionalDecimalPlaces))
                         throw SourceLineageUnavailable(sourceLine, "the commercial credit does not reconcile to original signed receipt-cost postings");
                     baseSplits = null;
                 }
-                else principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio);
+                else principalAmount = Round(baseSplits.Sum(SourceDebitAmount) * ratio, currencyDecimalPlaces);
                 accountId = sourceTransaction.AccountId;
                 exchangeRateId = allocatedReturnCost ? originalApControl?.ExchangeRateId : sourceTransaction.ExchangeRateId;
             }
@@ -1475,14 +1582,14 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     if (writeoffAccount.AccountType is not (AccountType.Revenue or AccountType.Expense))
                         throw new InvalidOperationException("Supplier writeoffs require a Revenue or Expense GL account.");
                 }
-                principalAmount = Round(line.LineTotal - line.TaxAmount);
+                principalAmount = Round(line.LineTotal - line.TaxAmount, currencyDecimalPlaces);
             }
 
             var principalLine = PostingLine(
                 accountId,
                 $"Supplier debit note {note.DebitNoteNumber} - {line.Description}",
                 debit: 0m,
-                credit: Functional(principalAmount, currency, functionalCurrency, rate),
+                credit: Functional(principalAmount, currency, functionalCurrency, rate, functionalDecimalPlaces),
                 sourceAmount: principalAmount,
                 currency,
                 functionalCurrency,
@@ -1494,7 +1601,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     ? "AP-Writeoff" : "AP-SupplierDebitNote-Line",
                 line.Id,
                 exchangeRateId,
-                linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null);
+                linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null,
+                currencyDecimalPlaces,
+                functionalDecimalPlaces);
             var inheritedDimensions = sourceDimensions.TryGetValue(line.Id, out var dimensionValues)
                 ? dimensionValues
                 : Array.Empty<FinancePostingDimensionValueDto>();
@@ -1502,15 +1611,20 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             if (baseSplits is { Count: > 1 })
             {
                 lineNumber--; // The aggregate principal line is replaced by its account splits.
-                var amounts = MonetaryAllocation.Allocate(baseSplits.Select(SourceDebitAmount).ToArray(), principalAmount);
+                var amounts = MonetaryAllocation.Allocate(
+                    baseSplits.Select(SourceDebitAmount).ToArray(),
+                    principalAmount,
+                    currencyDecimalPlaces);
                 for (var splitIndex = 0; splitIndex < baseSplits.Count; splitIndex++)
                 {
                     if (amounts[splitIndex] == 0m) continue;
                     var splitLine = PostingLine(baseSplits[splitIndex].AccountId, principalLine.Description!,
-                        0m, Functional(amounts[splitIndex], currency, functionalCurrency, rate), amounts[splitIndex],
+                        0m, Functional(amounts[splitIndex], currency, functionalCurrency, rate, functionalDecimalPlaces), amounts[splitIndex],
                         currency, functionalCurrency, rate, note.DebitNoteDate, note.DebitNoteNumber,
                         lineNumber++, principalLine.TransactionTag!, line.Id, baseSplits[splitIndex].ExchangeRateId,
-                        "Original AP invoice exchange-rate snapshot");
+                        "Original AP invoice exchange-rate snapshot",
+                        currencyDecimalPlaces,
+                        functionalDecimalPlaces);
                     splitLine.Dimensions = inheritedDimensions;
                     lines.Add(splitLine);
                 }
@@ -1519,7 +1633,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
 
             if (linkedInvoice != null
                 && !IsNetPostedSourceTransaction(originalTransactions[line.OriginalAccountTransactionId!.Value])
-                && Round(line.DiscountAmount) > 0m)
+                && Round(line.DiscountAmount, currencyDecimalPlaces) > 0m)
             {
                 var exactDiscounts = originalDiscountTransactions.Where(item =>
                     item.SourceDocumentLineId == line.OriginalVendorInvoiceLineItemId).ToList();
@@ -1535,7 +1649,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 var discountLine = PostingLine(
                     discountTransaction.AccountId,
                     $"Reverse purchase discount - {note.DebitNoteNumber} - {line.Description}",
-                    Functional(line.DiscountAmount, currency, functionalCurrency, rate),
+                    Functional(line.DiscountAmount, currency, functionalCurrency, rate, functionalDecimalPlaces),
                     0m,
                     line.DiscountAmount,
                     currency,
@@ -1547,7 +1661,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     "AP-SupplierDebitNote-Discount",
                     line.Id,
                     discountTransaction.ExchangeRateId,
-                    "Original AP invoice exchange-rate snapshot");
+                    "Original AP invoice exchange-rate snapshot",
+                    currencyDecimalPlaces,
+                    functionalDecimalPlaces);
                 discountLine.Dimensions = inheritedDimensions;
                 lines.Add(discountLine);
             }
@@ -1568,7 +1684,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     component.ResolvedCreditAccountId,
                     $"Reverse input tax - {note.DebitNoteNumber}",
                     0m,
-                    Functional(component.TaxAmount, currency, functionalCurrency, rate),
+                    Functional(component.TaxAmount, currency, functionalCurrency, rate, functionalDecimalPlaces),
                     component.TaxAmount,
                     currency,
                     functionalCurrency,
@@ -1579,14 +1695,16 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                     "AP-SupplierDebitNote-Tax",
                     line.Id,
                     componentRateId,
-                    linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null));
+                    linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null,
+                    currencyDecimalPlaces,
+                    functionalDecimalPlaces));
             }
         }
 
-        var creditTotal = Round(lines.Sum(item => item.CreditAmount));
-        var nonControlDebits = Round(lines.Sum(item => item.DebitAmount));
-        var apDebit = Round(creditTotal - nonControlDebits);
-        var expectedApDebit = Functional(note.TotalAmount, currency, functionalCurrency, rate);
+        var creditTotal = Round(lines.Sum(item => item.CreditAmount), functionalDecimalPlaces);
+        var nonControlDebits = Round(lines.Sum(item => item.DebitAmount), functionalDecimalPlaces);
+        var apDebit = Round(creditTotal - nonControlDebits, functionalDecimalPlaces);
+        var expectedApDebit = Functional(note.TotalAmount, currency, functionalCurrency, rate, functionalDecimalPlaces);
         if (apDebit <= 0m)
             throw new InvalidOperationException("Supplier debit note has no positive value to post.");
         if (apDebit != expectedApDebit)
@@ -1605,8 +1723,11 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             1,
             "AP-SupplierDebitNote-Control",
             exchangeRateId: originalApControl?.ExchangeRateId,
-            exchangeRateSource: linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null));
-        if (Round(lines.Sum(item => item.DebitAmount)) != Round(lines.Sum(item => item.CreditAmount)))
+            exchangeRateSource: linkedInvoice != null ? "Original AP invoice exchange-rate snapshot" : null,
+            transactionDecimalPlaces: currencyDecimalPlaces,
+            functionalDecimalPlaces: functionalDecimalPlaces));
+        if (Round(lines.Sum(item => item.DebitAmount), functionalDecimalPlaces)
+            != Round(lines.Sum(item => item.CreditAmount), functionalDecimalPlaces))
             throw new InvalidOperationException("Supplier debit-note posting is not balanced.");
 
         return new FinancePostingRequestV2Dto
@@ -1632,23 +1753,51 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ExchangeRateOverrideApprovedAt = linkedInvoice != null ? note.ApprovedAt : null,
             Lines = lines,
             TaxCalculationSnapshots = note.LineItems.Where(item => !item.IsDeleted)
-                .SelectMany(item => item.TaxComponents.Where(component => !component.IsDeleted).Select(component =>
-                    new FinanceTaxCalculationSnapshotDto
-                    {
-                        DocumentType = "SupplierDebitNote",
-                        DocumentId = note.Id,
-                        DocumentLineId = item.Id,
-                        TaxId = component.TaxId,
-                        TaxGroupId = component.TaxGroupId,
-                        PostingAccountId = component.ResolvedCreditAccountId,
-                        BaseAmount = component.BaseAmount,
-                        TaxableAmount = component.TaxableAmount,
-                        TaxRate = component.TaxRate,
-                        TaxAmount = component.TaxAmount,
-                        CompoundBasis = component.CompoundBasis,
-                        CalculationOrder = component.CalculationOrder,
-                        CalculationDate = note.DebitNoteDate
-                    })).ToList()
+                .SelectMany(item => item.TaxComponents.Where(component => !component.IsDeleted)
+                    .Select(component => ToTaxSnapshot(note, item, component)))
+                .ToList()
+        };
+    }
+
+    private static FinanceTaxCalculationSnapshotDto ToTaxSnapshot(
+        SupplierDebitNote note,
+        SupplierDebitNoteLineItem line,
+        SupplierDebitNoteTaxComponent component)
+    {
+        if (string.IsNullOrWhiteSpace(component.CurrencyCode)
+            || !component.CurrencyDecimalPlaces.HasValue
+            || !component.RawTaxAmount.HasValue
+            || !component.RoundingAdjustment.HasValue
+            || !component.AllocationSequence.HasValue
+            || !component.TaxRoundingScope.HasValue
+            || !component.TaxRoundingMethod.HasValue
+            || !component.TaxRoundingIncrement.HasValue)
+            throw new InvalidOperationException(
+                "AP_DEBIT_NOTE_TAX_EVIDENCE_INCOMPLETE: saved tax evidence predates governed precision and cannot be posted or replayed.");
+
+        return new FinanceTaxCalculationSnapshotDto
+        {
+            DocumentType = "SupplierDebitNote",
+            DocumentId = note.Id,
+            DocumentLineId = line.Id,
+            TaxId = component.TaxId,
+            TaxGroupId = component.TaxGroupId,
+            PostingAccountId = component.ResolvedCreditAccountId,
+            CurrencyCode = component.CurrencyCode,
+            CurrencyDecimalPlaces = component.CurrencyDecimalPlaces,
+            BaseAmount = component.BaseAmount,
+            TaxableAmount = component.TaxableAmount,
+            TaxRate = component.TaxRate,
+            TaxAmount = component.TaxAmount,
+            RawTaxAmount = component.RawTaxAmount.Value,
+            RoundingAdjustment = component.RoundingAdjustment.Value,
+            AllocationSequence = component.AllocationSequence.Value,
+            TaxRoundingScope = component.TaxRoundingScope,
+            TaxRoundingMethod = component.TaxRoundingMethod,
+            TaxRoundingIncrement = component.TaxRoundingIncrement,
+            CompoundBasis = component.CompoundBasis,
+            CalculationOrder = component.CalculationOrder,
+            CalculationDate = note.DebitNoteDate
         };
     }
 
@@ -1667,7 +1816,9 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         string tag,
         Guid? sourceDocumentLineId = null,
         Guid? exchangeRateId = null,
-        string? exchangeRateSource = null)
+        string? exchangeRateSource = null,
+        int transactionDecimalPlaces = 2,
+        int functionalDecimalPlaces = 2)
     {
         var sameCurrency = string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase);
         return new FinancePostingLineDto
@@ -1675,12 +1826,12 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             AccountId = accountId,
             SourceDocumentLineId = sourceDocumentLineId,
             Description = description,
-            DebitAmount = Round(debit),
-            CreditAmount = Round(credit),
+            DebitAmount = Round(debit, functionalDecimalPlaces),
+            CreditAmount = Round(credit, functionalDecimalPlaces),
             TransactionCurrency = currency,
-            TransactionDebitAmount = debit > 0m ? Round(sourceAmount) : 0m,
-            TransactionCreditAmount = credit > 0m ? Round(sourceAmount) : 0m,
-            ForeignCurrencyAmount = sameCurrency ? null : Round(sourceAmount),
+            TransactionDebitAmount = debit > 0m ? Round(sourceAmount, transactionDecimalPlaces) : 0m,
+            TransactionCreditAmount = credit > 0m ? Round(sourceAmount, transactionDecimalPlaces) : 0m,
+            ForeignCurrencyAmount = sameCurrency ? null : Round(sourceAmount, transactionDecimalPlaces),
             ExchangeRateId = sameCurrency ? null : exchangeRateId,
             ExchangeRate = sameCurrency ? null : rate,
             ExchangeRateSource = sameCurrency ? null : exchangeRateSource,
@@ -1838,9 +1989,16 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
         }
     }
 
-    private static void EnsureOptionalAmountMatches(decimal? supplied, decimal calculated, string description, string label)
+    private static void EnsureOptionalAmountMatches(
+        decimal? supplied,
+        decimal calculated,
+        string description,
+        string label,
+        int currencyDecimalPlaces)
     {
-        if (supplied.HasValue && Math.Abs(Round(supplied.Value - calculated)) > 0.01m)
+        if (supplied.HasValue
+            && Math.Abs(Round(supplied.Value - calculated, currencyDecimalPlaces))
+                >= CurrencyMinorUnitPolicy.MinorUnit(currencyDecimalPlaces))
             throw new InvalidOperationException(
                 $"Debit-note line '{description}' {label} differs from the server-derived source/tax evidence.");
     }
@@ -1908,10 +2066,18 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
                 TaxId = snapshot.TaxId,
                 TaxGroupId = snapshot.TaxGroupId,
                 PostingAccountId = snapshot.PostingAccountId,
+                CurrencyCode = snapshot.CurrencyCode,
+                CurrencyDecimalPlaces = snapshot.CurrencyDecimalPlaces,
                 BaseAmount = snapshot.BaseAmount,
                 TaxableAmount = snapshot.TaxableAmount,
                 TaxRate = snapshot.TaxRate,
                 TaxAmount = snapshot.TaxAmount,
+                RawTaxAmount = snapshot.RawTaxAmount,
+                RoundingAdjustment = snapshot.RoundingAdjustment,
+                AllocationSequence = snapshot.AllocationSequence,
+                TaxRoundingScope = snapshot.TaxRoundingScope,
+                TaxRoundingMethod = snapshot.TaxRoundingMethod,
+                TaxRoundingIncrement = snapshot.TaxRoundingIncrement,
                 CompoundBasis = snapshot.CompoundBasis,
                 CalculationOrder = snapshot.CalculationOrder,
                 CalculationDate = snapshot.CalculationDate,
@@ -2309,10 +2475,38 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
 
     private static string? TrimToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     private static string Append(string? current, string text) => string.IsNullOrWhiteSpace(current) ? text : $"{current}\n{text}";
-    private static decimal Round(decimal value) => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+    private static decimal Round(decimal value, int currencyDecimalPlaces = 2) =>
+        CurrencyMinorUnitPolicy.Round(value, currencyDecimalPlaces);
     private static decimal RoundRate(decimal value) => decimal.Round(value, 6, MidpointRounding.AwayFromZero);
     private static string NormalizeCurrency(string? value, string fallback) =>
         string.IsNullOrWhiteSpace(value) ? fallback.Trim().ToUpperInvariant() : value.Trim().ToUpperInvariant();
-    private static decimal Functional(decimal amount, string currency, string functionalCurrency, decimal rate) =>
-        Round(string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase) ? amount : amount * rate);
+    private static decimal Functional(
+        decimal amount,
+        string currency,
+        string functionalCurrency,
+        decimal rate,
+        int functionalDecimalPlaces = 2) =>
+        Round(
+            string.Equals(currency, functionalCurrency, StringComparison.OrdinalIgnoreCase)
+                ? amount
+                : amount * rate,
+            functionalDecimalPlaces);
+
+    private async Task<int> ResolveCurrencyDecimalPlacesAsync(
+        string currencyCode,
+        CancellationToken cancellationToken)
+    {
+        var normalized = NormalizeCurrency(currencyCode, "GHS");
+        var configured = await _db.Currencies.AsNoTracking()
+            .Where(currency =>
+                currency.TenantId == TenantId &&
+                currency.CurrencyCode == normalized &&
+                !currency.IsDeleted)
+            .Select(currency => (int?)currency.DecimalPlaces)
+            .SingleOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"Transaction currency '{normalized}' is missing from the tenant currency master.");
+        CurrencyMinorUnitPolicy.Validate(normalized, configured);
+        return configured;
+    }
 }

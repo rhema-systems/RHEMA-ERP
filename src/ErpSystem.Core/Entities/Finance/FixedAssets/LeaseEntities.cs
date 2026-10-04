@@ -67,6 +67,27 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public Guid? RouAssetId { get; set; }
         public virtual FixedAsset? RouAsset { get; set; }
 
+        // ── Frozen recognition authority ──
+        // New activations persist the exact governed primary book/currency/accounts used by
+        // the recognition journal. Existing active leases recover these values from their
+        // original posted recognition event before the first AP instalment is prepared.
+        public Guid? RecognitionPostingEventId { get; set; }
+        public Guid? RecognitionJournalEntryId { get; set; }
+        public Guid? AccountingBookId { get; set; }
+        public virtual AccountingBook? AccountingBook { get; set; }
+        [MaxLength(20)] public string? AccountingBookCode { get; set; }
+        [MaxLength(3)] public string? FunctionalCurrencyCode { get; set; }
+        public Guid? RouAssetAccountId { get; set; }
+        public Guid? LeaseLiabilityAccountId { get; set; }
+        public Guid? InterestExpenseAccountId { get; set; }
+
+        // ── Governed activation maker/checker evidence ──
+        public Guid? ActivationWorkflowInstanceId { get; set; }
+        public Guid? ActivationSubmittedByUserId { get; set; }
+        public DateTime? ActivationSubmittedAtUtc { get; set; }
+        public Guid? ActivationApprovedByUserId { get; set; }
+        public DateTime? ActivationApprovedAtUtc { get; set; }
+
         // ── Concurrency ──
         [Timestamp]
         public byte[] RowVersion { get; set; } = null!;
@@ -102,8 +123,11 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public decimal RemainingLiability { get; set; }
 
         /// <summary>
-        /// Whether the period journal has been posted
+        /// Whether the canonical AP invoice recognition journal has been posted.
+        /// Preparing the invoice draft never sets this flag and payment status is owned by AP.
         /// </summary>
         public bool IsPosted { get; set; }
+
+        public virtual ICollection<VendorInvoice> VendorInvoices { get; set; } = new List<VendorInvoice>();
     }
 }

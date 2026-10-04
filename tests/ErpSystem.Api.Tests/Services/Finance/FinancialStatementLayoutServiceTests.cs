@@ -21,6 +21,21 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FinancialStatementLayoutServiceTests
 {
     [Fact]
+    public void ValidationResponse_ExposesActionableRowMessageWithoutDroppingStructuredIssues()
+    {
+        var result = new FinancialStatementLayoutValidationResultDto { Issues = new()
+        {
+            new() { Severity = FinancialStatementLayoutValidationSeverity.Error, RowCode = "ASSETS", Code = "INVALID_MAPPING", Message = "Select an active classification." },
+            new() { Severity = FinancialStatementLayoutValidationSeverity.Warning, Message = "Optional display warning." }
+        } };
+        result.IsValid.Should().BeFalse();
+        result.Message.Should().Be("ASSETS: Select an active classification.");
+        result.Issues.Should().HaveCount(2);
+        var json = System.Text.Json.JsonSerializer.Serialize(result, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        json.Should().Contain("\"message\":\"ASSETS: Select an active classification.\"").And.Contain("\"issues\"");
+    }
+
+    [Fact]
     [Trait("Category", "Reporting")]
     public async Task GetLayouts_ShouldReturnVersionSummaryWithoutLoadingLayoutDetails()
     {

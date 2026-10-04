@@ -400,7 +400,7 @@ public sealed class EhcSlaMonitoringBackgroundService : BackgroundService
         public Guid? SubcategoryId { get; init; }
         public Guid? AssignedDepartmentId { get; init; }
         public Guid? AssignedToUserId { get; init; }
-        public Guid RequesterUserId { get; init; }
+        public Guid? RequesterUserId { get; init; }
         public DateTime? FirstResponseDueAt { get; init; }
         public DateTime? ResolutionDueAt { get; init; }
         public DateTime? FirstRespondedAt { get; init; }

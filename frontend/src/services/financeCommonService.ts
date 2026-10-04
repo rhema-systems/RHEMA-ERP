@@ -268,6 +268,7 @@ function buildUpdateCurrencyPayload(data: UpdateCurrencyDto) {
     digitGrouping: 3,
     currencyClassification: 'Regional',
     geographicRegion: data.country?.trim() || undefined,
+    countryName: data.country?.trim() || undefined,
     autoRetrieveExchangeRate: false,
     exchangeRateUpdateFrequency: 'Daily',
     isActive: data.isActive ?? true,
@@ -415,9 +416,17 @@ export const procurementCurrencyService = {
   },
 };
 
+export const estateCurrencyService = {
+  getActive: async (): Promise<CurrencyListDto[]> => {
+    const response = await api.get<CurrencyApiDto[]>('/estate/reference-data/currencies');
+    return normalizeCurrencyList(response ?? []);
+  },
+};
+
 const financeCommonService = {
   paymentTerms: paymentTermService,
   currencies: currencyService,
+  estateCurrencies: estateCurrencyService,
 };
 
 export default financeCommonService;

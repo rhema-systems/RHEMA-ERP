@@ -377,6 +377,8 @@ public class BankAccountService : IBankAccountService
                 TransactionDate = t.TransactionDate,
                 TransactionType = t.TransactionType,
                 Amount = t.Amount,
+                RoundingAdjustmentAmount = t.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = t.FinanceRoundingEvidenceId,
                 Currency = t.Currency,
                 Description = t.Description,
                 IsReconciled = t.IsReconciled

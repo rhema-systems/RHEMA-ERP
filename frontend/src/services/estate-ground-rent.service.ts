@@ -21,6 +21,7 @@ export interface GroundRentAssetOption {
   approvedRatePerAcre?: number;
   currencyCode: string;
   hasGroundRentAccount: boolean;
+  assetType?: 'Land' | 'Property' | 'Facility';
 }
 
 export interface GroundRentIncomeAccountOption {
@@ -38,6 +39,7 @@ export interface GroundRentOptions {
 export interface AssessGroundRent {
   estateManagedAssetId: string;
   ratePerAcre: number;
+  annualAmount?: number | null;
   currencyCode: string;
 }
 

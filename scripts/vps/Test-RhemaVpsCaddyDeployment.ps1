@@ -18,10 +18,10 @@ if ($helper -notmatch 'Get-Service RhemaERPCaddy') {
     throw 'The VPS helper does not verify the live Caddy service.'
 }
 if ($deploy -match "'/health', '/health/ready', '/health/live'") {
-    throw 'Public smoke must not send API health routes through the frontend-only Caddy fallback.'
+    throw 'Public smoke must not send private loopback health routes through the frontend-only Caddy fallback.'
 }
-if ($deploy -notmatch "'/api/tenant'.*'/api/auth/security-settings'") {
-    throw 'Public smoke must verify API routing through Caddy.'
+if ($deploy -notmatch "'/api/tenant'.*'/api/auth/security-settings'.*'/api/health/ready'") {
+    throw 'Public smoke must verify API and browser-readiness routing through Caddy.'
 }
 if ($deploy -notmatch "Invoke-PublicSmoke '' -AllowConfigurationDrift") {
     throw 'Dry-run smoke does not tolerate public-origin drift that apply will reconcile.'

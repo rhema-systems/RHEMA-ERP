@@ -1,6 +1,6 @@
 # Rhema ERP VPS Deployment Runbook
 
-Last updated: 2026-09-27
+Last updated: 2026-09-29
 
 This note captures the VPS deployment details that have caused repeat failures. Read it before deploying to the current Windows VPS. The server is presently a **test server**, so development-data seeding is intentionally enabled. It must be disabled before this host is promoted to production.
 
@@ -19,6 +19,7 @@ This note captures the VPS deployment details that have caused repeat failures. 
 - Package drop folder: `C:\RhemaERP\packages`
 - Deployment/log folder: `C:\RhemaERP\logs`
 - Rollback snapshots: `C:\RhemaERP\backups`
+- Immutable releases: `C:\RhemaERP\releases\<release-id>`
 - Windows services:
   - `RhemaERPAPI`
   - `RhemaERPFrontend`
@@ -28,43 +29,230 @@ The browser must never be sent to `http://localhost:5000`, `https://localhost:53
 
 ## Preferred Automated Workflow
 
-Use the repository deployment command for normal test-VPS releases. It turns the
-manual procedure in this runbook into fail-fast, timed stages and records evidence
-for each run:
+Phase 1 builds the existing regular Next.js runtime on a controlled Windows x64
+build host and sends only verified artifacts to the VPS. The VPS does not run
+`npm ci`, `npm install`, `npm run build`, or `next build` in this path. The
+frontend service remains `npm run start -- -p 3001`; standalone conversion is a
+separate Phase 2 decision.
+
+### GitHub Actions CI/CD
+
+`.github/workflows/ci-cd.yml` is the authoritative Windows-service pipeline.
+Pull requests and pushes to `master` run the migration, artifact, packaging and
+deploy-only contracts. A manual run can build one immutable release and, only
+when `deploy_to_test_vps` is explicitly selected, activate that same artifact on
+the test VPS. The deploy job is bound to the `test-vps` GitHub environment and
+refuses deployment from any branch other than `master`.
+
+The workflow deliberately does not build Docker images. It uses the same
+`Build-RhemaRelease.ps1` and `Deploy-RhemaVps.ps1 -DeployOnly` path documented
+below, keeps nested release ZIPs uncompressed during GitHub artifact transport,
+and retains sanitized deployment evidence for 30 days.
+
+Configure these repository variables once:
+
+- `VPS_HOST` — `63.141.230.56` for the current test VPS;
+- `VPS_SSH_PORT` — `2222`;
+- `VPS_SSH_USER` — `Administrator`;
+- `VPS_PUBLIC_BASE_URL` — `https://63.141.230.56`.
+
+Configure these repository or `test-vps` environment secrets once:
+
+- `SYNCFUSION_LICENSE` — the protected build-time Syncfusion key;
+- `VPS_SSH_PRIVATE_KEY` — the private key for the restricted deployment identity;
+- `VPS_SSH_KNOWN_HOSTS` — a trusted `[host]:port` OpenSSH known-hosts entry.
+
+After this CI/CD change is merged and pulled into the release checkout, an
+administrator can configure all of the variables, encrypted secrets, pinned
+host key, `test-vps` environment and workflow state without printing protected
+values:
 
 ```powershell
-# Validate the current VPS without building or changing the deployed application
-pwsh -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -DryRun
-
-# Deploy the current clean origin/master commit. Reuse the package only when its
-# commit and SHA-256 manifest both match; otherwise build a fresh package.
-pwsh -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -ReuseVerifiedArtifacts
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\vps\Initialize-GitHubVpsCicd.ps1
 ```
 
-The command performs these controls automatically:
+Run that bootstrap directly on the test VPS. It reads the already protected
+Syncfusion value from the API service configuration, uses the existing deployment
+identity, derives the known-hosts entry from the VPS's own OpenSSH public host key,
+and writes secrets to GitHub through standard input. If `gh.exe` is absent, the
+bootstrap downloads the pinned portable GitHub CLI release, verifies both its
+SHA-256 digest and GitHub Authenticode signature, and installs it under
+`C:\RhemaERP\tools\github-cli`. If authentication is absent, it starts GitHub's
+browser/device sign-in; use a repository administrator account with Actions
+enabled. If the dedicated deployment key does not exist, the bootstrap creates
+an Ed25519 identity under `C:\RhemaERP\secrets`, authorizes it through the active
+Windows OpenSSH administrator key file, and restricts the key files to SYSTEM and
+Administrators. If Windows OpenSSH Server is absent, it installs the Windows
+capability, configures key-only access for the deployment account on TCP 2222,
+validates the server configuration, and creates the named inbound firewall rule.
+The final check queues only the release-contract job with build and deployment
+disabled. It does not build or deploy the application.
+
+Do not generate `VPS_SSH_KNOWN_HOSTS` inside the workflow. Verify the host key
+through an independent trusted channel before saving it. The workflow requires
+strict host-key checking and never prints or uploads these secrets.
+
+The VPS API service configuration must retain `UatBootstrap__SharedPassword` only
+when an explicitly requested UAT preparation may need to create missing accounts.
+Normal application deployment neither runs operational UAT seeds nor requests an
+initial test-account password. An unattended UAT preparation fails during
+read-only preflight before backup or service interruption when missing accounts
+require a password and the protected setting is absent.
+
+To build without deployment, run **Windows VPS CI/CD** from GitHub Actions with
+`build_release=true` and `deploy_to_test_vps=false`. To build once and deploy that
+exact release, set both inputs to `true`. Deployment keeps migration probes,
+backups, application rollback, readiness checks, public API/assets/CORS checks,
+and the headless browser smoke test.
+
+### Build host requirements
+
+- clean checkout of the exact release commit;
+- Windows x64 with x64 Node.js, npm, the repository .NET SDK and PowerShell;
+- sufficient free memory for the build wrapper's 12 GB default V8 heap;
+- a protected `SYNCFUSION_LICENSE` or `Syncfusion__LicenseKey` environment value;
+- disk space for `frontend\.next-production\cache`, API/frontend staging, and ZIPs;
+- the intended public HTTPS origin supplied explicitly at build time.
+
+Build once from the controlled host:
+
+```powershell
+$commit = (git rev-parse HEAD).Trim()
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Build-RhemaRelease.ps1 `
+  -Environment Test `
+  -PublicBaseUrl 'https://63.141.230.56' `
+  -ExpectedCommit $commit
+```
+
+The builder prints `RELEASE_BUILD_PASSED|<release-id>|<manifest-path>`. Transfer
+or make that complete release directory available to the deployment workstation,
+then deploy it:
+
+```powershell
+$artifact = 'C:\path\to\artifacts\vps-releases\<release-id>'
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-RhemaVps.ps1 `
+  -Environment Test `
+  -DeployOnly `
+  -ArtifactDirectory $artifact `
+  -ExpectedCommit (git rev-parse HEAD).Trim()
+```
+
+The release directory contains only `api.zip`, `frontend.zip`, and
+`release-manifest.json`. The manifest binds the packages to the exact commit,
+environment, public origin, `NEXT_PUBLIC_API_URL`, tool versions, architecture,
+build ID and SHA-256 values. Secrets are never written to it.
+
+The deploy-only command preserves all existing controls:
 
 - requires a clean, exact `origin/master` commit unless an explicit diagnostic
   override is supplied;
-- runs VPS/service/configuration/database preflight checks before spending time
-  on a build;
+- rejects a manifest for another commit, environment, public API origin, or hash;
+- runs VPS/service/configuration/database and disk preflight checks;
 - compares repository and deployed EF migration IDs and refuses unprobed pending
   migrations that contain SQL `THROW` guards or install guard helpers;
-- publishes the self-contained API with the full build and builds a clean production
-  frontend using the public HTTPS origin;
-- creates commit-keyed packages, verifies their hashes, and reuses them safely;
 - creates and verifies application and SQL backups before changing services;
-- applies the API and frontend with rollback on readiness failure;
+- extracts immutable copies under `C:\RhemaERP\releases\<release-id>` and retains
+  the current, previous, and at least three recent successful releases;
+- activates the API and frontend with application rollback on readiness or later
+  verification failure;
 - verifies services, migrations, foreign keys, public routes, static assets,
   CORS, direct-port isolation, and the required browser journeys;
-- writes JSON evidence with the duration and result of every stage under
-  `artifacts\vps-releases\<short-sha>` and uploads successful deployment evidence
-  to `C:\RhemaERP\logs`.
+- writes timed JSON deployment evidence and uploads successful evidence to
+  `C:\RhemaERP\logs`.
 
-The normal deployment target is 15-30 minutes when a build is required and 5-15
-minutes when verified artifacts are reused. Stop and investigate a stage when it
-exceeds its normal range; do not restart the whole deployment speculatively. API
-readiness may legitimately use several minutes while EF migrations apply, but is
-bounded by `-ApiReadyTimeoutSeconds` (1800 seconds by default).
+The build manifest records npm restore, Syncfusion preparation, API publish,
+Next.js build, production dependency preparation, compression and hashing times.
+Deployment evidence records upload, preflight, backup, activation/migrations,
+restart/readiness, public health, browser smoke and total elapsed time. Before
+Phase 1, observed VPS work included about 8 minutes for npm dependencies and 63.6
+minutes for Next compilation, followed by lengthy page-data collection; one full
+run exceeded four hours. Phase 1 removes those build stages from the VPS. Record
+the first three deploy-only runs before setting a new operational target.
+
+### Cache and clean builds
+
+`frontend\.next-production\cache` persists on the build host. It is never copied
+into `frontend.zip` or transferred to the VPS. Use `-CleanBuild` only when cache
+corruption, a toolchain change, or controlled troubleshooting justifies discarding it:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Build-RhemaRelease.ps1 `
+  -Environment Test -PublicBaseUrl 'https://63.141.230.56' `
+  -ExpectedCommit (git rev-parse HEAD).Trim() -CleanBuild
+```
+
+The builder runs one `npm ci`. It copies that locked dependency tree into staging
+and runs `npm prune --omit=dev --ignore-scripts`, avoiding a second download/install
+while retaining the exact regular `next start` runtime. Syncfusion asset preparation
+runs once after secure activation. Local `npm install`/`npm ci` still prepares the
+assets through `postinstall`; builds and starts no longer repeat it.
+
+### Application rollback
+
+Deployment automatically restores the previous application files when activation
+or post-activation verification fails, restarts both services and verifies local
+health. It does **not** restore the database. Migrations deployed through this path
+must follow backward-compatible expand/contract rules.
+
+For an operator-requested rollback of the most recent deployment, run directly on
+the VPS using its deployment ID from the deployment evidence:
+
+```powershell
+$deploymentId = '<deployment-id>'
+$helper = Get-ChildItem 'C:\RhemaERP\packages\Invoke-RhemaVpsRemote-*.ps1' |
+  Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+if (-not $helper) { throw 'No versioned VPS helper was found.' }
+powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+  -File $helper.FullName -Action RollbackRelease -DeploymentId $deploymentId
+```
+
+This rollback requires the matching verified application backup and retired
+frontend retained by that deployment. Review `APPLICATION_ROLLBACK|PASS|DATABASE_UNCHANGED`.
+
+### Legacy/fallback build-on-VPS path
+
+The previous path remains available temporarily:
+
+```powershell
+# Validation only
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -DryRun
+
+# LEGACY/FALLBACK: builds before deploying
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -ReuseVerifiedArtifacts
+```
+
+Use the legacy path only when the controlled build host or artifact transfer is
+unavailable. It now preserves `.next\cache` and uses the build wrapper's heap
+default, but it still installs/builds on the deployment machine.
+
+### Manual VPS validation required
+
+After the first deploy-only release, verify:
+
+1. `RhemaERPAPI`, `RhemaERPFrontend`, and `RhemaERPCaddy` are Running.
+2. NSSM still runs `npm run start -- -p 3001` from `C:\RhemaERP\frontend`.
+3. `C:\RhemaERP\releases\<release-id>` contains `api`, `frontend`, and `release.json`.
+4. The live frontend build ID equals the manifest and its service worker contains
+   the manifest cache version.
+5. `https://63.141.230.56/login`, API live/ready/aggregate health and static chunks
+   return successfully; direct public ports 3001 and 5000 remain unreachable.
+6. Login, tenant selection, authenticated dashboard and PDF Viewer loading work in
+   a real browser; confirm the PDFium JS/WASM assets return 200.
+7. CORS accepts only the configured public origin.
+8. Migration count and latest migration match the repository, with no untrusted or
+   disabled foreign keys.
+9. Backup and deployment evidence contain hashes and stage timings but no secrets.
+10. Exercise application rollback once in the test environment and confirm the
+    database is unchanged.
+
+`Dockerfile.production` remains separate technical debt and is unchanged in Phase 1.
+Standalone `node server.js` conversion is also excluded.
 
 `-AllowDirtyWorktree` and `-AllowNonRemoteHead` are diagnostics/emergency
 overrides, not normal release options. They prevent a validation run from being
@@ -73,7 +261,7 @@ For a private HTTPS remote, the command first tries non-interactive Git and then
 uses an authenticated GitHub CLI session to verify the remote commit. It never
 opens an interactive credential prompt during a deployment.
 
-The remainder of this document is the detailed recovery and manual procedure.
+The remainder of this document retains the detailed recovery and legacy manual procedure.
 
 ### Deploy and prepare the QS UAT report on the VPS
 
@@ -84,12 +272,54 @@ release checkout, invoke the wrapper as one script:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-QsUatVps.ps1
 ```
 
-This uses the normal deployment's preflight, backup, migration, seed and smoke
+This builds one immutable release and passes it to the normal deployer with
+`-DeployOnly`. The deployer retains its preflight, backup, migration, seed and smoke
 gates, then generates the read-only QS prerequisite report and VPS walkthrough.
 It stops on deployment failure and does not run the report or print completion.
 If only the report fails, it explicitly distinguishes that from deployment failure.
 The default target remains the previously cut-over test database
 `RhemaERP_VpsTest_20260926_173800`; the report checks the actual service target.
+
+For the normal one-command test VPS update, build, activation, and readiness run:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-QsUatVps.ps1 -UpdateSource
+```
+
+The builder prints `RELEASE_ARTIFACT_DIRECTORY|<path>`. If activation or a later
+check fails after that marker, correct the reported blocker and reuse the exact
+verified release without another frontend or API build:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\Deploy-QsUatVps.ps1 `
+  -ArtifactDirectory 'C:\Users\Administrator\Documents\ERP\RHEMA-ERP\artifacts\vps-releases\<release-id>'
+```
+
+Do not use `-CleanBuild` during a routine deployment; it deliberately discards
+the persistent Next.js compilation cache. `-LegacyFullBuild` keeps the original
+all-in-one deployer available for an explicit diagnostic or recovery run.
+
+The release builder packages both artifacts with Windows `tar.exe` in ZIP mode.
+It avoids the multi-hour PowerShell `Compress-Archive -Optimal` pass and keeps a
+managed .NET ZIP fallback for older hosts. Both archives retain SHA-256 and
+entry-level validation before activation.
+
+The one-command QS wrapper now runs `Deploy-RhemaVps.ps1 -PreflightOnly` before
+building. Missing migration probes, retained-data blockers, service drift, or VPS
+configuration errors therefore stop before npm, .NET publish, or Next.js work.
+Guard probes run again after the API is stopped and immediately before migration
+startup. The Windows CI release-contract job rejects future guarded migrations
+without source-hash-pinned coverage.
+
+If a complete build passed but activation failed only because of a deployment-script
+or preflight defect, retain that release directory. After the fix is merged and the
+VPS checkout is clean and current, `Complete-RhemaReleasePackaging.ps1` can promote
+the already-built ZIPs to the new script-only commit. It verifies ancestry, confirms
+that `src` and `frontend` build inputs did not change, validates archive contents,
+and recomputes both hashes before rewriting the manifest. It refuses reuse when any
+application input changed.
 
 For the explicitly authorized QS UAT configuration auto-approval, run:
 
@@ -254,12 +484,16 @@ backup steps. A failure during packaging occurs before fresh database creation
 or service changes. Do not use this retry to bypass a later migration/cutover
 failure; inspect that deployment's evidence first.
 
-### Procurement, Inventory and QS deployment seeds
+### Explicit Procurement, Inventory and QS UAT preparation
 
-Test deployments automatically run the operational baseline. Fresh cutovers run
-`seed-deployment-uat` (base plus operational seeds) twice before changing services,
-and verify stable identities and master data. Later ordinary deployments run
-`seed-operational-uat` after migrations and verify its database results.
+Normal existing-database deployments do not run module UAT seeds. Pass
+`-PrepareOperationalUat` only for an explicitly requested shared Procurement,
+Inventory and QS test-data preparation; that path runs `seed-operational-uat`
+after migrations and verifies its database results. The QS wrapper adds this
+switch only when `-PrepareQsUat` is selected. Fresh test-database cutovers remain
+an explicit provisioning operation and run `seed-deployment-uat` (base plus
+operational seeds) twice before changing services, then verify stable identities
+and master data against the fresh target.
 
 | Area | Dedicated usernames |
 |---|---|
@@ -682,7 +916,7 @@ Restore the database backup only when migration/data rollback is required and ex
 
 5. Preserve the existing Caddy gateway.
 
-   `RhemaERPCaddy` owns the public certificate and routes `/api/*` to `127.0.0.1:5000`; remaining paths go to `127.0.0.1:3001`. Check API health directly on loopback because the current Caddyfile does not expose `/health*` publicly.
+   `RhemaERPCaddy` owns the public certificate and routes `/api/*` to `127.0.0.1:5000`; remaining paths go to `127.0.0.1:3001`. Operators check `/health*` directly on loopback. Browser screens use the sanitized `/api/health*` aliases so they stay within the public API route without exposing the private loopback paths.
 
 6. Deploy API and frontend together when DTOs or browser-facing contracts change.
 

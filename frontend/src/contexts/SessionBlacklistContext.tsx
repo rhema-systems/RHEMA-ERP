@@ -5,6 +5,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { authService } from '../services/auth';
 import { useQueryClient } from '@tanstack/react-query';
 import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../lib/auth-redirect';
+import { browserSessionCoordinator } from '../services/browser-session-coordinator';
 
 interface SessionBlacklistContextType {
   isSessionTerminated: boolean;
@@ -198,6 +199,22 @@ export function SessionBlacklistProvider({ children }: SessionBlacklistProviderP
       window.removeEventListener('storage', handleAuthStorageChange);
     };
   }, [pathname, queryClient, router]);
+
+  useEffect(() => browserSessionCoordinator.subscribe(event => {
+    if (event.type === 'login' || event.type === 'token-refreshed' || event.type === 'activity') {
+      if (authService.isAuthenticated()) {
+        setIsSessionTerminated(false);
+        setHasShownAlert(false);
+      }
+      return;
+    }
+
+    authService.clearTokens();
+    queryClient.clear();
+    if (pathname !== '/login' && pathname !== '/') {
+      router.replace(buildLoginRedirectUrl(getCurrentRelativeUrl()));
+    }
+  }), [pathname, queryClient, router]);
 
   const hideSessionTerminatedAlert = useCallback(() => {
     handleRedirectToLogin();

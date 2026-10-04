@@ -50,8 +50,8 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             return
             [
                 Stage("Legal Intake", "Legal Admin Assistant", "The linked property transaction and draft agreement are registered in Legal.", ["Confirm Estate source reference", "Confirm draft agreement is attached", "Assign Legal Officer"]),
-                Stage("Agreement Vetting", "Legal Officer", "The Legal Officer checks parties, property particulars, commercial terms, obligations, execution blocks, and legal risk.", ["Verify parties and property", "Review clauses and schedules", "Approve or return for correction"]),
-                Stage("Head of Legal Signature", "Head of Legal", "The Head of Legal signs the vetted agreement before it is dispatched to the customer portal or returned to Property Management.", ["Confirm Legal Officer recommendation", "Record Head of Legal signature", "Dispatch signed agreement to the customer portal"])
+                Stage("Agreement Vetting", "Legal Officer", "The Legal Officer checks parties, property particulars, commercial terms, obligations, execution blocks, and legal risk before the customer signs.", ["Verify parties and property", "Review clauses and schedules", "Release vetted agreement to customer or return for correction"]),
+                Stage("Head of Legal Signature", "Head of Legal", "After the customer returns the signed agreement, the Head of Legal applies the final Legal signature.", ["Confirm customer signed agreement", "Apply Head of Legal signature", "Return final signed agreement to Property Management"])
             ];
         }
 

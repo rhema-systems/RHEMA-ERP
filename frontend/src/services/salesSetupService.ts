@@ -38,11 +38,12 @@ export interface SalesSaleableItemDto {
   commercialStatus?: string;
   customerId?: string;
   customerName?: string;
-  estimatedValue?: number;
+  estimatedValue?: number | null;
   currency?: string;
-  areaSquareMeters?: number;
+  areaSquareMeters?: number | null;
   propertyReference?: string;
   canCreateSalesOrder: boolean;
+  salesOrderIneligibilityReason?: string;
   canCreateSalesAgreement: boolean;
   canCreateLeaseAgreement: boolean;
   suggestedOrderType?: string;
@@ -61,15 +62,33 @@ export interface SalesSaleableItemDto {
   locationId?: string;
   locationName?: string;
   unitOfMeasure?: string;
-  currentQuantity?: number;
-  availableQuantity?: number;
-  allocatedQuantity?: number;
+  currentQuantity?: number | null;
+  availableQuantity?: number | null;
+  allocatedQuantity?: number | null;
   shouldCreateSalesAllocation: boolean;
   activeAllocationId?: string;
   activeAllocationStatus?: string;
   activeAllocationReservedUntil?: string;
+  activeAllocationBusinessPartnerId?: string;
+  activeAllocationOpportunityId?: string;
+  activeAllocationSalesOrderId?: string;
   activeAllocationCustomerName?: string;
   hasActiveAllocation: boolean;
+}
+
+export interface SalesSaleableSourceFilterDefinitionDto {
+  field: string;
+  displayName: string;
+  valueType: 'text' | 'boolean' | 'select' | string;
+  isRequired: boolean;
+  defaultValue?: string;
+  helpText?: string;
+  options: string[];
+}
+
+export interface SalesSaleableSourceAdapterDefinitionDto {
+  adapterKey: string;
+  filters: SalesSaleableSourceFilterDefinitionDto[];
 }
 
 export interface UpsertSalesSaleableSourceDto {
@@ -97,6 +116,10 @@ const endpoint = '/sales/setup/saleable-sources';
 export const salesSetupService = {
   getSaleableSources(includeInactive = false) {
     return apiService.get<SalesSaleableSourceDto[]>(endpoint, { includeInactive });
+  },
+
+  getSaleableSourceAdapters() {
+    return apiService.get<SalesSaleableSourceAdapterDefinitionDto[]>('/sales/setup/saleable-source-adapters');
   },
 
   searchSaleableItems(sourceId: string, search?: string, take = 50) {

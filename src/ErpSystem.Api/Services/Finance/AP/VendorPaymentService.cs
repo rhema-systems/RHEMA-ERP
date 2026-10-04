@@ -62,6 +62,7 @@ namespace ErpSystem.Api.Services.Finance.AP
         private ExchangeRateQuoteSide? _settlementQuoteSide;
         private readonly IFinanceSourceDimensionService? _sourceDimensions;
         private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthorities;
 
         private static readonly JsonSerializerOptions PaymentControlJsonOptions = new()
         {
@@ -94,7 +95,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IControlledFileUploadService? controlledFiles = null,
             ICentralDocumentRepositoryFileService? centralDocuments = null,
             IFinanceSourceDimensionService? sourceDimensions = null,
-            IFinancePaymentDimensionAdapter? paymentDimensions = null)
+            IFinancePaymentDimensionAdapter? paymentDimensions = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthorities = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
@@ -117,6 +119,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             _centralDocuments = centralDocuments;
             _sourceDimensions = sourceDimensions;
             _paymentDimensions = paymentDimensions;
+            _sourceBookAuthorities = sourceBookAuthorities;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -366,7 +369,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                     PaymentDate = payment.PaymentDate,
                     TotalAmount = payment.TotalAmount,
                     AllocatedAmount = payment.AllocatedAmount,
-                    AvailableAmount = payment.TotalAmount - payment.AllocatedAmount,
+                    AvailableAmount = payment.UnallocatedAmount,
                     CurrencyCode = payment.CurrencyCode,
                     Status = payment.Status,
                     JournalEntryId = payment.JournalEntryId!.Value
@@ -484,16 +487,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                             : invoice.ExchangeRate,
                         requireApprovedSource: !string.Equals(invoiceCurrency, baseCurrencyCode, StringComparison.OrdinalIgnoreCase),
                         cancellationToken);
-                    allocationWhtFunctionalAmount += RoundMoney(
-                        Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate);
                     pendingWhtScopes.Add(new PendingWhtScope(
                         invoice.Id,
                         invoice.WithholdingContractReference,
                         invoice.WithholdingSupplyCategory,
-                        RoundMoney((Math.Max(requestedAllocation.AllocatedAmount, 0m) +
-                            Math.Max(requestedAllocation.DiscountAmount, 0m) +
-                            Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)) * invoiceRate.Rate),
-                        RoundMoney(Math.Max(requestedAllocation.WithholdingTaxAmount, 0m) * invoiceRate.Rate)));
+                        invoice.WithholdingTaxId.HasValue ? ApWithholdingBasis.FunctionalBase(invoice,
+                            RoundMoney(Math.Max(requestedAllocation.AllocatedAmount, 0m) +
+                                Math.Max(requestedAllocation.DiscountAmount, 0m) +
+                                Math.Max(requestedAllocation.WithholdingTaxAmount, 0m))) : 0m,
+                        RoundMoney(Math.Max(requestedAllocation.WithholdingTaxAmount, 0m)),
+                        RoundMoney(requestedAllocation.AllocatedAmount + requestedAllocation.DiscountAmount + requestedAllocation.WithholdingTaxAmount),
+                        invoiceRate.Id));
                 }
             }
             allocationWhtFunctionalAmount = RoundMoney(allocationWhtFunctionalAmount);
@@ -501,17 +505,6 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (invoiceWithholding != null)
                 dto.WithholdingTaxId = invoiceWithholding.TaxId;
             var requestedWhtAmount = allocationWhtFunctionalAmount;
-            // The header value is retained for API compatibility and functional-currency
-            // reporting, but allocation rows are now the authoritative source. Reject a stale
-            // client total instead of silently accepting two contradictory WHT representations.
-            // Zero is the documented cross-currency client sentinel requesting server derivation;
-            // only a positive legacy/header assertion is compared with the line roll-up.
-            if (dto.WithholdingTaxAmount is > 0m &&
-                Math.Abs(RoundMoney(dto.WithholdingTaxAmount.Value - requestedWhtAmount)) > 0.01m)
-            {
-                throw new InvalidOperationException(
-                    $"Payment WHT total {dto.WithholdingTaxAmount.Value:N2} does not match the line-level functional WHT total {requestedWhtAmount:N2}. Recalculate the payment before saving.");
-            }
             WhtCalculationResultDto? whtCalculation = null;
             if (dto.WithholdingTaxId.HasValue)
             {
@@ -532,16 +525,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                     excludeVendorPaymentId: null,
                     cancellationToken);
                 whtCalculation = RollUpWhtCalculations(calculations);
-
-                if (Math.Abs(RoundMoney(requestedWhtAmount - whtCalculation.WithholdingAmount)) > 0.01m)
-                {
-                    throw new InvalidOperationException(
-                        $"WHT allocations total {requestedWhtAmount:N2}, but configured tax {whtCalculation.TaxCode} requires {whtCalculation.WithholdingAmount:N2}. Recalculate the payment before saving.");
-                }
+                requestedWhtAmount = whtCalculation.WithholdingAmount;
             }
-            else if (requestedWhtAmount > 0m || dto.WithholdingTaxRate > 0m)
+            else if (pendingWhtScopes.Sum(item => item.WithholdingAmount) > 0m || dto.WithholdingTaxRate > 0m)
             {
                 throw new InvalidOperationException("Select an active configured WHT tax before entering a withholding amount or rate.");
+            }
+
+            // The header is a GHS statutory roll-up. A zero value is the documented
+            // server-derivation sentinel for foreign-currency settlements.
+            if (dto.WithholdingTaxAmount is > 0m &&
+                Math.Abs(RoundMoney(dto.WithholdingTaxAmount.Value - requestedWhtAmount)) > 0.01m)
+            {
+                throw new InvalidOperationException(
+                    $"Payment WHT total {dto.WithholdingTaxAmount.Value:N2} does not match the governed GHS WHT total {requestedWhtAmount:N2}. Recalculate the payment before saving.");
             }
 
             var whtAmount = whtCalculation?.WithholdingAmount ?? 0m;
@@ -1391,6 +1388,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                         !item.IsDeleted)
                     .SingleOrDefaultAsync(cancellationToken)
                     ?? throw new InvalidOperationException("The original AP payment posting event was not found.");
+                var paymentAuthority = await ResolvePostedPaymentBookAuthorityAsync(payment, cancellationToken);
+                if (originalPosting.AccountingBookId != paymentAuthority.AccountingBookId ||
+                    originalPosting.BookClassification != paymentAuthority.BookCode ||
+                    originalPosting.FunctionalCurrencyCode != paymentAuthority.FunctionalCurrencyCode)
+                    throw new InvalidOperationException("The original AP payment event does not match its frozen book authority.");
 
                 var reversalPlan = await _financePostingEngine.GetReversalPlanAsync(
                     originalPosting.Id,
@@ -1408,8 +1410,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     Description = $"Reverse vendor payment {payment.PaymentNumber} - {payment.BusinessPartner.PartnerName}",
                     PostingDate = reversalDate,
                     JournalType = "AP Payment Reversal",
-                    AccountingBookCode = "IFRS",
-                    FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
+                    AccountingBookCode = paymentAuthority.BookCode,
+                    FunctionalCurrencyCode = paymentAuthority.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                     ReversalReason = reason,
                     ReversalType = "SourceDocument",
@@ -1434,6 +1436,15 @@ namespace ErpSystem.Api.Services.Finance.AP
                 {
                     if (!settlement.PostingEventId.HasValue || !settlement.JournalEntryId.HasValue)
                         throw new InvalidOperationException("A realized FX settlement is missing its original posting links.");
+                    var fxEvent = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(item =>
+                            item.TenantId == TenantId && !item.IsDeleted && item.Id == settlement.PostingEventId &&
+                            item.JournalEntryId == settlement.JournalEntryId && item.PostingStatus == "Posted")
+                        .SingleOrDefaultAsync(cancellationToken)
+                        ?? throw new InvalidOperationException("The original realized FX posting event is unavailable.");
+                    if (fxEvent.AccountingBookId != paymentAuthority.AccountingBookId ||
+                        fxEvent.BookClassification != paymentAuthority.BookCode ||
+                        fxEvent.FunctionalCurrencyCode != paymentAuthority.FunctionalCurrencyCode)
+                        throw new InvalidOperationException("Realized FX authority does not match the AP payment book.");
 
                     var fxPlan = await _financePostingEngine.GetReversalPlanAsync(
                         settlement.PostingEventId.Value,
@@ -1451,8 +1462,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                         Description = $"Reverse AP realized FX for {payment.PaymentNumber}",
                         PostingDate = reversalDate,
                         JournalType = "Realized FX Reversal",
-                        AccountingBookCode = "IFRS",
-                        FunctionalCurrencyCode = settlement.FunctionalCurrencyCode,
+                        AccountingBookCode = fxEvent.BookClassification,
+                        FunctionalCurrencyCode = fxEvent.FunctionalCurrencyCode,
                         ReversalOfJournalEntryId = fxPlan.OriginalJournalEntryId,
                         ReversalReason = reason,
                         ReversalType = "SourceDocument",
@@ -1510,6 +1521,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                         DiscountFunctionalAmount = -allocation.DiscountFunctionalAmount,
                         WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                         WithholdingTaxFunctionalAmount = -allocation.WithholdingTaxFunctionalAmount,
+                        WithholdingTaxBaseFunctionalAmount = -allocation.WithholdingTaxBaseFunctionalAmount,
+                        WithholdingTaxStatutoryExchangeRateId = allocation.WithholdingTaxStatutoryExchangeRateId,
+                        WithholdingTaxStatutoryExchangeRate = allocation.WithholdingTaxStatutoryExchangeRate,
+                        WithholdingTaxStatutoryExchangeRateDate = allocation.WithholdingTaxStatutoryExchangeRateDate,
+                        WithholdingTaxStatutoryExchangeRateSource = allocation.WithholdingTaxStatutoryExchangeRateSource,
+                        WithholdingTaxStatutoryExchangeRateReference = allocation.WithholdingTaxStatutoryExchangeRateReference,
                         AllocationDate = reversalDate,
                         Notes = $"Payment reversal of allocation {allocation.Id}: {reason}",
                         IsReversal = true,
@@ -1906,6 +1923,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DiscountFunctionalAmount = settlement.DiscountFunctionalAmount,
                     WithholdingTaxAmount = withholdingTaxAmount,
                     WithholdingTaxFunctionalAmount = settlement.WithholdingFunctionalAmount,
+                    WithholdingTaxBaseFunctionalAmount = payment.WithholdingTaxId.HasValue
+                        ? ApWithholdingBasis.FunctionalBase(invoice, settlement.SettlementFunctionalAmount) : null,
                     AllocationDate = now,
                     Notes = alloc.Notes,
                     PaymentReadinessControlEventId = paymentDecision.Event.Id,
@@ -1968,6 +1987,17 @@ namespace ErpSystem.Api.Services.Finance.AP
             // server-owned WHT threshold evidence after every allocation change so a caller
             // cannot bypass the configured Ghana WHT policy by adding lines after creation.
             await SynchronizeApWithholdingComplianceAsync(payment, effectiveAllocations, cancellationToken);
+            foreach (var resultAllocation in result.Allocations)
+            {
+                var stored = createdAllocations.Single(item => item.Id == resultAllocation.Id);
+                resultAllocation.WithholdingTaxBaseFunctionalAmount = stored.WithholdingTaxBaseFunctionalAmount;
+                resultAllocation.WithholdingTaxFunctionalAmount = stored.WithholdingTaxFunctionalAmount;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateId = stored.WithholdingTaxStatutoryExchangeRateId;
+                resultAllocation.WithholdingTaxStatutoryExchangeRate = stored.WithholdingTaxStatutoryExchangeRate;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateDate = stored.WithholdingTaxStatutoryExchangeRateDate;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateSource = stored.WithholdingTaxStatutoryExchangeRateSource;
+                resultAllocation.WithholdingTaxStatutoryExchangeRateReference = stored.WithholdingTaxStatutoryExchangeRateReference;
+            }
             payment.UpdatedAt = now;
             payment.UpdatedBy = UserName;
             await _unitOfWork.Repository<VendorPayment>().UpdateAsync(payment);
@@ -2045,10 +2075,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 if (!payment.JournalEntryId.HasValue || !payment.IsSupplierAdvance)
                     throw new InvalidOperationException("Only a posted supplier advance can be applied through this workflow.");
+                var paymentAuthority = await ResolvePostedPaymentBookAuthorityAsync(payment, cancellationToken);
 
                 var settings = await GetFinanceSettingsAsync(cancellationToken);
                 var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
-                var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+                var functionalCurrency = paymentAuthority.FunctionalCurrencyCode;
                 var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
                 var paymentRate = NormalizeExchangeRate(payment.ExchangeRate);
                 if (!string.Equals(paymentCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase) &&
@@ -2096,6 +2127,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                         throw new InvalidOperationException("Supplier advance can only be applied to invoices for the same supplier.");
                     if (!invoice.JournalEntryId.HasValue)
                         throw new InvalidOperationException($"Supplier advance cannot be applied to unposted invoice '{invoice.InvoiceNumber}'.");
+                    var invoiceAuthority = await ResolveInvoiceBookAuthorityAsync(
+                        new[] { invoice.Id }, cancellationToken);
+                    if (invoiceAuthority != paymentAuthority)
+                        throw new InvalidOperationException(
+                            "AP_PAYMENT_MIXED_BOOKS: A supplier advance can only be applied to an invoice in its original accounting book.");
                     var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, functionalCurrency);
                     var invoiceRate = await ResolveApprovedSettlementRateAsync(
                         invoiceCurrency,
@@ -2288,7 +2324,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                         Description = $"Apply supplier advance {payment.PaymentNumber} to invoice {invoice.InvoiceNumber}",
                         PostingDate = applicationDate,
                         JournalType = "AP Supplier Advance Application",
-                        AccountingBookCode = "IFRS",
+                        AccountingBookCode = paymentAuthority.BookCode,
                         FunctionalCurrencyCode = functionalCurrency,
                         IdempotencyKey = $"AP:VendorPaymentAdvanceApplication:{payment.TenantId:N}:{allocation.Id:N}:Post",
                         ReturnExistingOnDuplicate = true,
@@ -2677,6 +2713,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DiscountFunctionalAmount = -allocation.DiscountFunctionalAmount,
                     WithholdingTaxAmount = -allocation.WithholdingTaxAmount,
                     WithholdingTaxFunctionalAmount = -allocation.WithholdingTaxFunctionalAmount,
+                    WithholdingTaxBaseFunctionalAmount = -allocation.WithholdingTaxBaseFunctionalAmount,
+                    WithholdingTaxStatutoryExchangeRateId = allocation.WithholdingTaxStatutoryExchangeRateId,
+                    WithholdingTaxStatutoryExchangeRate = allocation.WithholdingTaxStatutoryExchangeRate,
+                    WithholdingTaxStatutoryExchangeRateDate = allocation.WithholdingTaxStatutoryExchangeRateDate,
+                    WithholdingTaxStatutoryExchangeRateSource = allocation.WithholdingTaxStatutoryExchangeRateSource,
+                    WithholdingTaxStatutoryExchangeRateReference = allocation.WithholdingTaxStatutoryExchangeRateReference,
                     AllocationDate = now,
                     Notes = $"Reversal of allocation {allocationId}: {reason}",
                     IsReversal = true,
@@ -2866,6 +2908,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                 WithholdingTaxAmount = a.WithholdingTaxAmount,
                 WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                WithholdingTaxBaseFunctionalAmount = a.WithholdingTaxBaseFunctionalAmount,
+                WithholdingTaxStatutoryExchangeRateId = a.WithholdingTaxStatutoryExchangeRateId,
+                WithholdingTaxStatutoryExchangeRate = a.WithholdingTaxStatutoryExchangeRate,
+                WithholdingTaxStatutoryExchangeRateDate = a.WithholdingTaxStatutoryExchangeRateDate,
+                WithholdingTaxStatutoryExchangeRateSource = a.WithholdingTaxStatutoryExchangeRateSource,
+                WithholdingTaxStatutoryExchangeRateReference = a.WithholdingTaxStatutoryExchangeRateReference,
                 AllocationDate = a.AllocationDate,
                 Notes = a.Notes,
                 IsReversal = a.IsReversal,
@@ -3350,6 +3398,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
                 result.Add(new OutstandingVendorInvoiceDto
                 {
+                    NetSupplyAmount = i.SubTotal,
                     InvoiceId = i.Id,
                     InvoiceNumber = i.InvoiceNumber,
                     SupplierInvoiceNumber = i.SupplierInvoiceNumber,
@@ -3625,6 +3674,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                         DiscountFunctionalAmount = -original.DiscountFunctionalAmount,
                         WithholdingTaxAmount = -original.WithholdingTaxAmount,
                         WithholdingTaxFunctionalAmount = -original.WithholdingTaxFunctionalAmount,
+                        WithholdingTaxBaseFunctionalAmount = -original.WithholdingTaxBaseFunctionalAmount,
+                        WithholdingTaxStatutoryExchangeRateId = original.WithholdingTaxStatutoryExchangeRateId,
+                        WithholdingTaxStatutoryExchangeRate = original.WithholdingTaxStatutoryExchangeRate,
+                        WithholdingTaxStatutoryExchangeRateDate = original.WithholdingTaxStatutoryExchangeRateDate,
+                        WithholdingTaxStatutoryExchangeRateSource = original.WithholdingTaxStatutoryExchangeRateSource,
+                        WithholdingTaxStatutoryExchangeRateReference = original.WithholdingTaxStatutoryExchangeRateReference,
                         AllocationDate = now,
                         Notes = $"Controlled void reversal of allocation {original.Id}: {reason.Trim()}",
                         IsReversal = true,
@@ -5135,6 +5190,12 @@ namespace ErpSystem.Api.Services.Finance.AP
             EnsureAllocationTotalIsValid(payment, activeAllocations);
             var activeSupplierDebitApplications = GetEffectiveSupplierDebitNoteApplications(
                 payment.SupplierDebitNoteApplications);
+            var settlementInvoiceIds = activeAllocations.Select(item => item.VendorInvoiceId)
+                .Concat(activeSupplierDebitApplications.Select(item => item.VendorInvoiceId))
+                .Distinct()
+                .ToArray();
+            var bookAuthority = await ResolveAndFreezePaymentBookAuthorityAsync(
+                payment, settlementInvoiceIds, cancellationToken);
             if (activeSupplierDebitApplications.Count > 0 && activeAllocations.Count == 0)
                 throw new InvalidOperationException(
                     "A supplier debit note cannot turn a cash payment into a supplier advance. Allocate the payment cash before posting or use a standalone debit-note application workflow.");
@@ -5290,7 +5351,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             var supplier = await ResolvePaymentSupplierForPostingAsync(payment, cancellationToken);
             var settings = await GetFinanceSettingsAsync(cancellationToken);
-            var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+            var functionalCurrency = bookAuthority.FunctionalCurrencyCode;
             var paymentCurrency = NormalizeCurrency(payment.CurrencyCode, functionalCurrency);
             NormalizeAndValidateAllocationCurrencyEvidence(
                 payment,
@@ -5461,9 +5522,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                         settlementDimensions, allocation.Id, FinanceSettlementComponentType.WithholdingTax,
                         allocation.WithholdingTaxAmount, allocation.WithholdingTaxFunctionalAmount,
                         allocation.VendorInvoiceId, allocation.InvoiceCurrencyCode,
-                        allocation.InvoiceSettlementExchangeRateId,
-                        allocation.InvoiceSettlementExchangeRate);
+                        allocation.WithholdingTaxStatutoryExchangeRateId
+                            ?? allocation.InvoiceSettlementExchangeRateId,
+                        allocation.WithholdingTaxStatutoryExchangeRate
+                            ?? allocation.InvoiceSettlementExchangeRate);
                     foreach (var component in evidence)
+                    {
                         postingLines.Add(BuildPostingLine(
                             taxAccountId,
                             $"Withholding tax - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
@@ -5481,6 +5545,49 @@ namespace ErpSystem.Api.Services.Finance.AP
                             sourceDocumentLineId: component.OriginatingSourceLineId,
                             dimensions: await ResolveVendorSettlementPostingDimensionsAsync(
                                 component, taxAccountId, payment.PaymentDate, cancellationToken)));
+
+                        // Ghana WHT is payable in GHS at the governed BoG statutory rate. Cash,
+                        // discount and AP-control settlement remain measured at the approved
+                        // commercial settlement rate. The difference is an auditable FX variance;
+                        // omitting it would either misstate the tax liability or leave the payment
+                        // journal unbalanced whenever the two approved rates differ.
+                        var commercialFunctionalAmount = RoundMoney(
+                            component.TransactionAmount *
+                            NormalizeExchangeRate(allocation.InvoiceSettlementExchangeRate));
+                        var statutoryFxVariance = RoundMoney(
+                            component.FunctionalAmount - commercialFunctionalAmount);
+                        if (statutoryFxVariance != 0m)
+                        {
+                            var isLoss = statutoryFxVariance > 0m;
+                            var varianceAccountId = isLoss
+                                ? settings.RealizedFxLossAccountId
+                                : settings.RealizedFxGainAccountId;
+                            var varianceAccount = await ResolvePaymentPostingAccountAsync(
+                                varianceAccountId ?? throw new InvalidOperationException(
+                                    $"Realized FX {(isLoss ? "loss" : "gain")} account is not configured for the Ghana WHT statutory conversion variance."),
+                                isLoss ? "realized FX loss account" : "realized FX gain account",
+                                accountCache,
+                                allowControlAccount: false,
+                                requireDirectPosting: true,
+                                cancellationToken);
+                            var varianceAmount = Math.Abs(statutoryFxVariance);
+                            postingLines.Add(BuildPostingLine(
+                                varianceAccount.Id,
+                                $"Ghana WHT statutory FX {(isLoss ? "loss" : "gain")} - {payment.PaymentNumber} / {allocation.VendorInvoice.InvoiceNumber}",
+                                debitTransactionAmount: isLoss ? varianceAmount : 0m,
+                                creditTransactionAmount: isLoss ? 0m : varianceAmount,
+                                functionalCurrency,
+                                functionalCurrency,
+                                exchangeRate: 1m,
+                                payment.PaymentDate,
+                                payment.PaymentNumber,
+                                lineNumber++,
+                                isLoss ? "AP-WHT-Statutory-FX-Loss" : "AP-WHT-Statutory-FX-Gain",
+                                sourceDocumentLineId: component.OriginatingSourceLineId,
+                                dimensions: await ResolveVendorSettlementPostingDimensionsAsync(
+                                    component, varianceAccount.Id, payment.PaymentDate, cancellationToken)));
+                        }
+                    }
                 }
             }
 
@@ -5503,12 +5610,227 @@ namespace ErpSystem.Api.Services.Finance.AP
                     : $"Vendor payment {payment.PaymentNumber} - {payment.BusinessPartnerName}",
                 PostingDate = payment.PaymentDate,
                 JournalType = "AP Payment",
-                AccountingBookCode = "IFRS",
+                AccountingBookCode = bookAuthority.BookCode,
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = $"AP:VendorPayment:{payment.TenantId:N}:{payment.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
                 Lines = postingLines
             };
+        }
+
+        private sealed record PaymentBookAuthority(
+            Guid AccountingBookId,
+            string BookCode,
+            string FunctionalCurrencyCode);
+
+        private async Task<PaymentBookAuthority> ResolveAndFreezePaymentBookAuthorityAsync(
+            VendorPayment payment,
+            IReadOnlyCollection<Guid> invoiceIds,
+            CancellationToken cancellationToken)
+        {
+            PaymentBookAuthority authority;
+            if (invoiceIds.Count > 0)
+            {
+                authority = await ResolveInvoiceBookAuthorityAsync(invoiceIds, cancellationToken);
+            }
+            else if (payment.JournalEntryId.HasValue)
+            {
+                authority = await ResolvePostedPaymentBookAuthorityAsync(payment, cancellationToken);
+            }
+            else if (payment.AccountingBookId.HasValue &&
+                     !string.IsNullOrWhiteSpace(payment.AccountingBookCode) &&
+                     !string.IsNullOrWhiteSpace(payment.FunctionalCurrencyCode))
+            {
+                authority = new PaymentBookAuthority(
+                    payment.AccountingBookId.Value,
+                    payment.AccountingBookCode,
+                    payment.FunctionalCurrencyCode);
+                await ValidatePaymentBookAsync(authority, requirePostingEligible: true, cancellationToken);
+            }
+            else
+            {
+                authority = await ResolveUnallocatedPaymentBookAuthorityAsync(payment, cancellationToken);
+            }
+
+            FreezePaymentBookAuthority(payment, authority);
+            return authority;
+        }
+
+        private async Task<PaymentBookAuthority> ResolveInvoiceBookAuthorityAsync(
+            IReadOnlyCollection<Guid> invoiceIds,
+            CancellationToken cancellationToken)
+        {
+            var distinctIds = invoiceIds.Distinct().ToArray();
+            if (distinctIds.Length == 0)
+                throw new InvalidOperationException("At least one posted invoice is required to derive payment book authority.");
+            var invoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted && distinctIds.Contains(item.Id))
+                .Select(item => new
+                {
+                    item.Id,
+                    item.JournalEntryId,
+                    item.InvoiceNumber,
+                    item.LeaseScheduleLineId,
+                    item.SourceBookAuthorityId
+                })
+                .ToListAsync(cancellationToken);
+            if (invoices.Count != distinctIds.Length)
+            {
+                var missingId = distinctIds.First(id => invoices.All(invoice => invoice.Id != id));
+                throw new KeyNotFoundException($"Vendor invoice with Id '{missingId}' not found.");
+            }
+            var unposted = invoices.FirstOrDefault(item => !item.JournalEntryId.HasValue);
+            if (unposted != null)
+                throw new InvalidOperationException($"AP payment cannot settle unposted invoice '{unposted.InvoiceNumber}'.");
+
+            var events = await _unitOfWork.Repository<FinancePostingEvent>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted &&
+                    item.SourceDocumentType == "VendorInvoice" && distinctIds.Contains(item.SourceDocumentId) &&
+                    item.PostingAction == "Post" && item.PostingStatus == "Posted" && item.JournalEntryId.HasValue)
+                .Include(item => item.JournalEntry)
+                .ToListAsync(cancellationToken);
+            var authorities = new List<PaymentBookAuthority>();
+            foreach (var invoice in invoices)
+            {
+                var exact = events.Where(item => item.SourceDocumentId == invoice.Id &&
+                    item.JournalEntryId == invoice.JournalEntryId).ToArray();
+                if (exact.Length != 1 || exact[0].JournalEntry == null)
+                    throw new InvalidOperationException(
+                        $"Invoice '{invoice.InvoiceNumber}' does not have one authoritative central posting event.");
+                var postingEvent = exact[0];
+                var journal = postingEvent.JournalEntry;
+                if (journal.TenantId != TenantId || journal.IsDeleted || journal.PostingStatus != "Posted" ||
+                    journal.IsReversed || journal.ReversalJournalEntryId.HasValue ||
+                    journal.ReplicatedFromJournalEntryId.HasValue || journal.SourceDocumentType != "VendorInvoice" ||
+                    journal.SourceDocumentId != invoice.Id || journal.AccountingBookId != postingEvent.AccountingBookId ||
+                    journal.BookClassification != postingEvent.BookClassification)
+                    throw new InvalidOperationException(
+                        $"Invoice '{invoice.InvoiceNumber}' posting authority is reversed, replicated, or inconsistent.");
+                if (invoice.SourceBookAuthorityId.HasValue)
+                {
+                    if (_sourceBookAuthorities == null)
+                        throw new InvalidOperationException(
+                            "AP payment source-book authority validation is not configured.");
+                    var bound = await _sourceBookAuthorities.RequireBoundOriginalAsync(
+                        invoice.SourceBookAuthorityId.Value,
+                        cancellationToken);
+                    if (bound.OriginModuleCode != "FIN" || bound.SourceDocumentType != "VENDORINVOICE" ||
+                        bound.SourceDocumentId != invoice.Id || bound.PostingAction != "POST" ||
+                        bound.OriginalFinancePostingEventId != postingEvent.Id ||
+                        bound.OriginalJournalEntryId != journal.Id)
+                        throw new InvalidOperationException(
+                            $"Invoice '{invoice.InvoiceNumber}' bound source-book authority does not match its original posting evidence.");
+                    authorities.Add(new PaymentBookAuthority(
+                        bound.AccountingBookId,
+                        bound.AccountingBookCode,
+                        bound.FunctionalCurrencyCode));
+                    continue;
+                }
+                if (invoice.LeaseScheduleLineId.HasValue)
+                    throw new InvalidOperationException(
+                        $"LEASE_AP_SOURCE_BOOK_AUTHORITY_REQUIRED: posted lease invoice '{invoice.InvoiceNumber}' has no bound source-book authority.");
+                authorities.Add(new PaymentBookAuthority(
+                    postingEvent.AccountingBookId,
+                    postingEvent.BookClassification,
+                    postingEvent.FunctionalCurrencyCode));
+            }
+
+            var distinct = authorities.Distinct().ToArray();
+            if (distinct.Length != 1)
+                throw new InvalidOperationException("AP_PAYMENT_MIXED_BOOKS: A payment cannot settle invoices from different accounting-book authorities.");
+            await ValidatePaymentBookAsync(distinct[0], requirePostingEligible: true, cancellationToken);
+            return distinct[0];
+        }
+
+        private async Task<PaymentBookAuthority> ResolveUnallocatedPaymentBookAuthorityAsync(
+            VendorPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var bankAccount = await _unitOfWork.Repository<BankAccount>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted && item.Id == payment.BankAccountId && item.IsActive)
+                .Select(item => new { item.GLAccountId })
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "AP_PAYMENT_BOOK_AUTHORITY_REQUIRED: The supplier advance bank account is unavailable for exact-book authority.");
+            var candidates = await _unitOfWork.Repository<AccountAccountingBook>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted && item.IsEnabled &&
+                    item.AccountId == bankAccount.GLAccountId && !item.AccountingBook.IsDeleted &&
+                    item.AccountingBook.IsActive && item.AccountingBook.AllowsPosting &&
+                    item.AccountingBook.LifecycleStatus == AccountingBookLifecycleStatus.Active)
+                .Select(item => new PaymentBookAuthority(
+                    item.AccountingBookId,
+                    item.AccountingBook.Code,
+                    item.AccountingBook.FunctionalCurrencyCode!))
+                .Distinct()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (candidates.Count != 1)
+                throw new InvalidOperationException(
+                    "AP_PAYMENT_BOOK_AUTHORITY_REQUIRED: An unallocated supplier advance requires exactly one enabled bank-account book mapping; no current-primary fallback is permitted.");
+            await ValidatePaymentBookAsync(candidates[0], requirePostingEligible: true, cancellationToken);
+            return candidates[0];
+        }
+
+        private async Task<PaymentBookAuthority> ResolvePostedPaymentBookAuthorityAsync(
+            VendorPayment payment,
+            CancellationToken cancellationToken)
+        {
+            var postingEvent = await GetPostedPaymentEventAsync(payment, cancellationToken);
+            var journal = await _unitOfWork.Repository<JournalEntry>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted && item.Id == payment.JournalEntryId &&
+                    item.PostingStatus == "Posted" && !item.IsReversed && !item.ReversalJournalEntryId.HasValue &&
+                    item.ReplicatedFromJournalEntryId == null && item.SourceDocumentType == "VendorPayment" &&
+                    item.SourceDocumentId == payment.Id && item.AccountingBookId == postingEvent.AccountingBookId &&
+                    item.BookClassification == postingEvent.BookClassification)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The original AP payment journal authority is unavailable or inconsistent.");
+            var authority = new PaymentBookAuthority(
+                postingEvent.AccountingBookId,
+                postingEvent.BookClassification,
+                postingEvent.FunctionalCurrencyCode);
+            await ValidatePaymentBookAsync(authority, requirePostingEligible: false, cancellationToken);
+            FreezePaymentBookAuthority(payment, authority);
+            return authority;
+        }
+
+        private async Task ValidatePaymentBookAsync(
+            PaymentBookAuthority authority,
+            bool requirePostingEligible,
+            CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(authority.BookCode) ||
+                authority.BookCode != authority.BookCode.Trim().ToUpperInvariant() ||
+                string.IsNullOrWhiteSpace(authority.FunctionalCurrencyCode) ||
+                authority.FunctionalCurrencyCode.Length != 3 ||
+                authority.FunctionalCurrencyCode != authority.FunctionalCurrencyCode.Trim().ToUpperInvariant())
+                throw new InvalidOperationException("The AP payment accounting-book authority is noncanonical.");
+            var book = await _unitOfWork.Repository<AccountingBook>().GetQueryable(item =>
+                    item.TenantId == TenantId && !item.IsDeleted && item.Id == authority.AccountingBookId)
+                .SingleOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The AP payment accounting-book authority is unavailable in this tenant.");
+            if (book.Code != authority.BookCode || book.FunctionalCurrencyCode != authority.FunctionalCurrencyCode ||
+                requirePostingEligible && (!book.IsActive || !book.AllowsPosting ||
+                    book.LifecycleStatus != AccountingBookLifecycleStatus.Active))
+                throw new InvalidOperationException("The AP payment accounting-book authority is inconsistent or not eligible for posting.");
+        }
+
+        private static void FreezePaymentBookAuthority(
+            VendorPayment payment,
+            PaymentBookAuthority authority)
+        {
+            var any = payment.AccountingBookId.HasValue || !string.IsNullOrWhiteSpace(payment.AccountingBookCode) ||
+                !string.IsNullOrWhiteSpace(payment.FunctionalCurrencyCode);
+            var complete = payment.AccountingBookId.HasValue && !string.IsNullOrWhiteSpace(payment.AccountingBookCode) &&
+                !string.IsNullOrWhiteSpace(payment.FunctionalCurrencyCode);
+            if (any && !complete)
+                throw new InvalidOperationException("Partially frozen AP payment book authority cannot be repaired from a current default.");
+            if (complete && (payment.AccountingBookId != authority.AccountingBookId ||
+                payment.AccountingBookCode != authority.BookCode ||
+                payment.FunctionalCurrencyCode != authority.FunctionalCurrencyCode))
+                throw new InvalidOperationException("AP payment book authority does not match the allocated invoice authority.");
+            payment.AccountingBookId = authority.AccountingBookId;
+            payment.AccountingBookCode = authority.BookCode;
+            payment.FunctionalCurrencyCode = authority.FunctionalCurrencyCode;
         }
 
         private async Task PostRealizedFxIfRequiredAsync(
@@ -6271,7 +6593,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "discount functional amount");
                 allocation.WithholdingTaxFunctionalAmount = NormalizeEvidenceAmount(
                     allocation.WithholdingTaxFunctionalAmount,
-                    expected.WithholdingFunctionalAmount,
+                    allocation.WithholdingTaxStatutoryExchangeRate is > 0m
+                        ? RoundMoney(allocation.WithholdingTaxAmount *
+                            allocation.WithholdingTaxStatutoryExchangeRate.Value)
+                        : expected.WithholdingFunctionalAmount,
                     mayNormalizeSameCurrency,
                     allocation.Id,
                     "WHT functional amount");
@@ -6315,7 +6640,8 @@ namespace ErpSystem.Api.Services.Finance.AP
             IReadOnlyCollection<VendorPaymentAllocation> allocations,
             CancellationToken cancellationToken)
         {
-            var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
+            var functionalWht = 0m;
+            var hasNativeWht = allocations.Any(item => item.WithholdingTaxAmount != 0m);
             var invoiceIds = allocations.Select(item => item.VendorInvoiceId).Distinct().ToList();
             var withholdingInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
                 invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.BusinessPartnerId == payment.BusinessPartnerId &&
@@ -6325,10 +6651,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             var invoiceWithholding = ApInvoiceWithholdingPolicy.Resolve(withholdingInvoices, payment.WithholdingTaxId);
             if (invoiceWithholding != null)
                 payment.WithholdingTaxId = invoiceWithholding.TaxId;
-            payment.WithholdingTaxAmount = functionalWht;
             // A configured payment below its threshold must keep its taxable base: later
             // payments use that evidence when evaluating the supplier's cumulative threshold.
-            if (!payment.WithholdingTaxId.HasValue && functionalWht == 0m)
+            if (!payment.WithholdingTaxId.HasValue && !hasNativeWht)
             {
                 payment.WithholdingTaxBaseAmount = 0m;
                 payment.WithholdingTaxRate = 0m;
@@ -6345,25 +6670,61 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (_withholdingTaxService == null)
                 throw new InvalidOperationException("WHT compliance service is not configured.");
 
+            if (payment.JournalEntryId.HasValue && allocations.Any(item =>
+                    !item.WithholdingTaxBaseFunctionalAmount.HasValue ||
+                    (!string.Equals(item.InvoiceCurrencyCode, "GHS", StringComparison.OrdinalIgnoreCase) &&
+                     (!item.WithholdingTaxStatutoryExchangeRateId.HasValue ||
+                      item.WithholdingTaxStatutoryExchangeRate is null or <= 0m ||
+                      !item.WithholdingTaxStatutoryExchangeRateDate.HasValue ||
+                      string.IsNullOrWhiteSpace(item.WithholdingTaxStatutoryExchangeRateSource) ||
+                      string.IsNullOrWhiteSpace(item.WithholdingTaxStatutoryExchangeRateReference)))))
+                throw new InvalidOperationException("Posted WHT allocations lack frozen net-supply basis evidence. Finance must reconcile this historical payment before changing its allocations.");
             var calculations = await CalculateWhtByScopeAsync(
                 payment.WithholdingTaxId.Value,
                 payment.BusinessPartnerId,
                 payment.PaymentDate,
                 allocations.Select(item => new PendingWhtScope(
                     item.VendorInvoiceId,
-                    item.VendorInvoice?.WithholdingContractReference,
-                    item.VendorInvoice?.WithholdingSupplyCategory,
-                    item.SettlementFunctionalAmount,
-                    item.WithholdingTaxFunctionalAmount)),
+                    withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId).WithholdingContractReference,
+                    withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId).WithholdingSupplyCategory,
+                    ApWithholdingBasis.FunctionalBase(
+                        withholdingInvoices.Single(invoice => invoice.Id == item.VendorInvoiceId),
+                        RoundMoney(item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount)),
+                    item.WithholdingTaxAmount,
+                    RoundMoney(item.AllocatedAmount + item.DiscountAmount + item.WithholdingTaxAmount),
+                    item.InvoiceSettlementExchangeRateId)),
                 payment.Id,
                 cancellationToken);
             var calculation = RollUpWhtCalculations(calculations);
+            var evidenceByInvoice = calculation.StatutoryFxEvidence
+                .ToDictionary(item => item.VendorInvoiceId);
+            foreach (var allocation in allocations)
+            {
+                if (!evidenceByInvoice.TryGetValue(allocation.VendorInvoiceId, out var evidence))
+                    throw new InvalidOperationException("The WHT calculation did not return statutory FX evidence for every allocation.");
+                allocation.WithholdingTaxBaseFunctionalAmount = evidence.GhsTaxableBaseAmount;
+                allocation.WithholdingTaxFunctionalAmount = RoundMoney(
+                    allocation.WithholdingTaxAmount * evidence.ExchangeRateToGhs);
+                allocation.WithholdingTaxStatutoryExchangeRateId = evidence.ExchangeRateId;
+                allocation.WithholdingTaxStatutoryExchangeRate = evidence.ExchangeRateId.HasValue
+                    ? evidence.ExchangeRateToGhs
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateDate = evidence.ExchangeRateId.HasValue
+                    ? evidence.RecognitionDate.Date
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateSource = evidence.ExchangeRateId.HasValue
+                    ? evidence.RateSource
+                    : null;
+                allocation.WithholdingTaxStatutoryExchangeRateReference = evidence.SourceReference;
+            }
+            functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
             if (Math.Abs(RoundMoney(functionalWht - calculation.WithholdingAmount)) > 0.01m)
             {
                 throw new InvalidOperationException(
                     $"AP allocation WHT totals {functionalWht:N2}, but configured tax {calculation.TaxCode} requires {calculation.WithholdingAmount:N2}.");
             }
 
+            payment.WithholdingTaxAmount = functionalWht;
             payment.WithholdingTaxBaseAmount = calculation.TaxableBase;
             payment.WithholdingTaxRate = calculation.TaxRate;
             payment.WithholdingTaxCumulativeBefore = calculation.CumulativeBefore;
@@ -6384,12 +6745,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             if (_withholdingTaxService == null)
                 throw new InvalidOperationException("WHT compliance service is not configured.");
 
-            var groups = rows.GroupBy(row => new
-            {
-                ContractReference = row.ContractReference?.Trim().ToUpperInvariant(),
-                row.SupplyCategory
-            }).ToList();
-            if (groups.Any(group => string.IsNullOrWhiteSpace(group.Key.ContractReference) || !group.Key.SupplyCategory.HasValue))
+            var rowList = rows.ToList();
+            var groups = rowList.GroupBy(row => row.SupplyCategory).ToList();
+            if (rowList.Any(row => string.IsNullOrWhiteSpace(row.ContractReference) || !row.SupplyCategory.HasValue))
                 throw new InvalidOperationException(
                     "Every invoice in a WHT payment requires a contract/reference and Goods, Works, or Services category.");
 
@@ -6405,11 +6763,26 @@ namespace ErpSystem.Api.Services.Finance.AP
                         TaxableBase = RoundMoney(group.Sum(item => item.TaxableBase)),
                         ExcludeVendorPaymentId = excludeVendorPaymentId,
                         VendorInvoiceIds = group.Select(item => item.VendorInvoiceId).Distinct().ToList(),
-                        ContractReference = group.Key.ContractReference,
-                        SupplyCategory = group.Key.SupplyCategory
+                        ContractReference = string.Join(",", group.Select(row => row.ContractReference).Distinct()),
+                        SupplyCategory = group.Key,
+                        InvoiceSettlements = group.GroupBy(row => row.VendorInvoiceId).Select(invoiceRows => new WhtInvoiceSettlementDto
+                        {
+                            VendorInvoiceId = invoiceRows.Key,
+                            GrossSettlementAmount = RoundMoney(invoiceRows.Sum(row => row.GrossSettlementAmount)),
+                            ExchangeRateId = invoiceRows.Select(row => row.ExchangeRateId).Distinct().Single()
+                        }).ToList()
                     },
                     cancellationToken);
-                var supplied = RoundMoney(group.Sum(item => item.WithholdingAmount));
+                var statutoryFxEvidence = calculation.StatutoryFxEvidence
+                    ?? throw new InvalidOperationException(
+                        "Bank of Ghana statutory conversion evidence is missing for a WHT allocation.");
+                var evidenceByInvoice = statutoryFxEvidence
+                    .ToDictionary(item => item.VendorInvoiceId);
+                var supplied = RoundMoney(group.Sum(item =>
+                    item.WithholdingAmount *
+                    (evidenceByInvoice.TryGetValue(item.VendorInvoiceId, out var evidence)
+                        ? evidence.ExchangeRateToGhs
+                        : throw new InvalidOperationException("Bank of Ghana statutory conversion evidence is missing for a WHT allocation."))));
                 if (Math.Abs(RoundMoney(supplied - calculation.WithholdingAmount)) > 0.01m)
                 {
                     throw new InvalidOperationException(
@@ -6434,6 +6807,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TaxName = first.TaxName,
                 TaxRate = first.TaxRate,
                 TaxableBase = RoundMoney(calculations.Sum(item => item.TaxableBase)),
+                CurrentPaymentTaxableBase = RoundMoney(calculations.Sum(item => item.CurrentPaymentTaxableBase)),
+                CatchUpTaxableBase = RoundMoney(calculations.Sum(item => item.CatchUpTaxableBase)),
+                CatchUpWithholdingAmount = RoundMoney(calculations.Sum(item => item.CatchUpWithholdingAmount)),
                 CumulativeBefore = RoundMoney(calculations.Sum(item => item.CumulativeBefore)),
                 CumulativeAfter = RoundMoney(calculations.Sum(item => item.CumulativeAfter)),
                 ThresholdAmount = first.ThresholdAmount,
@@ -6445,7 +6821,10 @@ namespace ErpSystem.Api.Services.Finance.AP
                 ContractReference = calculations.Count == 1 ? first.ContractReference : "MULTIPLE",
                 SupplyCategory = first.SupplyCategory,
                 StatutoryPeriodStart = calculations.Min(item => item.StatutoryPeriodStart),
-                StatutoryPeriodEnd = calculations.Max(item => item.StatutoryPeriodEnd)
+                StatutoryPeriodEnd = calculations.Max(item => item.StatutoryPeriodEnd),
+                StatutoryFxEvidence = calculations
+                    .SelectMany(item => item.StatutoryFxEvidence ?? new List<WhtStatutoryFxEvidenceDto>())
+                    .ToList()
             };
         }
 
@@ -6658,6 +7037,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TotalAmount = payment.TotalAmount,
                 AllocatedAmount = payment.AllocatedAmount,
                 UnallocatedAmount = payment.UnallocatedAmount,
+                RoundingAdjustmentAmount = payment.RoundingAdjustmentAmount,
+                FinanceRoundingEvidenceId = payment.FinanceRoundingEvidenceId,
                 PaymentMethod = payment.PaymentMethod,
                 PaymentMethodId = payment.PaymentMethodId,
                 PaymentMethodName = payment.ConfiguredPaymentMethod?.Name,
@@ -6705,6 +7086,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentBatchId = payment.PaymentBatchId,
                 PaymentBatchNumber = payment.PaymentBatch?.BatchNumber,
                 JournalEntryId = payment.JournalEntryId,
+                AccountingBookId = payment.AccountingBookId,
+                AccountingBookCode = payment.AccountingBookCode,
+                FunctionalCurrencyCode = payment.FunctionalCurrencyCode,
                 ReversalJournalEntryId = payment.ReversalJournalEntryId,
                 ReversalPostingEventId = payment.ReversalPostingEventId,
                 ReversalDate = payment.ReversalDate,
@@ -6734,6 +7118,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     DiscountFunctionalAmount = a.DiscountFunctionalAmount,
                     WithholdingTaxAmount = a.WithholdingTaxAmount,
                     WithholdingTaxFunctionalAmount = a.WithholdingTaxFunctionalAmount,
+                    WithholdingTaxBaseFunctionalAmount = a.WithholdingTaxBaseFunctionalAmount,
+                    WithholdingTaxStatutoryExchangeRateId = a.WithholdingTaxStatutoryExchangeRateId,
+                    WithholdingTaxStatutoryExchangeRate = a.WithholdingTaxStatutoryExchangeRate,
+                    WithholdingTaxStatutoryExchangeRateDate = a.WithholdingTaxStatutoryExchangeRateDate,
+                    WithholdingTaxStatutoryExchangeRateSource = a.WithholdingTaxStatutoryExchangeRateSource,
+                    WithholdingTaxStatutoryExchangeRateReference = a.WithholdingTaxStatutoryExchangeRateReference,
                     AllocationDate = a.AllocationDate,
                     Notes = a.Notes,
                     IsReversal = a.IsReversal,
@@ -6825,7 +7215,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             string? ContractReference,
             WhtSupplyCategory? SupplyCategory,
             decimal TaxableBase,
-            decimal WithholdingAmount);
+            decimal WithholdingAmount,
+            decimal GrossSettlementAmount,
+            Guid? ExchangeRateId);
 
         private PaymentBatchDto MapBatchToDto(PaymentBatch batch)
         {

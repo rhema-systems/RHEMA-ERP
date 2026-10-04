@@ -10,6 +10,8 @@ export interface JobCard {
   description?: string;
   problemDescription?: string;
   assetId: string;
+  assetSource?: 'LegacyMaintenanceAsset' | 'FixedAsset' | 'EstateManagedAsset';
+  sourceAssetId?: string;
   assetName: string;
   assetCode: string;
   maintenanceTypeId: string;
@@ -105,6 +107,8 @@ export interface CreateJobCardRequest {
   description?: string;
   problemDescription?: string;
   assetId: string;
+  assetSource?: 'LegacyMaintenanceAsset' | 'FixedAsset' | 'EstateManagedAsset';
+  sourceAssetId?: string;
   maintenanceTypeId: string;
   priorityLevelId: string;
   customerBusinessPartnerId?: string;

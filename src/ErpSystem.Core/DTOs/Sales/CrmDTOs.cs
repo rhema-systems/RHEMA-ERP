@@ -171,7 +171,8 @@ public class OpportunitySummaryDto
 {
     public Guid Id { get; set; }
     public string Name { get; set; } = string.Empty;
-    public string Stage { get; set; } = "Prospecting";
+    public Guid? StageDefinitionId { get; set; }
+    public string Stage { get; set; } = string.Empty;
     public int Probability { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
@@ -209,7 +210,8 @@ public class CreateOpportunityDto
 
     public Guid? CustomerId { get; set; }
     public Guid? LeadId { get; set; }
-    public string Stage { get; set; } = "Prospecting";
+    public Guid? StageDefinitionId { get; set; }
+    public string? Stage { get; set; }
 
     [Range(0, 100)]
     public int Probability { get; set; } = 10;
@@ -242,6 +244,7 @@ public class UpdateOpportunityDto
     public string? Description { get; set; }
 
     public Guid? CustomerId { get; set; }
+    public Guid? StageDefinitionId { get; set; }
     public string? Stage { get; set; }
 
     [Range(0, 100)]
@@ -324,6 +327,10 @@ public class QuoteLineItemDto
     public decimal LineTotal { get; set; }
     public string? ProductCode { get; set; }
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
+    public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
     public decimal DiscountPercentage { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxAmount { get; set; }
@@ -373,6 +380,7 @@ public class CreateQuoteLineItemDto
 
     [StringLength(50)]
     public string? Unit { get; set; }
+    public Guid? UnitOfMeasureId { get; set; }
 
     public decimal? DiscountPercentage { get; set; }
     public decimal? TaxAmount { get; set; }

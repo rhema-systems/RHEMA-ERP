@@ -68,6 +68,7 @@ import { LegalPropertyCaseContextDialog } from './LegalPropertyCaseContextDialog
 import { estateLandManagementService, EstateManagedAssetStatus, type EstateManagedAsset } from '@/services/estate-land-management.service';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { estateFacilitiesService, type FacilitiesProviderOption } from '@/services/estate-facilities.service';
+import { maintenanceDataService, type MaintenanceType, type PriorityLevel } from '@/services/maintenanceDataService';
 import type { LegalWorkspaceField } from '@/services/legal-procedure.service';
 
 const ProcedurePdfViewer = dynamic(
@@ -94,6 +95,24 @@ interface ProcedureCaseWorkspaceProps {
   intakeFields?: LegalWorkspaceField[];
 }
 
+function CaseDetailContainer({ modal, open, onOpenChange, title, children }: {
+  modal: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  if (!modal) return <>{children}</>;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[92vh] max-w-[96vw] overflow-y-auto p-4 sm:max-w-5xl">
+        <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
+        {children}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 const LEGAL_PROPERTY_MATTERS = new Set([
   'LegalTransfer', 'LegalAssignmentSubleaseVesting',
   'LegalLeaseVariationRenewalSublease', 'LegalMortgage',
@@ -114,6 +133,39 @@ const LEGAL_NEW_MATTER_FIELD_KEYS = new Set([
   'counselName', 'instructionReference', 'feeEstimate',
 ]);
 
+const ESTATE_LINKED_ASSET_FIELD_KEYS = new Set([
+  'propertyNumber',
+  'housePlotShopNumber',
+  'unitNumber',
+  'adjoiningPlotNumber',
+]);
+
+const FACILITIES_LINKED_ASSET_ENTITY_TYPES = new Set([
+  'EstateFacilityMaintenance',
+  'EstateFacilityComplaint',
+]);
+
+const FACILITIES_SYSTEM_FIELD_KEYS = new Set([
+  'referenceNumber',
+  'estateManagedAssetId',
+]);
+
+const FACILITIES_COMPLAINT_CREATE_FIELD_KEYS = new Set([
+  'contactReference',
+  'complaintCategory',
+  'priority',
+  'serviceImpact',
+  'incidentDate',
+  'targetDate',
+  'complaintDescription',
+  'desiredResolution',
+]);
+
+const HIDDEN_LINK_FIELD_KEYS = new Set([
+  'estateManagedAssetId',
+  'customerBusinessPartnerId',
+]);
+
 const LAND_FEE_ENTITY_TYPES = new Set([
   'EstateLandsPartiallyServiced',
   'EstateTraditionalLands',
@@ -131,6 +183,19 @@ type DepartmentOption = {
   organizationLevelId: string;
   levelName?: string | null;
 };
+
+const estateAssetReference = (asset: EstateManagedAsset) =>
+  asset.projectUnitCode || asset.assetCode;
+
+const estateAssetLabel = (asset: EstateManagedAsset) =>
+  [
+    estateAssetReference(asset),
+    asset.name,
+    asset.location || asset.town,
+    asset.propertyFileReference ? `File ${asset.propertyFileReference}` : null,
+  ]
+    .filter(Boolean)
+    .join(' - ');
 
 const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
   'Legal Intake': ['assignedLegalOfficer'],
@@ -556,6 +621,10 @@ export function ProcedureCaseWorkspace({
   const [versionHistoryLoading, setVersionHistoryLoading] = React.useState(false);
   const [versionHistoryError, setVersionHistoryError] = React.useState<string | null>(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [isCaseDialogOpen, setIsCaseDialogOpen] = React.useState(false);
+  const [isHandoffDialogOpen, setIsHandoffDialogOpen] = React.useState(false);
+  const [maintenanceTypes, setMaintenanceTypes] = React.useState<MaintenanceType[]>([]);
+  const [maintenancePriorities, setMaintenancePriorities] = React.useState<PriorityLevel[]>([]);
   const [intakeAttachmentMode, setIntakeAttachmentMode] = React.useState<'upload' | 'dms'>('upload');
   const [intakeAttachmentFile, setIntakeAttachmentFile] = React.useState<File | null>(null);
   const [intakeDmsSearch, setIntakeDmsSearch] = React.useState('');
@@ -564,12 +633,22 @@ export function ProcedureCaseWorkspace({
   const [isLoadingIntakeDms, setIsLoadingIntakeDms] = React.useState(false);
   const [linkDocumentTargetId, setLinkDocumentTargetId] = React.useState<string | null>(null);
   const [newLegalFields, setNewLegalFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
+  const [newEstateFields, setNewEstateFields] = React.useState<Record<string, string | null>>(prefilledFieldValues);
   const [legalAssetSearch, setLegalAssetSearch] = React.useState(searchParams.get('field_propertyNumber') || '');
   const [legalAssets, setLegalAssets] = React.useState<EstateManagedAsset[]>([]);
   const [selectedLegalAsset, setSelectedLegalAsset] = React.useState<EstateManagedAsset | null>(null);
   const [legalAssetContext, setLegalAssetContext] = React.useState<EstateManagedAsset | null>(null);
   const [isLegalAssetContextOpen, setIsLegalAssetContextOpen] = React.useState(false);
   const [legalAssetContextError, setLegalAssetContextError] = React.useState<string | null>(null);
+  const [estateAssetSearch, setEstateAssetSearch] = React.useState(
+    searchParams.get('field_propertyNumber') ||
+      searchParams.get('field_propertyUnit') ||
+      searchParams.get('field_housePlotShopNumber') ||
+      searchParams.get('field_unitNumber') ||
+      ''
+  );
+  const [estateAssets, setEstateAssets] = React.useState<EstateManagedAsset[]>([]);
+  const [selectedEstateAsset, setSelectedEstateAsset] = React.useState<EstateManagedAsset | null>(null);
   const [legalCustomers, setLegalCustomers] = React.useState<BusinessPartnerDto[]>([]);
   const [facilitiesProviders, setFacilitiesProviders] = React.useState<FacilitiesProviderOption[]>([]);
   const [isLegalContextOpen, setIsLegalContextOpen] = React.useState(false);
@@ -629,6 +708,15 @@ export function ProcedureCaseWorkspace({
   const linkedLegalAssetId = selectedCase?.fields.find(
     (field) => field.key === 'estateManagedAssetId'
   )?.value;
+  const isFacilitiesMaintenanceOrComplaint =
+    module === 'Facilities' && FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType);
+  const isFacilitiesMaintenance = module === 'Facilities' && entityType === 'EstateFacilityMaintenance';
+  const isFacilitiesComplaint = module === 'Facilities' && entityType === 'EstateFacilityComplaint';
+  const isFacilitiesCaseRegister = isFacilitiesMaintenanceOrComplaint && !detailOnly;
+  const complaintCreateFields = isFacilitiesComplaint
+    ? intakeFields.filter((field) => FACILITIES_COMPLAINT_CREATE_FIELD_KEYS.has(field.key))
+    : [];
+  const isMaintenanceHandoffStage = isFacilitiesMaintenance && selectedCase?.currentStageName === 'Maintenance Handoff Review';
   const isLinkedLegalMatter =
     module === 'Legal' && Boolean(originatingPropertyCaseId);
   const selectedNewCaseDepartment = departmentOptions.find(
@@ -661,6 +749,9 @@ export function ProcedureCaseWorkspace({
   const legalAssetOptions = selectedLegalAsset && !legalAssets.some((asset) => asset.id === selectedLegalAsset.id)
     ? [selectedLegalAsset, ...legalAssets]
     : legalAssets;
+  const estateAssetOptions = selectedEstateAsset && !estateAssets.some((asset) => asset.id === selectedEstateAsset.id)
+    ? [selectedEstateAsset, ...estateAssets]
+    : estateAssets;
   const selectedCaseDepartmentValue =
     selectedCase?.organizationUnitId ||
     departmentOptions.find(
@@ -877,6 +968,36 @@ export function ProcedureCaseWorkspace({
     }
     return null;
   }, [entityType, module, selectedCase]);
+  const legalPropertyAgreementReviewBlocker = React.useMemo(() => {
+    if (
+      !selectedCase ||
+      entityType !== 'LegalPropertyAgreementReview' ||
+      selectedCase.currentStageName !== 'Head of Legal Signature'
+    ) {
+      return null;
+    }
+
+    const hasCustomerSignedAgreement = selectedCase.documents.some(
+      (document) =>
+        (document.name === 'Customer signed agreement' ||
+          document.name === 'Signed property agreement') &&
+        Boolean(document.fileUrl)
+    );
+    if (!hasCustomerSignedAgreement) {
+      return 'Routing is disabled until the customer returns the signed agreement.';
+    }
+
+    const hasHeadOfLegalSignedAgreement = selectedCase.documents.some(
+      (document) =>
+        document.name === 'Head of Legal signed agreement' &&
+        Boolean(document.fileUrl)
+    );
+    if (!hasHeadOfLegalSignedAgreement) {
+      return 'Apply the final Head of Legal signature before submitting this stage.';
+    }
+
+    return null;
+  }, [entityType, selectedCase]);
   const currentStageEditableFieldKeys = React.useMemo(
     () => new Set(selectedCase?.currentStageFieldKeys ?? []),
     [selectedCase?.currentStageFieldKeys]
@@ -903,7 +1024,8 @@ export function ProcedureCaseWorkspace({
     legalTransferRequiredFieldMessages.length > 0 ||
     !legalTransferPaymentReady ||
     Boolean(facilitiesMaintenanceCloseoutBlocker) ||
-    Boolean(facilitiesComplaintCloseoutBlocker);
+    Boolean(facilitiesComplaintCloseoutBlocker) ||
+    Boolean(legalPropertyAgreementReviewBlocker);
 
   const getDocumentManagementRecordId = (fileUrl?: string | null) => {
     const match = fileUrl?.match(/^\/document-management\/records\/([^/?#]+)/i);
@@ -1052,7 +1174,7 @@ export function ProcedureCaseWorkspace({
     setDmsViewerDocumentId(document.id);
   };
 
-  const loadCases = React.useCallback(async () => {
+  const loadCases = React.useCallback(async (preferredCaseId?: string) => {
     setIsLoading(true);
     setError(null);
     try {
@@ -1076,11 +1198,12 @@ export function ProcedureCaseWorkspace({
       setCaseTotalPages(Math.max(1, data.totalPages || 1));
 
       // Notifications and handoff links pass caseId so reviewers land on the exact Estate procedure case.
-      const targetCaseId = requestedCaseId || (registerOnly ? null : data.items[0]?.id);
+      const targetCaseId = requestedCaseId || preferredCaseId || (registerOnly ? null : data.items[0]?.id);
 
       if (targetCaseId) {
         const detail = await procedureCaseService.getCase(targetCaseId);
         setSelectedCase(detail);
+        if (isFacilitiesCaseRegister && requestedCaseId) setIsCaseDialogOpen(true);
       } else if (!targetCaseId) {
         setSelectedCase(null);
       }
@@ -1099,6 +1222,7 @@ export function ProcedureCaseWorkspace({
     module,
     registerOnly,
     requestedCaseId,
+    isFacilitiesCaseRegister,
   ]);
 
   React.useEffect(() => {
@@ -1184,6 +1308,7 @@ export function ProcedureCaseWorkspace({
       organizationUnitId: searchParams.get('organizationUnitId') || '',
     }));
     setNewLegalFields((current) => ({ ...current, ...prefilledFieldValues }));
+    setNewEstateFields((current) => ({ ...current, ...prefilledFieldValues }));
   }, [
     prefillSignature,
     prefilledCase,
@@ -1212,6 +1337,39 @@ export function ProcedureCaseWorkspace({
   }, [isCreateDialogOpen, legalAssetSearch, module]);
 
   React.useEffect(() => {
+    if (
+      module !== 'Estate' &&
+      (module !== 'Facilities' || !FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType))
+    ) return;
+    if (!isCreateDialogOpen && !selectedCase) return;
+    let active = true;
+    const timer = window.setTimeout(() => {
+      void estateLandManagementService.getManagedAssets({
+        search: estateAssetSearch.trim() || undefined,
+        take: 100,
+      }).then((assets) => {
+        if (active) setEstateAssets(assets);
+      }).catch(() => {
+        if (active) setEstateAssets([]);
+      });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [entityType, estateAssetSearch, isCreateDialogOpen, module, selectedCase]);
+
+  React.useEffect(() => {
+    const assetId = newEstateFields.estateManagedAssetId;
+    if (!isFacilitiesMaintenance || !isCreateDialogOpen || !assetId || selectedEstateAsset?.id === assetId) return;
+    let active = true;
+    void estateLandManagementService.getManagedAsset(assetId)
+      .then((asset) => { if (active) setSelectedEstateAsset(asset); })
+      .catch(() => { if (active) setSelectedEstateAsset(null); });
+    return () => { active = false; };
+  }, [isCreateDialogOpen, isFacilitiesMaintenance, newEstateFields.estateManagedAssetId, selectedEstateAsset?.id]);
+
+  React.useEffect(() => {
     if (module !== 'Legal' || !isCreateDialogOpen) return;
     let active = true;
     void businessPartnerService.getActivePartners('Customer').then((customers) => {
@@ -1234,6 +1392,20 @@ export function ProcedureCaseWorkspace({
     });
     return () => { active = false; };
   }, [module, entityType]);
+
+  React.useEffect(() => {
+    if (!isFacilitiesMaintenance) return;
+    let active = true;
+    void Promise.all([
+      maintenanceDataService.getMaintenanceTypes(),
+      maintenanceDataService.getPriorityLevels(),
+    ]).then(([types, priorities]) => {
+      if (!active) return;
+      setMaintenanceTypes(types.filter((type) => type.isActive));
+      setMaintenancePriorities(priorities.filter((priority) => priority.isActive && ['low', 'medium', 'high'].includes(priority.name.toLowerCase())));
+    });
+    return () => { active = false; };
+  }, [isFacilitiesMaintenance]);
 
   React.useEffect(() => {
     if (!supportsGeneratedDocuments) {
@@ -1395,6 +1567,27 @@ export function ProcedureCaseWorkspace({
     try {
       const detail = await procedureCaseService.getCase(id);
       setSelectedCase(detail);
+      if (!detail) {
+        return;
+      }
+      if (module === 'Estate') {
+        const reference = detail.fields.find((field) =>
+          ESTATE_LINKED_ASSET_FIELD_KEYS.has(field.key)
+        )?.value;
+        const linkedAssetId = detail.fields.find((field) => field.key === 'estateManagedAssetId')?.value;
+        setEstateAssetSearch(reference || '');
+        if (linkedAssetId) {
+          void estateLandManagementService.getManagedAsset(linkedAssetId)
+            .then(setSelectedEstateAsset)
+            .catch(() => setSelectedEstateAsset(null));
+        } else {
+          setSelectedEstateAsset(null);
+        }
+      } else if (module === 'Facilities' && FACILITIES_LINKED_ASSET_ENTITY_TYPES.has(entityType)) {
+        const reference = detail.fields.find((field) => field.key === 'propertyUnit')?.value;
+        setEstateAssetSearch(reference || '');
+        setSelectedEstateAsset(null);
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -1420,6 +1613,17 @@ export function ProcedureCaseWorkspace({
       setError('Select the property linked to this Legal matter.');
       return;
     }
+    if (isFacilitiesMaintenanceOrComplaint && (!newEstateFields.propertyUnit || !newEstateFields.estateManagedAssetId)) {
+      setError('Select a property from the Estate property register for this Facilities case.');
+      return;
+    }
+    if (isFacilitiesComplaint && complaintCreateFields.length > 0
+        && (!newCase.applicantName.trim()
+          || !newEstateFields.complaintCategory?.trim()
+          || !newEstateFields.complaintDescription?.trim())) {
+      setError('Enter the complainant, complaint category, and description.');
+      return;
+    }
 
     setIsSaving(true);
     setError(null);
@@ -1433,9 +1637,13 @@ export function ProcedureCaseWorkspace({
         organizationLevelId: selectedNewCaseDepartment.organizationLevelId,
         organizationUnitId: selectedNewCaseDepartment.id,
         receivedDate: newCase.receivedDate,
-        description: newCase.description,
+        description: isFacilitiesComplaint
+          ? newEstateFields.complaintDescription || newCase.description
+          : newCase.description,
         fieldValues: module === 'Legal'
           ? { ...prefilledFieldValues, ...newLegalFields, applicantName: newCase.applicantName }
+          : module === 'Estate' || isFacilitiesMaintenanceOrComplaint
+            ? { ...prefilledFieldValues, ...newEstateFields, applicantName: newCase.applicantName }
           : prefilledFieldValues,
         hasIntakeAttachment: Boolean(intakeAttachmentMode === 'upload' ? intakeAttachmentFile : intakeDmsRecordId),
       });
@@ -1468,12 +1676,22 @@ export function ProcedureCaseWorkspace({
         receivedDate: module === 'Legal' ? new Date().toISOString().slice(0, 10) : '',
         description: '',
       });
-      await loadCases();
+      await loadCases(created.id);
       setIsCreateDialogOpen(false);
+      if (isFacilitiesCaseRegister) {
+        setSelectedCase(attachedCase);
+        setIsCaseDialogOpen(true);
+        setNewEstateFields({});
+        setSelectedEstateAsset(null);
+      }
       if (module === 'Legal') {
         setNewLegalFields({});
         setSelectedLegalAsset(null);
         toast({ title: 'Legal matter created', variant: 'success' });
+      } else if (module === 'Estate') {
+        setNewEstateFields({});
+        setSelectedEstateAsset(null);
+        toast({ title: 'Estate case created', variant: 'success' });
       } else if (registerOnly || detailOnly) {
         router.push(caseDetailHref(created.id));
       }
@@ -1486,6 +1704,122 @@ export function ProcedureCaseWorkspace({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const estateFieldValuesForAsset = (asset: EstateManagedAsset) => {
+    const reference = estateAssetReference(asset);
+    const values: Record<string, string | null> = {
+      estateManagedAssetId: asset.id,
+      customerBusinessPartnerId: asset.customerBusinessPartnerId || null,
+      propertyNumber: reference,
+      housePlotShopNumber: reference,
+      unitNumber: reference,
+      fileReference: asset.propertyFileReference || null,
+      propertyFileReference: asset.propertyFileReference || null,
+      location: asset.location || asset.town || null,
+      applicantName: asset.lesseeName || null,
+      oldLesseeName: asset.lesseeName || null,
+      transferorName: asset.lesseeName || null,
+      lesseeName: asset.lesseeName || null,
+      addressOnRecord: asset.lesseeAddress || null,
+      oldAddress: asset.lesseeAddress || null,
+      landUse: asset.purpose || null,
+      existingUse: asset.purpose || null,
+      plotSizeAcres:
+        asset.areaUnit?.toLowerCase().includes('acre') && asset.areaValue != null
+          ? String(asset.areaValue)
+          : null,
+      plotSizeHectares:
+        asset.areaUnit?.toLowerCase().includes('hectare') && asset.areaValue != null
+          ? String(asset.areaValue)
+          : null,
+      groundRentRatePerAcre: asset.groundRentRatePerAcre != null ? String(asset.groundRentRatePerAcre) : null,
+      groundRentComputed: asset.groundRentComputed != null ? String(asset.groundRentComputed) : null,
+      groundRentPayable: asset.groundRentPayable != null ? String(asset.groundRentPayable) : null,
+      existingLayoutReference: asset.mapSheetNumber || asset.surveyPlanNumber || null,
+      originalLeaseReference: asset.propertyFileReference || null,
+    };
+
+    return Object.fromEntries(
+      Object.entries(values).filter(([, value]) => value !== null && value !== '')
+    ) as Record<string, string>;
+  };
+
+  const applyEstateAssetToSelectedCase = (asset: EstateManagedAsset) => {
+    const values = estateFieldValuesForAsset(asset);
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setNewCase((current) => ({
+      ...current,
+      applicantName: current.applicantName || asset.lesseeName || '',
+    }));
+    setSelectedCase((current) => {
+      if (!current) return current;
+      const fields = [...current.fields];
+      Object.entries(values).forEach(([key, value]) => {
+        const index = fields.findIndex((field) => field.key === key);
+        if (index >= 0) {
+          fields[index] = { ...fields[index], value };
+        } else {
+          fields.push({
+            id: `local-${key}`,
+            key,
+            label: key === 'estateManagedAssetId'
+              ? 'Linked estate asset ID'
+              : key === 'customerBusinessPartnerId'
+                ? 'Linked customer ID'
+                : key,
+            fieldType: 'text',
+            value,
+            options: null,
+          });
+        }
+      });
+      return { ...current, fields };
+    });
+  };
+
+  const applyFacilitiesAssetToSelectedCase = (asset: EstateManagedAsset) => {
+    const values: Record<string, string> = {
+      propertyUnit: estateAssetReference(asset),
+      location: asset.location || asset.town || '',
+    };
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setSelectedCase((current) => {
+      if (!current) return current;
+      const fields = current.fields.map((field) =>
+        Object.prototype.hasOwnProperty.call(values, field.key)
+          ? { ...field, value: values[field.key] }
+          : field
+      );
+      return { ...current, fields };
+    });
+  };
+
+  const applyFacilitiesAssetToNewCase = (asset: EstateManagedAsset) => {
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setNewEstateFields((current) => ({
+      ...current,
+      propertyUnit: estateAssetReference(asset),
+      estateManagedAssetId: asset.id,
+      location: asset.location || asset.town || '',
+      ...(isFacilitiesMaintenance ? { issueDescription: newCase.description } : {}),
+    }));
+  };
+
+  const applyEstateAssetToNewCase = (asset: EstateManagedAsset) => {
+    setSelectedEstateAsset(asset);
+    setEstateAssetSearch(estateAssetReference(asset));
+    setNewEstateFields((current) => ({
+      ...current,
+      ...estateFieldValuesForAsset(asset),
+    }));
+    setNewCase((current) => ({
+      ...current,
+      applicantName: current.applicantName || asset.lesseeName || '',
+    }));
   };
 
   const updateFieldValue = (key: string, value: string) => {
@@ -1525,7 +1859,7 @@ export function ProcedureCaseWorkspace({
         description: selectedCase.description,
       });
       setSelectedCase(updated);
-      await loadCases();
+      await loadCases(selectedCase.id);
       toast({ title: 'Stage updates saved', variant: 'success' });
     } catch (err) {
       setError(
@@ -1553,7 +1887,7 @@ export function ProcedureCaseWorkspace({
         isCompleted
       );
       setSelectedCase(updated);
-      await loadCases();
+      await loadCases(selectedCase.id);
       toast({ title: 'Checklist updated', variant: 'success' });
     } catch (err) {
       setError(
@@ -2041,7 +2375,7 @@ export function ProcedureCaseWorkspace({
         'Stage completed from workspace.'
       );
       setSelectedCase(updated);
-      await loadCases();
+      await loadCases(selectedCase.id);
       toast({
         title: 'Stage submitted',
         description:
@@ -2050,10 +2384,12 @@ export function ProcedureCaseWorkspace({
             : `Current stage: ${updated.currentStageName}.`,
         variant: 'success',
       });
+      return true;
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Unable to submit current stage.'
       );
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -2167,6 +2503,12 @@ export function ProcedureCaseWorkspace({
     if (module === 'Legal' && (field.key === 'estateManagedAssetId' || field.key === 'customerBusinessPartnerId')) {
       return null;
     }
+    if (module === 'Estate' && HIDDEN_LINK_FIELD_KEYS.has(field.key)) {
+      return null;
+    }
+    if (module === 'Facilities' && FACILITIES_SYSTEM_FIELD_KEYS.has(field.key)) {
+      return null;
+    }
     const isCalculated = CALCULATED_PROCEDURE_FIELD_KEYS.has(field.key);
     const isLinkedLegalReadonly =
       isLinkedLegalMatter && !linkedLegalEditableFields.has(field.key);
@@ -2189,6 +2531,36 @@ export function ProcedureCaseWorkspace({
         ) : null}
       </label>
     );
+
+    if (isFacilitiesMaintenance && field.key === 'maintenanceTypeId') {
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Select value={field.value || undefined} disabled={isDisabled} onValueChange={(value) => updateFieldValue(field.key, value)}>
+            <SelectTrigger id={fieldId}><SelectValue placeholder="Select Maintenance type" /></SelectTrigger>
+            <SelectContent>
+              {maintenanceTypes.map((type) => <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {maintenanceTypes.length === 0 ? <p className="text-xs text-destructive">No active Maintenance types are available.</p> : null}
+        </div>
+      );
+    }
+
+    if (isFacilitiesMaintenance && field.key === 'priority') {
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Select value={field.value || undefined} disabled={isDisabled} onValueChange={(value) => updateFieldValue(field.key, value)}>
+            <SelectTrigger id={fieldId}><SelectValue placeholder="Select priority" /></SelectTrigger>
+            <SelectContent>
+              {maintenancePriorities.map((priority) => <SelectItem key={priority.id} value={priority.name}>{priority.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {maintenancePriorities.length === 0 ? <p className="text-xs text-destructive">No Low, Medium, or High priority is configured in Maintenance.</p> : null}
+        </div>
+      );
+    }
 
     if (module === 'Facilities' && entityType === 'EstateFacilityMaintenance'
       && field.key === 'serviceProviderBusinessPartnerId') {
@@ -2232,6 +2604,83 @@ export function ProcedureCaseWorkspace({
               ))}
             </SelectContent>
           </Select>
+        </div>
+      );
+    }
+
+    if (module === 'Estate' && ESTATE_LINKED_ASSET_FIELD_KEYS.has(field.key)) {
+      const selectedAssetId = selectedCase?.fields.find((item) => item.key === 'estateManagedAssetId')?.value;
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Input
+            id={`${fieldId}-search`}
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            disabled={isDisabled}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={selectedAssetId || undefined}
+            disabled={isDisabled}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyEstateAssetToSelectedCase(asset);
+            }}
+          >
+            <SelectTrigger id={fieldId}>
+              <SelectValue placeholder={field.value || `Select ${field.label.toLowerCase()}`} />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {field.value ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {field.value}</p>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (isFacilitiesMaintenanceOrComplaint && field.key === 'propertyUnit') {
+      return (
+        <div key={field.id} className="space-y-1.5">
+          {label}
+          <Input
+            id={`${fieldId}-search`}
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            disabled={isDisabled}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={selectedEstateAsset?.id || undefined}
+            disabled={isDisabled}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyFacilitiesAssetToSelectedCase(asset);
+            }}
+          >
+            <SelectTrigger id={fieldId}>
+              <SelectValue placeholder={field.value || 'Select from Estate register'} />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {field.value ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {field.value}</p>
+          ) : null}
         </div>
       );
     }
@@ -2305,10 +2754,15 @@ export function ProcedureCaseWorkspace({
 
   const renderCreateCaseForm = () => (
     <div className="space-y-3">
-      {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-title">Matter title</label> : null}
+      {module === 'Legal' || isFacilitiesMaintenanceOrComplaint ? (
+        <label className="text-xs font-medium" htmlFor="new-procedure-title">
+          {module === 'Legal' ? 'Matter title' : 'Case title'}
+        </label>
+      ) : null}
       <Input
-        id="new-legal-title"
+        id="new-procedure-title"
         value={newCase.title}
+        disabled={module === 'Legal' || isFacilitiesMaintenanceOrComplaint}
         onChange={(event) =>
           setNewCase({ ...newCase, title: event.target.value })
         }
@@ -2375,10 +2829,58 @@ export function ProcedureCaseWorkspace({
           </Select>
         </div>
       ) : null}
+      {module === 'Estate' ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium" htmlFor="new-estate-asset-search">Property / plot / unit</label>
+          <Input
+            id="new-estate-asset-search"
+            placeholder="Search property, plot, unit, file reference, or location"
+            value={estateAssetSearch}
+            onChange={(event) => setEstateAssetSearch(event.target.value)}
+          />
+          <Select
+            value={newEstateFields.estateManagedAssetId || undefined}
+            onValueChange={(value) => {
+              const asset = estateAssetOptions.find((item) => item.id === value);
+              if (!asset) return;
+              applyEstateAssetToNewCase(asset);
+            }}
+          >
+            <SelectTrigger id="new-estate-asset">
+              <SelectValue placeholder="Select from Estate register" />
+            </SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => (
+                <SelectItem key={asset.id} value={asset.id}>
+                  {estateAssetLabel(asset)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {newEstateFields.propertyNumber ? (
+            <p className="text-xs text-muted-foreground">Selected reference: {newEstateFields.propertyNumber}</p>
+          ) : null}
+        </div>
+      ) : null}
+      {isFacilitiesMaintenanceOrComplaint ? (
+        <div className="space-y-2">
+          <label className="text-xs font-medium" htmlFor="new-facilities-asset-search">Property / unit / plot</label>
+          <Input id="new-facilities-asset-search" placeholder="Search the Estate property register" value={estateAssetSearch} onChange={(event) => setEstateAssetSearch(event.target.value)} />
+          <Select value={newEstateFields.estateManagedAssetId || undefined} onValueChange={(value) => {
+            const asset = estateAssetOptions.find((item) => item.id === value);
+            if (asset) applyFacilitiesAssetToNewCase(asset);
+          }}>
+            <SelectTrigger aria-label="Property" aria-required="true"><SelectValue placeholder="Select property" /></SelectTrigger>
+            <SelectContent>
+              {estateAssetOptions.map((asset) => <SelectItem key={asset.id} value={asset.id}>{estateAssetLabel(asset)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-applicant">Applicant / party name</label> : null}
       <Input
         id="new-legal-applicant"
-        placeholder="Applicant / party name"
+        placeholder={isFacilitiesComplaint ? 'Complainant name' : 'Applicant / party name'}
         value={newCase.applicantName}
         onChange={(event) => {
           const applicantName = event.target.value;
@@ -2418,6 +2920,29 @@ export function ProcedureCaseWorkspace({
                   disabled={field.key === 'propertyNumber' && Boolean(newLegalFields.estateManagedAssetId)}
                   onChange={(event) => setNewLegalFields((current) => ({ ...current, [field.key]: event.target.value }))}
                 />
+              )}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {complaintCreateFields.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {complaintCreateFields.map((field) => (
+            <div key={field.key} className={field.type === 'textarea' ? 'space-y-1.5 sm:col-span-2' : 'space-y-1.5'}>
+              <label className="text-xs font-medium" htmlFor={`new-complaint-${field.key}`}>{field.label}</label>
+              {field.type === 'select' && field.options?.length ? (
+                <Select value={newEstateFields[field.key] || undefined}
+                  onValueChange={(value) => setNewEstateFields((current) => ({ ...current, [field.key]: value }))}>
+                  <SelectTrigger id={`new-complaint-${field.key}`}><SelectValue placeholder={field.label} /></SelectTrigger>
+                  <SelectContent>{field.options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>
+                </Select>
+              ) : field.type === 'textarea' ? (
+                <Textarea id={`new-complaint-${field.key}`} value={newEstateFields[field.key] || ''}
+                  onChange={(event) => setNewEstateFields((current) => ({ ...current, [field.key]: event.target.value }))} />
+              ) : (
+                <Input id={`new-complaint-${field.key}`} type={field.type === 'date' ? 'date' : 'text'}
+                  value={newEstateFields[field.key] || ''}
+                  onChange={(event) => setNewEstateFields((current) => ({ ...current, [field.key]: event.target.value }))} />
               )}
             </div>
           ))}
@@ -2499,17 +3024,18 @@ export function ProcedureCaseWorkspace({
         }
       />
       {module === 'Legal' ? <label className="text-xs font-medium" htmlFor="new-legal-description">Description</label> : null}
-      <Textarea
+      {complaintCreateFields.length === 0 ? <Textarea
         id="new-legal-description"
-        placeholder="Description"
+        placeholder={isFacilitiesMaintenance ? 'Problem description' : 'Description'}
         value={newCase.description}
-        onChange={(event) =>
+        onChange={(event) => {
+          if (isFacilitiesMaintenance) setNewEstateFields((current) => ({ ...current, issueDescription: event.target.value }));
           setNewCase({
             ...newCase,
             description: event.target.value,
-          })
-        }
-      />
+          });
+        }}
+      /> : null}
       <Button
         className="w-full gap-2"
         onClick={() => void createCase()}
@@ -2631,15 +3157,18 @@ export function ProcedureCaseWorkspace({
                               </Badge>
                             </td>
                             <td className="px-3 py-3 text-right align-top">
-                              <Button asChild size="sm" variant="outline">
-                                <Link
-                                  href={caseDetailHref(procedureCase.id)}
-                                  className="gap-2"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  View
-                                </Link>
-                              </Button>
+                              {isFacilitiesCaseRegister ? (
+                                <Button type="button" size="sm" variant="outline" className="gap-2" onClick={() => {
+                                  setIsCaseDialogOpen(true);
+                                  void selectCase(procedureCase.id);
+                                }}>
+                                  <Eye className="h-4 w-4" /> View
+                                </Button>
+                              ) : (
+                                <Button asChild size="sm" variant="outline">
+                                  <Link href={caseDetailHref(procedureCase.id)} className="gap-2"><Eye className="h-4 w-4" /> View</Link>
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -2663,7 +3192,7 @@ export function ProcedureCaseWorkspace({
               </div>
               ) : null}
 
-              {allowsManualCaseCreation && !registerOnly && !detailOnly ? (
+              {allowsManualCaseCreation && !registerOnly && !detailOnly && !isFacilitiesCaseRegister ? (
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">
                     {terminology.createHeading}
@@ -2672,7 +3201,9 @@ export function ProcedureCaseWorkspace({
                 </div>
               ) : null}
             {!registerOnly && selectedCase ? (
+              <CaseDetailContainer modal={isFacilitiesCaseRegister} open={isCaseDialogOpen} onOpenChange={setIsCaseDialogOpen} title={selectedCase.referenceNumber || selectedCase.title}>
               <div className="space-y-4">
+                {isFacilitiesCaseRegister && error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                     <div>
@@ -2747,13 +3278,14 @@ export function ProcedureCaseWorkspace({
                 <Tabs defaultValue="stage" className="space-y-4">
                   <TabsList className="flex h-auto flex-wrap justify-start">
                     <TabsTrigger value="stage">Stage details</TabsTrigger>
+                    <TabsTrigger value="checklist">Checklist</TabsTrigger>
                     <TabsTrigger value="documents">Documents</TabsTrigger>
                     <TabsTrigger value="submit">Submit</TabsTrigger>
                   </TabsList>
                   <TabsContent value="stage" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <div className="mb-3 flex items-center justify-between gap-2">
-                    <h2 className="text-sm font-semibold">Intake</h2>
+                    <h2 className="text-sm font-semibold">{isFacilitiesMaintenanceOrComplaint ? selectedCase.currentStageName : 'Intake'}</h2>
                     <Button
                       size="sm"
                       variant="outline"
@@ -2766,7 +3298,7 @@ export function ProcedureCaseWorkspace({
                     </Button>
                   </div>
                   <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1.5">
+                    {!isFacilitiesMaintenance ? <div className="space-y-1.5">
                       <label
                         htmlFor="procedure-reference-number"
                         className="text-xs font-medium text-muted-foreground"
@@ -2778,7 +3310,7 @@ export function ProcedureCaseWorkspace({
                         value={selectedCase.referenceNumber ?? ''}
                         disabled
                       />
-                    </div>
+                    </div> : null}
                     <div className="space-y-1.5">
                       <label
                         htmlFor="procedure-applicant-name"
@@ -2801,7 +3333,7 @@ export function ProcedureCaseWorkspace({
                         }
                       />
                     </div>
-                    <div className="space-y-1.5">
+                    {!isFacilitiesMaintenance ? <div className="space-y-1.5">
                       <label
                         htmlFor="procedure-source-department"
                         className="text-xs font-medium text-muted-foreground"
@@ -2849,8 +3381,8 @@ export function ProcedureCaseWorkspace({
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="space-y-1.5">
+                    </div> : null}
+                    {!isFacilitiesMaintenance ? <div className="space-y-1.5">
                       <label
                         htmlFor="procedure-received-date"
                         className="text-xs font-medium text-muted-foreground"
@@ -2872,16 +3404,20 @@ export function ProcedureCaseWorkspace({
                           })
                         }
                       />
-                    </div>
+                    </div> : null}
                     {selectedCase.fields
                       .filter(
                         (field) =>
-                          entityType !== 'LegalTransfer' ||
-                          !LEGAL_TRANSFER_FINANCE_FIELD_KEYS.has(field.key)
+                          (entityType !== 'LegalTransfer' ||
+                          !LEGAL_TRANSFER_FINANCE_FIELD_KEYS.has(field.key)) &&
+                          (!isFacilitiesMaintenance ||
+                            (!['priority', 'maintenanceTypeId', 'handoffDescription', 'estimatedHours', 'estimatedCost'].includes(field.key) &&
+                              (currentStageEditableFieldKeys.has(field.key) ||
+                                (isMaintenanceHandoffStage && ['propertyUnit', 'issueDescription', 'issueType'].includes(field.key)))))
                       )
                       .map((field) => renderField(field))}
                   </div>
-                  <div className="mt-3 space-y-1.5">
+                  {!isFacilitiesMaintenance ? <div className="mt-3 space-y-1.5">
                     <label
                       htmlFor="procedure-description"
                       className="text-xs font-medium text-muted-foreground"
@@ -2902,7 +3438,7 @@ export function ProcedureCaseWorkspace({
                         })
                       }
                     />
-                  </div>
+                  </div> : null}
                   <div className="mt-4 flex justify-end border-t border-border pt-4">
                     <Button
                       size="sm"
@@ -3181,37 +3717,46 @@ export function ProcedureCaseWorkspace({
                   }
                 />
 
+                  </TabsContent>
+
+                  <TabsContent value="checklist" className="space-y-4">
                 <div className="rounded-md border border-border bg-background p-4">
                   <h2 className="text-sm font-semibold">
                     Current Stage Checklist
                   </h2>
-                  <div className="mt-3 space-y-3">
-                    {currentStageItems.map((item) => (
-                      <label
-                        key={item.id}
-                        className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm"
-                      >
-                        <Checkbox
-                          checked={item.isCompleted}
-                          disabled={
-                            !selectedCase.canEditCurrentStage || isSaving
-                          }
-                          onCheckedChange={(checked) =>
-                            void toggleChecklist(item.id, checked === true)
-                          }
-                        />
-                        <span
-                          className={
-                            item.isCompleted
-                              ? 'text-muted-foreground line-through'
-                              : ''
-                          }
+                  {currentStageItems.length > 0 ? (
+                    <div className="mt-3 space-y-3">
+                      {currentStageItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-start gap-3 rounded-md border border-border bg-card p-3 text-sm"
                         >
-                          {item.text}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
+                          <Checkbox
+                            checked={item.isCompleted}
+                            disabled={
+                              !selectedCase.canEditCurrentStage || isSaving
+                            }
+                            onCheckedChange={(checked) =>
+                              void toggleChecklist(item.id, checked === true)
+                            }
+                          />
+                          <span
+                            className={
+                              item.isCompleted
+                                ? 'text-muted-foreground line-through'
+                                : ''
+                            }
+                          >
+                            {item.text}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+                      This stage has no checklist items.
+                    </p>
+                  )}
                 </div>
                   </TabsContent>
 
@@ -3276,11 +3821,16 @@ export function ProcedureCaseWorkspace({
                         Boolean(signatureRole) &&
                         selectedCase.canEditCurrentStage &&
                         !legalTransferStageSignatureRecorded;
+                      const isPropertyAgreementSourceDocument =
+                        entityType === 'LegalPropertyAgreementReview' &&
+                        (document.name === 'Customer signed agreement' ||
+                          document.name === 'Signed property agreement' ||
+                          document.name === 'Generated draft agreement');
                       const propertyAgreementSigned = entityType === 'LegalPropertyAgreementReview' &&
                         selectedCase.documents.some((item) => item.name === 'Head of Legal signed agreement' && Boolean(item.fileUrl));
                       const canSignPropertyAgreement =
                         entityType === 'LegalPropertyAgreementReview' &&
-                        document.name === 'Generated draft agreement' &&
+                        isPropertyAgreementSourceDocument &&
                         Boolean(document.fileUrl) &&
                         (selectedCase.currentStageName === 'Head of Legal Signature' || selectedCase.currentStageName === 'Head of Legal Release') &&
                         selectedCase.canEditCurrentStage &&
@@ -3567,6 +4117,8 @@ export function ProcedureCaseWorkspace({
                           ? facilitiesMaintenanceCloseoutBlocker
                         : facilitiesComplaintCloseoutBlocker
                           ? facilitiesComplaintCloseoutBlocker
+                        : legalPropertyAgreementReviewBlocker
+                          ? legalPropertyAgreementReviewBlocker
                         : isLegalTransferClientPaymentStage &&
                             !legalTransferPaymentReady
                           ? 'Finance payment must be synced before this stage can be submitted.'
@@ -3574,21 +4126,29 @@ export function ProcedureCaseWorkspace({
                     </span>
                   </div>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <Button
-                      className="gap-2"
-                      onClick={() => void completeStage()}
-                      disabled={isStageSubmitDisabled}
-                    >
-                      <Send className="h-4 w-4" />
-                      Submit stage
-                    </Button>
+                    {isMaintenanceHandoffStage ? (
+                      <Button className="gap-2" onClick={() => {
+                        setError(null);
+                        const problem = selectedCase.fields.find((field) => field.key === 'issueDescription')?.value || selectedCase.description || '';
+                        const handoff = selectedCase.fields.find((field) => field.key === 'handoffDescription');
+                        if (handoff && !handoff.value) updateFieldValue('handoffDescription', problem);
+                        setIsHandoffDialogOpen(true);
+                      }} disabled={!selectedCase.canEditCurrentStage || isSaving}>
+                        <Send className="h-4 w-4" /> Create maintenance handoff
+                      </Button>
+                    ) : (
+                      <Button className="gap-2" onClick={() => void completeStage()} disabled={isStageSubmitDisabled}>
+                        <Send className="h-4 w-4" /> Submit stage
+                      </Button>
+                    )}
                   </div>
                 </div>
                   </TabsContent>
                 </Tabs>
               </div>
+              </CaseDetailContainer>
             ) : (
-              <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
+              !isFacilitiesCaseRegister && <div className="rounded-md border border-border bg-background p-8 text-center text-sm text-muted-foreground">
                 {terminology.selectMessage}
               </div>
             )}
@@ -3607,10 +4167,36 @@ export function ProcedureCaseWorkspace({
               </DialogDescription>
             ) : null}
           </DialogHeader>
-          {module === 'Legal' && error ? (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
+          {(module === 'Legal' || isFacilitiesMaintenanceOrComplaint) && error ? (
+            <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p>
           ) : null}
           {renderCreateCaseForm()}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isHandoffDialogOpen} onOpenChange={setIsHandoffDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Create maintenance handoff</DialogTitle>
+            <DialogDescription>{selectedCase?.referenceNumber || selectedCase?.title}</DialogDescription>
+          </DialogHeader>
+          {selectedCase ? (
+            <div className="space-y-4">
+              {error ? <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{error}</p> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5"><label className="text-xs font-medium">Property / unit / plot</label><Input readOnly value={selectedCase.fields.find((field) => field.key === 'propertyUnit')?.value || ''} /></div>
+                <div className="space-y-1.5"><label className="text-xs font-medium">Issue type</label><Input readOnly value={selectedCase.fields.find((field) => field.key === 'issueType')?.value || ''} /></div>
+                <div className="space-y-1.5 sm:col-span-2"><label className="text-xs font-medium">Customer problem description</label><Textarea readOnly value={selectedCase.fields.find((field) => field.key === 'issueDescription')?.value || selectedCase.description || ''} /></div>
+                {['maintenanceTypeId', 'priority', 'handoffDescription', 'estimatedHours', 'estimatedCost']
+                  .map((key) => selectedCase.fields.find((field) => field.key === key))
+                  .filter((field): field is ProcedureCaseDetail['fields'][number] => Boolean(field))
+                  .map((field) => renderField(field))}
+              </div>
+              <div className="flex justify-end gap-2 border-t pt-4">
+                <Button variant="outline" onClick={() => setIsHandoffDialogOpen(false)} disabled={isSaving}>Cancel</Button>
+                <Button onClick={() => void completeStage().then((success) => { if (success) setIsHandoffDialogOpen(false); })} disabled={isStageSubmitDisabled}>Create job card</Button>
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
       <Dialog open={Boolean(linkDocumentTargetId)} onOpenChange={(open) => { if (!open) setLinkDocumentTargetId(null); }}>

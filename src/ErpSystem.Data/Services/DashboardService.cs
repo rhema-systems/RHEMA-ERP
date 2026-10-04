@@ -5,6 +5,7 @@ using ErpSystem.Core.Services;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 
 namespace ErpSystem.Data.Services
 {
@@ -38,7 +39,7 @@ namespace ErpSystem.Data.Services
                 var recentActivities = await GetRecentActivitiesAsync(tenantId, isAdmin);
                 var notifications = await GetNotificationsAsync(tenantId);
                 var onlineUsers = await GetOnlineUsersAsync(tenantId, isAdmin);
-                var systemStatus = GetSystemStatus();
+                var systemStatus = await GetSystemStatusAsync();
 
                 return new DashboardDataDto
                 {
@@ -196,7 +197,8 @@ namespace ErpSystem.Data.Services
                 OnlineUsers = onlineUsers,
                 TotalSessions = totalSessions,
                 ActiveSessions = activeSessions.Count,
-                SystemUptime = 99.9m, // This would come from actual system monitoring
+                // No application uptime monitor is configured for this legacy endpoint.
+                SystemUptime = null,
                 UsersByRole = GetUsersByRoleDistribution(users),
                 UserLoginTrend = loginTrend,
                 SessionActivity = sessionActivity
@@ -301,22 +303,10 @@ namespace ErpSystem.Data.Services
 
         private static Task<List<NotificationDto>> GetNotificationsAsync(string tenantId)
         {
-            // This would be implemented based on your notification system
-            // For now, return some sample notifications
-            var notifications = new List<NotificationDto>
-            {
-                new NotificationDto
-                {
-                    Id = Guid.NewGuid().ToString(),
-                    Type = "system",
-                    Title = "System Update",
-                    Message = "New features available",
-                    Severity = "info",
-                    Timestamp = DateTime.UtcNow.AddMinutes(-30),
-                    IsRead = false
-                }
-            };
-            return Task.FromResult(notifications);
+            // User-targeted notifications are served by NotificationsController. This legacy
+            // tenant-only contract has no user identity, so returning an empty state is safer
+            // than exposing another user's records or inventing a sample notification.
+            return Task.FromResult(new List<NotificationDto>());
         }
 
         private async Task<List<OnlineUserDto>> GetOnlineUsersAsync(string tenantId, bool isSuperAdmin = false)
@@ -377,24 +367,44 @@ namespace ErpSystem.Data.Services
             return onlineUsers;
         }
 
-        private SystemStatusDto GetSystemStatus()
+        private async Task<SystemStatusDto> GetSystemStatusAsync()
         {
-            // This would integrate with actual system monitoring
-            // For now, return sample data
+            var stopwatch = Stopwatch.StartNew();
+            var databaseHealthy = false;
+            string? databaseError = null;
+            try
+            {
+                databaseHealthy = await _context.Database.CanConnectAsync();
+            }
+            catch (Exception ex)
+            {
+                databaseError = "Database readiness check failed.";
+                _logger.LogWarning(ex, "Legacy dashboard database readiness check failed");
+            }
+            stopwatch.Stop();
+
             return new SystemStatusDto
             {
-                IsHealthy = true,
-                Status = "Operational",
-                CpuUsage = 35.2,
-                MemoryUsage = 68.4,
-                DiskUsage = 45.1,
-                DatabaseConnections = _context.Database.GetDbConnection().State == System.Data.ConnectionState.Open ? 1 : 0,
-                Services = new List<ServiceStatusDto>
-                {
-                    new ServiceStatusDto { Name = "Database", IsHealthy = true, Status = "Connected", ResponseTime = 12 },
-                    new ServiceStatusDto { Name = "Cache", IsHealthy = true, Status = "Connected", ResponseTime = 3 },
-                    new ServiceStatusDto { Name = "External API", IsHealthy = true, Status = "Connected", ResponseTime = 45 }
-                }
+                IsHealthy = databaseHealthy,
+                Status = databaseHealthy
+                    ? "Database available; host telemetry unavailable"
+                    : "Database unavailable; host telemetry unavailable",
+                CpuUsage = null,
+                MemoryUsage = null,
+                DiskUsage = null,
+                DatabaseConnections = null,
+                Services =
+                [
+                    new ServiceStatusDto
+                    {
+                        Name = "Database",
+                        IsHealthy = databaseHealthy,
+                        Status = databaseHealthy ? "Connected" : "Unavailable",
+                        ResponseTime = stopwatch.ElapsedMilliseconds,
+                        ErrorMessage = databaseError
+                    }
+                ],
+                LastCheck = DateTime.UtcNow
             };
         }
 

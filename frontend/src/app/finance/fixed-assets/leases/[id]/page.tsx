@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { FileText, Loader2, ArrowLeft, Play, CheckCircle } from 'lucide-react';
+import { FileText, Loader2, ArrowLeft, Play, CheckCircle, ReceiptText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -12,16 +12,19 @@ import { leaseAccountingService, type LeaseContractDetail, type LeaseStatus } fr
 import { SourceDocumentDimensionDefaultsPanel, SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/use-auth';
 
 export default function LeaseDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const { hasPermission } = useAuth();
   const id = params.id as string;
+  const canCreateApInvoice = hasPermission('Finance.AP.Invoices.Create');
+  const canManageFixedAssets = hasPermission('Finance.FixedAssets.Manage');
 
   const [lease, setLease] = useState<LeaseContractDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [recognitionDefaults, setRecognitionDefaults] = useState<Record<string, string>>({});
-  const [periodDefaults, setPeriodDefaults] = useState<Record<string, string>>({});
 
   useEffect(() => {
     const load = async () => {
@@ -45,7 +48,7 @@ export default function LeaseDetailPage() {
   };
 
   const handleActivate = async () => {
-    if (!confirm('Activate this lease? This will create the ROU fixed asset and post recognition GL journal.')) return;
+    if (!confirm('Submit this lease recognition proposal for independent approval? No asset or journal is created until final approval.')) return;
     try {
       await leaseAccountingService.activate(id, {
         defaultDimensions: toFinancePostingDimensionValues(recognitionDefaults),
@@ -54,21 +57,17 @@ export default function LeaseDetailPage() {
       });
       await refresh();
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'The lease was not activated. Review its commencement data and Finance mappings, then retry.');
+      toast.error(error instanceof Error ? error.message : 'The lease activation proposal was not submitted. Review its commencement data and Finance mappings, then retry.');
     }
   };
 
-  const handlePostPeriod = async (lineId: string, periodNumber: number) => {
-    if (!confirm(`Post journal for period ${periodNumber}?`)) return;
+  const handlePreparePayable = async (lineId: string, periodNumber: number) => {
+    if (!confirm(`Prepare the AP invoice draft for period ${periodNumber}? It will still require normal AP review and approval.`)) return;
     try {
-      await leaseAccountingService.postPeriodJournal(id, lineId, {
-        defaultDimensions: toFinancePostingDimensionValues(periodDefaults),
-        lines: [],
-        applyDefaultToEligibleLines: true,
-      });
+      await leaseAccountingService.preparePeriodPayable(id, lineId);
       await refresh();
     } catch (error: unknown) {
-      toast.error(error instanceof Error ? error.message : 'The lease period was not posted. Review the period status and required account mappings, then retry.');
+      toast.error(error instanceof Error ? error.message : 'The AP draft was not prepared. Review prior periods and the lease source authority, then retry.');
     }
   };
 
@@ -78,6 +77,7 @@ export default function LeaseDetailPage() {
   const getStatusBadge = (status: LeaseStatus) => {
     const variants: Record<LeaseStatus, 'default' | 'secondary' | 'destructive' | 'outline'> = {
       Draft: 'outline', Active: 'default', Terminated: 'destructive', Completed: 'secondary',
+      PendingApproval: 'secondary', Rejected: 'destructive',
     };
     return <Badge variant={variants[status] || 'default'}>{status}</Badge>;
   };
@@ -107,13 +107,19 @@ export default function LeaseDetailPage() {
             <p className="text-muted-foreground">{lease.description}</p>
           </div>
         </div>
-        {lease.status === 'Draft' && (
+        {(lease.status === 'Draft' || lease.status === 'Rejected') && canManageFixedAssets && (
           <Button onClick={handleActivate} size="lg">
             <Play className="mr-2 h-4 w-4" />
-            Activate Lease
+            Submit activation
           </Button>
         )}
       </div>
+
+      {lease.status === 'PendingApproval' && (
+        <p className="text-sm text-muted-foreground">
+          Activation is pending independent approval in the Finance approval queue. No recognition journal or ROU asset has been created.
+        </p>
+      )}
 
       <Breadcrumb>
         <BreadcrumbList>
@@ -165,19 +171,11 @@ export default function LeaseDetailPage() {
         />
       )}
 
-      {lease.status === 'Active' && lease.scheduleLines.some(line => !line.isPosted) && (
-        <SourceDocumentDimensionDefaultsPanel
-          effectiveDate={(lease.scheduleLines.find(line => !line.isPosted)?.periodDate || lease.startDate).slice(0, 10)}
-          values={periodDefaults}
-          onChange={setPeriodDefaults}
-        />
-      )}
-
       {/* Amortization Schedule */}
       <Card>
         <CardHeader>
           <CardTitle>Amortization Schedule</CardTitle>
-          <CardDescription>{lease.totalPeriods} periods — {postedCount} posted</CardDescription>
+          <CardDescription>{lease.totalPeriods} periods — {postedCount} accounting-posted through AP</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
@@ -190,7 +188,7 @@ export default function LeaseDetailPage() {
                 <TableHead className="text-right">Principal</TableHead>
                 <TableHead className="text-right">Remaining</TableHead>
                 <TableHead>Status</TableHead>
-                {lease.status === 'Active' && <TableHead />}
+                <TableHead>AP invoice</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,21 +201,28 @@ export default function LeaseDetailPage() {
                   <TableCell className="text-right">{formatMoney(line.principalReduction)}</TableCell>
                   <TableCell className="text-right">{formatMoney(line.remainingLiability)}</TableCell>
                   <TableCell>
-                    {line.isPosted ? (
-                      <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Posted</Badge>
-                    ) : (
-                      <Badge variant="outline">Pending</Badge>
+                    {line.vendorInvoiceStatus === 'Paid' ? (
+                      <Badge variant="default"><CheckCircle className="h-3 w-3 mr-1" />Paid in AP</Badge>
+                    ) : line.vendorInvoiceStatus ? (
+                      <Badge variant={line.vendorInvoiceStatus === 'Voided' ? 'destructive' : line.isPosted ? 'default' : 'secondary'}>
+                        {line.vendorInvoiceStatus}
+                      </Badge>
+                    ) : <Badge variant="outline">No AP invoice</Badge>}
+                  </TableCell>
+                  <TableCell className="space-x-2 whitespace-nowrap">
+                    {line.vendorInvoiceId && (
+                      <Button size="sm" variant="ghost" asChild>
+                        <a href={`/finance/ap/invoices/${line.vendorInvoiceId}`}>
+                          <ReceiptText className="mr-1 h-4 w-4" />{line.vendorInvoiceNumber || 'Open AP invoice'}
+                        </a>
+                      </Button>
+                    )}
+                    {line.canPreparePayable && canCreateApInvoice && (
+                      <Button size="sm" variant="outline" onClick={() => handlePreparePayable(line.id, line.periodNumber)}>
+                        Prepare AP draft
+                      </Button>
                     )}
                   </TableCell>
-                  {lease.status === 'Active' && (
-                    <TableCell>
-                      {!line.isPosted && (
-                        <Button size="sm" variant="outline" onClick={() => handlePostPeriod(line.id, line.periodNumber)}>
-                          Post
-                        </Button>
-                      )}
-                    </TableCell>
-                  )}
                 </TableRow>
               ))}
             </TableBody>
@@ -225,14 +230,16 @@ export default function LeaseDetailPage() {
         </CardContent>
       </Card>
 
-      {lease.scheduleLines.some(line => line.financeDimensions?.lines.length) && (
+      {lease.scheduleLines.some((line) => line.financeDimensions) && (
         <Card>
           <CardHeader>
-            <CardTitle>Lease period dimension evidence</CardTitle>
-            <CardDescription>Frozen evidence remains tied to each immutable schedule line.</CardDescription>
+            <CardTitle>Historical lease-period dimension evidence</CardTitle>
+            <CardDescription>
+              Read-only evidence retained from legacy standalone lease-period postings. New instalments are coded and posted by their linked AP invoice.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {lease.scheduleLines.filter(line => line.financeDimensions?.lines.length).map(line => (
+            {lease.scheduleLines.filter((line) => line.financeDimensions).map((line) => (
               <div key={line.id} className="space-y-2">
                 <p className="text-sm font-medium">Period {line.periodNumber}</p>
                 <SourceDocumentDimensionEvidence evidence={line.financeDimensions} />
@@ -241,6 +248,10 @@ export default function LeaseDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <p className="text-sm text-muted-foreground">
+        Lease periods create AP drafts only. Invoice approval posts the liability through the normal maker/checker workflow; payment status remains owned by AP.
+      </p>
     </div>
   );
 }

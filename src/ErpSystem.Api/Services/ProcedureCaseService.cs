@@ -14,6 +14,7 @@ using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Maintenance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
@@ -303,6 +304,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                         && (item.PartnerType == "Customer" || item.PartnerType == "Both"))))
                 throw new InvalidOperationException("Select an active customer for this Legal matter.");
         }
+        if (module == "Facilities" && entityType == "EstateFacilityMaintenance")
+        {
+            await EnsureFacilitiesMaintenancePropertyForIntakeAsync(_db, tenantId, request.FieldValues);
+        }
         var workspace = await BuildWorkspaceSeedAsync(module, entityType);
         EnsurePublishedWorkflowForProcedureCase(module, entityType, workspace.WorkflowDefinitionId, "opening");
         var firstStage = workspace.Stages.FirstOrDefault() ?? new StageSeed(0, "Open", null, null, null, []);
@@ -412,10 +417,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         // Procedure cases are source records for workflow; keep creation, workflow startup, and linkage atomic.
         // SQL Server retrying execution strategies require user-initiated transactions to run inside the
         // strategy delegate so the complete transaction can be retried as one unit.
-        var executionStrategy = _db.Database.CreateExecutionStrategy();
-        await executionStrategy.ExecuteAsync(async () =>
+        async Task PersistCaseAndStartWorkflowAsync()
         {
-            await using var transaction = await _db.Database.BeginTransactionAsync();
             _db.ProcedureCases.Add(procedureCase);
             await _db.SaveChangesAsync();
 
@@ -469,9 +472,26 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 await _db.SaveChangesAsync();
                 await SyncCaseFromWorkflowRuntimeAsync(procedureCase.Id, workflowInstance.Id, userId);
             }
+        }
 
-            await transaction.CommitAsync();
-        });
+        if (_db.Database.CurrentTransaction is not null)
+        {
+            // A coordinating owner (for example, the Sales-to-Estate handoff) may need the
+            // procedure case and its source-record mutation to commit as one unit. Join that
+            // transaction instead of attempting an unsupported nested transaction.
+            await PersistCaseAndStartWorkflowAsync();
+        }
+        else
+        {
+            var executionStrategy = _db.Database.CreateExecutionStrategy();
+            await executionStrategy.ExecuteAsync(async () =>
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync();
+                await PersistCaseAndStartWorkflowAsync();
+
+                await transaction.CommitAsync();
+            });
+        }
 
         return await ToDetailDtoAsync((await LoadCaseAsync(procedureCase.Id, asTracking: false))!);
     }
@@ -625,7 +645,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .Where(item => item.TenantId == tenantId && !item.IsDeleted
                     && ((listingReference != null && item.AssetCode == listingReference)
                         || (propertyReference != null
-                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))))
+                            && (item.AssetCode == propertyReference || item.ProjectUnitCode == propertyReference))
+                        || item.Demarcations.Any(parcel => !parcel.IsDeleted
+                            && (parcel.ChildFixedAssetReference == listingReference
+                                || parcel.ChildFixedAssetReference == propertyReference))))
                 .Select(item => (Guid?)item.Id)
                 .FirstOrDefaultAsync();
         }
@@ -1036,11 +1059,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         EnsurePropertyAgreementHeadOfLegalSignatureReady(procedureCase);
         EnsureExternalListingApprovalIsReady(procedureCase);
         EnsurePropertyListingStageReady(procedureCase);
+        await EnsureFacilitiesMaintenanceHandoffReadyAsync(procedureCase);
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 2)
             await EnsurePremiumFinancePaymentAsync(procedureCase);
         if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
             && (!IsRentalListingApplication(procedureCase) || IsLeaseListingApplication(procedureCase)))
             await EnsureFullAmountFinancePaymentAsync(procedureCase);
+        if (IsPropertyListingApplication(procedureCase) && procedureCase.CurrentStageIndex >= 5
+            && IsRentalListingApplication(procedureCase) && !IsLeaseListingApplication(procedureCase))
+            await EnsureFirstMonthRentPaymentAsync(procedureCase);
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
@@ -1086,7 +1113,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         _db.ProcedureCaseActivities.Add(Activity(tenantId, userId, procedureCase.Id, "Completed stage", procedureCase.CurrentStageName, request.Notes));
 
-        var stages = await BuildStageSeedsAsync(procedureCase.Module, procedureCase.EntityType);
+        var stages = await BuildStageSeedsAsync(procedureCase.Module, procedureCase.EntityType,
+            usePublishedWorkflow: procedureCase.WorkflowDefinitionId.HasValue
+                || !AllowsCatalogWorkflowFallback(procedureCase.Module, procedureCase.EntityType));
         var currentPosition = stages.FindIndex(stage => stage.Index == procedureCase.CurrentStageIndex);
         var nextStage = currentPosition >= 0 && currentPosition + 1 < stages.Count ? stages[currentPosition + 1] : null;
 
@@ -1239,28 +1268,34 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 now);
         }
 
-        if (procedureCase.OpenedById != Guid.Empty)
+        var customerNotificationRecipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(
+            _db,
+            procedureCase);
+        if (customerNotificationRecipientIds.Count > 0)
         {
             try
             {
-                await _notificationService.CreateNotificationAsync(
-                    new CreateNotificationDto
-                    {
-                        RecipientId = procedureCase.OpenedById,
-                        Type = isReject
-                            ? "estate.property.application-rejected"
-                            : "estate.property.application-clarification",
-                        Title = isReject
-                            ? "Property application rejected"
-                            : "Property application needs clarification",
-                        Message = $"{procedureCase.ReferenceNumber ?? procedureCase.Title}: {reason}",
-                        Priority = isReject ? "High" : "Normal",
-                        EntityType = "ProcedureCase",
-                        EntityId = procedureCase.Id,
-                        ActionUrl = $"/external-portal/my-property-requests/{procedureCase.Id}"
-                    },
-                    userId,
-                    tenantId);
+                foreach (var recipientId in customerNotificationRecipientIds)
+                {
+                    await _notificationService.CreateNotificationAsync(
+                        new CreateNotificationDto
+                        {
+                            RecipientId = recipientId,
+                            Type = isReject
+                                ? "estate.property.application-rejected"
+                                : "estate.property.application-clarification",
+                            Title = isReject
+                                ? "Property application rejected"
+                                : "Property application needs clarification",
+                            Message = $"{procedureCase.ReferenceNumber ?? procedureCase.Title}: {reason}",
+                            Priority = isReject ? "High" : "Normal",
+                            EntityType = "ProcedureCase",
+                            EntityId = procedureCase.Id,
+                            ActionUrl = $"/external-portal/my-property-requests/{procedureCase.Id}"
+                        },
+                        userId,
+                        tenantId);
+                }
             }
             catch
             {
@@ -1348,14 +1383,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             var returned = string.Equals(vettingStatus, "Returned for correction", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(vettingStatus, "Returned", StringComparison.OrdinalIgnoreCase);
             var signedByHeadOfLegal = IsHeadOfLegalSignatureRecorded(FieldValue(legalCase, "signatureStatus"));
+            var readyForCustomerSignature =
+                !returned
+                && !signedByHeadOfLegal
+                && string.Equals(legalCase.CurrentStageName, "Head of Legal Signature", StringComparison.OrdinalIgnoreCase);
             var approved = isCompleted && !returned && signedByHeadOfLegal;
             customerLegalReviewStatus = approved
                 ? "Signed by Head of Legal"
                 : returned
                     ? "Returned by Legal for correction"
-                    : isCompleted
+                    : readyForCustomerSignature
+                        ? "Approved by Legal - ready for customer signature"
+                        : isCompleted
                         ? "Awaiting Head of Legal signature"
-                    : $"Under Legal review - {legalCase.CurrentStageName}";
+                        : $"Under Legal review - {legalCase.CurrentStageName}";
             await UpsertLinkedSourceFieldAsync(
                 tenantId,
                 sourceCase.Id,
@@ -1364,14 +1405,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 customerLegalReviewStatus,
                 actorUserId,
                 now);
-            if (approved || returned)
+            if (approved || returned || readyForCustomerSignature)
             {
                 await UpsertLinkedSourceFieldAsync(
                     tenantId,
                     sourceCase.Id,
                     "customerNotificationStatus",
                     "Customer notification status",
-                    approved ? "Agreement sent to customer portal" : "Legal correction required",
+                    returned ? "Legal correction required" : "Agreement sent to customer portal",
                     actorUserId,
                     now);
             }
@@ -1456,10 +1497,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var customerShouldBeNotified = customerReviewChanged
             && customerNotificationRecipientIds.Count > 0
             && (string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(customerLegalReviewStatus, "Approved by Legal - ready for customer signature", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(customerLegalReviewStatus, "Returned by Legal for correction", StringComparison.OrdinalIgnoreCase));
         if (customerShouldBeNotified)
         {
-            var approved = string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase);
+            var approved = string.Equals(customerLegalReviewStatus, "Signed by Head of Legal", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(customerLegalReviewStatus, "Approved by Legal - ready for customer signature", StringComparison.OrdinalIgnoreCase);
             try
             {
                 foreach (var recipientId in customerNotificationRecipientIds)
@@ -1471,7 +1514,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                             Type = approved ? "estate.property.agreement-released" : "estate.property.agreement-correction-required",
                             Title = approved ? "Property agreement ready for signature" : "Property agreement requires correction",
                             Message = approved
-                                ? $"The Head of Legal has signed the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title}. You can now review, sign, and upload it."
+                                ? $"Legal has released the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title}. You can now review, sign, and upload it."
                                 : $"Legal returned the agreement for {sourceCase.ReferenceNumber ?? sourceCase.Title} for correction.",
                             Priority = approved ? "High" : "Normal",
                             EntityType = "ProcedureCase",
@@ -1765,8 +1808,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var sourceDocument = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
         if (sourceDocument is null) return null;
-        if (!string.Equals(sourceDocument.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Sign the generated draft agreement linked from Estate.");
+        var signingCustomerCopy =
+            string.Equals(sourceDocument.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(sourceDocument.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase);
+        if (!signingCustomerCopy
+            && !string.Equals(sourceDocument.Name, "Generated draft agreement", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Sign the customer-signed agreement returned from the portal.");
         if (procedureCase.Documents.Any(item => !item.IsDeleted
             && string.Equals(item.Name, "Head of Legal signed agreement", StringComparison.OrdinalIgnoreCase)
             && !string.IsNullOrWhiteSpace(item.FileUrl)))
@@ -1774,29 +1821,44 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
-        var recordId = TryParseDocumentManagementRecordId(sourceDocument.FileUrl)
-            ?? throw new InvalidOperationException("The generated agreement is not linked to a DMS record.");
-        var record = await _db.CentralDocumentRecords
-            .AsNoTracking()
-            .Include(item => item.Versions.Where(version => !version.IsDeleted))
-            .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted)
-            ?? throw new InvalidOperationException("The generated agreement was not found in DMS.");
-        var version = ResolveCurrentDocumentVersion(record)
-            ?? throw new InvalidOperationException("The generated agreement has no document version to sign.");
-        var pdfPath = !string.IsNullOrWhiteSpace(version.RenditionPath)
-            ? version.RenditionPath
-            : version.RepositoryPath;
-        if (string.IsNullOrWhiteSpace(pdfPath))
-            throw new InvalidOperationException("The generated agreement has no file to sign.");
-
         var actor = string.IsNullOrWhiteSpace(_currentUser.FullName)
             ? _currentUser.UserName ?? "Head of Legal"
             : _currentUser.FullName.Trim();
         var now = DateTime.UtcNow;
-        await using var sourceStream = await _fileStorageService.DownloadFileAsync(
-            pdfPath,
-            !string.IsNullOrWhiteSpace(version.RenditionPath) ? record.Id : version.FileUploadRecordId ?? record.Id);
-        var needsPdfConversion = string.IsNullOrWhiteSpace(version.RenditionPath)
+        CentralDocumentRecord? record = null;
+        CentralDocumentVersion? version = null;
+        string? pdfPath = null;
+        Guid downloadRecordId = sourceDocument.Id;
+        if (signingCustomerCopy)
+        {
+            pdfPath = sourceDocument.FileUrl;
+            if (string.IsNullOrWhiteSpace(pdfPath))
+                throw new InvalidOperationException("The customer-signed agreement has no file to sign.");
+        }
+        else
+        {
+            var recordId = TryParseDocumentManagementRecordId(sourceDocument.FileUrl)
+                ?? throw new InvalidOperationException("The generated agreement is not linked to a DMS record.");
+            record = await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .Include(item => item.Versions.Where(version => !version.IsDeleted))
+                .FirstOrDefaultAsync(item => item.Id == recordId && item.TenantId == tenantId && !item.IsDeleted)
+                ?? throw new InvalidOperationException("The generated agreement was not found in DMS.");
+            version = ResolveCurrentDocumentVersion(record)
+                ?? throw new InvalidOperationException("The generated agreement has no document version to sign.");
+            pdfPath = !string.IsNullOrWhiteSpace(version.RenditionPath)
+                ? version.RenditionPath
+                : version.RepositoryPath;
+            if (string.IsNullOrWhiteSpace(pdfPath))
+                throw new InvalidOperationException("The generated agreement has no file to sign.");
+            downloadRecordId = !string.IsNullOrWhiteSpace(version.RenditionPath)
+                ? record.Id
+                : version.FileUploadRecordId ?? record.Id;
+        }
+        await using var sourceStream = await _fileStorageService.DownloadFileAsync(pdfPath, downloadRecordId);
+        var needsPdfConversion = !signingCustomerCopy
+            && version is not null
+            && string.IsNullOrWhiteSpace(version.RenditionPath)
             && version.FileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) != true;
         CentralDocumentPdfPreviewResult? preview = null;
         if (needsPdfConversion)
@@ -1806,7 +1868,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             preview = await _renditionService.CreatePdfPreviewAsync(
                 new CentralDocumentPdfPreviewRequest(
                     sourceStream,
-                    version.FileName ?? $"{record.DocumentReference}.docx",
+                    version!.FileName ?? $"{record!.DocumentReference}.docx",
                     version.ContentType ?? "application/octet-stream"),
                 CancellationToken.None);
             if (!preview.Success || preview.PdfStream is null)
@@ -1815,13 +1877,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         using var previewPdf = preview?.PdfStream;
         var signature = await _pdfSigningService.SignAsync(
             previewPdf ?? sourceStream,
-            new CentralDocumentPdfSigningRequest(record.DocumentReference, actor, "Head of Legal", request.Notes, now),
+            new CentralDocumentPdfSigningRequest(
+                record?.DocumentReference ?? procedureCase.ReferenceNumber ?? procedureCase.Title,
+                actor,
+                "Head of Legal",
+                request.Notes,
+                now),
             CancellationToken.None);
         await using var signedStream = new MemoryStream(signature.PdfBytes);
         var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
         {
             FileStream = signedStream,
-            FileName = BuildSignedProcedureDocumentFileName(version.FileName ?? "property-agreement.pdf", "Head of Legal"),
+            FileName = BuildSignedProcedureDocumentFileName(
+                signingCustomerCopy
+                    ? sourceDocument.FileName ?? "customer-signed-agreement.pdf"
+                    : version?.FileName ?? "property-agreement.pdf",
+                "Head of Legal"),
             ContentType = "application/pdf",
             FileSize = signature.PdfBytes.LongLength,
             Category = "procedure-case-documents",
@@ -2175,6 +2246,65 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         await _db.SaveChangesAsync();
     }
 
+    private async Task EnsureFacilitiesMaintenanceHandoffReadyAsync(ProcedureCase procedureCase)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        EnsureFacilitiesMaintenanceHandoffFields(procedureCase);
+        if (await ResolveFacilitiesMaintenanceTypeAsync(procedureCase, procedureCase.TenantId) is null)
+            throw new InvalidOperationException("Select an active Maintenance type before creating the maintenance handoff.");
+        if (await ResolveFacilitiesPriorityLevelAsync(procedureCase, procedureCase.TenantId) is null)
+            throw new InvalidOperationException("Select a configured Low, Medium, or High Maintenance priority before creating the handoff.");
+        await ResolveFacilitiesMaintenanceAssetAsync(procedureCase, procedureCase.TenantId);
+    }
+
+    internal static void EnsureFacilitiesMaintenanceHandoffFields(ProcedureCase procedureCase)
+    {
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "propertyUnit")))
+            throw new InvalidOperationException("Select a property before creating the maintenance handoff.");
+        if (string.IsNullOrWhiteSpace(FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description)))
+            throw new InvalidOperationException("Record the customer's problem description before creating the maintenance handoff.");
+        if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "handoffDescription")))
+            throw new InvalidOperationException("Enter the job card description before creating the maintenance handoff.");
+        if (!double.TryParse(FieldValue(procedureCase, "estimatedHours"), NumberStyles.Float, CultureInfo.InvariantCulture, out var hours) || hours <= 0)
+            throw new InvalidOperationException("Enter estimated hours greater than zero before creating the maintenance handoff.");
+        if (!decimal.TryParse(FieldValue(procedureCase, "estimatedCost"), NumberStyles.Number, CultureInfo.InvariantCulture, out var cost) || cost < 0)
+            throw new InvalidOperationException("Enter a valid estimated cost before creating the maintenance handoff.");
+        if (!Guid.TryParse(FieldValue(procedureCase, "maintenanceTypeId"), out _))
+            throw new InvalidOperationException("Select a Maintenance type before creating the maintenance handoff.");
+        if (!new[] { "Low", "Medium", "High" }.Contains(FieldValue(procedureCase, "priority")?.Trim(), StringComparer.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Select Low, Medium, or High priority before creating the maintenance handoff.");
+    }
+
+    internal static async Task EnsureFacilitiesMaintenancePropertyForIntakeAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        IDictionary<string, string?>? fieldValues)
+    {
+        var propertyUnit = fieldValues is not null && fieldValues.TryGetValue("propertyUnit", out var reference)
+            ? reference
+            : null;
+        var assetIdValue = fieldValues is not null && fieldValues.TryGetValue("estateManagedAssetId", out var linkedId)
+            ? linkedId
+            : null;
+        if (string.IsNullOrWhiteSpace(propertyUnit)
+            || !Guid.TryParse(assetIdValue, out var assetId))
+        {
+            throw new InvalidOperationException("Select a property from the Estate property register before creating the maintenance case.");
+        }
+
+        var matches = await db.EstateManagedAssets.AsNoTracking().AnyAsync(asset =>
+            asset.TenantId == tenantId && asset.Id == assetId && !asset.IsDeleted
+            && (asset.AssetCode == propertyUnit || asset.ProjectUnitCode == propertyUnit));
+        if (!matches)
+        {
+            throw new InvalidOperationException("The selected Estate property does not match this maintenance case. Select the property again.");
+        }
+    }
+
     private async Task CreateMaintenanceJobCardForFacilitiesHandoffAsync(
         ProcedureCase procedureCase,
         string completedStageName,
@@ -2233,15 +2363,26 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         var maintenanceAsset = await ResolveFacilitiesMaintenanceAssetAsync(procedureCase, tenantId);
         var maintenanceType = await ResolveFacilitiesMaintenanceTypeAsync(procedureCase, tenantId);
         var priorityLevel = await ResolveFacilitiesPriorityLevelAsync(procedureCase, tenantId);
-        if (maintenanceAsset is null || maintenanceType is null || priorityLevel is null)
+        if (maintenanceType is null || priorityLevel is null)
         {
-            throw new InvalidOperationException("Maintenance setup is incomplete. Configure an active maintenance asset, maintenance type, and priority level before routing this Facilities request.");
+            throw new InvalidOperationException("Maintenance setup is incomplete for the selected property, type, or priority.");
         }
 
         var sourceReference = FirstNonBlank(procedureCase.ReferenceNumber, procedureCase.Title, procedureCase.Id.ToString()) ?? procedureCase.Id.ToString();
         var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
+        var estatePropertyId = Guid.TryParse(FieldValue(procedureCase, "estateManagedAssetId"), out var selectedEstatePropertyId)
+            ? selectedEstatePropertyId : Guid.Empty;
+        var estateProperty = await _db.EstateManagedAssets.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (estatePropertyId != Guid.Empty
+                    ? item.Id == estatePropertyId
+                    : item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))
+            .Select(item => new { item.Id, item.Name, item.AssetCode })
+            .FirstOrDefaultAsync();
+        var propertyName = FirstNonBlank(estateProperty?.Name, propertyUnit) ?? "Property";
         var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), "Maintenance request")!;
         var issueDescription = FirstNonBlank(FieldValue(procedureCase, "issueDescription"), procedureCase.Description, FieldValue(procedureCase, "notes"));
+        var handoffDescription = FieldValue(procedureCase, "handoffDescription")?.Trim();
         var serviceImpact = FirstNonBlank(FieldValue(procedureCase, "serviceImpact"), "Not recorded")!;
         var accessInstructions = FirstNonBlank(FieldValue(procedureCase, "accessInstructions"), "Not recorded")!;
         var targetDate = ParseProcedureDate(FieldValue(procedureCase, "targetDate"));
@@ -2257,8 +2398,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         var createdJobCard = await _jobCardService.CreateJobCardAsync(new CreateJobCardDto
         {
-            Title = $"Facilities maintenance - {FirstNonBlank(propertyUnit, issueType, sourceReference)}",
-            Description = $"Source: Estate / Facilities. Facilities case {sourceReference}. Property/unit: {propertyUnit ?? "Not recorded"}. Service impact: {serviceImpact}. Access: {accessInstructions}.",
+            Title = $"Facilities maintenance - {propertyName}",
+            Description = handoffDescription,
             ProblemDescription = issueDescription ?? issueType,
             AssetId = maintenanceAsset.Id,
             MaintenanceTypeId = maintenanceType.Id,
@@ -2266,8 +2407,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             CustomerBusinessPartnerId = customerBusinessPartnerId,
             MaintenanceLocation = "External",
             RequiredCompletionDate = targetDate,
-            EstimatedHours = maintenanceType.EstimatedHours > 0 ? maintenanceType.EstimatedHours : 2,
-            EstimatedCost = maintenanceType.EstimatedCost,
+            EstimatedHours = double.Parse(FieldValue(procedureCase, "estimatedHours")!, CultureInfo.InvariantCulture),
+            EstimatedCost = decimal.Parse(FieldValue(procedureCase, "estimatedCost")!, CultureInfo.InvariantCulture),
             RequiresShutdown = maintenanceType.RequiresShutdown,
             RequiresSafetyPermit = maintenanceType.RequiresSafetyPermit,
             SafetyRequirements = FirstNonBlank(maintenanceType.SafetyRequirements, FieldValue(procedureCase, "safetyNotes")),
@@ -2281,6 +2422,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 ["sourceReference"] = sourceReference,
                 ["sourceEntityType"] = procedureCase.EntityType,
                 ["propertyUnit"] = propertyUnit ?? string.Empty,
+                ["estateManagedAssetId"] = estateProperty?.Id.ToString() ?? string.Empty,
+                ["propertyName"] = propertyName,
+                ["problemDescription"] = issueDescription ?? string.Empty,
+                ["handoffDescription"] = handoffDescription ?? string.Empty,
+                ["accessInstructions"] = accessInstructions,
                 ["issueType"] = issueType,
                 ["serviceImpact"] = serviceImpact,
                 ["serviceProviderBusinessPartnerId"] = providerSelection?.Provider.Id.ToString() ?? string.Empty,
@@ -2424,72 +2570,119 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || status.Trim().Equals("Closed", StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceAsset?> ResolveFacilitiesMaintenanceAssetAsync(
+    private Task<MaintenanceAsset> ResolveFacilitiesMaintenanceAssetAsync(
         ProcedureCase procedureCase,
         Guid tenantId)
     {
         var propertyUnit = FirstNonBlank(FieldValue(procedureCase, "propertyUnit"), FieldValue(procedureCase, "propertyNumber"), FieldValue(procedureCase, "housePlotShopNumber"));
-        var normalizedPropertyUnit = propertyUnit?.ToLowerInvariant();
-        if (!string.IsNullOrWhiteSpace(normalizedPropertyUnit))
+        return EnsureFacilitiesMaintenanceAssetAsync(
+            _db, tenantId, propertyUnit,
+            FieldValue(procedureCase, "estateManagedAssetId"), _currentUser.UserName);
+    }
+
+    internal static async Task<MaintenanceAsset> EnsureFacilitiesMaintenanceAssetAsync(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string? propertyUnit,
+        string? estateManagedAssetId,
+        string? createdBy)
+    {
+        if (string.IsNullOrWhiteSpace(propertyUnit))
+            throw new InvalidOperationException("Select an Estate property before creating the maintenance handoff.");
+
+        EstateManagedAsset? estateProperty;
+        if (!string.IsNullOrWhiteSpace(estateManagedAssetId))
         {
-            var matchingAsset = await _db.MaintenanceAssets
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                .Where(item =>
-                    item.AssetNumber.ToLower() == normalizedPropertyUnit
-                    || item.Name.ToLower() == normalizedPropertyUnit
-                    || item.AssetNumber.ToLower().Contains(normalizedPropertyUnit)
-                    || item.Name.ToLower().Contains(normalizedPropertyUnit))
-                .OrderBy(item => item.AssetNumber)
-                .FirstOrDefaultAsync();
-            if (matchingAsset is not null)
-            {
-                return matchingAsset;
-            }
+            if (!Guid.TryParse(estateManagedAssetId, out var propertyId))
+                throw new InvalidOperationException("The selected Estate property ID is invalid.");
+            estateProperty = await db.EstateManagedAssets.AsNoTracking()
+                .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == propertyId && !item.IsDeleted);
+        }
+        else
+        {
+            var matches = await db.EstateManagedAssets.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && (item.AssetCode == propertyUnit || item.ProjectUnitCode == propertyUnit))
+                .OrderBy(item => item.AssetCode == propertyUnit ? 0 : 1)
+                .Take(2).ToListAsync();
+            if (matches.Count > 1 && string.Equals(matches[0].AssetCode, matches[1].AssetCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("More than one Estate property matches this reference. Select the property again.");
+            if (matches.Count > 1 && !string.Equals(matches[0].AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("More than one Estate property matches this unit. Select the property again.");
+            estateProperty = matches.FirstOrDefault();
         }
 
-        return await _db.MaintenanceAssets
-            .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.Status == AssetStatus.Active)
-            .OrderBy(item => item.AssetNumber)
-            .FirstOrDefaultAsync()
-            ?? await _db.MaintenanceAssets
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted)
-                .OrderBy(item => item.AssetNumber)
-                .FirstOrDefaultAsync();
+        if (estateProperty is null)
+            throw new InvalidOperationException("The selected property is not in the Estate property register.");
+        if (!string.Equals(estateProperty.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(estateProperty.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The selected Estate property no longer matches this maintenance case. Select the property again.");
+
+        var marker = $"EST-{estateProperty.Id:N}";
+        var manualName = estateProperty.Name.Length <= 100 ? estateProperty.Name : estateProperty.Name[..100];
+        var displayName = $"{estateProperty.AssetCode} - {estateProperty.Name}";
+        var asset = await db.MaintenanceAssets.FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted && item.AssetNumber == marker);
+        if (asset is null)
+        {
+            var manualMatches = await db.MaintenanceAssets
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                    && item.AssetNumber.ToLower() == estateProperty.AssetCode.ToLower())
+                .Take(2).ToListAsync();
+            if (manualMatches.Count > 1 || manualMatches.Count == 1
+                && !string.Equals(manualMatches[0].Name, manualName, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("A different Maintenance asset already uses this Estate property reference. Resolve the asset reference before creating the handoff.");
+            asset = manualMatches.FirstOrDefault();
+        }
+        if (asset is not null)
+        {
+            if (asset.Status != AssetStatus.Active)
+                throw new InvalidOperationException("The linked Maintenance asset is inactive. Reactivate it before creating the handoff.");
+            return asset;
+        }
+
+        var category = await db.MaintenanceAssetCategories.FirstOrDefaultAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Code == "EST-PROP");
+        if (category is null)
+        {
+            category = new MaintenanceAssetCategory
+            {
+                TenantId = tenantId,
+                Name = "Estate Properties",
+                Code = "EST-PROP",
+                AssetType = "Building",
+                AutoGenerateSchedules = false,
+                CreatedBy = createdBy ?? "Facilities"
+            };
+            db.MaintenanceAssetCategories.Add(category);
+        }
+
+        asset = new MaintenanceAsset
+        {
+            TenantId = tenantId,
+            AssetNumber = marker,
+            Name = displayName[..Math.Min(100, displayName.Length)],
+            Description = $"Linked Estate property {estateProperty.AssetCode} ({estateProperty.Id}).",
+            AssetCategoryId = category.Id,
+            AssetCategory = category,
+            Location = estateProperty.Location,
+            Status = AssetStatus.Active,
+            CreatedBy = createdBy ?? "Facilities"
+        };
+        db.MaintenanceAssets.Add(asset);
+        await db.SaveChangesAsync();
+        return asset;
     }
 
     private async Task<ErpSystem.Core.Entities.Maintenance.MaintenanceType?> ResolveFacilitiesMaintenanceTypeAsync(
         ProcedureCase procedureCase,
         Guid tenantId)
     {
-        var issueType = FirstNonBlank(FieldValue(procedureCase, "issueType"), FieldValue(procedureCase, "complaintCategory"));
-        if (!string.IsNullOrWhiteSpace(issueType))
-        {
-            var normalizedIssueType = issueType.ToLowerInvariant();
-            var matchingType = await _db.MaintenanceTypes
-                .AsNoTracking()
-                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-                .Where(item =>
-                    item.Name.ToLower().Contains(normalizedIssueType)
-                    || item.Code.ToLower().Contains(normalizedIssueType)
-                    || item.Category.ToLower().Contains(normalizedIssueType))
-                .OrderBy(item => item.SortOrder)
-                .ThenBy(item => item.Name)
-                .FirstOrDefaultAsync();
-            if (matchingType is not null)
-            {
-                return matchingType;
-            }
-        }
-
+        if (!Guid.TryParse(FieldValue(procedureCase, "maintenanceTypeId"), out var maintenanceTypeId))
+            return null;
         return await _db.MaintenanceTypes
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-            .OrderByDescending(item => item.MaintenanceClass == "Corrective")
-            .ThenBy(item => item.SortOrder)
-            .ThenBy(item => item.Name)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Id == maintenanceTypeId)
             .FirstOrDefaultAsync();
     }
 
@@ -2498,20 +2691,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         Guid tenantId)
     {
         var priority = FieldValue(procedureCase, "priority")?.Trim();
-        var desiredLevel = priority?.ToLowerInvariant() switch
-        {
-            "urgent" or "critical" or "emergency" => 1,
-            "high" => 2,
-            "normal" or "medium" => 3,
-            "low" => 4,
-            _ => 3
-        };
-
+        if (priority is null || !new[] { "Low", "Medium", "High" }.Contains(priority, StringComparer.OrdinalIgnoreCase))
+            return null;
         return await _db.PriorityLevels
             .AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
-            .OrderBy(item => item.Level == desiredLevel ? 0 : 1)
-            .ThenBy(item => item.Level)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive && item.Name.ToLower() == priority.ToLower())
             .FirstOrDefaultAsync();
     }
 
@@ -2701,10 +2885,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var transferFee = ParseProcedureAmount(FieldValue(legalCase, "transferFeePayable"));
         var amountText = transferFee.HasValue
@@ -2716,31 +2902,34 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.transfer-fee-invoice-ready",
-                    Title = "Transfer fee invoice ready",
-                    Message = $"Finance AR invoice {invoice.InvoiceNumber} is approved and ready for payment. Pay {amountText} for Legal transfer {legalReference} using reference {paymentRequestReference}.",
-                    Priority = "High",
-                    EntityType = "Invoice",
-                    EntityId = invoice.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["transferFeePayable"] = amountText,
-                        ["paymentRequestReference"] = paymentRequestReference,
-                        ["invoiceId"] = invoice.Id,
-                        ["invoiceNumber"] = invoice.InvoiceNumber,
-                        ["invoiceStatus"] = invoice.Status.ToString()
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.transfer-fee-invoice-ready",
+                        Title = "Transfer fee invoice ready",
+                        Message = $"Finance AR invoice {invoice.InvoiceNumber} is approved and ready for payment. Pay {amountText} for Legal transfer {legalReference} using reference {paymentRequestReference}.",
+                        Priority = "High",
+                        EntityType = "Invoice",
+                        EntityId = invoice.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["transferFeePayable"] = amountText,
+                            ["paymentRequestReference"] = paymentRequestReference,
+                            ["invoiceId"] = invoice.Id,
+                            ["invoiceNumber"] = invoice.InvoiceNumber,
+                            ["invoiceStatus"] = invoice.Status.ToString()
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotificationStatus", "Transfer fee customer notification status", "Notified", actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferFeeCustomerNotifiedAt", "Transfer fee customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
@@ -2779,10 +2968,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
         var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
@@ -2790,28 +2981,31 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.legal-transfer-draft-ready",
-                    Title = "Transfer draft ready for signature",
-                    Message = $"Legal transfer {legalReference} is ready. Download the draft, sign it, and upload the signed copy from My Properties.",
-                    Priority = "High",
-                    EntityType = "ProcedureCase",
-                    EntityId = legalCase.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["draftReference"] = draftReference ?? string.Empty,
-                        ["currentStage"] = legalCase.CurrentStageName ?? string.Empty
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.legal-transfer-draft-ready",
+                        Title = "Transfer draft ready for signature",
+                        Message = $"Legal transfer {legalReference} is ready. Download the draft, sign it, and upload the signed copy from My Properties.",
+                        Priority = "High",
+                        EntityType = "ProcedureCase",
+                        EntityId = legalCase.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["draftReference"] = draftReference ?? string.Empty,
+                            ["currentStage"] = legalCase.CurrentStageName ?? string.Empty
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotificationStatus", "Transfer draft customer notification status", "Notified", actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferDraftCustomerNotifiedAt", "Transfer draft customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
@@ -2857,10 +3051,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .FirstOrDefaultAsync(item => item.TenantId == tenantId
                 && item.Id == sourceCaseId
                 && !item.IsDeleted);
-        if (sourceCase is null || sourceCase.OpenedById == Guid.Empty)
+        if (sourceCase is null)
         {
             return;
         }
+        var recipientIds = await EstatePortalCustomerRecipientResolver.ResolveForCaseAsync(_db, sourceCase);
+        if (recipientIds.Count == 0) return;
 
         var legalReference = legalCase.ReferenceNumber ?? legalCase.Id.ToString();
         var sourceReference = sourceCase.ReferenceNumber ?? sourceCase.Title;
@@ -2868,27 +3064,30 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         try
         {
-            await _notificationService.CreateNotificationAsync(
-                new CreateNotificationDto
-                {
-                    RecipientId = sourceCase.OpenedById,
-                    Type = "estate.property.legal-transfer-interview-date",
-                    Title = "Transfer interview date set",
-                    Message = $"Legal transfer {legalReference} has an interview/execution date of {displayDate}. Track the transfer from My Properties.",
-                    Priority = "High",
-                    EntityType = "ProcedureCase",
-                    EntityId = legalCase.Id,
-                    ActionUrl = "/external-portal/my-properties",
-                    Metadata = new Dictionary<string, object>
+            foreach (var recipientId in recipientIds)
+            {
+                await _notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
                     {
-                        ["legalCaseId"] = legalCase.Id,
-                        ["legalReference"] = legalReference,
-                        ["sourceReference"] = sourceReference,
-                        ["interviewDate"] = interviewDate
-                    }
-                },
-                actorUserId,
-                tenantId);
+                        RecipientId = recipientId,
+                        Type = "estate.property.legal-transfer-interview-date",
+                        Title = "Transfer interview date set",
+                        Message = $"Legal transfer {legalReference} has an interview/execution date of {displayDate}. Track the transfer from My Properties.",
+                        Priority = "High",
+                        EntityType = "ProcedureCase",
+                        EntityId = legalCase.Id,
+                        ActionUrl = "/external-portal/my-properties",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["legalCaseId"] = legalCase.Id,
+                            ["legalReference"] = legalReference,
+                            ["sourceReference"] = sourceReference,
+                            ["interviewDate"] = interviewDate
+                        }
+                    },
+                    actorUserId,
+                    tenantId);
+            }
 
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedDate", "Transfer interview customer notified date", interviewDate, actorUserId, now);
             await UpsertLinkedSourceFieldAsync(tenantId, legalCase.Id, "transferInterviewCustomerNotifiedAt", "Transfer interview customer notified at", now.ToString("O", CultureInfo.InvariantCulture), actorUserId, now);
@@ -3496,16 +3695,18 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return procedureCase.CurrentStageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus"],
-            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired"],
+            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus"],
             2 => isRental && approved
-                ? ["decisionStatus", "requestedLeaseTerm", "moveInDate"]
+                ? IsLeaseListingApplication(procedureCase)
+                    ? ["decisionStatus", "requestedLeaseTerm", "moveInDate"]
+                    : ["decisionStatus", "moveInDate"]
                 : ["decisionStatus"],
             3 => ["legalAgreementReviewStatus"],
             // Customer execution values are system-managed by the portal and DMS.
             // Validate their workflow state in ValidatePropertyManagementStageAsync.
             4 => [],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus"]
+                ? ["salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus"]
                 : ["salePaymentStatus", "salePaymentCheckStatus"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)
@@ -3582,6 +3783,28 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
             || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Finance must confirm full payment of the remaining sale or lease amount before conveyance.");
+    }
+
+    private async Task EnsureFirstMonthRentPaymentAsync(ProcedureCase procedureCase)
+    {
+        var amount = ParseProcedureAmount(FieldValue(procedureCase, "listingPrice"));
+        var salesPaid = ParseProcedureAmount(FieldValue(procedureCase, "salesAmountPaid")) ?? 0m;
+        if (amount is not > 0m || salesPaid < 0m || salesPaid > amount.Value)
+            throw new InvalidOperationException("Record the agreed first month rent and valid Sales payment before the Finance check.");
+
+        var balance = decimal.Round(amount.Value - salesPaid, 2, MidpointRounding.AwayFromZero);
+        if (balance <= 0m)
+            return;
+
+        if (!string.Equals(FieldValue(procedureCase, "agreementExecutionStatus"), "Fully executed", StringComparison.OrdinalIgnoreCase)
+            || !Guid.TryParse(FieldValue(procedureCase, "saleInvoiceId"), out var invoiceId))
+            throw new InvalidOperationException("After the agreement is fully signed, create the Finance invoice for the remaining first month rent.");
+
+        var invoice = await _invoiceService.GetByIdAsync(invoiceId);
+        if (invoice is null || !AmountsMatch(invoice.TotalAmount, balance)
+            || invoice.PaidAmount < balance || invoice.BalanceAmount > 0m
+            || !string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Finance must confirm full payment of the remaining first month rent before billing can start.");
     }
 
     private static void EnsurePropertyListingPremiumChargeGateReady(ProcedureCase procedureCase)
@@ -3670,6 +3893,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 if (isRental && !IsLeaseListingApplication(procedureCase))
                 {
                     var billingStatus = FieldValue(procedureCase, "billingStartStatus");
+                    if (!IsSalePaymentSatisfied(procedureCase))
+                    {
+                        throw new InvalidOperationException("Collect and confirm the remaining first month rent before completing the Finance check.");
+                    }
+
                     if (string.IsNullOrWhiteSpace(FieldValue(procedureCase, "billingStartDate"))
                         || !ContainsAny(billingStatus ?? string.Empty, "Ready for billing", "Billing active", "Rent billing activated"))
                     {
@@ -3743,7 +3971,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     }
 
     private static bool IsLegalAgreementReviewApproved(string? value)
-        => IsHeadOfLegalSignatureRecorded(value);
+        => IsLegalAgreementReadyForCustomerSignature(value)
+            || IsHeadOfLegalSignatureRecorded(value);
+
+    private static bool IsLegalAgreementReadyForCustomerSignature(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && value.Contains("approved by legal", StringComparison.OrdinalIgnoreCase)
+            && value.Contains("customer signature", StringComparison.OrdinalIgnoreCase);
 
     private static bool IsHeadOfLegalSignatureRecorded(string? value)
         => !string.IsNullOrWhiteSpace(value)
@@ -3760,9 +3994,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return;
         }
 
+        if (!procedureCase.Documents.Any(document => !document.IsDeleted
+            && (string.Equals(document.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(document.Name, "Signed property agreement", StringComparison.OrdinalIgnoreCase))
+            && !string.IsNullOrWhiteSpace(document.FileUrl)))
+        {
+            throw new InvalidOperationException("The customer must upload the signed agreement before Head of Legal applies the final signature.");
+        }
         if (!IsHeadOfLegalSignatureRecorded(FieldValue(procedureCase, "signatureStatus")))
         {
-            throw new InvalidOperationException("Record Head of Legal signed in Signature status before submitting the agreement to the customer.");
+            throw new InvalidOperationException("Apply the Head of Legal final signature after the customer returns the signed agreement.");
         }
         if (!procedureCase.Documents.Any(document => !document.IsDeleted
             && string.Equals(document.Name, "Head of Legal signed agreement", StringComparison.OrdinalIgnoreCase)
@@ -4352,6 +4593,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return false;
         }
 
+        var childDemarcationId = await _db.EstateLandDemarcations
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.ChildFixedAssetReference == listingReference
+                && item.EstateManagedAsset.TenantId == tenantId
+                && !item.EstateManagedAsset.IsDeleted)
+            .Select(item => item.Id)
+            .FirstOrDefaultAsync();
+        if (childDemarcationId != Guid.Empty)
+        {
+            return await PublishDemarcationListingAsync(tenantId, childDemarcationId, now);
+        }
+
         if (EstateLandDemarcationReference.TryParse(listingReference, out var assetCode, out var demarcationNumber))
         {
             var demarcationId = await _db.EstateLandDemarcations
@@ -4420,18 +4675,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 && item.Id == assetId
                 && !item.IsDeleted
                 && item.ExternalListingType != "None"
-                && (item.Status == EstateManagedAssetStatus.LandBank
-                    || item.Status == EstateManagedAssetStatus.Available
-                    || item.Status == EstateManagedAssetStatus.Reserved))
+                && item.Status == EstateManagedAssetStatus.Available)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(item => item.IsPublishedToExternalPortal, true)
                 .SetProperty(item => item.ExternalListingStatus, "Published")
                 .SetProperty(item => item.ExternalPublishedAt, item => item.ExternalPublishedAt ?? now)
-                .SetProperty(
-                    item => item.Status,
-                    item => item.Status == EstateManagedAssetStatus.Reserved
-                        ? EstateManagedAssetStatus.Available
-                        : item.Status)
                 .SetProperty(item => item.UpdatedAt, now));
 
         return updated > 0;
@@ -4558,6 +4806,10 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         Guid? workflowDefinitionId,
         string action)
     {
+        if (AllowsCatalogWorkflowFallback(module, entityType) && !workflowDefinitionId.HasValue)
+        {
+            return;
+        }
         if (!RequiresPublishedWorkflowForProcedureCase(module, entityType) || workflowDefinitionId.HasValue)
         {
             return;
@@ -4568,6 +4820,11 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
     private void EnsureWorkflowRuntimeForProcedureCase(ProcedureCase procedureCase, string action)
     {
+        if (AllowsCatalogWorkflowFallback(procedureCase.Module, procedureCase.EntityType)
+            && !procedureCase.WorkflowDefinitionId.HasValue)
+        {
+            return;
+        }
         if (!RequiresPublishedWorkflowForProcedureCase(procedureCase.Module, procedureCase.EntityType)
             || procedureCase.WorkflowInstanceId.HasValue)
         {
@@ -4612,10 +4869,15 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static string MissingPublishedWorkflowMessage(string module, string entityType, string action)
         => $"Publish a workflow for {module} / {entityType} before {action} this procedure case.";
 
-    private async Task<List<StageSeed>> BuildStageSeedsAsync(string module, string entityType)
+    private static bool AllowsCatalogWorkflowFallback(string module, string entityType)
+        => string.Equals(module, "PropertyManagement", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(entityType, "EstatePropertyManagementListingApplication", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<List<StageSeed>> BuildStageSeedsAsync(string module, string entityType,
+        bool usePublishedWorkflow = true)
     {
         var tenantId = RequireTenantId();
-        var workflow = await _db.WorkflowDefinitions
+        var workflow = usePublishedWorkflow ? await _db.WorkflowDefinitions
             .AsNoTracking()
             .Include(item => item.EntityType)
             .Include(item => item.Steps)
@@ -4626,7 +4888,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 && (item.EntityType.Name == entityType || item.EntityType.Code == entityType))
             .OrderByDescending(item => item.PublishedAt ?? item.CreatedAt)
             .ThenByDescending(item => item.Version)
-            .FirstOrDefaultAsync();
+            .FirstOrDefaultAsync() : null;
 
         if (workflow is not null && workflow.Steps.Count > 0)
         {
@@ -4646,8 +4908,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
-        // Catalog stages are retained only as a backend fallback for non-case workspaces and legacy reads.
-        // Case-style procedure routing is blocked unless a published workflow is available.
+        // The listing application may use catalog stages when opened before its workflow is published.
+        // Other case-style procedures still require a published workflow.
         return module switch
         {
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages
@@ -4782,8 +5044,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return (
             procedure.Title,
-            [],
-            []);
+            BuildEstateFieldSeeds(procedure),
+            BuildEstateDocumentSeeds(procedure));
     }
 
     private (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents) BuildPropertyManagementSeed(string entityType)
@@ -4820,6 +5082,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var fields = new List<FieldSeed>
         {
+            new("estateManagedAssetId", "Linked estate asset ID", "text", null),
+            new("customerBusinessPartnerId", "Linked customer ID", "text", null),
             new("referenceNumber", "Reference number", "text", null),
             new("procedureType", "Procedure", "text", [procedure.Title]),
             new("applicantName", "Applicant / lessee / client name", "text", null),
@@ -5994,6 +6258,17 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase);
         var fields = procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList();
+        if (string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var seed in BuildFacilitiesSeed(procedureCase.EntityType).Fields
+                .Where(item => new[] { "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost" }
+                    .Contains(item.Key, StringComparer.OrdinalIgnoreCase)))
+            {
+                if (fields.All(item => !string.Equals(item.Key, seed.Key, StringComparison.OrdinalIgnoreCase)))
+                    fields.Add(new ProcedureCaseFieldDto(Guid.NewGuid(), seed.Key, seed.Label, seed.FieldType, null, seed.Options));
+            }
+        }
         var documents = procedureCase.Documents.OrderBy(item => item.CreatedAt).ToList();
         var dmsDocuments = await LoadDmsDocumentSnapshotsAsync(procedureCase.TenantId, documents);
         await AddFacilitiesMaintenanceExecutionStatusFieldsAsync(procedureCase, fields);
@@ -6243,15 +6518,37 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             .ToList() ?? [];
         if (configuredFields.Count > 0)
         {
-            return configuredFields;
+            return FacilitiesMaintenanceStageFieldKeys(procedureCase, configuredFields);
         }
 
         if (!IsPropertyManagementListingApplication(procedureCase))
         {
-            return [];
+            return FacilitiesMaintenanceStageFieldKeys(procedureCase, []);
         }
 
         return GetPropertyListingStageFieldKeys(procedureCase);
+    }
+
+    private static IReadOnlyList<string> FacilitiesMaintenanceStageFieldKeys(ProcedureCase procedureCase, IReadOnlyList<string> configuredFields)
+    {
+        if (!string.Equals(procedureCase.Module, "Facilities", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(procedureCase.EntityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
+            return configuredFields;
+
+        if (string.Equals(procedureCase.CurrentStageName, "Facilities Intake", StringComparison.OrdinalIgnoreCase))
+            return configuredFields.Concat(["propertyUnit", "location", "contactReference", "issueType", "serviceImpact", "targetDate", "preferredVisitDate", "accessInstructions", "issueDescription"])
+                .Where(key => !string.Equals(key, "priority", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (string.Equals(procedureCase.CurrentStageName, "Maintenance Closeout", StringComparison.OrdinalIgnoreCase))
+            return configuredFields.Concat(["inspectionOutcome", "inspectionReference", "requesterFeedbackStatus", "closureNotes"])
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        if (!string.Equals(procedureCase.CurrentStageName, "Maintenance Handoff Review", StringComparison.OrdinalIgnoreCase))
+            return configuredFields;
+
+        return configuredFields.Concat(["priority", "maintenanceTypeId", "handoffDescription", "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId"])
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
     }
 
     private static bool IsPropertyManagementListingApplication(ProcedureCase procedureCase)
@@ -6267,14 +6564,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         return procedureCase.CurrentStageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus", "applicationStatus", "notes"],
-            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired", "premiumChargeAmount", "premiumChargeInvoiceReference", "premiumChargePaymentStatus", "notes"],
+            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "notes"],
             2 => isRental
-                ? ["decisionStatus", "requestedLeaseTerm", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "premiumChargePaymentStatus", "notes"]
-                : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "premiumChargePaymentStatus", "notes"],
+                ? IsLeaseListingApplication(procedureCase)
+                    ? ["decisionStatus", "requestedLeaseTerm", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "notes"]
+                    : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "notes"]
+                : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "notes"],
             3 => ["legalAgreementReviewReference", "legalAgreementReviewStatus", "notes"],
             4 => ["notes"],
             5 => isRental && !IsLeaseListingApplication(procedureCase)
-                ? ["billingStartDate", "billingStartStatus", "notes"]
+                ? ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus", "notes"]
                 : ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "notes"],
             6 => isRental
                 ? IsLeaseListingApplication(procedureCase)

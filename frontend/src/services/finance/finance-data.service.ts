@@ -110,6 +110,11 @@ import {
 
 // Mirrors the backend PeriodCloseResultDto returned by fiscal year close/reopen.
 export interface FiscalYearCloseResult {
+  accountingBookId?: string;
+  bookCloseCycleId?: string;
+  closingJournalEntryId?: string;
+  reversalJournalEntryId?: string;
+  netIncomeTransferred?: number;
   success: boolean;
   message: string;
   fiscalPeriodId: string;
@@ -117,6 +122,21 @@ export interface FiscalYearCloseResult {
   closedDate?: string | null;
   closedByUserName?: string | null;
   errors: string[];
+}
+
+export interface YearEndBookCloseCycle {
+  id: string;
+  fiscalYearId: string;
+  accountingBookId: string;
+  accountingBookCode: string;
+  functionalCurrencyCode: string;
+  cycleNumber: number;
+  status: 'Closing' | 'Closed' | 'Reopened';
+  closingJournalEntryId?: string;
+  reversalJournalEntryId?: string;
+  netIncomeTransferred: number;
+  closedAtUtc: string;
+  reopenedAtUtc?: string;
 }
 
 // =============================================================================
@@ -370,6 +390,10 @@ class FinanceDataService {
       `/finance/accounting-books/${accountingBookId}/initialization/delta-structure`,
       {}
     );
+  }
+
+  async prepareAccountingBookStructure(accountingBookId: string): Promise<import('@/types/finance').DeltaBookStructurePreparation> {
+    return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/structure`, {});
   }
 
   async configureAccountingBookInitialization(
@@ -745,23 +769,27 @@ class FinanceDataService {
 
   async closeFiscalYear(
     id: string,
-    options?: { retainedEarningsAccountId?: string; closingNotes?: string }
+    options: { accountingBookId: string; idempotencyKey: string; retainedEarningsAccountId?: string; closingNotes?: string }
   ): Promise<FiscalYearCloseResult> {
     // The retained earnings account defaults from Finance Settings when omitted.
     return apiService.post<FiscalYearCloseResult>(
       `/finance/fiscal-years/${id}/close`,
-      options ?? {}
+      options
     );
   }
 
   async reopenFiscalYear(
     id: string,
-    reason: string
+    request: { accountingBookId: string; bookCloseCycleId: string; reason: string }
   ): Promise<FiscalYearCloseResult> {
     return apiService.post<FiscalYearCloseResult>(
       `/finance/fiscal-years/${id}/reopen`,
-      { reason }
+      request
     );
+  }
+
+  async getYearEndCloseCycles(id: string): Promise<YearEndBookCloseCycle[]> {
+    return apiService.get<YearEndBookCloseCycle[]>(`/finance/fiscal-years/${id}/book-close-cycles`);
   }
 
   // ===== FISCAL PERIODS =====
@@ -1067,12 +1095,14 @@ class FinanceDataService {
   async reverseJournalEntry(
     id: string,
     reason: string,
+    reversalDatePolicy: 'CurrentOpenPeriod' | 'OriginalDocumentPeriodIfOpen',
     reversalDate?: string
   ): Promise<JournalEntry> {
     const raw = await apiService.post<any>(
       `/finance/journal-entries/${id}/reverse`,
       {
         reason,
+        reversalDatePolicy,
         reversalDate: reversalDate || undefined,
       }
     );
@@ -1452,7 +1482,7 @@ class FinanceDataService {
   async updateFinanceSettings(
     dto: UpdateFinanceSettingsDto
   ): Promise<FinanceSettings> {
-    return apiService.put<FinanceSettings>('/finance/settings', dto);
+    return apiService.patch<FinanceSettings>('/finance/settings', dto);
   }
 
   // ===== FINANCIAL STATEMENTS =====
@@ -1655,11 +1685,16 @@ class FinanceDataService {
   async activateSegmentStructure(
     id: string,
     rowVersion: string,
-    reason?: string
+    options?: {
+      reason?: string;
+      confirmExistingAccountBackfill?: boolean;
+      defaultSegmentValue?: string;
+      defaultSegmentLookupValueId?: string;
+    }
   ): Promise<SegmentStructure> {
     return apiService.post<SegmentStructure>(
       `/finance/segments/${id}/activate`,
-      { rowVersion, reason }
+      { rowVersion, ...options }
     );
   }
 
@@ -1726,10 +1761,6 @@ class FinanceDataService {
     }[]
   ): Promise<void> {
     return apiService.post('/finance/segments/reorder', reorderList);
-  }
-
-  async regenerateAccountNumbers(): Promise<void> {
-    return apiService.post('/finance/segments/regenerate', {});
   }
 
   // ===== ACCOUNT CURRENCY LINKS =====

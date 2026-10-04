@@ -101,6 +101,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 dto.Rate,
                 effectiveFrom,
                 dto.IsActive,
+                dto.Applicability,
+                dto.IsInputTaxDeductible,
                 dto.TaxPayableAccountId,
                 dto.TaxReceivableAccountId,
                 cancellationToken);
@@ -189,6 +191,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             var newRate = dto.Rate ?? tax.Rate;
             var newEffectiveFrom = (dto.EffectiveFrom ?? (dto.Rate.HasValue && dto.Rate.Value != tax.Rate ? DateTime.UtcNow : tax.EffectiveFrom)).Date;
             var newIsActive = dto.IsActive ?? tax.IsActive;
+            var newApplicability = dto.Applicability ?? tax.Applicability;
+            var newIsInputTaxDeductible = dto.IsInputTaxDeductible ?? tax.IsInputTaxDeductible;
             Guid? newPayableAccountId = dto.ClearTaxPayableAccount
                 ? null
                 : dto.TaxPayableAccountId ?? tax.TaxPayableAccountId;
@@ -217,6 +221,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 newRate,
                 newEffectiveFrom,
                 newIsActive,
+                newApplicability,
+                newIsInputTaxDeductible,
                 newPayableAccountId,
                 newReceivableAccountId,
                 cancellationToken);
@@ -671,6 +677,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             decimal rate,
             DateTime effectiveFrom,
             bool isActive,
+            TaxApplicability applicability,
+            bool isInputTaxDeductible,
             Guid? taxPayableAccountId,
             Guid? taxReceivableAccountId,
             CancellationToken cancellationToken)
@@ -694,6 +702,15 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
             await ValidateTaxAccountAsync(taxPayableAccountId, "tax payable account", cancellationToken);
             await ValidateTaxAccountAsync(taxReceivableAccountId, "tax receivable account", cancellationToken);
+
+            if (isActive
+                && isInputTaxDeductible
+                && applicability is TaxApplicability.Purchases or TaxApplicability.Both
+                && !taxReceivableAccountId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    "A recoverable purchase tax requires an active tax receivable account before it can be used.");
+            }
         }
 
         private async Task ValidateTaxAccountAsync(
@@ -884,7 +901,11 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             }
 
             var now = DateTime.UtcNow;
-            var effectiveFrom = new DateTime(2024, 1, 1);
+            var effectiveFrom = new DateTime(2026, 1, 1);
+            var taxPayableAccount = await FindRequiredTaxControlAccountAsync(
+                "2200", AccountType.Liability, "output tax payable", cancellationToken);
+            var taxReceivableAccount = await FindRequiredTaxControlAccountAsync(
+                "1140", AccountType.Asset, "recoverable input tax", cancellationToken);
 
             // Create individual taxes
             var nhil = new Tax
@@ -900,6 +921,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Category = TaxCategory.Levy,
                 IsActive = true,
                 IsInputTaxDeductible = true,
+                TaxPayableAccountId = taxPayableAccount.Id,
+                TaxReceivableAccountId = taxReceivableAccount.Id,
                 CreatedAt = now,
                 CreatedBy = "system"
             };
@@ -917,6 +940,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Category = TaxCategory.Levy,
                 IsActive = true,
                 IsInputTaxDeductible = true,
+                TaxPayableAccountId = taxPayableAccount.Id,
+                TaxReceivableAccountId = taxReceivableAccount.Id,
                 CreatedAt = now,
                 CreatedBy = "system"
             };
@@ -951,6 +976,8 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Category = TaxCategory.Standard,
                 IsActive = true,
                 IsInputTaxDeductible = true,
+                TaxPayableAccountId = taxPayableAccount.Id,
+                TaxReceivableAccountId = taxReceivableAccount.Id,
                 CreatedAt = now,
                 CreatedBy = "system"
             };
@@ -968,6 +995,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Category = TaxCategory.Withholding,
                 IsActive = true,
                 IsInputTaxDeductible = false,
+                TaxPayableAccountId = taxPayableAccount.Id,
                 ThresholdAmount = 2000m,
                 CreatedAt = now,
                 CreatedBy = "system"
@@ -986,6 +1014,7 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 Category = TaxCategory.Withholding,
                 IsActive = true,
                 IsInputTaxDeductible = false,
+                TaxPayableAccountId = taxPayableAccount.Id,
                 ThresholdAmount = 2000m,
                 CreatedAt = now,
                 CreatedBy = "system"
@@ -1114,6 +1143,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
 
         private async Task RepairGhanaVatStandardComponentsAsync(CancellationToken cancellationToken)
         {
+            var taxPayableAccount = await FindRequiredTaxControlAccountAsync(
+                "2200", AccountType.Liability, "output tax payable", cancellationToken);
+            var taxReceivableAccount = await FindRequiredTaxControlAccountAsync(
+                "1140", AccountType.Asset, "recoverable input tax", cancellationToken);
             var candidateGroups = await _context.Set<TaxGroup>()
                 .Include(g => g.Components)
                     .ThenInclude(c => c.Tax)
@@ -1200,14 +1233,27 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                         continue;
                     }
 
-                    var isVatComponent =
-                        string.Equals(taxCode, "VAT", StringComparison.OrdinalIgnoreCase)
-                        || string.Equals(taxCode, "VAT-STD", StringComparison.OrdinalIgnoreCase)
-                        || taxName.Contains("Value Added Tax", StringComparison.OrdinalIgnoreCase);
-
-                    if (!isVatComponent)
+                    if (component.Tax is { } activeTax)
                     {
-                        continue;
+                        if (activeTax.Applicability is TaxApplicability.Sales or TaxApplicability.Both
+                            && activeTax.Category is TaxCategory.Standard or TaxCategory.Levy
+                            && activeTax.TaxPayableAccountId != taxPayableAccount.Id)
+                        {
+                            activeTax.TaxPayableAccountId = taxPayableAccount.Id;
+                            activeTax.UpdatedAt = now;
+                            activeTax.UpdatedBy = "system";
+                            changed = true;
+                        }
+
+                        if (activeTax.IsInputTaxDeductible
+                            && activeTax.Applicability is TaxApplicability.Purchases or TaxApplicability.Both
+                            && activeTax.TaxReceivableAccountId != taxReceivableAccount.Id)
+                        {
+                            activeTax.TaxReceivableAccountId = taxReceivableAccount.Id;
+                            activeTax.UpdatedAt = now;
+                            activeTax.UpdatedBy = "system";
+                            changed = true;
+                        }
                     }
 
                     if (component.CompoundBasis != CompoundBasis.BaseOnly)
@@ -1232,6 +1278,36 @@ namespace ErpSystem.Api.Services.Finance.Taxation
                 await _context.SaveChangesAsync(cancellationToken);
                 _logger.LogInformation("Repaired Ghana standard VAT components for tenant {TenantId}", TenantId);
             }
+        }
+
+        private async Task<Account> FindRequiredTaxControlAccountAsync(
+            string accountCode,
+            AccountType expectedType,
+            string purpose,
+            CancellationToken cancellationToken)
+        {
+            var account = await _context.Accounts.FirstOrDefaultAsync(a =>
+                a.TenantId == TenantId
+                && a.AccountCode == accountCode
+                && !a.IsDeleted,
+                cancellationToken);
+
+            if (account == null)
+            {
+                throw new InvalidOperationException(
+                    $"The Ghana tax defaults require account {accountCode} for {purpose}. Seed or configure the Finance chart of accounts first.");
+            }
+
+            if (account.Status != AccountStatus.Active
+                || account.AccountType != expectedType
+                || !account.IsControlAccount
+                || account.AllowDirectPosting)
+            {
+                throw new InvalidOperationException(
+                    $"Account {accountCode} must be an active, non-direct-posting {expectedType} control account for {purpose}.");
+            }
+
+            return account;
         }
 
         public async Task SeedTaxRulesAsync(CancellationToken cancellationToken = default)

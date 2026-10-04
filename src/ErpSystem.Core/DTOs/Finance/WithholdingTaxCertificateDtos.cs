@@ -92,6 +92,15 @@ public sealed class WhtCalculationRequestDto
     public List<Guid> VendorInvoiceIds { get; set; } = new();
     public string? ContractReference { get; set; }
     public WhtSupplyCategory? SupplyCategory { get; set; }
+    /// <summary>Invoice-native gross liability settled; the server derives VAT-exclusive bases.</summary>
+    public List<WhtInvoiceSettlementDto> InvoiceSettlements { get; set; } = new();
+}
+
+public sealed class WhtInvoiceSettlementDto
+{
+    public Guid VendorInvoiceId { get; set; }
+    public decimal GrossSettlementAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
 }
 
 public sealed class WhtCalculationResultDto
@@ -102,6 +111,9 @@ public sealed class WhtCalculationResultDto
     public decimal TaxRate { get; set; }
     public decimal TaxableBase { get; set; }
     public decimal CumulativeBefore { get; set; }
+    public decimal CurrentPaymentTaxableBase { get; set; }
+    public decimal CatchUpTaxableBase { get; set; }
+    public decimal CatchUpWithholdingAmount { get; set; }
     public decimal CumulativeAfter { get; set; }
     public decimal? ThresholdAmount { get; set; }
     public decimal RemainingBeforeThreshold { get; set; }
@@ -113,6 +125,21 @@ public sealed class WhtCalculationResultDto
     public WhtSupplyCategory SupplyCategory { get; set; }
     public DateTime StatutoryPeriodStart { get; set; }
     public DateTime StatutoryPeriodEnd { get; set; }
+    public List<WhtStatutoryFxEvidenceDto> StatutoryFxEvidence { get; set; } = new();
+}
+
+public sealed class WhtStatutoryFxEvidenceDto
+{
+    public Guid VendorInvoiceId { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal GrossSettlementAmount { get; set; }
+    public decimal NetTaxableBaseAmount { get; set; }
+    public decimal GhsTaxableBaseAmount { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public decimal ExchangeRateToGhs { get; set; } = 1m;
+    public DateTime RecognitionDate { get; set; }
+    public string RateSource { get; set; } = "Functional currency";
+    public string? SourceReference { get; set; }
 }
 
 public sealed class WhtRemittanceQueryDto

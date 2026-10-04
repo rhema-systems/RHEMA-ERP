@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Estate;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Projects;
@@ -47,7 +48,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     || item.IsPublishedToExternalPortal == query.PublishedToExternalPortal.Value)
                 && (query.PortalListingCandidates != true
                     || item.IsPublishedToExternalPortal
-                    || item.ExternalListingType != "None"));
+                    || item.ExternalListingType != "None")
+                && (string.IsNullOrEmpty(query.ExternalListingStatus)
+                    || (query.ExternalListingStatus != "PendingPublication"
+                        && item.ExternalListingStatus == query.ExternalListingStatus)));
 
         if (normalizedSearch != null)
         {
@@ -66,6 +70,33 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 || (item.PropertyFileReference != null && EF.Functions.Like(item.PropertyFileReference, search)));
         }
 
+        if (query.IncludeLandDemarcations
+            && !query.AssetId.HasValue
+            && (!query.AssetType.HasValue || query.AssetType == EstateManagedAssetType.Land))
+        {
+            var parentAssets = await assetsQuery
+                .AsNoTracking()
+                .ToListAsync();
+
+            await EnrichLandAcquisitionAssetsForReadAsync(parentAssets);
+
+            var parentDtos = parentAssets.Select(MapToDto).ToList();
+            await ApplyDemarcationCountsAsync(parentDtos);
+            var demarcationDtos = await GetLandDemarcationRegisterRowsAsync(
+                query,
+                normalizedSearch,
+                statuses,
+                excludedStatuses);
+
+            return parentDtos
+                .Concat(demarcationDtos)
+                .OrderBy(item => item.AssetCode)
+                .ThenBy(item => item.Name)
+                .Skip(skip)
+                .Take(take)
+                .ToList();
+        }
+
         var assets = await assetsQuery
             .AsNoTracking()
             .OrderBy(item => item.AssetCode)
@@ -82,7 +113,27 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             return mappedAssets;
         }
 
-        var assetIds = assets.Select(item => item.Id).ToList();
+        await ApplyDemarcationCountsAsync(mappedAssets);
+
+        return mappedAssets;
+    }
+
+    private async Task ApplyDemarcationCountsAsync(IReadOnlyCollection<EstateManagedAssetDto> mappedAssets)
+    {
+        if (mappedAssets.Count == 0)
+        {
+            return;
+        }
+
+        var assetIds = mappedAssets
+            .Where(item => item.ListingScope == "asset")
+            .Select(item => item.Id)
+            .ToList();
+        if (assetIds.Count == 0)
+        {
+            return;
+        }
+
         var demarcationCounts = await _unitOfWork.Repository<EstateLandDemarcation>()
             .GetQueryable(item => item.TenantId == _currentUserProvider.TenantId
                 && assetIds.Contains(item.EstateManagedAssetId)
@@ -104,9 +155,63 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 mappedAsset.VerifiedDemarcationCount = count.VerifiedCount;
             }
         }
-
-        return mappedAssets;
     }
+
+    private async Task<IReadOnlyList<EstateManagedAssetDto>> GetLandDemarcationRegisterRowsAsync(
+        EstateManagedAssetQuery query,
+        string? normalizedSearch,
+        IReadOnlyCollection<EstateManagedAssetStatus> statuses,
+        IReadOnlyCollection<EstateManagedAssetStatus> excludedStatuses)
+    {
+        var demarcationsQuery = _unitOfWork.Repository<EstateLandDemarcation>()
+            .GetQueryable(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && !item.IsDeleted
+                && item.EstateManagedAsset.TenantId == _currentUserProvider.TenantId
+                && !item.EstateManagedAsset.IsDeleted
+                && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                && (!query.Status.HasValue || item.EstateManagedAsset.Status == query.Status.Value)
+                && (statuses.Count == 0 || statuses.Contains(item.EstateManagedAsset.Status))
+                && (excludedStatuses.Count == 0 || !excludedStatuses.Contains(item.EstateManagedAsset.Status))
+                && (!query.AvailableForLease.HasValue || item.EstateManagedAsset.IsAvailableForLease == query.AvailableForLease.Value)
+                && (!query.AvailableForSale.HasValue || item.EstateManagedAsset.IsAvailableForSale == query.AvailableForSale.Value)
+                && (!query.AvailableForSaleOrLease.HasValue
+                    || (item.EstateManagedAsset.IsAvailableForSale || item.EstateManagedAsset.IsAvailableForLease) == query.AvailableForSaleOrLease.Value)
+                && (!query.PublishedToExternalPortal.HasValue
+                    || item.IsPublishedToExternalPortal == query.PublishedToExternalPortal.Value)
+                && (query.PortalListingCandidates != true
+                    || item.IsPublishedToExternalPortal
+                    || item.ExternalListingType != "None")
+                && (string.IsNullOrEmpty(query.ExternalListingStatus)
+                    || (query.ExternalListingStatus != "PendingPublication"
+                        && item.ExternalListingStatus == query.ExternalListingStatus)));
+
+        if (normalizedSearch != null)
+        {
+            var search = $"%{normalizedSearch}%";
+            demarcationsQuery = demarcationsQuery.Where(item =>
+                EF.Functions.Like(item.Description, search)
+                || (item.ChildFixedAssetReference != null && EF.Functions.Like(item.ChildFixedAssetReference, search))
+                || (item.ParentLandAssetReference != null && EF.Functions.Like(item.ParentLandAssetReference, search))
+                || (item.ParentFixedAssetReference != null && EF.Functions.Like(item.ParentFixedAssetReference, search))
+                || EF.Functions.Like(item.EstateManagedAsset.AssetCode, search)
+                || EF.Functions.Like(item.EstateManagedAsset.Name, search)
+                || (item.EstateManagedAsset.ProjectCode != null && EF.Functions.Like(item.EstateManagedAsset.ProjectCode, search))
+                || (item.EstateManagedAsset.ProjectTitle != null && EF.Functions.Like(item.EstateManagedAsset.ProjectTitle, search))
+                || (item.EstateManagedAsset.Purpose != null && EF.Functions.Like(item.EstateManagedAsset.Purpose, search))
+                || (item.EstateManagedAsset.ZoningClassification != null && EF.Functions.Like(item.EstateManagedAsset.ZoningClassification, search))
+                || (item.EstateManagedAsset.GisLayerReference != null && EF.Functions.Like(item.EstateManagedAsset.GisLayerReference, search))
+                || (item.EstateManagedAsset.Location != null && EF.Functions.Like(item.EstateManagedAsset.Location, search)));
+        }
+
+        var demarcations = await demarcationsQuery
+            .Include(item => item.EstateManagedAsset)
+            .AsNoTracking()
+            .ToListAsync();
+
+        return demarcations.Select(MapDemarcationToManagedAssetDto).ToList();
+    }
+
 
     public async Task<EstateManagedAssetDto> PublishLandAcquisitionAsync(LandAcquisitionEstateHandoffDto handoff)
         => await ExecuteSerializableMutationAsync(
@@ -187,7 +292,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             ? asset.OwnershipHistoryJson
             : JsonSerializer.Serialize(handoff.OwnershipHistory);
         asset.ValuationAmount = handoff.ValuationAmount;
-        asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
+        asset.Currency = await ResolveActiveFinanceCurrencyAsync(handoff.Currency);
         asset.IsAvailableForLease = false;
         asset.IsAvailableForSale = false;
         asset.IsPublishedFromProject = false;
@@ -199,6 +304,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalMonthlyRent = null;
         asset.ExternalGroundRentRequired = null;
         asset.ExternalPremiumChargeRequired = null;
+        asset.ExternalPremiumChargeAmount = null;
         asset.ExternalLeaseTermMonths = null;
         asset.ExternalListingNotes = null;
         asset.ExternalPublishedAt = null;
@@ -311,7 +417,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.UnitType = TrimOrNull(handoff.UnitType);
         asset.AreaSquareMeters = handoff.AreaSquareMeters;
         asset.ValuationAmount = handoff.ValuationAmount;
-        asset.Currency = string.IsNullOrWhiteSpace(handoff.Currency) ? "GHS" : handoff.Currency.Trim().ToUpperInvariant();
+        asset.Currency = await ResolveActiveFinanceCurrencyAsync(handoff.Currency);
         asset.IsAvailableForLease = handoff.IsAvailableForLease;
         asset.IsAvailableForSale = handoff.IsAvailableForSale;
         asset.IsPublishedFromProject = true;
@@ -356,6 +462,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalListingStatus = "Withdrawn";
         asset.ExternalListingType = "None";
         asset.ExternalPublishedAt = null;
+        await PausePropertyOperationsAsync(asset);
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -404,13 +511,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             capitalizedCost = request.ValuationAmount;
         }
 
+        var currency = await ResolveActiveFinanceCurrencyAsync(request.Currency);
         var costBreakdown = new[]
             {
-                request.OwnerConsiderationCost is > 0m ? $"Owner/vendor consideration: {request.Currency} {request.OwnerConsiderationCost.Value:N2}" : null,
-                request.ExternalSurveyorCost is > 0m ? $"External surveyor cost: {request.Currency} {request.ExternalSurveyorCost.Value:N2}" : null,
-                request.StampDutyCost is > 0m ? $"Stamp duty: {request.Currency} {request.StampDutyCost.Value:N2}" : null,
-                request.OtherAcquisitionCost is > 0m ? $"Other acquisition cost: {request.Currency} {request.OtherAcquisitionCost.Value:N2}" : null,
-                $"Total capitalized land cost: {request.Currency} {capitalizedCost:N2}"
+                request.OwnerConsiderationCost is > 0m ? $"Owner/vendor consideration: {currency} {request.OwnerConsiderationCost.Value:N2}" : null,
+                request.ExternalSurveyorCost is > 0m ? $"External surveyor cost: {currency} {request.ExternalSurveyorCost.Value:N2}" : null,
+                request.StampDutyCost is > 0m ? $"Stamp duty: {currency} {request.StampDutyCost.Value:N2}" : null,
+                request.OtherAcquisitionCost is > 0m ? $"Other acquisition cost: {currency} {request.OtherAcquisitionCost.Value:N2}" : null,
+                $"Total capitalized land cost: {currency} {capitalizedCost:N2}"
             }
             .Where(item => !string.IsNullOrWhiteSpace(item));
         var asset = new EstateManagedAsset
@@ -450,7 +558,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             StampDutyCost = request.StampDutyCost,
             OtherAcquisitionCost = request.OtherAcquisitionCost,
             TotalCapitalizedCost = capitalizedCost,
-            Currency = string.IsNullOrWhiteSpace(request.Currency) ? "GHS" : request.Currency.Trim().ToUpperInvariant(),
+            Currency = currency,
             Notes = string.Join(Environment.NewLine, new[]
             {
                 request.Notes.Trim(),
@@ -540,13 +648,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 && !item.EstateManagedAsset.Demarcations.Any(child =>
                     !child.IsDeleted && child.ParentDemarcationId == item.Id)
                 && ((item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
-                        && (item.IsReadyForProjectManagement || item.EstateManagedAsset.IsReadyForProjectManagement)
+                        && item.IsReadyForProjectManagement
                         && !item.IsPublishedToExternalPortal
                         && !item.EstateManagedAsset.IsPublishedToExternalPortal)
                     || (normalizedCurrentReference != null
                         && ((currentReferenceIsAssetId
                                 && item.EstateManagedAssetId == currentAssetId)
                             || item.EstateManagedAsset.AssetCode == normalizedCurrentReference
+                            || item.ChildFixedAssetReference == normalizedCurrentReference
                             || item.EstateManagedAsset.ProjectCode == normalizedCurrentReference
                             || item.EstateManagedAsset.Name == normalizedCurrentReference
                             || (currentReferenceIsDemarcation
@@ -568,6 +677,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                 DemarcationIsReadyForProjectManagement = item.IsReadyForProjectManagement,
                 DemarcationIsPublishedToExternalPortal = item.IsPublishedToExternalPortal,
                 DemarcationNumber = item.DemarcationNumber,
+                ChildFixedAssetReference = item.ChildFixedAssetReference,
                 Description = item.Description,
                 AreaSquareFeet = item.AreaSquareFeet,
                 BoundaryVerified = item.BoundaryVerified
@@ -593,7 +703,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     candidate,
                     currentReferenceSet);
                 var isAvailable = candidate.AssetStatus == EstateManagedAssetStatus.LandBank
-                    && (candidate.DemarcationIsReadyForProjectManagement || candidate.AssetIsReadyForProjectManagement)
+                    && candidate.DemarcationIsReadyForProjectManagement
                     && !candidate.AssetIsPublishedToExternalPortal
                     && !candidate.DemarcationIsPublishedToExternalPortal
                     && !IsReadyLandCandidateAssignedToProject(
@@ -612,9 +722,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
                     AssetName = candidate.AssetName,
                     AssetLocation = candidate.AssetLocation,
                     DemarcationId = candidate.DemarcationId,
-                    LandReference = EstateLandDemarcationReference.Build(
-                        candidate.AssetCode,
-                        candidate.DemarcationNumber),
+                    LandReference = EstateLandDemarcationReference.DisplayReference(
+                        candidate.ChildFixedAssetReference, candidate.AssetCode, candidate.DemarcationNumber),
                     DemarcationNumber = candidate.DemarcationNumber,
                     Description = candidate.Description,
                     AreaSquareFeet = candidate.AreaSquareFeet,
@@ -876,9 +985,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var includesSale = ListingIncludesSale(listingType);
         var includesRecurringCharge = ListingIncludesRecurringCharge(listingType);
         var isLeaseListing = ListingIsLease(listingType);
-        var listingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
-            ? "GHS"
-            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        var listingCurrency = await ResolveActiveFinanceCurrencyAsync(
+            request.ExternalListingCurrency,
+            asset.Currency);
         var salePrice = includesSale
             ? request.ExternalSalePrice ?? request.ExternalListingPrice
             : null;
@@ -907,6 +1016,13 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         }
         if (publishToCustomerPortal
             && includesRecurringCharge
+            && request.ExternalPremiumChargeRequired == true
+            && request.ExternalPremiumChargeAmount is not > 0m)
+        {
+            throw new InvalidOperationException("Enter the premium charge amount before publishing this listing.");
+        }
+        if (publishToCustomerPortal
+            && includesRecurringCharge
             && asset.AssetType == EstateManagedAssetType.Land
             && request.ExternalGroundRentRequired is null)
         {
@@ -929,6 +1045,9 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         demarcation.ExternalMonthlyRent = recurringCharge;
         demarcation.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
         demarcation.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
+        demarcation.ExternalPremiumChargeAmount = includesRecurringCharge && request.ExternalPremiumChargeRequired == true
+            ? request.ExternalPremiumChargeAmount
+            : null;
         demarcation.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
@@ -1479,6 +1598,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             asset.ExternalPublishedAt = null;
         }
 
+        await PausePropertyOperationsAsync(asset);
+
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = _currentUserProvider.Username;
         asset.LastModifiedById = _currentUserProvider.UserId;
@@ -1486,6 +1607,50 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         await repository.UpdateAsync(asset);
         await _unitOfWork.SaveChangesAsync();
         return MapToDto(asset);
+    }
+
+    private async Task PausePropertyOperationsAsync(EstateManagedAsset asset)
+    {
+        if (asset.Status is not (EstateManagedAssetStatus.Reserved
+            or EstateManagedAssetStatus.Blocked
+            or EstateManagedAssetStatus.Retired))
+            return;
+
+        var today = DateTime.UtcNow.Date;
+        var now = DateTime.UtcNow;
+        asset.AutoGenerateRentInvoices = false;
+        asset.NextRentBillingDate = null;
+
+        var groundRentRepository = _unitOfWork.Repository<EstateGroundRentAccount>();
+        var accounts = await groundRentRepository.FindAsync(account =>
+            account.TenantId == asset.TenantId && !account.IsDeleted
+            && account.EstateManagedAssetId == asset.Id && account.Status == "Active");
+        foreach (var account in accounts)
+        {
+            account.Status = "Held";
+            account.UpdatedAt = now;
+            account.UpdatedBy = _currentUserProvider.Username;
+            await groundRentRepository.UpdateAsync(account);
+        }
+
+        var rosterRepository = _unitOfWork.Repository<EstateFacilityDutyRoster>();
+        var rosters = await rosterRepository.FindAsync(item =>
+            item.TenantId == asset.TenantId && !item.IsDeleted
+            && item.CompletionStatus != "Completed"
+            && item.CompletionStatus != "Cancelled"
+            && (item.EndDate == null || item.EndDate >= today)
+            && (item.PropertyUnit == asset.AssetCode
+                || (asset.ProjectUnitCode != null && item.PropertyUnit == asset.ProjectUnitCode)
+                || item.PropertyReference == asset.AssetCode));
+        foreach (var roster in rosters)
+        {
+            roster.EndDate = today.AddDays(-1);
+            roster.CompletionStatus = "Cancelled";
+            roster.UpdatedAt = now;
+            roster.UpdatedBy = _currentUserProvider.Username;
+            roster.LastModifiedById = _currentUserProvider.UserId;
+            await rosterRepository.UpdateAsync(roster);
+        }
     }
 
     public Task<EstateManagedAssetDto> UpdateExternalListingAsync(
@@ -1524,12 +1689,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             && (asset.AssetType == EstateManagedAssetType.Property
                 || asset.AssetType == EstateManagedAssetType.Facility))
         {
-            if (asset.SourceType != EstateManagedAssetSourceType.Imported
-                && (asset.SourceType != EstateManagedAssetSourceType.ProjectUnit
-                    || !asset.IsPublishedFromProject))
+            if (!IsPropertyPortalSourceAllowed(asset.SourceType, asset.IsPublishedFromProject))
             {
                 throw new InvalidOperationException(
-                    "Only imported or project-handoff property can be sent to Portal Listings.");
+                    "Only manually registered, imported, or project-handoff property can be sent to Portal Listings.");
             }
 
             if (asset.Status != EstateManagedAssetStatus.Available)
@@ -1560,6 +1723,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         {
             if (request.ExternalPremiumChargeRequired is null)
                 throw new InvalidOperationException("Select whether a premium charge is required before publishing this listing.");
+            if (request.ExternalPremiumChargeRequired == true && request.ExternalPremiumChargeAmount is not > 0m)
+                throw new InvalidOperationException("Enter the premium charge amount before publishing this listing.");
             if (isLeaseListing && leaseAmount is not > 0m)
             {
                 throw new InvalidOperationException("Enter the full-term lease amount before publishing a lease listing.");
@@ -1570,8 +1735,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             }
             if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired is null)
                 throw new InvalidOperationException("Select whether annual ground rent is required before publishing this land listing.");
-            if (asset.AssetType == EstateManagedAssetType.Land && request.ExternalGroundRentRequired == true && asset.GroundRentPayable is not > 0m)
-                throw new InvalidOperationException("Assess and approve annual ground rent before publishing this land listing.");
+            if (request.ExternalGroundRentRequired == true && asset.GroundRentPayable is not > 0m)
+                throw new InvalidOperationException("Assess and approve annual ground rent before publishing this listing.");
         }
 
         if (request.IsPublishedToExternalPortal && includesSale && !salePrice.HasValue)
@@ -1586,14 +1751,17 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         asset.ExternalMonthlyRent = recurringCharge;
         asset.ExternalGroundRentRequired = includesRecurringCharge ? request.ExternalGroundRentRequired : null;
         asset.ExternalPremiumChargeRequired = includesRecurringCharge ? request.ExternalPremiumChargeRequired : null;
+        asset.ExternalPremiumChargeAmount = includesRecurringCharge && request.ExternalPremiumChargeRequired == true
+            ? request.ExternalPremiumChargeAmount
+            : null;
         asset.ExternalLeaseTermMonths = includesRecurringCharge && request.ExternalLeaseTermMonths > 0
             ? request.ExternalLeaseTermMonths
             : null;
         // Keep the generic listing price populated for older integrations.
         asset.ExternalListingPrice = includesSale ? salePrice : isLeaseListing ? leaseAmount : recurringCharge;
-        asset.ExternalListingCurrency = string.IsNullOrWhiteSpace(request.ExternalListingCurrency)
-            ? "GHS"
-            : request.ExternalListingCurrency.Trim().ToUpperInvariant();
+        asset.ExternalListingCurrency = await ResolveActiveFinanceCurrencyAsync(
+            request.ExternalListingCurrency,
+            asset.Currency);
         asset.ExternalListingNotes = TrimOrNull(request.ExternalListingNotes);
         asset.ExternalPublishedAt = request.IsPublishedToExternalPortal
             ? asset.ExternalPublishedAt ?? DateTime.UtcNow
@@ -1705,6 +1873,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         CentralDocumentReference = document.CentralDocumentReference,
         PublishedToCentralDmsAt = document.PublishedToCentralDmsAt
     };
+
+    internal static bool IsPropertyPortalSourceAllowed(EstateManagedAssetSourceType sourceType, bool isPublishedFromProject) =>
+        sourceType is EstateManagedAssetSourceType.Manual or EstateManagedAssetSourceType.Imported
+        || (sourceType == EstateManagedAssetSourceType.ProjectUnit && isPublishedFromProject);
 
     private static EstateManagedAssetType ResolveAssetType(string? unitType)
     {
@@ -2470,10 +2642,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         EstateLandDemarcation demarcation,
         ISet<string> assignedLandReferences)
     {
-        var landReference = EstateLandDemarcationReference.Build(
-            asset.AssetCode,
-            demarcation.DemarcationNumber);
-        if (assignedLandReferences.Contains(landReference))
+        var landReference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference)
+            || assignedLandReferences.Contains(EstateLandDemarcationReference.Build(asset.AssetCode, demarcation.DemarcationNumber)))
         {
             return true;
         }
@@ -2494,10 +2666,10 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ReadyLandCandidate candidate,
         ISet<string> assignedLandReferences)
     {
-        var landReference = EstateLandDemarcationReference.Build(
-            candidate.AssetCode,
-            candidate.DemarcationNumber);
-        if (assignedLandReferences.Contains(landReference))
+        var landReference = EstateLandDemarcationReference.DisplayReference(
+            candidate.ChildFixedAssetReference, candidate.AssetCode, candidate.DemarcationNumber);
+        if (assignedLandReferences.Contains(landReference)
+            || assignedLandReferences.Contains(EstateLandDemarcationReference.Build(candidate.AssetCode, candidate.DemarcationNumber)))
         {
             return true;
         }
@@ -2527,6 +2699,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         public bool DemarcationIsReadyForProjectManagement { get; init; }
         public bool DemarcationIsPublishedToExternalPortal { get; init; }
         public int DemarcationNumber { get; init; }
+        public string? ChildFixedAssetReference { get; init; }
         public string Description { get; init; } = string.Empty;
         public decimal AreaSquareFeet { get; init; }
         public bool BoundaryVerified { get; init; }
@@ -2539,9 +2712,8 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         Id = demarcation.Id,
         EstateManagedAssetId = demarcation.EstateManagedAssetId,
         ParentDemarcationId = demarcation.ParentDemarcationId,
-        LandReference = EstateLandDemarcationReference.Build(
-            assetCode,
-            demarcation.DemarcationNumber),
+        LandReference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference, assetCode, demarcation.DemarcationNumber),
         DemarcationNumber = demarcation.DemarcationNumber,
         Description = demarcation.Description,
         BeaconCount = demarcation.BeaconCount,
@@ -2570,6 +2742,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
         ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
         ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
+        ExternalPremiumChargeAmount = demarcation.ExternalPremiumChargeAmount,
         ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
         ExternalListingCurrency = demarcation.ExternalListingCurrency,
         ExternalListingNotes = demarcation.ExternalListingNotes,
@@ -2578,9 +2751,88 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         CreatedBy = demarcation.CreatedBy
     };
 
+    private static EstateManagedAssetDto MapDemarcationToManagedAssetDto(EstateLandDemarcation demarcation)
+    {
+        var asset = demarcation.EstateManagedAsset;
+        var reference = EstateLandDemarcationReference.DisplayReference(
+            demarcation.ChildFixedAssetReference,
+            asset.AssetCode,
+            demarcation.DemarcationNumber);
+
+        return new EstateManagedAssetDto
+        {
+            Id = demarcation.Id,
+            ListingScope = "demarcation",
+            ParentAssetId = demarcation.EstateManagedAssetId,
+            AssetCode = reference,
+            Name = reference,
+            Description = demarcation.Description,
+            Location = asset.Location,
+            Purpose = asset.Purpose,
+            ZoningClassification = asset.ZoningClassification,
+            PlanningComplianceStatus = asset.PlanningComplianceStatus,
+            GisLayerReference = asset.GisLayerReference,
+            GisProvider = asset.GisProvider,
+            GisFeatureId = asset.GisFeatureId,
+            GisSourceCrs = asset.GisSourceCrs,
+            GisSyncStatus = asset.GisSyncStatus,
+            GisLastSyncedAt = asset.GisLastSyncedAt,
+            BoundaryVerified = demarcation.BoundaryVerified,
+            BoundaryCoordinates = demarcation.BoundaryCoordinates,
+            SurveyPlanNumber = asset.SurveyPlanNumber,
+            MapSheetNumber = asset.MapSheetNumber,
+            CadastreDescription = asset.CadastreDescription,
+            Region = asset.Region,
+            District = asset.District,
+            Town = asset.Town,
+            AreaValue = demarcation.AreaSquareFeet,
+            AreaUnit = "sq ft",
+            SurveyorName = asset.SurveyorName,
+            SurveyDate = asset.SurveyDate,
+            BeaconCount = demarcation.BeaconCount,
+            OwnershipHistory = string.IsNullOrWhiteSpace(asset.OwnershipHistoryJson)
+                ? Array.Empty<ExistingLandOwnerDto>()
+                : JsonSerializer.Deserialize<List<ExistingLandOwnerDto>>(asset.OwnershipHistoryJson) ?? [],
+            IsReadyForProjectManagement = demarcation.IsReadyForProjectManagement,
+            AssetType = EstateManagedAssetType.Land,
+            Status = asset.Status,
+            SourceType = asset.SourceType,
+            LandAcquisitionId = asset.LandAcquisitionId,
+            ProjectId = asset.ProjectId,
+            ProjectCode = asset.ProjectCode,
+            ProjectTitle = asset.ProjectTitle,
+            UnitType = "Land parcel",
+            GroundRentPayable = demarcation.GroundRentPayable,
+            GroundRentRatePerAcre = demarcation.GroundRentRatePerAcre,
+            GroundRentComputed = demarcation.GroundRentComputed,
+            AreaSquareMeters = demarcation.AreaSquareFeet / 10.7639104167m,
+            ValuationAmount = demarcation.AllocatedCost,
+            Currency = FirstNonBlankOrNull(demarcation.ExternalListingCurrency, asset.Currency) ?? "GHS",
+            IsAvailableForLease = asset.IsAvailableForLease,
+            IsAvailableForSale = asset.IsAvailableForSale,
+            IsPublishedFromProject = asset.IsPublishedFromProject,
+            PublishedFromProjectAt = asset.PublishedFromProjectAt,
+            IsPublishedToExternalPortal = demarcation.IsPublishedToExternalPortal,
+            ExternalListingType = demarcation.ExternalListingType,
+            ExternalListingStatus = demarcation.ExternalListingStatus,
+            ExternalListingPrice = demarcation.ExternalListingPrice,
+            ExternalSalePrice = demarcation.ExternalSalePrice,
+            ExternalMonthlyRent = demarcation.ExternalMonthlyRent,
+            ExternalGroundRentRequired = demarcation.ExternalGroundRentRequired,
+            ExternalPremiumChargeRequired = demarcation.ExternalPremiumChargeRequired,
+            ExternalPremiumChargeAmount = demarcation.ExternalPremiumChargeAmount,
+            ExternalLeaseTermMonths = demarcation.ExternalLeaseTermMonths,
+            ExternalListingCurrency = demarcation.ExternalListingCurrency,
+            ExternalListingNotes = demarcation.ExternalListingNotes,
+            ExternalPublishedAt = demarcation.ExternalPublishedAt,
+            Notes = asset.Notes
+        };
+    }
+
     private static EstateManagedAssetDto MapToDto(EstateManagedAsset asset) => new()
     {
         Id = asset.Id,
+        ListingScope = "asset",
         AssetCode = asset.AssetCode,
         Name = asset.Name,
         Description = asset.Description,
@@ -2656,6 +2908,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         ExternalMonthlyRent = asset.ExternalMonthlyRent,
         ExternalGroundRentRequired = asset.ExternalGroundRentRequired,
         ExternalPremiumChargeRequired = asset.ExternalPremiumChargeRequired,
+        ExternalPremiumChargeAmount = asset.ExternalPremiumChargeAmount,
         RentBillingActivatedAt = asset.RentBillingActivatedAt,
         NextRentBillingDate = asset.NextRentBillingDate,
         LastRentInvoiceId = asset.LastRentInvoiceId,
@@ -2680,6 +2933,56 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .FirstOrDefault(),
         Notes = asset.Notes
     };
+
+    private async Task<string> ResolveActiveFinanceCurrencyAsync(
+        string? requestedCurrency,
+        string? fallbackCurrency = null)
+    {
+        var currencies = _unitOfWork.Repository<Currency>()
+            .GetQueryable(currency =>
+                currency.TenantId == _currentUserProvider.TenantId
+                && currency.IsActive
+                && !currency.IsDeleted);
+        var normalized = FirstNonBlankOrNull(requestedCurrency, fallbackCurrency)?.ToUpperInvariant();
+
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            var activeCurrency = await currencies
+                .Where(currency => currency.CurrencyCode == normalized)
+                .Select(currency => currency.CurrencyCode)
+                .FirstOrDefaultAsync();
+            if (!string.IsNullOrWhiteSpace(activeCurrency))
+            {
+                return activeCurrency;
+            }
+
+            throw new InvalidOperationException(
+                $"Currency {normalized} is not active in Finance for this tenant.");
+        }
+
+        var baseCurrency = await currencies
+            .Where(currency => currency.IsBaseCurrency)
+            .OrderBy(currency => currency.DisplayOrder)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(baseCurrency))
+        {
+            return baseCurrency;
+        }
+
+        var firstActiveCurrency = await currencies
+            .OrderBy(currency => currency.DisplayOrder)
+            .ThenBy(currency => currency.CurrencyCode)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(firstActiveCurrency))
+        {
+            return firstActiveCurrency;
+        }
+
+        throw new InvalidOperationException(
+            "Finance must configure an active currency before Estate can save monetary values.");
+    }
 
     private static string? TrimOrNull(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

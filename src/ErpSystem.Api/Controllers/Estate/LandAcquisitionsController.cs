@@ -32,6 +32,9 @@ public class LandAcquisitionsController : ControllerBase
     private const string AcquiringOwnerName = "TDC";
     private const string WorkflowEntityType = "LandAcquisition";
     private const double OwnershipCoordinateToleranceFeet = 5d;
+    private const int MaxWorkspaceFields = 256;
+    private const int MaxWorkspaceKeyLength = 100;
+    private const int MaxWorkspacePayloadBytes = 200_000;
     private static readonly JsonSerializerOptions WorkflowStepJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -213,6 +216,24 @@ public class LandAcquisitionsController : ControllerBase
         if (request.ProcedureId < 0 || request.ProcedureId > 16)
         {
             return BadRequest("Invalid acquisition procedure.");
+        }
+
+        var stageDefinition = StageDefinitions.First(stage => stage.Order == request.ProcedureId);
+        if (!string.IsNullOrWhiteSpace(request.WorkspaceKind) &&
+            !string.Equals(request.WorkspaceKind, stageDefinition.WorkspaceKind, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest("The workspace kind does not match the acquisition procedure.");
+        }
+
+        if (request.Values is null)
+        {
+            return BadRequest("Workspace values are required.");
+        }
+
+        var workspacePayloadProblem = ValidateWorkspacePayload(request.Values);
+        if (workspacePayloadProblem != null)
+        {
+            return BadRequest(workspacePayloadProblem);
         }
 
         var tenantId = GetTenantId();
@@ -662,6 +683,11 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound(new { success = false, message = "Land acquisition document was not found." });
         }
 
+        if (!await CanViewStageAsync(acquisition, (int)document.Procedure, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
+        }
+
         var stream = await _fileStorageService.DownloadFileAsync(document.FilePath, document.Id);
         return File(stream, ContentTypeFor(document.FileName), document.FileName);
     }
@@ -679,15 +705,15 @@ public class LandAcquisitionsController : ControllerBase
             return NotFound("Land acquisition was not found.");
         }
 
-        if (!await CanAccessStageAsync(acquisition, acquisition.StageOrder, GetUserId(), IsWorkflowAdministrator()))
-        {
-            return Forbid();
-        }
-
         var document = acquisition.Documents.FirstOrDefault(item => item.Id == documentId && !item.IsDeleted);
         if (document == null)
         {
             return NotFound(new { success = false, message = "Land acquisition document was not found." });
+        }
+
+        if (!await CanViewStageAsync(acquisition, (int)document.Procedure, GetUserId(), IsWorkflowAdministrator()))
+        {
+            return Forbid();
         }
 
         var contentType = ContentTypeFor(document.FileName);
@@ -1070,6 +1096,10 @@ public class LandAcquisitionsController : ControllerBase
             ObjectDecimal(assetCreationValues, "totalCapitalizedCost") ??
             ObjectDecimal(assetCreationValues, "capitalizationValue") ??
             (asset is { CapitalizationValue: > 0 } ? asset.CapitalizationValue : null);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots, assetCreationValues),
+            cancellationToken);
         var managedAsset = await _managedAssetService.PublishLandAcquisitionAsync(new LandAcquisitionEstateHandoffDto
         {
             LandAcquisitionId = acquisition.Id,
@@ -1088,6 +1118,7 @@ public class LandAcquisitionsController : ControllerBase
             AreaValue = asset?.Size > 0 ? asset.Size : acquisition.EstimatedSize,
             AreaUnit = asset?.SizeUnit ?? survey?.AreaUnit ?? Text(cadastralValues, "areaUnit"),
             ValuationAmount = capitalizedCost,
+            Currency = currency,
             BoundaryCoordinates = survey?.BoundaryCoordinates ?? Text(cadastralValues, "boundaryCoordinates"),
             SurveyPlanNumber = survey?.PlanNumber ?? Text(cadastralValues, "surveyPlanNumber"),
             MapSheetNumber = survey?.MapSheetNumber ?? Text(cadastralValues, "mapSheetNumber"),
@@ -1171,6 +1202,24 @@ public class LandAcquisitionsController : ControllerBase
             .Include(item => item.StatutoryConsent)
             .Include(item => item.StampDutyAssessment)
             .Include(item => item.StampDutyPayment);
+
+    private static string? ValidateWorkspacePayload(Dictionary<string, object?> values)
+    {
+        if (values.Count > MaxWorkspaceFields)
+        {
+            return $"Workspace payload cannot contain more than {MaxWorkspaceFields} fields.";
+        }
+
+        if (values.Keys.Any(key => string.IsNullOrWhiteSpace(key) || key.Length > MaxWorkspaceKeyLength))
+        {
+            return $"Workspace field keys are required and cannot exceed {MaxWorkspaceKeyLength} characters.";
+        }
+
+        var payloadSize = JsonSerializer.SerializeToUtf8Bytes(values).Length;
+        return payloadSize > MaxWorkspacePayloadBytes
+            ? $"Workspace payload cannot exceed {MaxWorkspacePayloadBytes:N0} bytes."
+            : null;
+    }
 
     private void ApplyWorkspace(LandAcquisition acquisition, LandAcquisitionWorkspaceRequest request)
     {
@@ -1383,11 +1432,14 @@ public class LandAcquisitionsController : ControllerBase
                     .Where(item => !item.IsDeleted)
                     .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
                     .FirstOrDefault();
+                var currency = ResolveLandAcquisitionCurrency(snapshots, values) ?? "GHS";
                 var capitalization = BuildCapitalizationSummary(
                     acquisition,
                     snapshots,
                     values,
-                    asset);
+                    asset,
+                    currency);
+                values["currency"] = currency;
                 values["ownerConsiderationCost"] = capitalization.OwnerConsiderationCost;
                 values["externalSurveyorCost"] = capitalization.ExternalSurveyorCost;
                 values["stampDutyCost"] = capitalization.StampDutyCost;
@@ -1527,11 +1579,17 @@ public class LandAcquisitionsController : ControllerBase
             return;
         }
 
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots, values),
+            cancellationToken);
         var capitalization = BuildCapitalizationSummary(
             acquisition,
-            ReadWorkspaceSnapshots(acquisition),
+            snapshots,
             values,
-            landAsset);
+            landAsset,
+            currency);
         var capitalizedValue = RoundMoney(capitalization.TotalCapitalizedCost);
         if (capitalizedValue <= 0m)
         {
@@ -1612,8 +1670,8 @@ public class LandAcquisitionsController : ControllerBase
         fixedAsset.LifetimeProductionCapacity = 0m;
         fixedAsset.AccumulatedProductionUnits = 0m;
         fixedAsset.Status = FixedAssetStatus.Capitalized;
-        fixedAsset.FunctionalCurrencyCode = "GHS";
-        fixedAsset.TransactionCurrencyCode = "GHS";
+        fixedAsset.FunctionalCurrencyCode = currency;
+        fixedAsset.TransactionCurrencyCode = currency;
         fixedAsset.CapitalizedAt = now;
         fixedAsset.UpdatedAt = now;
         fixedAsset.UpdatedBy = userName;
@@ -2199,14 +2257,17 @@ public class LandAcquisitionsController : ControllerBase
             .Where(item => !item.IsDeleted)
             .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
             .FirstOrDefault();
+        var responseValueSnapshot = responseValues.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value,
+            StringComparer.OrdinalIgnoreCase);
+        var currency = ResolveLandAcquisitionCurrency(snapshots, responseValueSnapshot) ?? "GHS";
         var capitalization = BuildCapitalizationSummary(
             acquisition,
             snapshots,
-            responseValues.ToDictionary(
-                pair => pair.Key,
-                pair => pair.Value,
-                StringComparer.OrdinalIgnoreCase),
-            asset);
+            responseValueSnapshot,
+            asset,
+            currency);
 
         SetMissingResponseValue(responseValues, "assetCode", asset?.AssetCode ?? GenerateLandAssetCode(acquisition.ProjectReference));
         SetMissingResponseValue(responseValues, "assetNumber", asset?.AssetNumber ?? GenerateLandAssetNumber(acquisition.ProjectReference));
@@ -2250,6 +2311,7 @@ public class LandAcquisitionsController : ControllerBase
             SnapshotText(ownershipVerification, "dueDiligenceStatus") ??
             "Ownership verified through legal due diligence and Lands Commission registration");
         responseValues["capitalizationValue"] = FormatDecimal(capitalization.TotalCapitalizedCost);
+        SetMissingResponseValue(responseValues, "currency", currency);
         responseValues["ownerConsiderationCost"] = FormatDecimal(capitalization.OwnerConsiderationCost);
         responseValues["externalSurveyorCost"] = FormatDecimal(capitalization.ExternalSurveyorCost);
         responseValues["stampDutyCost"] = FormatDecimal(capitalization.StampDutyCost);
@@ -2265,11 +2327,126 @@ public class LandAcquisitionsController : ControllerBase
             "Created from completed estate land acquisition workflow. Capitalized cost includes owner consideration, surveyor costs, stamp duty, and other acquisition costs supported by the workflow.");
     }
 
+    private async Task<string> ResolveActiveFinanceCurrencyAsync(
+        Guid tenantId,
+        string? requestedCurrency,
+        CancellationToken cancellationToken)
+    {
+        var currencies = _context.Set<Currency>()
+            .AsNoTracking()
+            .Where(currency =>
+                currency.TenantId == tenantId &&
+                currency.IsActive &&
+                !currency.IsDeleted);
+        var normalized = NormalizeCurrencyCode(requestedCurrency);
+
+        if (!string.IsNullOrWhiteSpace(normalized))
+        {
+            var activeCurrency = await currencies
+                .Where(currency => currency.CurrencyCode == normalized)
+                .Select(currency => currency.CurrencyCode)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (!string.IsNullOrWhiteSpace(activeCurrency))
+            {
+                return activeCurrency;
+            }
+
+            throw new InvalidOperationException(
+                $"Currency {normalized} is not active in Finance for this tenant.");
+        }
+
+        var baseCurrency = await currencies
+            .Where(currency => currency.IsBaseCurrency)
+            .OrderBy(currency => currency.DisplayOrder)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(baseCurrency))
+        {
+            return baseCurrency;
+        }
+
+        var firstActiveCurrency = await currencies
+            .OrderBy(currency => currency.DisplayOrder)
+            .ThenBy(currency => currency.CurrencyCode)
+            .Select(currency => currency.CurrencyCode)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(firstActiveCurrency))
+        {
+            return firstActiveCurrency;
+        }
+
+        throw new InvalidOperationException(
+            "Finance must configure an active currency before Land Acquisition can create monetary records.");
+    }
+
+    private static string? ResolveLandAcquisitionCurrency(
+        IReadOnlyDictionary<int, Dictionary<string, JsonElement>> snapshots,
+        IReadOnlyDictionary<string, object?>? currentValues = null)
+    {
+        var directCurrency = NormalizeCurrencyCode(ObjectText(currentValues, "currency"));
+        if (!string.IsNullOrWhiteSpace(directCurrency))
+        {
+            return directCurrency;
+        }
+
+        foreach (var stage in new[]
+                 {
+                     AcquisitionProcedure.LandAssetCreation,
+                     AcquisitionProcedure.StampDutyPayment,
+                     AcquisitionProcedure.StampDutyAssessment,
+                     AcquisitionProcedure.VendorPayment,
+                     AcquisitionProcedure.AgreementNegotiation,
+                     AcquisitionProcedure.CadastralSurvey,
+                     AcquisitionProcedure.LandIdentification
+                 })
+        {
+            if (!snapshots.TryGetValue((int)stage, out var values))
+            {
+                continue;
+            }
+
+            var currency =
+                NormalizeCurrencyCode(SnapshotText(values, "currency")) ??
+                NormalizeCurrencyCode(SnapshotText(values, "currencyCode"));
+            if (!string.IsNullOrWhiteSpace(currency))
+            {
+                return currency;
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeCurrencyCode(string? value)
+    {
+        var normalized = value?.Trim().ToUpperInvariant();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
+    private static string? ObjectText(
+        IReadOnlyDictionary<string, object?>? values,
+        string key)
+    {
+        if (values == null || !values.TryGetValue(key, out var value) || value == null)
+        {
+            return null;
+        }
+
+        if (value is JsonElement json)
+        {
+            return json.ValueKind == JsonValueKind.String ? json.GetString() : json.ToString();
+        }
+
+        var text = value.ToString();
+        return string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+    }
+
     private static LandCapitalizationSummary BuildCapitalizationSummary(
         LandAcquisition acquisition,
         IReadOnlyDictionary<int, Dictionary<string, JsonElement>> snapshots,
         IReadOnlyDictionary<string, object?>? assetCreationValues = null,
-        LandAsset? asset = null)
+        LandAsset? asset = null,
+        string currency = "GHS")
     {
         snapshots.TryGetValue((int)AcquisitionProcedure.AgreementNegotiation, out var negotiationSnapshot);
         snapshots.TryGetValue((int)AcquisitionProcedure.VendorPayment, out var vendorPaymentSnapshot);
@@ -2333,14 +2510,15 @@ public class LandAcquisitionsController : ControllerBase
 
         var parts = new List<string>
         {
-            $"Owner/vendor consideration: GHS {ownerConsideration:N2}",
-            $"External surveyor cost: GHS {externalSurveyorCost:N2}",
-            $"Stamp duty: GHS {stampDuty:N2}",
-            $"Other acquisition costs: GHS {otherAcquisitionCost:N2}",
-            $"Total land cost: GHS {total:N2}"
+            $"Owner/vendor consideration: {currency} {ownerConsideration:N2}",
+            $"External surveyor cost: {currency} {externalSurveyorCost:N2}",
+            $"Stamp duty: {currency} {stampDuty:N2}",
+            $"Other acquisition costs: {currency} {otherAcquisitionCost:N2}",
+            $"Total land cost: {currency} {total:N2}"
         };
 
         return new LandCapitalizationSummary(
+            currency,
             ownerConsideration,
             externalSurveyorCost,
             stampDuty,
@@ -2350,6 +2528,7 @@ public class LandAcquisitionsController : ControllerBase
     }
 
     private sealed record LandCapitalizationSummary(
+        string Currency,
         decimal OwnerConsiderationCost,
         decimal ExternalSurveyorCost,
         decimal StampDutyCost,
@@ -2644,6 +2823,10 @@ public class LandAcquisitionsController : ControllerBase
         var debitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots),
+            cancellationToken);
 
         if (invoice == null)
         {
@@ -2655,7 +2838,7 @@ public class LandAcquisitionsController : ControllerBase
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = SnapshotDate(surveySnapshot, "surveyorFeeDueDate") ?? DateTime.UtcNow,
-                CurrencyCode = "GHS",
+                CurrencyCode = currency,
                 ExchangeRate = 1m,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
@@ -2697,6 +2880,7 @@ public class LandAcquisitionsController : ControllerBase
 
         var values = SnapshotToObjectDictionary(surveySnapshot);
         values["surveyorSource"] = "External";
+        values["currency"] = currency;
         values["surveyorBusinessPartnerId"] = surveyorPartner.Id;
         values["surveyorName"] = surveyorName;
         values["accountsPayableSupplierId"] = invoice.BusinessPartnerId;
@@ -2911,6 +3095,10 @@ public class LandAcquisitionsController : ControllerBase
         var landDebitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots),
+            cancellationToken);
 
         if (invoice == null)
         {
@@ -2923,7 +3111,7 @@ public class LandAcquisitionsController : ControllerBase
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = dueDate,
-                CurrencyCode = "GHS",
+                CurrencyCode = currency,
                 ExchangeRate = 1m,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
@@ -2966,6 +3154,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
         {
+            ["currency"] = currency,
             ["vendorBusinessPartnerId"] = vendorPartner?.Id,
             ["vendorName"] = vendorName,
             ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
@@ -3027,6 +3216,11 @@ public class LandAcquisitionsController : ControllerBase
         var stampDutyDebitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
+        var snapshots = ReadWorkspaceSnapshots(acquisition);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots),
+            cancellationToken);
 
         if (invoice == null)
         {
@@ -3038,7 +3232,7 @@ public class LandAcquisitionsController : ControllerBase
                 InvoiceDate = assessment.AssessmentDate ?? DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = DateTime.UtcNow,
-                CurrencyCode = "GHS",
+                CurrencyCode = currency,
                 ExchangeRate = 1m,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
@@ -3088,6 +3282,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, new Dictionary<string, object?>
         {
+            ["currency"] = currency,
             ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,
@@ -3151,6 +3346,10 @@ public class LandAcquisitionsController : ControllerBase
         var debitAccountId = invoice?.JournalEntryId.HasValue == true
             ? (Guid?)null
             : await ResolveLandAcquisitionDebitAccountIdAsync(acquisition.TenantId, cancellationToken);
+        var currency = await ResolveActiveFinanceCurrencyAsync(
+            acquisition.TenantId,
+            ResolveLandAcquisitionCurrency(snapshots),
+            cancellationToken);
 
         if (invoice == null)
         {
@@ -3168,7 +3367,7 @@ public class LandAcquisitionsController : ControllerBase
                 InvoiceDate = DateTime.UtcNow,
                 ReceivedDate = DateTime.UtcNow,
                 DueDate = earliestDueDate,
-                CurrencyCode = "GHS",
+                CurrencyCode = currency,
                 ExchangeRate = 1m,
                 PaymentTermsDays = 0,
                 MatchingType = InvoiceMatchingType.None,
@@ -3206,6 +3405,7 @@ public class LandAcquisitionsController : ControllerBase
         }
 
         var values = SnapshotToObjectDictionary(paymentSnapshot);
+        values["currency"] = currency;
         values["otherAccountsPayableSupplierId"] = invoice.BusinessPartnerId;
         values["otherAccountsPayableInvoiceId"] = invoice.Id;
         values["otherAccountsPayableInvoiceNumber"] = invoice.InvoiceNumber;
@@ -3404,6 +3604,7 @@ public class LandAcquisitionsController : ControllerBase
         {
             SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
             {
+                ["currency"] = SnapshotText(paymentSnapshot, "currency"),
                 ["vendorBusinessPartnerId"] = SnapshotText(paymentSnapshot, "vendorBusinessPartnerId"),
                 ["vendorName"] = SnapshotText(paymentSnapshot, "vendorName"),
                 ["accountsPayableSupplierId"] = SnapshotText(paymentSnapshot, "accountsPayableSupplierId"),
@@ -3464,6 +3665,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.VendorPayment, new Dictionary<string, object?>
         {
+            ["currency"] = invoice.CurrencyCode,
             ["vendorBusinessPartnerId"] = SnapshotText(paymentSnapshot, "vendorBusinessPartnerId"),
             ["vendorName"] = SnapshotText(paymentSnapshot, "vendorName"),
             ["accountsPayableSupplierId"] = invoice.BusinessPartnerId,
@@ -3621,6 +3823,7 @@ public class LandAcquisitionsController : ControllerBase
 
         SaveWorkspaceSnapshot(acquisition, (int)AcquisitionProcedure.StampDutyPayment, new Dictionary<string, object?>
         {
+            ["currency"] = invoice.CurrencyCode,
             ["accountsPayableSupplierId"] = stampDutyPayment.AccountsPayableSupplierId,
             ["accountsPayableInvoiceId"] = invoice.Id,
             ["accountsPayableInvoiceNumber"] = invoice.InvoiceNumber,

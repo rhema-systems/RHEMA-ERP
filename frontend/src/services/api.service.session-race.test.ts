@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api.service';
+import { browserSessionCoordinator } from './browser-session-coordinator';
 
 const oldToken = 'header.old-session.signature';
 const newToken = 'header.new-session.signature';
@@ -92,6 +93,56 @@ describe('API session changes during outstanding requests', () => {
     expect(blacklisted).not.toHaveBeenCalled();
   });
 
+  it('performs one refresh for simultaneous current-session requests', async () => {
+    const refresh = deferred<Response>();
+    fetchMock.mockResolvedValueOnce(response(401, { message: 'Expired' }));
+    fetchMock.mockResolvedValueOnce(response(401, { message: 'Expired' }));
+    fetchMock.mockReturnValueOnce(refresh.promise);
+    fetchMock.mockResolvedValueOnce(response(200, { request: 1 }));
+    fetchMock.mockResolvedValueOnce(response(200, { request: 2 }));
+
+    const first = apiService.get('/protected?request=1');
+    const second = apiService.get('/protected?request=2');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    refresh.resolve(response(200, {
+      token: refreshedToken,
+      refreshToken: 'old-refresh',
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }, '/api/auth/refresh'));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([{ request: 1 }, { request: 2 }]);
+    expect(fetchMock.mock.calls.filter(call => String(call[0]).includes('/auth/refresh'))).toHaveLength(1);
+  });
+
+  it('retries with a token refreshed by another tab without issuing a second refresh', async () => {
+    const pending = deferred<Response>();
+    fetchMock.mockReturnValueOnce(pending.promise);
+    fetchMock.mockResolvedValueOnce(response(200, { success: true }));
+    const request = apiService.get('/protected');
+
+    replaceStoredSession();
+    browserSessionCoordinator.publish('token-refreshed');
+    pending.resolve(response(401, { message: 'Old token expired' }));
+
+    await expect(request).resolves.toEqual({ success: true });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(new Headers(fetchMock.mock.calls[1][1]?.headers).get('Authorization')).toBe(`Bearer ${newToken}`);
+  });
+
+  it('does not let a stale logout erase a replacement session', async () => {
+    const logout = deferred<Response>();
+    fetchMock.mockReturnValueOnce(logout.promise);
+    const request = apiService.logout('old-refresh');
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    replaceStoredSession();
+    logout.resolve(response(200, { success: true }, '/api/auth/logout'));
+    await request;
+
+    expect(localStorage.getItem('authToken')).toBe(newToken);
+    expect(localStorage.getItem('refreshToken')).toBe('new-refresh');
+  });
+
   it('presents governed Finance failures as an explanation with a support reference', async () => {
     fetchMock.mockResolvedValueOnce(response(400, {
       message: 'DELTA_POSTING_WINDOW_CLOSED: The accounting date is outside this Delta book posting window.',
@@ -117,6 +168,22 @@ describe('API session changes during outstanding requests', () => {
       });
     },
   );
+
+  it('surfaces Finance field-validation details instead of the generic ASP.NET title', async () => {
+    fetchMock.mockResolvedValueOnce(response(400, {
+      title: 'One or more validation errors occurred.',
+      errors: {
+        liquidityAccountId: ['Select an active Cash Till or holding account.'],
+        paymentMethodId: ['Payment method is required.'],
+      },
+    }, '/api/ar/payments'));
+
+    await expect(apiService.post('/ar/payments')).rejects.toMatchObject({
+      message: 'Liquidity Account ID: Select an active Cash Till or holding account. Payment Method ID: Payment method is required.',
+      financeTitle: 'Finance action failed',
+      status: 400,
+    });
+  });
 
   it('does not restore a logged-out session when its refresh finishes later', async () => {
     const refresh = deferred<Response>();

@@ -29,6 +29,7 @@ public class FinancePostingEvent : TenantEntity
 
     [MaxLength(450)]
     public string? IdempotencyKey { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
 
     /// <summary>
     /// Versioned canonical fingerprint of the complete normalized posting command. Historical
@@ -54,10 +55,10 @@ public class FinancePostingEvent : TenantEntity
 
     public Guid? RequestedByUserId { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalDebitAmount { get; set; }
 
-    [Column(TypeName = "decimal(18,2)")]
+    [Column(TypeName = "decimal(20,4)")]
     public decimal TotalCreditAmount { get; set; }
 
     [Required]

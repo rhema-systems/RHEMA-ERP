@@ -14,6 +14,9 @@ public class MaintenanceMappingProfile : Profile
     {
         // Asset Management Mappings
         CreateMap<MaintenanceAsset, MaintenanceAssetDto>()
+            .ForMember(dest => dest.AssetSource, opt => opt.MapFrom(src => src.SourceType))
+            .ForMember(dest => dest.SourceAssetId, opt => opt.MapFrom(src => src.FixedAssetId ?? src.EstateManagedAssetId ?? src.Id))
+            .ForMember(dest => dest.IsSourceControlled, opt => opt.MapFrom(src => src.FixedAssetId.HasValue || src.EstateManagedAssetId.HasValue))
             .ForMember(dest => dest.AssetCategory, opt => opt.MapFrom(src => src.AssetCategory))
             .ForMember(dest => dest.ParentAsset, opt => opt.MapFrom(src => src.ParentAsset))
             .ForMember(dest => dest.ChildAssets, opt => opt.MapFrom(src => src.ChildAssets))

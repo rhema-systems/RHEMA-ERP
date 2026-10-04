@@ -170,6 +170,11 @@ public class EhcWorkflowRoutingRule : TenantEntity
 [Table("EhcTickets")]
 public class EhcTicket : TenantEntity
 {
+    public Guid? PublicPropertyEnquiryContactId { get; set; }
+
+    [ForeignKey(nameof(PublicPropertyEnquiryContactId))]
+    public virtual EhcPublicPropertyEnquiryContact? PublicPropertyEnquiryContact { get; set; }
+
     [Column(TypeName = "nvarchar(max)")]
     public string? PropertyListingContextJson { get; set; }
 
@@ -206,13 +211,13 @@ public class EhcTicket : TenantEntity
     public string Description { get; set; } = string.Empty;
 
     /// <summary>
-    /// Requester (creator) user id.
+    /// Authenticated requester user id. Public property enquiries deliberately leave this null;
+    /// their immutable contact identity is stored in PropertyListingContextJson instead.
     /// </summary>
-    [Required]
-    public Guid RequesterUserId { get; set; }
+    public Guid? RequesterUserId { get; set; }
 
     [ForeignKey(nameof(RequesterUserId))]
-    public virtual ApplicationUser RequesterUser { get; set; } = null!;
+    public virtual ApplicationUser? RequesterUser { get; set; }
 
     public Guid? AssignedToUserId { get; set; }
 

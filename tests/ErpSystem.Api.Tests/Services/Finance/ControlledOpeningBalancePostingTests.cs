@@ -1277,6 +1277,10 @@ public sealed class ControlledOpeningBalancePostingTests
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        fixture.WhtPayable.AllowDirectPosting = false;
+        fixture.WhtPayable.IsControlAccount = true;
+        fixture.WhtReceivable.AllowDirectPosting = false;
+        fixture.WhtReceivable.IsControlAccount = true;
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
 
@@ -1825,7 +1829,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var act = () => service.PostAsync(batch.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Posting period is not open.");
+            .WithMessage("Posting period is not open.*");
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
         (await db.OpeningBalanceBatches.SingleAsync(b => b.Id == batch.Id)).Status.Should().Be("PostingFailed");
     }

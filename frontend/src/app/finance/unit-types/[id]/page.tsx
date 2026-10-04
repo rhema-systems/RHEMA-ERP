@@ -16,7 +16,7 @@ export default function EditUnitTypePage() {
     const id = useParams<{ id: string }>().id;
     const router = useRouter();
     const [originalActive, setOriginalActive] = useState(true);
-    const [form, setForm] = useState({ code: '', name: '', description: '', decimalPlaces: 2, isActive: true });
+    const [form, setForm] = useState({ code: '', name: '', description: '', decimalPlaces: 2, roundingIncrement: '', isActive: true });
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -25,7 +25,7 @@ export default function EditUnitTypePage() {
         let cancelled = false;
         void unitAccountsDataService.getUnitTypeById(id).then((unitType) => {
             if (cancelled) return;
-            setForm({ code: unitType.code, name: unitType.name, description: unitType.description ?? '', decimalPlaces: unitType.decimalPlaces, isActive: unitType.isActive });
+            setForm({ code: unitType.code, name: unitType.name, description: unitType.description ?? '', decimalPlaces: unitType.decimalPlaces, roundingIncrement: unitType.roundingIncrement?.toString() ?? '', isActive: unitType.isActive });
             setOriginalActive(unitType.isActive);
         }).catch((reason: unknown) => {
             if (!cancelled) setError(reason instanceof Error ? reason.message : 'Unable to load unit type.');
@@ -38,7 +38,7 @@ export default function EditUnitTypePage() {
         if (!form.name.trim()) return setError('Name is required.');
         setBusy(true); setError(null);
         try {
-            await unitAccountsDataService.updateUnitType(id, { name: form.name.trim(), description: form.description.trim(), decimalPlaces: form.decimalPlaces });
+            await unitAccountsDataService.updateUnitType(id, { name: form.name.trim(), description: form.description.trim(), decimalPlaces: form.decimalPlaces, roundingIncrement: form.roundingIncrement ? Number(form.roundingIncrement) : null });
             if (form.isActive !== originalActive) await unitAccountsDataService.setUnitTypeActive(id, form.isActive);
             router.push('/finance/unit-types');
         } catch (reason) {
@@ -63,6 +63,7 @@ export default function EditUnitTypePage() {
                 <div className="space-y-2"><Label>Code</Label><Input value={form.code} disabled /></div>
                 <div className="space-y-2"><Label>Name</Label><Input required maxLength={100} value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></div>
                 <div className="space-y-2"><Label>Decimal places</Label><Input type="number" min={0} max={6} value={form.decimalPlaces} onChange={(event) => setForm({ ...form, decimalPlaces: Number(event.target.value) })} /></div>
+                <div className="space-y-2"><Label>Quantity increment</Label><Input type="number" min={10 ** -form.decimalPlaces} step={10 ** -form.decimalPlaces} placeholder="Optional" value={form.roundingIncrement} onChange={(event) => setForm({ ...form, roundingIncrement: event.target.value })} /><p className="text-xs text-muted-foreground">Optional governed increment; entered quantities must be exact multiples.</p></div>
                 <div className="flex items-center gap-3 pt-7"><Switch checked={form.isActive} onCheckedChange={(isActive) => setForm({ ...form, isActive })} /><Label>{form.isActive ? 'Active' : 'Inactive'}</Label></div>
             </div>
             <div className="space-y-2"><Label>Description</Label><Textarea maxLength={500} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>

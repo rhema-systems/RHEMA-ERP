@@ -46,10 +46,35 @@ public class RefreshTokenService : IRefreshTokenService
             _logger.LogInformation("Created new refresh token for user {UserId}, expires at {ExpiresAt}",
                 userId, refreshToken.ExpiresAt);
 
-            // Return a copy with the original token value for the client
-            // We don't store the actual token value, only the hash
-            refreshToken.TokenHash = tokenValue; // Temporarily set for return
-            return refreshToken;
+            // Return a detached client copy containing the one-time raw value. Mutating the
+            // tracked entity here would let a later usage update overwrite the persisted hash.
+            return new RefreshToken
+            {
+                Id = refreshToken.Id,
+                TokenHash = tokenValue,
+                UserId = refreshToken.UserId,
+                TenantId = refreshToken.TenantId,
+                ExpiresAt = refreshToken.ExpiresAt,
+                IsRevoked = refreshToken.IsRevoked,
+                RevokedAt = refreshToken.RevokedAt,
+                RevokedBy = refreshToken.RevokedBy,
+                RevocationReason = refreshToken.RevocationReason,
+                LastUsedAt = refreshToken.LastUsedAt,
+                UsageCount = refreshToken.UsageCount,
+                MaxUsageCount = refreshToken.MaxUsageCount,
+                IpAddress = refreshToken.IpAddress,
+                UserAgent = refreshToken.UserAgent,
+                DeviceId = refreshToken.DeviceId,
+                CreatedAt = refreshToken.CreatedAt,
+                CreatedBy = refreshToken.CreatedBy,
+                CreatedById = refreshToken.CreatedById,
+                UpdatedAt = refreshToken.UpdatedAt,
+                UpdatedBy = refreshToken.UpdatedBy,
+                LastModifiedById = refreshToken.LastModifiedById,
+                IsDeleted = refreshToken.IsDeleted,
+                DeletedAt = refreshToken.DeletedAt,
+                DeletedBy = refreshToken.DeletedBy
+            };
         }
         catch (Exception ex)
         {

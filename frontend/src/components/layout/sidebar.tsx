@@ -3244,7 +3244,7 @@ export const navigationItems: NavItem[] = [
     accessMode: 'any',
     children: [
       { title: 'Dashboard', href: '/legal/dashboard', icon: BarChart3 },
-      { title: 'Procedures', href: '/legal', icon: ClipboardList },
+      { title: 'Legal Matters', href: '/legal', icon: ClipboardList },
       {
         title: 'Property Agreement Reviews',
         href: '/legal/LegalPropertyAgreementReview',
@@ -3725,7 +3725,7 @@ export const navigationItems: NavItem[] = [
                 icon: FileText,
               },
               {
-                title: 'Fiscal Calendar Setup',
+                title: 'Fiscal Calendar',
                 href: '/administration/finance/fiscal-calendar',
                 icon: Calendar,
               },
@@ -4348,7 +4348,7 @@ export const navigationItems: NavItem[] = [
         roles: ADMINISTRATION_ROLES,
         children: [
           {
-            title: 'Security',
+            title: 'Security Management',
             href: '/administration/security/dashboard',
             icon: Shield,
           },
@@ -4862,22 +4862,25 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         onMouseEnter={handleSidebarMouseEnter}
         onMouseLeave={handleSidebarMouseLeave}
         className={cn(
-          'flex h-full flex-col bg-white/95 dark:bg-[#181818]/95 backdrop-blur-xl border-r border-slate-200/50 dark:border-neutral-800/70 transition-all duration-300',
-          sidebarIsCollapsed ? 'w-16' : 'w-64',
+          'flex h-full flex-col border-r border-blue-100/70 bg-white/94 shadow-[8px_0_30px_-28px_rgba(15,23,42,0.55)] backdrop-blur-xl transition-all duration-300 dark:border-neutral-800/70 dark:bg-[#181818]/95',
+          sidebarIsCollapsed ? 'w-16' : 'w-56',
           className
         )}
       >
         {/* Header */}
-        <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/50 dark:border-neutral-800/70">
+        <div className="flex h-16 items-center justify-between border-b border-slate-200/60 px-3.5 dark:border-neutral-800/70">
           {!sidebarIsCollapsed && (
-            <div className="flex items-center space-x-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600">
-                <Building2 className="h-5 w-5 text-white" />
+            <div className="flex min-w-0 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-end justify-center gap-0.5 rounded-xl bg-blue-50 px-1.5 py-1.5 shadow-inner dark:bg-blue-950/50" aria-hidden="true">
+                <span className="h-4 w-1.5 rounded-sm bg-blue-600" />
+                <span className="h-6 w-1.5 rounded-sm bg-indigo-600" />
+                <span className="h-5 w-1.5 rounded-sm bg-sky-400" />
               </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                  ERP System
+              <div className="min-w-0">
+                <h2 className="truncate text-[0.95rem] font-extrabold tracking-tight text-slate-950 dark:text-white">
+                  RHEMA-ERP
                 </h2>
+                <p className="truncate text-[0.45rem] font-semibold uppercase tracking-[0.16em] text-slate-400">People · Process · Progress</p>
               </div>
             </div>
           )}
@@ -4888,7 +4891,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
             aria-label={
               collapsed ? 'Keep sidebar expanded' : 'Collapse sidebar'
             }
-            className="h-8 w-8 p-0"
+            className="h-8 w-8 shrink-0 rounded-xl p-0 text-slate-500 hover:bg-white hover:shadow-sm dark:hover:bg-neutral-800"
           >
             {collapsed ? (
               <Menu className="h-4 w-4" />
@@ -4899,7 +4902,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className={cn('flex-1 overflow-y-auto p-2', sidebarIsCollapsed ? 'space-y-0' : 'space-y-0.5')}>
+        <nav className={cn('flex-1 overflow-y-auto px-2 py-2.5', sidebarIsCollapsed ? 'space-y-0' : 'space-y-0.5')}>
           {filterNavItems(sidebarNavigationItems).map((item, _index, siblings) => {
             const Icon = item.icon;
             const hasChildren = item.children && item.children.length > 0;
@@ -4921,12 +4924,12 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                       openMainItemMenu(item.title, e);
                     }}
                     className={cn(
-                      'flex w-full items-center justify-between font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex w-full items-center justify-between font-medium transition-all hover:bg-white hover:shadow-sm dark:hover:bg-neutral-800/70 dark:hover:shadow-none',
                       sidebarIsCollapsed
                         ? 'rounded-xl px-4 py-3 text-sm'
-                        : 'min-h-9 gap-2 rounded-lg border border-transparent px-3 py-1.5 text-sm leading-5',
+                        : 'min-h-9 gap-2 rounded-xl border border-transparent px-3 py-1.5 text-[0.78rem] leading-5',
                       itemIsActive
-                        ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
+                        ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
@@ -4944,12 +4947,12 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                     aria-label={item.title}
                     title={item.title}
                     className={cn(
-                      'flex items-center font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex items-center font-medium transition-all hover:bg-white hover:shadow-sm dark:hover:bg-neutral-800/70 dark:hover:shadow-none',
                       sidebarIsCollapsed
                         ? 'space-x-4 rounded-xl px-4 py-3 text-sm'
-                        : 'min-h-9 gap-2.5 rounded-lg border border-transparent px-3 py-1.5 text-sm leading-5',
+                        : 'min-h-9 gap-2.5 rounded-xl border border-transparent px-3 py-1.5 text-[0.78rem] leading-5',
                       itemIsActive
-                        ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
+                        ? 'border-blue-600 bg-gradient-to-r from-blue-600 to-blue-500 text-white shadow-[0_8px_18px_-12px_rgba(37,99,235,0.9)]'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
@@ -4961,6 +4964,16 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
             );
           })}
         </nav>
+
+        {!sidebarIsCollapsed ? (
+          <div className="border-t border-slate-200/60 p-2.5 dark:border-neutral-800/70">
+            <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-500 to-sky-400 px-3 py-3.5 text-white">
+              <div className="absolute -bottom-6 -right-5 h-20 w-20 rounded-full bg-white/20 blur-xl" />
+              <p className="relative text-[0.72rem] font-bold leading-4">Building a smarter organization</p>
+              <p className="relative mt-1 text-[0.55rem] text-blue-50">Integrated. Intelligent. Impactful.</p>
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Invisible Bridge for First Level Menu */}
@@ -4968,7 +4981,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         <div
           data-sidebar-flyout="true"
           className="fixed z-40"
-          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 256, hoveredItem)}
+          style={getBridgeStyle(sidebarIsCollapsed ? 64 : 224, hoveredItem)}
           onMouseEnter={handleMenuMouseEnter}
           onMouseLeave={handleMenuMouseLeave}
         />

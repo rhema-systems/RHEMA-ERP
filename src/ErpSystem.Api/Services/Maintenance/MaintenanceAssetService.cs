@@ -25,6 +25,7 @@ public class MaintenanceAssetService : IMaintenanceAssetService
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ApplicationDbContext _context;
+    private readonly IMaintenanceAssetMappingService _assetMappingService;
 
     public MaintenanceAssetService(
         IMaintenanceAssetRepository assetRepository,
@@ -35,7 +36,8 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         ILogger<MaintenanceAssetService> logger,
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
-        ApplicationDbContext context)
+        ApplicationDbContext context,
+        IMaintenanceAssetMappingService assetMappingService)
     {
         _assetRepository = assetRepository;
         _categoryRepository = categoryRepository;
@@ -46,7 +48,11 @@ public class MaintenanceAssetService : IMaintenanceAssetService
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _context = context;
+        _assetMappingService = assetMappingService;
     }
+
+    public Task<IReadOnlyList<JobCardAssetOptionDto>> GetJobCardAssetOptionsAsync(string? searchTerm = null)
+        => _assetMappingService.GetSelectionOptionsAsync(searchTerm);
 
     public async Task<MaintenanceAssetDto> CreateAssetAsync(CreateMaintenanceAssetDto createDto)
     {
@@ -144,7 +150,43 @@ public class MaintenanceAssetService : IMaintenanceAssetService
                 }
             }
 
+            var sourceControlled = existingAsset.FixedAssetId.HasValue || existingAsset.EstateManagedAssetId.HasValue;
+            var canonicalSnapshot = sourceControlled
+                ? new
+                {
+                    existingAsset.Name,
+                    existingAsset.AssetNumber,
+                    existingAsset.Description,
+                    existingAsset.Manufacturer,
+                    existingAsset.Model,
+                    existingAsset.Year,
+                    existingAsset.OwnershipType,
+                    existingAsset.SerialNumber,
+                    existingAsset.PurchaseDate,
+                    existingAsset.PurchasePrice,
+                    existingAsset.CurrentValue,
+                    existingAsset.Location,
+                    existingAsset.Status
+                }
+                : null;
+
             _mapper.Map(updateDto, existingAsset);
+            if (canonicalSnapshot != null)
+            {
+                existingAsset.Name = canonicalSnapshot.Name;
+                existingAsset.AssetNumber = canonicalSnapshot.AssetNumber;
+                existingAsset.Description = canonicalSnapshot.Description;
+                existingAsset.Manufacturer = canonicalSnapshot.Manufacturer;
+                existingAsset.Model = canonicalSnapshot.Model;
+                existingAsset.Year = canonicalSnapshot.Year;
+                existingAsset.OwnershipType = canonicalSnapshot.OwnershipType;
+                existingAsset.SerialNumber = canonicalSnapshot.SerialNumber;
+                existingAsset.PurchaseDate = canonicalSnapshot.PurchaseDate;
+                existingAsset.PurchasePrice = canonicalSnapshot.PurchasePrice;
+                existingAsset.CurrentValue = canonicalSnapshot.CurrentValue;
+                existingAsset.Location = canonicalSnapshot.Location;
+                existingAsset.Status = canonicalSnapshot.Status;
+            }
             await _assetRepository.UpdateAsync(existingAsset);
             await _unitOfWork.SaveChangesAsync();
 
@@ -166,6 +208,11 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             _logger.LogInformation("Deleting maintenance asset: {AssetId}", id);
 
             var asset = await _assetRepository.GetByIdAsync(id) ?? throw new ArgumentException($"Asset with ID {id} not found");
+
+            if (asset.FixedAssetId.HasValue || asset.EstateManagedAssetId.HasValue)
+            {
+                throw new InvalidOperationException("Source-controlled maintenance profiles cannot be deleted. Disable the Finance category flag or retire the Estate asset in its authoritative module instead.");
+            }
 
             // Check for child assets
             var childAssets = await _assetRepository.GetByParentAssetIdAsync(id);
@@ -329,6 +376,9 @@ public class MaintenanceAssetService : IMaintenanceAssetService
             var assetListDtos = assets.Select(a => new MaintenanceAssetListDto
             {
                 Id = a.Id,
+                AssetSource = a.SourceType,
+                SourceAssetId = a.FixedAssetId ?? a.EstateManagedAssetId ?? a.Id,
+                IsSourceControlled = a.FixedAssetId.HasValue || a.EstateManagedAssetId.HasValue,
                 Name = a.Name,
                 AssetNumber = a.AssetNumber,
                 Description = a.Description,

@@ -1,33 +1,100 @@
-using ErpSystem.Core.DTOs.Crm;
-using ErpSystem.Core.DTOs.Inventory;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Projects;
-using ProcurementPurchaseOrderSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseOrderSummaryDto;
-using ProcurementPurchaseRequisitionSummaryDto = ErpSystem.Core.DTOs.Procurement.PurchaseRequisitionSummaryDto;
-using TenderDto = ErpSystem.Core.DTOs.Procurement.TenderDto;
 
 namespace ErpSystem.Core.DTOs.Dashboard;
 
 public class EnterpriseDashboardDto
 {
-    public CrmOverviewDto? CrmOverview { get; set; }
-    public CrmReportingDto? CrmReporting { get; set; }
-    public CrmConversionsDto? CrmConversions { get; set; }
+    public BaseCurrencyReferenceDto ReportingCurrency { get; set; } = new();
+    public FinanceDashboardDto? FinanceOverview { get; set; }
+    public EnterpriseCrmDashboardDto? Crm { get; set; }
     public ProjectDashboardDto? ProjectDashboard { get; set; }
-    public List<ProcurementPurchaseRequisitionSummaryDto> PendingPurchaseRequisitions { get; set; } = new();
-    public List<ProcurementPurchaseOrderSummaryDto> OpenPurchaseOrders { get; set; } = new();
-    public List<InventoryRequisitionDto> PendingInventoryApprovals { get; set; } = new();
-    public List<InventoryRequisitionDto> PendingInventoryIssues { get; set; } = new();
+    public EnterpriseOperationalQueueDto OperationalQueues { get; set; } = new();
     public MaintenanceDashboardDto? MaintenanceOverview { get; set; }
     public WorkOrderMetricsDto? MaintenanceMetrics { get; set; }
     public WorkOrderTrendsDto? MaintenanceTrends { get; set; }
-    public List<EnterpriseMaintenanceScheduleDto> UpcomingMaintenance { get; set; } = new();
-    public List<TenderDto> Tenders { get; set; } = new();
     public ProcurementInventoryManagementDashboardDto? ProcurementInventoryManagement { get; set; }
     public List<EnterpriseDashboardModuleStatusDto> ModuleStatus { get; set; } = new();
     public DateTime RangeStartDate { get; set; }
     public DateTime RangeEndDate { get; set; }
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
+}
+
+public sealed class EnterpriseCrmDashboardDto
+{
+    public int TotalLeadCount { get; set; }
+    public int QualifiedLeadCount { get; set; }
+    public int LeadsNeedingFollowUpCount { get; set; }
+    public int OpenOpportunityCount { get; set; }
+    public int ActiveQuoteCount { get; set; }
+    public int ActiveAccountCount { get; set; }
+    public int AtRiskAccountCount { get; set; }
+    public DateTime PipelineAsOf { get; set; }
+    public string FunnelModel { get; set; } = "StageTransitionHistory";
+    public DateTime FunnelRangeStart { get; set; }
+    public DateTime FunnelRangeEnd { get; set; }
+    public DateTime? HistoryCoverageStart { get; set; }
+    public int LegacyHistorySnapshotCount { get; set; }
+    public int LostOpportunityCount { get; set; }
+    public List<string> DataQualityIssues { get; set; } = new();
+    public List<EnterpriseDashboardStageCountDto> PipelineByStage { get; set; } = new();
+    public List<EnterpriseDashboardCountPointDto> AccountRiskByBand { get; set; } = new();
+    public List<EnterpriseDashboardFunnelPointDto> ConversionFunnel { get; set; } = new();
+}
+
+public sealed class EnterpriseDashboardStageCountDto
+{
+    public Guid StageId { get; set; }
+    public string Stage { get; set; } = string.Empty;
+    public int StageOrder { get; set; }
+    public bool IsClosed { get; set; }
+    public bool IsWon { get; set; }
+    public bool IsLost { get; set; }
+    public int OpportunityCount { get; set; }
+    public int QuoteCount { get; set; }
+    public decimal PercentageOfActivePipeline { get; set; }
+    public decimal AverageAgeDays { get; set; }
+    public int StalledOpportunityCount { get; set; }
+    public int OverdueOpportunityCount { get; set; }
+    public List<EnterpriseDashboardCurrencyAmountDto> AmountsByCurrency { get; set; } = new();
+    public List<EnterpriseDashboardCurrencyAmountDto> WeightedAmountsByCurrency { get; set; } = new();
+    public int OpportunitiesWithoutCurrencyCount { get; set; }
+}
+
+public sealed class EnterpriseDashboardCurrencyAmountDto
+{
+    public string Currency { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+}
+
+public sealed class EnterpriseDashboardFunnelPointDto
+{
+    public Guid StageId { get; set; }
+    public string Stage { get; set; } = string.Empty;
+    public int StageOrder { get; set; }
+    public int Count { get; set; }
+    public decimal? ConversionRate { get; set; }
+    public decimal? OverallConversionRate { get; set; }
+    public List<EnterpriseDashboardCurrencyAmountDto> AmountsByCurrency { get; set; } = new();
+    public int OpportunitiesWithoutCurrencyCount { get; set; }
+}
+
+public sealed class EnterpriseOperationalQueueDto
+{
+    public int PendingPurchaseRequisitionCount { get; set; }
+    public int OpenPurchaseOrderCount { get; set; }
+    public int PendingInventoryApprovalCount { get; set; }
+    public int PendingInventoryIssueCount { get; set; }
+    public int OpenTenderCount { get; set; }
+    public int TendersClosingWithin14DaysCount { get; set; }
+    public List<EnterpriseDashboardCountPointDto> OpenTendersByStatus { get; set; } = new();
+}
+
+public sealed class EnterpriseDashboardCountPointDto
+{
+    public string Label { get; set; } = string.Empty;
+    public int Count { get; set; }
 }
 
 public sealed class ProcurementInventoryManagementDashboardDto

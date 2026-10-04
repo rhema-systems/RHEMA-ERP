@@ -7,6 +7,14 @@ public static class EstateLandDemarcationReference
     public static string Build(string assetCode, int demarcationNumber)
         => $"{assetCode.Trim()}{PortionSeparator}{demarcationNumber:D3}";
 
+    public static string DisplayReference(
+        string? childFixedAssetReference,
+        string assetCode,
+        int demarcationNumber)
+        => string.IsNullOrWhiteSpace(childFixedAssetReference)
+            ? $"{assetCode.Trim()}-D{demarcationNumber:000}"
+            : childFixedAssetReference.Trim();
+
     public static bool TryParse(
         string? landReference,
         out string assetCode,
@@ -23,12 +31,18 @@ public static class EstateLandDemarcationReference
         var separatorIndex = normalized.LastIndexOf(
             PortionSeparator,
             StringComparison.OrdinalIgnoreCase);
+        var separatorLength = PortionSeparator.Length;
         if (separatorIndex <= 0)
         {
-            return false;
+            separatorIndex = normalized.LastIndexOf("-D", StringComparison.OrdinalIgnoreCase);
+            separatorLength = 2;
+            if (separatorIndex <= 0)
+            {
+                return false;
+            }
         }
 
-        var numberText = normalized[(separatorIndex + PortionSeparator.Length)..];
+        var numberText = normalized[(separatorIndex + separatorLength)..];
         if (!int.TryParse(numberText, out demarcationNumber)
             || demarcationNumber <= 0)
         {

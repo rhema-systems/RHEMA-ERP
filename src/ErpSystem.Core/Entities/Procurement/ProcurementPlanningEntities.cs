@@ -119,7 +119,7 @@ public class ProcurementPlan : TenantEntity
 /// <summary>
 /// Individual item in a procurement plan
 /// </summary>
-public class ProcurementPlanItem : TenantEntity
+public class ProcurementPlanItem : TenantEntity, ErpSystem.Core.Interfaces.Inventory.ICommercialQuantityEvidenceLine
 {
     /// <summary>Permanent database-generated line reference, independent of editable budget/category codes.</summary>
     [MaxLength(36)]
@@ -166,6 +166,10 @@ public class ProcurementPlanItem : TenantEntity
 
     [MaxLength(20)]
     public string UnitOfMeasure { get; set; } = "EA";
+    public Guid? UnitOfMeasureId { get; set; }
+    [MaxLength(20)] public string? UnitOfMeasureCodeSnapshot { get; set; }
+    public int? UnitOfMeasureDecimalPlacesSnapshot { get; set; }
+    [Column(TypeName = "decimal(18,6)")] public decimal? UnitOfMeasureRoundingIncrementSnapshot { get; set; }
 
     [Column(TypeName = "decimal(18,4)")]
     public decimal EstimatedUnitPrice { get; set; }

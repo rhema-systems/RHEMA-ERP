@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   loginWithOtp: vi.fn(),
   getTenants: vi.fn(),
   getPublicSecuritySettings: vi.fn(),
+  getPublicLoginAppearance: vi.fn(),
   selectTenant: vi.fn(),
 }));
 
@@ -24,6 +25,12 @@ vi.mock('react-google-recaptcha', () => ({ default: () => <div data-testid="capt
 vi.mock('../../services/auth', () => ({ authService: mocks }));
 vi.mock('../../services/api.service', () => ({ apiService: mocks }));
 vi.mock('../../services/settings', () => ({ settingsService: mocks }));
+vi.mock('../../services/login-appearance', () => ({
+  DEFAULT_LOGIN_PAGE_STYLE: 'LightCorporate',
+  loginAppearanceService: {
+    getPublicLoginAppearance: mocks.getPublicLoginAppearance,
+  },
+}));
 vi.mock('../../services/tenant', () => ({ tenantService: mocks }));
 
 import LoginPage from './page';
@@ -48,22 +55,67 @@ describe('login entry points and redirects', () => {
     mocks.getStoredUser.mockReturnValue(internalUser);
     mocks.getTenants.mockResolvedValue([{ isActive: true, allowSelfRegistration: true }]);
     mocks.getPublicSecuritySettings.mockResolvedValue({ captchaEnabled: false });
+    mocks.getPublicLoginAppearance.mockResolvedValue({ loginPageStyle: 'LightCorporate' });
     mocks.selectTenant.mockResolvedValue(undefined);
     mocks.login.mockResolvedValue({ token: 'test-session', user: internalUser });
   });
 
   afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-  it('keeps supplier applications and password/OTP controls, without a registration button or helper', async () => {
+  it('keeps supplier applications and password sign-in without alternate mode or remember-me controls', async () => {
     renderPage();
     expect(await screen.findByRole('link', { name: 'Apply as a supplier' })).toHaveAttribute('href', '/supplier-application');
     expect(screen.queryByText('Create Account')).not.toBeInTheDocument();
     expect(screen.queryByText(/Supplier applicants verify a contact/)).not.toBeInTheDocument();
-    expect(screen.getByLabelText('USER NAME OR EMAIL ADDRESS')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Password' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'One-time code' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Remember me for 30 days')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Username or Email Address')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Show password' }));
-    expect(screen.getByLabelText('PASSWORD')).toHaveAttribute('type', 'text');
-    fireEvent.click(screen.getByRole('button', { name: 'One-time code' }));
-    expect(screen.getByRole('button', { name: 'Send code' })).toBeVisible();
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
+    expect(screen.getByPlaceholderText('Enter your password')).toBeVisible();
+    expect(screen.queryByPlaceholderText('Admin123!')).not.toBeInTheDocument();
+    expect(screen.getByTestId('shared-login-form')).toBeVisible();
+    expect(screen.getByTestId('login-shell')).toHaveAttribute('data-login-style', 'LightCorporate');
+  });
+
+  it('uses the dark premium shell without changing the shared authentication controls', async () => {
+    mocks.getPublicLoginAppearance.mockResolvedValue({ loginPageStyle: 'DarkPremium' });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-shell')).toHaveAttribute('data-login-style', 'DarkPremium');
+    });
+    expect(screen.getByTestId('shared-login-form')).toBeVisible();
+    expect(screen.getByLabelText('Username or Email Address')).toBeVisible();
+    expect(screen.getByLabelText('Password')).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/forgot-password');
+    expect(screen.getByRole('button', { name: 'Sign In' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Apply as a supplier' })).toHaveAttribute('href', '/supplier-application');
+  });
+
+  it('does not flash the light shell before loading the dark appearance and keeps redirect loading dark', async () => {
+    let resolveAppearance!: (value: { loginPageStyle: 'DarkPremium' }) => void;
+    mocks.getPublicLoginAppearance.mockReturnValue(new Promise((resolve) => {
+      resolveAppearance = resolve;
+    }));
+    mocks.getStoredToken.mockReturnValue('test-session');
+
+    renderPage();
+
+    expect(screen.queryByTestId('login-shell')).not.toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveAttribute('data-login-loading-style', 'Pending');
+
+    resolveAppearance({ loginPageStyle: 'DarkPremium' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('login-shell')).toHaveAttribute('data-login-style', 'DarkPremium');
+    });
+    const loadingPanel = screen.getByRole('status');
+    expect(loadingPanel).toHaveAttribute('data-login-loading-style', 'DarkPremium');
+    expect(loadingPanel).toHaveClass('bg-slate-950/80', 'text-white');
+    expect(loadingPanel.querySelector('svg')).toHaveClass('text-sky-300');
   });
 
   it('continues to render required CAPTCHA verification', async () => {
@@ -77,7 +129,7 @@ describe('login entry points and redirects', () => {
     renderPage();
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/tenant-select'));
     expect(mocks.replace).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('status')).toHaveTextContent('Signing you in...');
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Signing you in...'));
     expect(mocks.selectTenant).not.toHaveBeenCalled();
   });
 
@@ -115,8 +167,8 @@ describe('login entry points and redirects', () => {
   it('keeps password 2FA on the verification screen until authentication completes', async () => {
     mocks.login.mockResolvedValue({ requiresTwoFactor: true, twoFactorToken: 'test-challenge' });
     renderPage();
-    fireEvent.change(screen.getByLabelText('USER NAME OR EMAIL ADDRESS'), { target: { value: 'test.manager' } });
-    fireEvent.change(screen.getByLabelText('PASSWORD'), { target: { value: 'Example123!' } });
+    fireEvent.change(await screen.findByLabelText('Username or Email Address'), { target: { value: 'test.manager' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Example123!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
     expect(await screen.findByLabelText('AUTHENTICATION CODE')).toBeVisible();
     expect(mocks.replace).not.toHaveBeenCalled();
@@ -129,8 +181,8 @@ describe('login entry points and redirects', () => {
       return { token: 'test-session', user: internalUser };
     });
     renderPage();
-    fireEvent.change(screen.getByLabelText('USER NAME OR EMAIL ADDRESS'), { target: { value: 'test.manager' } });
-    fireEvent.change(screen.getByLabelText('PASSWORD'), { target: { value: 'Example123!' } });
+    fireEvent.change(await screen.findByLabelText('Username or Email Address'), { target: { value: 'test.manager' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Example123!' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign In' }));
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/tenant-select'));
     expect(mocks.replace).toHaveBeenCalledTimes(1);

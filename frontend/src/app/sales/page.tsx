@@ -39,6 +39,7 @@ import {
   type SalesSaleableItemDto,
   type SalesSaleableSourceDto,
 } from '@/services/salesSetupService';
+import { hasSaleableNumber } from '@/lib/sales/saleableItemDisplay';
 import { buildSaleableSourceParams as buildSourceParams } from './components/SaleableSourceQuickStart';
 
 const sourceIcons = {
@@ -312,7 +313,7 @@ export default function SalesPage() {
                             {unit.status ? <Badge variant="secondary">{unit.status}</Badge> : null}
                             {unit.commercialStatus ? <Badge variant="outline">{unit.commercialStatus}</Badge> : null}
                             {unit.customerName ? <Badge variant="outline">{unit.customerName}</Badge> : null}
-                            {unit.availableQuantity !== undefined ? (
+                            {hasSaleableNumber(unit.availableQuantity) ? (
                               <Badge variant="outline">
                                 {unit.availableQuantity.toLocaleString()} {unit.unitOfMeasure || ''}
                               </Badge>
@@ -321,9 +322,11 @@ export default function SalesPage() {
                         </div>
                         <div className="text-right text-sm">
                           <div className="font-semibold">
-                            {unit.estimatedValue ? `${unit.currency || ''} ${unit.estimatedValue.toLocaleString()}` : unit.currency}
+                            {hasSaleableNumber(unit.estimatedValue)
+                              ? `${unit.currency || ''} ${unit.estimatedValue.toLocaleString()}`
+                              : unit.currency}
                           </div>
-                          {unit.areaSquareMeters ? (
+                          {hasSaleableNumber(unit.areaSquareMeters) ? (
                             <div className="text-xs text-muted-foreground">{unit.areaSquareMeters.toLocaleString()} sqm</div>
                           ) : null}
                         </div>
@@ -361,9 +364,11 @@ export default function SalesPage() {
                     <div>
                       <div className="text-muted-foreground">Available</div>
                       <div className="font-medium">
-                        {selectedUnit.availableQuantity !== undefined
+                        {hasSaleableNumber(selectedUnit.availableQuantity)
                           ? `${selectedUnit.availableQuantity.toLocaleString()} ${selectedUnit.unitOfMeasure || ''}`.trim()
-                          : selectedUnit.areaSquareMeters ? `${selectedUnit.areaSquareMeters.toLocaleString()} sqm` : '-'}
+                          : hasSaleableNumber(selectedUnit.areaSquareMeters)
+                            ? `${selectedUnit.areaSquareMeters.toLocaleString()} sqm`
+                            : '-'}
                       </div>
                     </div>
                   </div>

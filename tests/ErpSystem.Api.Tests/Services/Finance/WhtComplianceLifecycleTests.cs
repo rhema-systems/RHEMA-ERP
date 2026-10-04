@@ -1,4 +1,5 @@
 using System.Text;
+using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.Taxation;
 using ErpSystem.Core.DTOs.Finance;
@@ -7,11 +8,13 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging;
@@ -94,7 +97,7 @@ public sealed class WhtComplianceLifecycleTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-WHT")]
     [Trait("Category", "Tax")]
-    public async Task Calculation_ShouldApplyTheConfiguredRateToTheWholePaymentThatCrossesTheAnnualThreshold()
+    public async Task Calculation_ShouldCatchUpTheUnwithheldAggregateWhenTheAnnualThresholdIsExceeded()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -139,7 +142,10 @@ public sealed class WhtComplianceLifecycleTests
         crossing.CumulativeBefore.Should().Be(1_500m);
         crossing.CumulativeAfter.Should().Be(2_100m);
         crossing.ThresholdApplied.Should().BeTrue();
-        crossing.WithholdingAmount.Should().Be(45m, "7.5% applies to the full GHS 600 crossing payment");
+        crossing.WithholdingAmount.Should().Be(157.50m, "GRA requires catch-up on the full qualifying 2,100 aggregate");
+        crossing.CurrentPaymentTaxableBase.Should().Be(600m);
+        crossing.CatchUpTaxableBase.Should().Be(1_500m);
+        crossing.CatchUpWithholdingAmount.Should().Be(112.50m);
         newYear.CumulativeBefore.Should().Be(0m, "payment-date calendar years are separate statutory aggregates");
         newYear.ThresholdApplied.Should().BeFalse();
     }
@@ -147,7 +153,7 @@ public sealed class WhtComplianceLifecycleTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-WHT")]
     [Trait("Category", "Tax")]
-    public async Task Calculation_ShouldExcludeDraftsAndUnrelatedContractScopes()
+    public async Task Calculation_ShouldExcludeDraftsButAggregateRelatedSupplyAcrossContractNumbers()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -176,9 +182,10 @@ public sealed class WhtComplianceLifecycleTests
             SupplyCategory = WhtSupplyCategory.Services
         });
 
-        result.CumulativeBefore.Should().Be(500m);
-        result.CumulativeAfter.Should().Be(1_500m);
-        result.ThresholdApplied.Should().BeFalse();
+        result.CumulativeBefore.Should().Be(5_500m);
+        result.CumulativeAfter.Should().Be(6_500m);
+        result.ThresholdApplied.Should().BeTrue();
+        result.WithholdingAmount.Should().Be(112.50m, "487.50 cumulative liability less 375 already withheld");
     }
 
     [Fact]
@@ -421,6 +428,100 @@ public sealed class WhtComplianceLifecycleTests
         return new WhtFixture(tenantId, partner, role, profile, tax, book);
     }
 
+    [Theory]
+    [InlineData(10000, 2000, 12000, 10000, 750)]
+    [InlineData(10000, 2000, 6000, 5000, 375)]
+    [InlineData(9500, 1900, 11400, 9500, 712.5)]
+    [InlineData(10000, 2000, 1200, 1000, 75)]
+    public async Task Calculation_ShouldExcludeInvoiceTaxesAndProrateTheNetSupply(
+        decimal net, decimal taxAmount, decimal grossSettled, decimal expectedBase, decimal expectedWht)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "WHT-VAT-2026",
+            BusinessPartnerId = fixture.Partner.Id, BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id, SupplierName = fixture.Partner.PartnerName,
+            InvoiceDate = new DateTime(2026, 9, 1), CurrencyCode = "GHS", ExchangeRate = 1m,
+            SubTotal = net, TaxAmount = taxAmount, TotalAmount = net + taxAmount,
+            BaseCurrencyAmount = net + taxAmount, Status = VendorInvoiceStatus.Approved,
+            WithholdingTaxId = fixture.Tax.Id, WithholdingTaxRate = 7.5m,
+            WithholdingContractReference = "SERVICES-2026", WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        db.VendorInvoices.Add(invoice);
+        await db.SaveChangesAsync();
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), ContractReference = "SERVICES-2026",
+            SupplyCategory = WhtSupplyCategory.Services, VendorInvoiceIds = new() { invoice.Id },
+            TaxableBase = 999999m, // Client-supplied base is not authoritative for invoice settlements.
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = grossSettled } }
+        });
+        result.CurrentPaymentTaxableBase.Should().Be(expectedBase);
+        result.WithholdingAmount.Should().Be(expectedWht);
+        result.CatchUpWithholdingAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task Calculation_ExactlyAtThreshold_ShouldNotWithhold()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        await db.SaveChangesAsync();
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), TaxableBase = 2000m,
+            ContractReference = "EXACT-THRESHOLD", SupplyCategory = WhtSupplyCategory.Services
+        });
+        result.ThresholdApplied.Should().BeFalse();
+        result.WithholdingAmount.Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task Calculation_GraGoodsExample_ShouldWithhold84OnThirdContract()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        fixture.Tax.Rate = 3m;
+        var first = SeedPostedWhtPayment(db, fixture, "VP-GOODS-1", new DateTime(2026, 1, 5), 1000m, 0m, "FIRST", WhtSupplyCategory.Goods);
+        var second = SeedPostedWhtPayment(db, fixture, "VP-GOODS-2", new DateTime(2026, 3, 5), 900m, 0m, "SECOND", WhtSupplyCategory.Goods);
+        first.WithholdingTaxRate = second.WithholdingTaxRate = 3m;
+        await db.SaveChangesAsync();
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 8, 16), TaxableBase = 900m,
+            ContractReference = "THIRD", SupplyCategory = WhtSupplyCategory.Goods
+        });
+        result.CumulativeBefore.Should().Be(1900m);
+        result.WithholdingAmount.Should().Be(84m);
+        result.CatchUpWithholdingAmount.Should().Be(57m);
+        result.TaxableBase.Should().Be(2800m);
+    }
+
+    [Fact]
+    public async Task Calculation_ShouldRejectBackdatedScopeAfterLaterPostedPayment()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        SeedPostedWhtPayment(db, fixture, "VP-LATER", new DateTime(2026, 9, 29));
+        await db.SaveChangesAsync();
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 28), TaxableBase = 3000m,
+            ContractReference = "BACKDATED", SupplyCategory = WhtSupplyCategory.Services
+        });
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*backdating*");
+    }
+
     private static VendorPayment SeedPostedWhtPayment(
         ApplicationDbContext db,
         WhtFixture fixture,
@@ -494,6 +595,7 @@ public sealed class WhtComplianceLifecycleTests
             AllocatedAmount = taxableBase - withholdingAmount,
             PaymentCurrencyAmount = taxableBase - withholdingAmount,
             SettlementFunctionalAmount = taxableBase,
+            WithholdingTaxBaseFunctionalAmount = taxableBase,
             WithholdingTaxAmount = withholdingAmount,
             WithholdingTaxFunctionalAmount = withholdingAmount,
             AllocationDate = paymentDate
@@ -503,6 +605,441 @@ public sealed class WhtComplianceLifecycleTests
         db.Set<VendorPayment>().Add(payment);
         db.Set<VendorPaymentAllocation>().Add(allocation);
         return payment;
+    }
+
+    [Fact]
+    public async Task Calculation_UnselectedApprovedContract_ShouldQualifyThresholdWithoutPriorPayment()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        SeedUnpostedWhtPayment(db, fixture, "CURRENT", new DateTime(2026, 9, 1), 1200m);
+        SeedUnpostedWhtPayment(db, fixture, "OTHER", new DateTime(2026, 9, 2), 900m);
+        await db.SaveChangesAsync();
+        var invoice = await db.VendorInvoices.SingleAsync(row => row.InvoiceNumber == "INV-CURRENT");
+        invoice.WithholdingTaxRate = 7.5m;
+        await db.SaveChangesAsync();
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services,
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 1200m } }
+        });
+        result.CumulativeBefore.Should().Be(0m);
+        result.ThresholdApplied.Should().BeTrue();
+        result.WithholdingAmount.Should().Be(90m);
+    }
+
+    [Fact]
+    public async Task Calculation_LegacyPostedBaseMissing_ShouldRequireReconciliationNotCurrentInvoiceRecalculation()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        SeedPostedWhtPayment(db, fixture, "LEGACY", new DateTime(2026, 9, 1), 1000m, 0m);
+        await db.SaveChangesAsync();
+        var allocation = await db.Set<VendorPaymentAllocation>().SingleAsync();
+        allocation.WithholdingTaxBaseFunctionalAmount = null;
+        allocation.VendorInvoice.SubTotal = 800m;
+        allocation.VendorInvoice.TaxAmount = 200m;
+        await db.SaveChangesAsync();
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), TaxableBase = 1200m,
+            ContractReference = "CONTRACT-001", SupplyCategory = WhtSupplyCategory.Services
+        });
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*frozen net-supply basis*");
+    }
+
+    [Fact]
+    public async Task Calculation_NonGhsFunctionalCurrency_ShouldNotApplyGhsThresholdAsLocalUnits()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        await db.SaveChangesAsync();
+        (await db.FinanceSettings.SingleAsync()).BaseCurrency = "USD";
+        await db.SaveChangesAsync();
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), TaxableBase = 3000m,
+            ContractReference = "CONTRACT-001", SupplyCategory = WhtSupplyCategory.Services
+        });
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*denominated in GHS*");
+    }
+
+    [Fact]
+    public async Task PublicPreview_WithoutInvoices_ShouldRejectUntrustedClientBaseWithoutCallingService()
+    {
+        var service = new Mock<IWithholdingTaxCertificateService>(MockBehavior.Strict);
+        var result = await new WithholdingTaxCertificatesController(service.Object)
+            .CalculateApWithholding(new WhtCalculationRequestDto { TaxableBase = 5000m }, CancellationToken.None);
+        result.Result.Should().BeOfType<BadRequestObjectResult>();
+        service.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Calculation_ForeignSelectedOrUnselectedContract_ShouldRequireStatutoryNotBookFx(bool selectForeign)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        SeedUnpostedWhtPayment(db, fixture, "GHS", new DateTime(2026, 9, 1), 1000m);
+        SeedUnpostedWhtPayment(db, fixture, "USD", new DateTime(2026, 9, 2), 100m);
+        await db.SaveChangesAsync();
+        var invoices = await db.VendorInvoices.ToListAsync();
+        var foreign = invoices.Single(row => row.InvoiceNumber == "INV-USD");
+        foreign.CurrencyCode = "USD";
+        foreign.ExchangeRateId = Guid.NewGuid();
+        foreign.ExchangeRate = 10m;
+        foreign.BaseCurrencyAmount = 1000m;
+        invoices.ForEach(row => row.WithholdingTaxRate = 7.5m);
+        await db.SaveChangesAsync();
+        var selected = selectForeign ? foreign : invoices.Single(row => row.InvoiceNumber == "INV-GHS");
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services,
+            InvoiceSettlements = new() { new() { VendorInvoiceId = selected.Id, GrossSettlementAmount = selected.TotalAmount } }
+        });
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ForeignInvoice_ShouldUseExactDateApprovedBankOfGhanaRateForNetSupply()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        fixture.Tax.ThresholdAmount = null;
+        var recognitionDate = new DateTime(2026, 9, 29);
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "INV-USD-STATUTORY",
+            BusinessPartnerId = fixture.Partner.Id, BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id, SupplierName = fixture.Partner.PartnerName,
+            InvoiceDate = recognitionDate, CurrencyCode = "USD", ExchangeRate = 10m,
+            SubTotal = 80m, TaxAmount = 20m, TotalAmount = 100m, BaseCurrencyAmount = 1_000m,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id, WithholdingTaxRate = 7.5m,
+            WithholdingContractReference = "USD-SERVICES-2026",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        var statutoryRate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m,
+            EffectiveDate = recognitionDate, EndDate = recognitionDate,
+            RateType = ExchangeRateType.GhanaStatutory, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", APIResponseMetadata = "BoG daily interbank reference 2026-09-29",
+            ApprovalStatus = RateApprovalStatus.Approved, IsActive = true,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = recognitionDate
+        };
+        db.VendorInvoices.Add(invoice);
+        db.ExchangeRates.Add(statutoryRate);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = recognitionDate, ContractReference = "USD-SERVICES-2026",
+            SupplyCategory = WhtSupplyCategory.Services,
+            VendorInvoiceIds = new() { invoice.Id },
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 50m } }
+        });
+
+        result.CurrentPaymentTaxableBase.Should().Be(500m, "USD 40 net supply is converted at the governed GHS 12.5 statutory factor");
+        result.WithholdingAmount.Should().Be(37.50m);
+        result.StatutoryFxEvidence.Should().ContainSingle(evidence =>
+            evidence.VendorInvoiceId == invoice.Id
+            && evidence.CurrencyCode == "USD"
+            && evidence.NetTaxableBaseAmount == 40m
+            && evidence.GhsTaxableBaseAmount == 500m
+            && evidence.ExchangeRateId == statutoryRate.Id
+            && evidence.ExchangeRateToGhs == 12.5m
+            && evidence.RecognitionDate == recognitionDate
+            && evidence.RateSource == "Bank of Ghana"
+            && evidence.SourceReference == "BoG daily interbank reference 2026-09-29");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-WHT")]
+    [Trait("Category", "Tax")]
+    public async Task Calculation_ForeignInvoice_ShouldRejectPriorDateStatutoryRate()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        fixture.Tax.ThresholdAmount = null;
+        var recognitionDate = new DateTime(2026, 9, 29);
+        var invoice = new VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, InvoiceNumber = "INV-USD-NO-EXACT-RATE",
+            BusinessPartnerId = fixture.Partner.Id, BusinessPartnerRoleId = fixture.Role.Id,
+            BusinessPartnerApProfileVersionId = fixture.Profile.Id, SupplierName = fixture.Partner.PartnerName,
+            InvoiceDate = recognitionDate, CurrencyCode = "USD", ExchangeRate = 10m,
+            SubTotal = 80m, TaxAmount = 20m, TotalAmount = 100m, BaseCurrencyAmount = 1_000m,
+            Status = VendorInvoiceStatus.Approved, ApprovalStatus = "Approved",
+            WithholdingTaxId = fixture.Tax.Id, WithholdingTaxRate = 7.5m,
+            WithholdingContractReference = "USD-SERVICES-2026",
+            WithholdingSupplyCategory = WhtSupplyCategory.Services
+        };
+        db.VendorInvoices.Add(invoice);
+        db.ExchangeRates.Add(new ExchangeRate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId,
+            BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m,
+            EffectiveDate = recognitionDate.AddDays(-1), EndDate = recognitionDate.AddDays(-1),
+            RateType = ExchangeRateType.GhanaStatutory, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", APIResponseMetadata = "BoG daily interbank reference 2026-09-28",
+            ApprovalStatus = RateApprovalStatus.Approved, IsActive = true,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = recognitionDate.AddDays(-1)
+        });
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = recognitionDate, ContractReference = "USD-SERVICES-2026",
+            SupplyCategory = WhtSupplyCategory.Services,
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 50m } }
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*No approved Bank of Ghana statutory USD/GHS rate exists for 2026-09-29*");
+    }
+
+    [Fact]
+    public async Task Calculation_ForeignHistoricalPayment_ShouldNotTreatCommercialBaseAsStatutoryEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var payment = SeedPostedWhtPayment(db, fixture, "FOREIGN-HISTORY", new DateTime(2026, 9, 1), 1000m, 0m);
+        payment.CurrencyCode = "USD";
+        db.VendorInvoices.Local.Single().CurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        var act = () => CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 9, 29), TaxableBase = 1200m,
+            ContractReference = "CONTRACT-001", SupplyCategory = WhtSupplyCategory.Services
+        });
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ForeignHistory_ShouldBlockNewIssueReissueAndRemittanceButAllowReadAndCancellation(bool foreignPayment)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var payment = SeedPostedWhtPayment(db, fixture, "LEGACY-FX", new DateTime(2026, 7, 22));
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var issued = await service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
+        // WHT statutory conversion is driven by the invoice supply currency. A foreign payment
+        // settling a GHS invoice does not need a second conversion of an already-GHS tax base.
+        if (foreignPayment) payment.CurrencyCode = "USD";
+        (await db.VendorInvoices.SingleAsync()).CurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        (await service.GetApCertificateAsync(payment.Id)).Should().NotBeNull();
+        var reissue = () => service.ReissueApCertificateAsync(payment.Id, new ReissueWhtCertificateDto { Reason = "Foreign statutory evidence requires review." });
+        await reissue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+        var remittance = () => service.CreateRemittanceAsync(new CreateWhtRemittanceDto
+        {
+            PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
+            VendorPaymentIds = new() { payment.Id }
+        });
+        await remittance.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+        var cancelled = await service.CancelApCertificateAsync(payment.Id, new CancelWhtCertificateDto { Reason = "Preserve history while statutory evidence is reconciled." });
+        cancelled.CertificateStatus.Should().Be("Cancelled");
+        (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(1);
+        (await db.WithholdingTaxRemittances.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ForeignHistory_ShouldBlockFirstCertificateAndExistingRemittanceTransitions()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var payment = SeedPostedWhtPayment(db, fixture, "LEGACY-REMIT-FX", new DateTime(2026, 7, 22));
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var draft = await service.CreateRemittanceAsync(new CreateWhtRemittanceDto
+        {
+            PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
+            VendorPaymentIds = new() { payment.Id }
+        });
+        (await db.VendorInvoices.SingleAsync()).CurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        var issue = () => service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
+        await issue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+        var submit = () => service.SubmitRemittanceAsync(draft.Id, new SubmitWhtRemittanceDto { SubmissionReference = "GRA-LEGACY-FX" });
+        await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+        (await db.WithholdingTaxRemittances.SingleAsync()).Status = WhtRemittanceStatus.Submitted;
+        await db.SaveChangesAsync();
+        var pay = () => service.MarkRemittancePaidAsync(draft.Id, new PayWhtRemittanceDto { PaymentDate = new DateTime(2026, 8, 14), PaymentReference = "BANK-LEGACY-FX" });
+        await pay.Should().ThrowAsync<InvalidOperationException>().WithMessage("*Bank of Ghana statutory*");
+        await service.CancelRemittanceAsync(draft.Id, new CancelWhtRemittanceDto { Reason = "Reconcile the legacy foreign statutory evidence." });
+        (await db.WithholdingTaxRemittances.SingleAsync()).Status.Should().Be(WhtRemittanceStatus.Cancelled);
+        (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Calculation_ShouldIncludeWholePaymentDayInContractQualification(bool selectedInvoiceHasTime)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var paymentDate = new DateTime(2026, 9, 29);
+        SeedUnpostedWhtPayment(db, fixture, "SAME-DAY-CURRENT",
+            selectedInvoiceHasTime ? paymentDate.AddHours(12) : paymentDate,
+            selectedInvoiceHasTime ? 3000m : 1000m);
+        if (!selectedInvoiceHasTime)
+            SeedUnpostedWhtPayment(db, fixture, "SAME-DAY-OTHER", paymentDate.AddHours(12), 2000m);
+        await db.SaveChangesAsync();
+        var invoice = await db.VendorInvoices.SingleAsync(item => item.InvoiceNumber == "INV-SAME-DAY-CURRENT");
+        invoice.WithholdingTaxRate = 7.5m;
+        await db.SaveChangesAsync();
+        var result = await CreateService(db, tenantId).CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = paymentDate, ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services,
+            InvoiceSettlements = new() { new() { VendorInvoiceId = invoice.Id, GrossSettlementAmount = 500m } }
+        });
+        result.CumulativeBefore.Should().Be(0m);
+        result.ThresholdApplied.Should().BeTrue();
+        result.WithholdingAmount.Should().Be(37.5m);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GlReversedPayment_ShouldNotEnterHistoryIssueOrNewRemittance(bool reversedFlag)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var payment = SeedPostedWhtPayment(db, fixture, "GL-REVERSED", new DateTime(2026, 7, 22), 1500m, 112.5m);
+        var journal = db.JournalEntries.Local.Single();
+        if (reversedFlag) journal.IsReversed = true;
+        else journal.ReversalJournalEntryId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var calculation = await service.CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = fixture.Tax.Id, BusinessPartnerId = fixture.Partner.Id,
+            PaymentDate = new DateTime(2026, 7, 23), ContractReference = "CONTRACT-001",
+            SupplyCategory = WhtSupplyCategory.Services, TaxableBase = 600m
+        });
+        calculation.CumulativeBefore.Should().Be(0m);
+        calculation.WithholdingAmount.Should().Be(0m);
+        (await service.GetUnremittedLiabilitiesAsync(null, null, "GHS")).Should().BeEmpty();
+        var readWithoutHistory = () => service.GetApCertificateAsync(payment.Id);
+        await readWithoutHistory.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not linked to a posted journal*");
+        var issue = () => service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
+        await issue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not linked to a posted journal*");
+        var create = () => service.CreateRemittanceAsync(new CreateWhtRemittanceDto
+        {
+            PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
+            VendorPaymentIds = new() { payment.Id }
+        });
+        await create.Should().ThrowAsync<InvalidOperationException>().WithMessage("*reversed*");
+        (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(0);
+        (await db.WithholdingTaxRemittances.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GlReversedPayment_ShouldBlockReissueAndExistingRemittanceButPreserveCancellation(bool reversedFlag)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedFoundation(db, tenantId);
+        var payment = SeedPostedWhtPayment(db, fixture, "GL-REVERSED-EXISTING", new DateTime(2026, 7, 22));
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        await service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto());
+        var draft = await service.CreateRemittanceAsync(new CreateWhtRemittanceDto
+        {
+            PeriodFrom = new DateTime(2026, 7, 1), PeriodTo = new DateTime(2026, 7, 31), CurrencyCode = "GHS",
+            VendorPaymentIds = new() { payment.Id }
+        });
+        // Simulate retained Posted status with independently reversed GL evidence.
+        var journal = await db.JournalEntries.SingleAsync();
+        if (reversedFlag) journal.IsReversed = true;
+        else journal.ReversalJournalEntryId = Guid.NewGuid();
+        await db.SaveChangesAsync();
+        (await service.GetApCertificateAsync(payment.Id)).Should().NotBeNull();
+        (await service.GetApCertificateHtmlAsync(payment.Id)).Should().NotBeNullOrWhiteSpace();
+        (await service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto()))
+            .CertificateStatus.Should().Be("Issued");
+        (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(1);
+        var reissue = () => service.ReissueApCertificateAsync(payment.Id,
+            new ReissueWhtCertificateDto { Reason = "Reconcile independently reversed source journal." });
+        await reissue.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not linked to a posted journal*");
+        var submit = () => service.SubmitRemittanceAsync(draft.Id,
+            new SubmitWhtRemittanceDto { SubmissionReference = "GRA-REVERSED-SOURCE" });
+        await submit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not linked to a posted journal*");
+        (await db.WithholdingTaxRemittances.SingleAsync()).Status = WhtRemittanceStatus.Submitted;
+        await db.SaveChangesAsync();
+        var pay = () => service.MarkRemittancePaidAsync(draft.Id,
+            new PayWhtRemittanceDto { PaymentDate = new DateTime(2026, 8, 14), PaymentReference = "BANK-REVERSED-SOURCE" });
+        await pay.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not linked to a posted journal*");
+        // The service's serializable boundary clears tracking after each lifecycle mutation.
+        // Reload the payment before retiring it so this test changes persisted source evidence
+        // rather than a detached seeding instance.
+        var paymentToRetire = await db.Set<VendorPayment>().SingleAsync(item => item.Id == payment.Id);
+        paymentToRetire.Status = reversedFlag ? VendorPaymentStatus.Reversed : VendorPaymentStatus.Voided;
+        paymentToRetire.PaymentDate = new DateTime(2026, 8, 31);
+        paymentToRetire.BusinessPartnerName = "MUTATED SOURCE NAME";
+        paymentToRetire.WithholdingTaxRate = 99m;
+        paymentToRetire.WithholdingTaxBaseAmount = 9_999m;
+        paymentToRetire.WithholdingTaxAmount = 999m;
+        paymentToRetire.CurrencyCode = "USD";
+        await db.SaveChangesAsync();
+        (await service.GetApCertificatesAsync(new WhtCertificateQueryDto())).Items.Should().ContainSingle();
+        (await service.GetApCertificateAsync(payment.Id)).Should().NotBeNull();
+        (await service.GetApCertificateHtmlAsync(payment.Id)).Should().NotBeNullOrWhiteSpace();
+        (await service.GenerateApCertificateAsync(payment.Id, new GenerateWhtCertificateDto()))
+            .CertificateStatus.Should().Be("Issued");
+        (await service.GetUnremittedLiabilitiesAsync(null, null, "GHS")).Should().BeEmpty();
+        var retainedRegister = Encoding.UTF8.GetString((await service.ExportRegisterAsync(null, null)).Content);
+        retainedRegister.Should().Contain("GL-REVERSED-EXISTING");
+        retainedRegister.Should().Contain("2026-07-22");
+        retainedRegister.Should().Contain(fixture.Partner.PartnerName);
+        retainedRegister.Should().Contain("\"7.5\",\"1000.00\",\"75.00\",\"GHS\"");
+        retainedRegister.Should().NotContain("MUTATED SOURCE NAME");
+        retainedRegister.Should().NotContain("\"99\",\"9999.00\",\"999.00\",\"USD\"");
+        await service.CancelRemittanceAsync(draft.Id,
+            new CancelWhtRemittanceDto { Reason = "Reconcile independently reversed source evidence." });
+        var cancelled = await service.CancelApCertificateAsync(payment.Id,
+            new CancelWhtCertificateDto { Reason = "Preserve original certificate after source reversal." });
+        cancelled.CertificateStatus.Should().Be("Cancelled");
+        (await db.WithholdingTaxCertificates.CountAsync()).Should().Be(1);
+        var issueAfterCancellation = () => service.GenerateApCertificateAsync(
+            payment.Id, new GenerateWhtCertificateDto());
+        await issueAfterCancellation.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*reversed or voided*");
     }
 
     private static VendorPayment SeedUnpostedWhtPayment(

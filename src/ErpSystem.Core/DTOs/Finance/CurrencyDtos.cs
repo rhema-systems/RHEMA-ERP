@@ -244,5 +244,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public string ExchangeRateUpdateFrequency { get; set; } = "Daily";
         
         public bool IsActive { get; set; } = true;
+
+        [MaxLength(2)]
+        public string? CountryCode { get; set; }
+
+        [MaxLength(100)]
+        public string? CountryName { get; set; }
     }
 }

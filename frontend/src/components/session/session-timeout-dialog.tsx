@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -26,38 +25,14 @@ export function SessionTimeoutDialog({
   onExtendSession,
   onLogout,
 }: SessionTimeoutDialogProps) {
-  const [timeLeft, setTimeLeft] = useState(remainingSeconds);
-
-  useEffect(() => {
-    setTimeLeft(remainingSeconds);
-  }, [remainingSeconds]);
-
-  useEffect(() => {
-    if (!isOpen || timeLeft <= 0) return;
-
-    const timer = setInterval(() => {
-      setTimeLeft((prev) => {
-        const newTime = prev - 1;
-        if (newTime <= 0) {
-          clearInterval(timer);
-          onLogout();
-          return 0;
-        }
-        return newTime;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [isOpen, timeLeft, onLogout]);
-
   const formatTime = (seconds: number) => {
     const minutes = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${minutes}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const progressPercentage = (timeLeft / remainingSeconds) * 100;
-  const isUrgent = timeLeft <= 30;
+  const progressPercentage = Math.min(100, (remainingSeconds / 120) * 100);
+  const isUrgent = remainingSeconds <= 30;
 
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
@@ -76,7 +51,7 @@ export function SessionTimeoutDialog({
           <div className="flex items-center justify-center gap-2">
             <Clock className={`h-8 w-8 ${isUrgent ? 'text-red-500' : 'text-blue-500'}`} />
             <span className={`text-3xl font-mono font-bold ${isUrgent ? 'text-red-500' : 'text-blue-600'}`}>
-              {formatTime(timeLeft)}
+              {formatTime(remainingSeconds)}
             </span>
           </div>
           
@@ -84,7 +59,7 @@ export function SessionTimeoutDialog({
             <div className="flex justify-between text-sm">
               <span>Time remaining</span>
               <span className={isUrgent ? 'text-red-500 font-semibold' : 'text-gray-600'}>
-                {formatTime(timeLeft)}
+                {formatTime(remainingSeconds)}
               </span>
             </div>
             <Progress 
@@ -116,7 +91,7 @@ export function SessionTimeoutDialog({
           <Button
             onClick={onExtendSession}
             className="flex-1"
-            disabled={timeLeft <= 0}
+            disabled={remainingSeconds <= 0}
           >
             Continue Session
           </Button>

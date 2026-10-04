@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Data;
 
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Api.Services.Finance;
@@ -29,6 +30,7 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly IFinancialStatementLayoutExecutionService? _statementLayoutExecutionService;
         private readonly FinanceDimensionReportingFilterService? _dimensionReportingFilters;
         private readonly IAccountSegmentIdentityService _segmentIdentityService;
+        private readonly IFinanceSourceBookAuthorityService? _sourceBookAuthority;
 
         public GeneralLedgerService(
             ApplicationDbContext context,
@@ -41,7 +43,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             IFinancePostingEngine financePostingEngine,
             IFinancialStatementLayoutExecutionService? statementLayoutExecutionService = null,
             FinanceDimensionReportingFilterService? dimensionReportingFilters = null,
-            IAccountSegmentIdentityService? segmentIdentityService = null)
+            IAccountSegmentIdentityService? segmentIdentityService = null,
+            IFinanceSourceBookAuthorityService? sourceBookAuthority = null)
         {
             _context = context;
             _reportingContext = reportingContext;
@@ -54,6 +57,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             _statementLayoutExecutionService = statementLayoutExecutionService;
             _dimensionReportingFilters = dimensionReportingFilters;
             _segmentIdentityService = segmentIdentityService ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(context);
+            _sourceBookAuthority = sourceBookAuthority;
         }
 
         private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -745,7 +749,7 @@ namespace ErpSystem.Api.Services.Finance.GL
             return NormalizeBookClassification(bookClassification) switch
             {
                 "IFRS" => account.IFRSLineItem,
-                "LOCAL_STATUTORY" => account.BaseLineItem,
+                "BASE" or "LOCAL_STATUTORY" => account.BaseLineItem,
                 "MANAGEMENT" => account.LocalLineItem,
                 _ => account.IFRSLineItem
             };
@@ -758,10 +762,25 @@ namespace ErpSystem.Api.Services.Finance.GL
             var normalized = (bookClassification ?? "IFRS").Trim().ToUpperInvariant();
             return normalized switch
             {
-                "BASE" or "LOCAL" => "LOCAL_STATUTORY",
+                "LOCAL" or "LOCAL_STATUTORY" or "PRIMARY" => "BASE",
                 "MANAGEMENT" => "MANAGEMENT",
                 _ => normalized
             };
+        }
+
+        private async Task<string> ResolveBookCurrencyCodeAsync(Guid tenantId, string bookClassification)
+        {
+            var functionalCurrencyCode = await _context.AccountingBooks
+                .AsNoTracking()
+                .Where(book => book.TenantId == tenantId
+                    && !book.IsDeleted
+                    && book.Code == bookClassification)
+                .Select(book => book.FunctionalCurrencyCode)
+                .SingleOrDefaultAsync();
+
+            return string.IsNullOrWhiteSpace(functionalCurrencyCode)
+                ? await _tenantSettings.GetBaseCurrencyAsync()
+                : functionalCurrencyCode.Trim().ToUpperInvariant();
         }
 
         private sealed record ClassificationPresentation(string Code, string Name, string? ParentName);
@@ -1691,7 +1710,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 StartDate = startDate,
                 EndDate = request.EndDate.Date,
                 BookClassification = bookClassification,
-                CurrencyCode = await _tenantSettings.GetBaseCurrencyAsync()
+                CurrencyCode = await ResolveBookCurrencyCodeAsync(tenantId, bookClassification)
             };
 
             foreach (var account in accounts)
@@ -2595,378 +2614,448 @@ namespace ErpSystem.Api.Services.Finance.GL
             await _fiscalPeriodService.UnlockPeriodAsync(fiscalPeriodId, unlockReason);
         }
 
-        public async Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request)
+        public Task<PeriodCloseResultDto> CloseFiscalYearAsync(YearEndCloseRequestDto request) =>
+            InYearEndTransactionAsync(async () =>
+            {
+                var actor = RequireYearEndActor();
+                if (request.AccountingBookId == Guid.Empty || string.IsNullOrWhiteSpace(request.IdempotencyKey)
+                    || request.IdempotencyKey.Length > 100)
+                    throw new InvalidOperationException("An exact accounting book and idempotency key are required.");
+                var key = request.IdempotencyKey.Trim();
+                var notes = string.IsNullOrWhiteSpace(request.ClosingNotes) ? null : request.ClosingNotes.Trim();
+                var year = await RequireYearEndFiscalYearAsync(request.FiscalYearId);
+                var previous = await _context.YearEndBookCloseCycles.SingleOrDefaultAsync(item =>
+                    item.TenantId == TenantId && item.IdempotencyKey == key);
+                if (previous != null)
+                {
+                    if (previous.FiscalYearId != year.Id || previous.AccountingBookId != request.AccountingBookId
+                        || previous.RetainedEarningsAccountId != request.RetainedEarningsAccountId
+                        || previous.ClosingNotes != notes || previous.Status != "Closed")
+                        throw new InvalidOperationException("Year-end idempotency conflict. Reclosing a reopened year requires a new key.");
+                    if (previous.ClosingJournalEntryId.HasValue)
+                        await RequireBoundYearEndAuthorityAsync(previous, year.EndDate, "Post");
+                    return YearEndResult(previous, year, "Existing book close returned.");
+                }
+
+                var book = await _context.AccountingBooks.Include(item => item.BaseAccountingBook)
+                    .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.Id == request.AccountingBookId && !item.IsDeleted)
+                    ?? throw new InvalidOperationException("The selected accounting book does not belong to this tenant.");
+                if (book.LifecycleStatus != AccountingBookLifecycleStatus.Active || !book.IsActive || !book.AllowsPosting)
+                    throw new InvalidOperationException("The selected accounting book is not active for posting.");
+                var currency = book.BookType == AccountingBookType.Delta
+                    ? book.BaseAccountingBook?.FunctionalCurrencyCode : book.FunctionalCurrencyCode;
+                if (string.IsNullOrWhiteSpace(currency))
+                    throw new InvalidOperationException("The selected accounting book has no functional-currency authority.");
+                if (await _context.YearEndBookCloseCycles.AnyAsync(item => item.TenantId == TenantId
+                    && item.FiscalYearId == year.Id && item.AccountingBookId == book.Id && item.Status != "Reopened"))
+                    throw new InvalidOperationException("This accounting book is already closed for the fiscal year. Reopen its exact close cycle first.");
+
+                string periodAuthoritySnapshot;
+                try
+                {
+                    periodAuthoritySnapshot = await YearEndTenantPeriodAuthority.CaptureAsync(
+                        _context, TenantId, year.Id);
+                }
+                catch (InvalidOperationException exception)
+                {
+                    return new PeriodCloseResultDto
+                    {
+                        Success = false,
+                        Message = "Cannot close fiscal year - tenant fiscal-period close authority is incomplete.",
+                        Errors = new() { exception.Message }
+                    };
+                }
+                var periodIds = year.FiscalPeriods.Where(item => !item.IsDeleted).Select(item => item.Id).ToArray();
+
+                var unpostedJournals = await _context.JournalEntries.CountAsync(item => item.TenantId == TenantId
+                    && item.AccountingBookId == book.Id && periodIds.Contains(item.FiscalPeriodId)
+                    && !item.IsDeleted && item.PostingStatus != "Posted" && item.PostingStatus != "Reversed");
+                if (unpostedJournals > 0)
+                    return new PeriodCloseResultDto { Success = false, Message = "Cannot close fiscal year - unposted journal entries remain",
+                        Errors = new() { $"{unpostedJournals} unposted journal entries remain in the selected accounting book." } };
+                var unpostedLines = await _context.AccountTransactions.CountAsync(item => item.TenantId == TenantId
+                    && item.AccountingBookId == book.Id && periodIds.Contains(item.FiscalPeriodId)
+                    && !item.IsDeleted && item.PostingStatus != "Posted" && item.PostingStatus != "Reversed");
+                if (unpostedLines > 0)
+                    return new PeriodCloseResultDto { Success = false, Message = "Cannot close fiscal year - unposted transaction lines remain",
+                        Errors = new() { $"{unpostedLines} unposted transaction lines remain in the selected accounting book." } };
+
+                var cycleNumber = (await _context.YearEndBookCloseCycles.Where(item => item.TenantId == TenantId
+                    && item.FiscalYearId == year.Id && item.AccountingBookId == book.Id)
+                    .MaxAsync(item => (int?)item.CycleNumber) ?? 0) + 1;
+                var cycle = new YearEndBookCloseCycle
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, FiscalYearId = year.Id,
+                    AccountingBookId = book.Id, AccountingBookCode = book.Code, FunctionalCurrencyCode = currency,
+                    CycleNumber = cycleNumber, IdempotencyKey = key, RetainedEarningsAccountId = request.RetainedEarningsAccountId,
+                    Status = "Closing", ClosedByUserId = actor, ClosedAtUtc = DateTime.UtcNow, ClosingNotes = notes,
+                    PeriodAuthoritySnapshotJson = periodAuthoritySnapshot,
+                    CreatedAt = DateTime.UtcNow, CreatedBy = _currentUserService.UserName
+                };
+                _context.YearEndBookCloseCycles.Add(cycle);
+                await _context.SaveChangesAsync();
+                var (postingEventId, journalId, netIncome) = await TransferRetainedEarningsAsync(year, cycle);
+                cycle.ClosingJournalEntryId = journalId;
+                cycle.NetIncomeTransferred = netIncome;
+                if (journalId.HasValue && postingEventId.HasValue)
+                {
+                    await RequireSourceBookAuthority().RetainExistingPostedOriginalAsync(
+                        BuildYearEndAuthorityRequest(cycle, year.EndDate, "Post",
+                            FinanceSourceBookAuthorityFreezeStages.LegacyPosted),
+                        journalId.Value,
+                        postingEventId.Value);
+                }
+                cycle.Status = "Closed";
+                await _context.SaveChangesAsync();
+                return YearEndResult(cycle, year, $"Book {book.Code} closed. Net income transferred: {netIncome:N2} {currency}.");
+            });
+
+        public Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, FiscalYearReopenRequestDto request) =>
+            InYearEndTransactionAsync(async () =>
+            {
+                var actor = RequireYearEndActor();
+                if (request.AccountingBookId == Guid.Empty || request.BookCloseCycleId == Guid.Empty
+                    || string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length < 20 || request.Reason.Trim().Length > 500)
+                    throw new InvalidOperationException("An exact accounting book, close cycle and reason of 20 to 500 characters are required.");
+                var reason = request.Reason.Trim();
+                var year = await RequireYearEndFiscalYearAsync(fiscalYearId);
+                var cycle = await _context.YearEndBookCloseCycles.SingleOrDefaultAsync(item => item.TenantId == TenantId
+                    && item.FiscalYearId == year.Id && item.AccountingBookId == request.AccountingBookId && item.Id == request.BookCloseCycleId)
+                    ?? throw new InvalidOperationException("The selected close cycle does not belong to this book and fiscal year.");
+                if (cycle.Status == "Reopened")
+                {
+                    if (cycle.ReopenReason != reason)
+                        throw new InvalidOperationException("Year-end reopen retry conflicts with the retained reversal reason.");
+                    if (cycle.ReversalJournalEntryId.HasValue)
+                    {
+                        var reversalAuthority = await RequireBoundYearEndAuthorityAsync(
+                            cycle, year.EndDate, "Reverse", "YearEndCloseReversal");
+                        if (reversalAuthority.OriginalJournalEntryId != cycle.ReversalJournalEntryId)
+                            throw new InvalidOperationException(
+                                "The frozen book-reopen lineage does not match the retained reversal evidence.");
+                    }
+                    return YearEndResult(cycle, year, "Existing book reopen returned.");
+                }
+                if (cycle.Status != "Closed")
+                    throw new InvalidOperationException("The book close cycle is not closed.");
+
+                if (cycle.ClosingJournalEntryId.HasValue)
+                {
+                    var originalAuthority = await RequireBoundYearEndAuthorityAsync(
+                        cycle, year.EndDate, "Post");
+                    var original = await _context.FinancePostingEvents
+                        .Include(item => item.JournalEntry).ThenInclude(item => item!.Transactions)
+                        .SingleOrDefaultAsync(item => item.TenantId == TenantId && item.SourceDocumentId == cycle.Id
+                            && item.SourceDocumentType == "YearEndClose" && item.JournalEntryId == cycle.ClosingJournalEntryId
+                            && !item.IsDeleted)
+                        ?? throw new InvalidOperationException("The original book-close posting evidence is missing.");
+                    var journal = original.JournalEntry ?? throw new InvalidOperationException("The closing journal is missing.");
+                    if (original.AccountingBookId != cycle.AccountingBookId || original.BookClassification != cycle.AccountingBookCode
+                        || original.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode || journal.AccountingBookId != cycle.AccountingBookId
+                        || journal.Transactions.Any(item => item.IsDeleted || item.AccountingBookId != cycle.AccountingBookId
+                            || item.FunctionalCurrencyCode != cycle.FunctionalCurrencyCode))
+                        throw new InvalidOperationException("The original book-close posting authority is inconsistent.");
+                    if (originalAuthority.OriginalFinancePostingEventId != original.Id ||
+                        originalAuthority.OriginalJournalEntryId != journal.Id)
+                        throw new InvalidOperationException("The frozen book-close lineage does not match the retained posting evidence.");
+                    var reversalAuthority = await RequireSourceBookAuthority().FreezeInheritedAsync(
+                        BuildYearEndAuthorityRequest(cycle, journal.EntryDate, "Reverse",
+                            FinanceSourceBookAuthorityFreezeStages.PrePost, "YearEndCloseReversal"),
+                        [new FinanceSourceBookAuthorityOriginRequest
+                        {
+                            OriginAuthorityId = originalAuthority.AuthorityId,
+                            Role = "ORIGINAL_YEAR_END_CLOSE"
+                        }]);
+                    var reversal = await _financePostingEngine.PostYearEndAsync(new FinancePostingRequestV2Dto
+                    {
+                        SourceModule = "GL", SourceDocumentType = "YearEndCloseReversal", SourceDocumentId = cycle.Id,
+                        SourceDocumentTenantId = TenantId, PostingAction = "Reverse", ReversalOfJournalEntryId = journal.Id,
+                        ReversalReason = reason, ReversalType = "Manual", SourceDocumentReference = year.FiscalYearCode,
+                        Description = $"Reopen {cycle.AccountingBookCode} / {year.FiscalYearName} / cycle {cycle.CycleNumber}",
+                        PostingDate = journal.EntryDate, FiscalPeriodId = journal.FiscalPeriodId, JournalType = "Year-End Close Reversal",
+                        AccountingBookCode = reversalAuthority.AccountingBookCode,
+                        FunctionalCurrencyCode = reversalAuthority.FunctionalCurrencyCode,
+                        IdempotencyKey = $"GL:YearEndCloseReversal:{TenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}",
+                        AllowPostingToClosedPeriod = true,
+                        Lines = journal.Transactions.OrderBy(item => item.LineNumber).Select(item => new FinancePostingLineDto
+                        {
+                            AccountId = item.AccountId, SourceDocumentLineId = item.SourceDocumentLineId,
+                            Description = $"Reversal: {item.Description}", DebitAmount = item.CreditAmount, CreditAmount = item.DebitAmount,
+                            TransactionCurrency = item.TransactionCurrency, TransactionDebitAmount = item.TransactionCreditAmount,
+                            TransactionCreditAmount = item.TransactionDebitAmount, ForeignCurrencyAmount = item.ForeignCurrencyAmount,
+                            ExchangeRateId = item.ExchangeRateId, ExchangeRate = item.ExchangeRate,
+                            ExchangeRateSource = item.ExchangeRateSource, ExchangeRateDate = item.ExchangeRateDate,
+                            SourceReferenceNumber = item.SourceReferenceNumber, LineNumber = item.LineNumber,
+                            FinanceDimensionSetId = item.FinanceDimensionSetId, SegmentString = item.SegmentString,
+                            Notes = reason, TransactionTag = "YearEndCloseReversal"
+                        }).ToList()
+                    }, cycle.Id);
+                    await RequireSourceBookAuthority().BindOriginalPostingAsync(
+                        reversalAuthority.AuthorityId, reversal.PostingEventId, reversal.JournalEntryId);
+                    cycle.ReversalJournalEntryId = reversal.JournalEntryId;
+                }
+                cycle.Status = "Reopened";
+                cycle.ReopenedByUserId = actor;
+                cycle.ReopenedAtUtc = DateTime.UtcNow;
+                cycle.ReopenReason = reason;
+                await _context.SaveChangesAsync();
+                return YearEndResult(cycle, year, $"Book {cycle.AccountingBookCode} reopened; its closing entry was reversed. Period opening requires the existing governed workflow.");
+            });
+
+        public async Task<IReadOnlyList<YearEndBookCloseCycleDto>> GetYearEndCloseCyclesAsync(Guid fiscalYearId) =>
+            await _context.YearEndBookCloseCycles.AsNoTracking().Where(item => item.TenantId == TenantId
+                && item.FiscalYearId == fiscalYearId && !item.IsDeleted).OrderByDescending(item => item.CycleNumber)
+                .Select(item => new YearEndBookCloseCycleDto
+                {
+                    Id = item.Id, FiscalYearId = item.FiscalYearId, AccountingBookId = item.AccountingBookId,
+                    AccountingBookCode = item.AccountingBookCode, FunctionalCurrencyCode = item.FunctionalCurrencyCode,
+                    CycleNumber = item.CycleNumber, Status = item.Status, ClosingJournalEntryId = item.ClosingJournalEntryId,
+                    ReversalJournalEntryId = item.ReversalJournalEntryId, NetIncomeTransferred = item.NetIncomeTransferred,
+                    ClosedAtUtc = item.ClosedAtUtc, ReopenedAtUtc = item.ReopenedAtUtc
+                }).ToListAsync();
+
+        private async Task<FiscalYear> RequireYearEndFiscalYearAsync(Guid fiscalYearId)
         {
-            var tenantId = TenantId;
-            var userId = _currentUserService.UserId;
-            if (userId == null)
-                throw new InvalidOperationException("User context is required.");
-
-            var fiscalYear = await _context.FiscalYears
-                .Include(fy => fy.FiscalPeriods)
-                .FirstOrDefaultAsync(fy => fy.Id == request.FiscalYearId && fy.TenantId == tenantId);
-
-            if (fiscalYear == null)
-                throw new ArgumentException($"Fiscal year {request.FiscalYearId} not found");
-
-            if (fiscalYear.IsClosed)
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = $"Fiscal year '{fiscalYear.FiscalYearName}' is already closed.",
-                    Errors = new List<string> { "Reopen the fiscal year before closing it again." }
-                };
-            }
-
-            // Validate all periods are closed
-            var openPeriods = fiscalYear.FiscalPeriods.Where(p => !p.IsClosed).ToList();
-            if (openPeriods.Any())
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = "Cannot close fiscal year - some periods are still open",
-                    Errors = openPeriods.Select(p => $"Period '{p.PeriodName}' is still open").ToList()
-                };
-            }
-
-            var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
-            var unpostedJournalEntries = await _context.JournalEntries
-                .CountAsync(je => je.TenantId == tenantId
-                    && periodIds.Contains(je.FiscalPeriodId)
-                    && !je.IsDeleted
-                    && je.PostingStatus != "Posted"
-                    && je.PostingStatus != "Reversed");
-
-            if (unpostedJournalEntries > 0)
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = "Cannot close fiscal year - unposted journal entries remain",
-                    Errors = new List<string>
-                    {
-                        $"{unpostedJournalEntries} journal entr{(unpostedJournalEntries == 1 ? "y is" : "ies are")} not posted. Post or remove all draft, submitted, and approved entries before closing the year."
-                    }
-                };
-            }
-
-            var unpostedTransactionLines = await _context.AccountTransactions
-                .CountAsync(t => t.TenantId == tenantId
-                    && periodIds.Contains(t.FiscalPeriodId)
-                    && !t.IsDeleted
-                    && t.PostingStatus != "Posted"
-                    && t.PostingStatus != "Reversed");
-
-            if (unpostedTransactionLines > 0)
-            {
-                return new PeriodCloseResultDto
-                {
-                    Success = false,
-                    Message = "Cannot close fiscal year - unposted transaction lines remain",
-                    Errors = new List<string>
-                    {
-                        $"{unpostedTransactionLines} account transaction line{(unpostedTransactionLines == 1 ? " is" : "s are")} not posted. Resolve the ledger data before closing the year."
-                    }
-                };
-            }
-
-            // Keep the closing journal posting and the fiscal-year state flip in one commit so a
-            // failure between them cannot leave a posted closing entry on an open year.
-            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
-
-            var (closingJournalEntryId, netIncome) = await TransferRetainedEarningsAsync(fiscalYear, request.RetainedEarningsAccountId);
-
-            // Update fiscal year
-            fiscalYear.IsClosed = true;
-            fiscalYear.IsActive = false;
-            fiscalYear.Status = "Closed";
-            fiscalYear.ClosedDate = DateTime.UtcNow;
-            fiscalYear.ClosedByUserId = Guid.Parse(userId);
-            fiscalYear.RetainedEarningsTransferComplete = true;
-            fiscalYear.RetainedEarningsTransferDate = DateTime.UtcNow;
-            fiscalYear.ClosingJournalEntryId = closingJournalEntryId;
-            fiscalYear.NetIncomeTransferred = netIncome;
-            fiscalYear.YearEndClosingNotes = request.ClosingNotes;
-
-            await _context.SaveChangesAsync();
-            await dbTransaction.CommitAsync();
-
-            return new PeriodCloseResultDto
-            {
-                Success = true,
-                Message = $"Fiscal year '{fiscalYear.FiscalYearName}' closed successfully. Net income transferred: {fiscalYear.NetIncomeTransferred:N2}",
-                FiscalPeriodId = fiscalYear.Id,
-                PeriodName = fiscalYear.FiscalYearName,
-                ClosedDate = fiscalYear.ClosedDate
-            };
+            var year = await _context.FiscalYears.Include(item => item.FiscalPeriods)
+                .SingleOrDefaultAsync(item => item.Id == fiscalYearId && item.TenantId == TenantId && !item.IsDeleted)
+                ?? throw new ArgumentException("Fiscal year was not found.");
+            if (year.IsLocked)
+                throw new InvalidOperationException("The fiscal year is locked.");
+            if (year.IsClosed || year.ClosingJournalEntryId.HasValue || year.RetainedEarningsTransferComplete)
+                throw new InvalidOperationException("This fiscal year contains a legacy year-wide close. Reconcile and migrate its original book authority before book-specific close or reopen.");
+            return year;
         }
 
-        public async Task<PeriodCloseResultDto> ReopenFiscalYearAsync(Guid fiscalYearId, string reason)
+        private Guid RequireYearEndActor() => Guid.TryParse(_currentUserService.UserId, out var actor) && actor != Guid.Empty
+            ? actor : throw new UnauthorizedAccessException("An authenticated Finance user is required.");
+
+        private static PeriodCloseResultDto YearEndResult(YearEndBookCloseCycle cycle, FiscalYear year, string message) => new()
         {
-            if (string.IsNullOrWhiteSpace(reason))
-                throw new ArgumentException("A reason is required to reopen a fiscal year.");
+            Success = true, Message = message, FiscalPeriodId = year.Id, PeriodName = year.FiscalYearName,
+            AccountingBookId = cycle.AccountingBookId, BookCloseCycleId = cycle.Id, ClosingJournalEntryId = cycle.ClosingJournalEntryId,
+            ReversalJournalEntryId = cycle.ReversalJournalEntryId, NetIncomeTransferred = cycle.NetIncomeTransferred,
+            ClosedDate = cycle.ClosedAtUtc
+        };
 
-            var tenantId = TenantId;
-            var userId = _currentUserService.UserId;
-            if (userId == null)
-                throw new InvalidOperationException("User context is required.");
-
-            var fiscalYear = await _context.FiscalYears
-                .Include(fy => fy.FiscalPeriods)
-                .FirstOrDefaultAsync(fy => fy.Id == fiscalYearId && fy.TenantId == tenantId);
-
-            if (fiscalYear == null)
-                throw new ArgumentException($"Fiscal year {fiscalYearId} not found");
-
-            if (!fiscalYear.IsClosed)
-                throw new InvalidOperationException($"Fiscal year '{fiscalYear.FiscalYearName}' is not closed.");
-
-            await using var dbTransaction = await _context.Database.BeginTransactionAsync();
-
-            // Reverse the closing entry through the posting engine so account balance
-            // snapshots and posting-event back-references stay correct.
-            if (fiscalYear.ClosingJournalEntryId.HasValue)
+        private Task<T> InYearEndTransactionAsync<T>(Func<Task<T>> action)
+        {
+            if (!_context.Database.IsRelational()) return action();
+            return _context.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
             {
-                var closingEntry = await _context.JournalEntries
-                    .Include(je => je.Transactions)
-                    .FirstOrDefaultAsync(je => je.Id == fiscalYear.ClosingJournalEntryId.Value && je.TenantId == tenantId);
-
-                if (closingEntry == null)
-                    throw new InvalidOperationException("The fiscal year's closing journal entry could not be found.");
-
-                var reversalRequest = new FinancePostingRequestV2Dto
+                await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+                try
                 {
-                    SourceModule = "GL",
-                    SourceDocumentType = "YearEndCloseReversal",
-                    SourceDocumentId = fiscalYear.Id,
-                    SourceDocumentTenantId = tenantId,
-                    ReversalOfJournalEntryId = closingEntry.Id,
-                    ReversalReason = reason.Trim(),
-                    ReversalType = "Manual",
-                    PostingAction = "Reverse",
-                    SourceDocumentReference = fiscalYear.FiscalYearCode,
-                    Description = $"Reopen fiscal year - reversal of year-end close for {fiscalYear.FiscalYearName}",
-                    PostingDate = closingEntry.EntryDate,
-                    FiscalPeriodId = closingEntry.FiscalPeriodId,
-                    JournalType = "Year-End Close Reversal",
-                    AccountingBookCode = closingEntry.BookClassification,
-                    FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
-                    IdempotencyKey = $"GL:YearEndCloseReversal:{tenantId:N}:{fiscalYear.Id:N}:{closingEntry.Id:N}",
-                    AllowPostingToClosedPeriod = true,
-                    Lines = closingEntry.Transactions
-                        .Where(t => !t.IsDeleted)
-                        .Select(t => new FinancePostingLineDto
-                        {
-                            AccountId = t.AccountId,
-                            SourceDocumentLineId = t.SourceDocumentLineId,
-                            Description = $"Reversal: {t.Description}",
-                            DebitAmount = t.CreditAmount,
-                            CreditAmount = t.DebitAmount,
-                            TransactionCurrency = t.TransactionCurrency,
-                            TransactionDebitAmount = t.TransactionCreditAmount,
-                            TransactionCreditAmount = t.TransactionDebitAmount,
-                            ForeignCurrencyAmount = t.ForeignCurrencyAmount,
-                            ExchangeRateId = t.ExchangeRateId,
-                            ExchangeRate = t.ExchangeRate,
-                            ExchangeRateSource = t.ExchangeRateSource,
-                            ExchangeRateDate = t.ExchangeRateDate,
-                            SourceReferenceNumber = t.SourceReferenceNumber,
-                            LineNumber = t.LineNumber,
-                            FinanceDimensionSetId = t.FinanceDimensionSetId,
-                            SegmentString = t.SegmentString,
-                            Notes = reason.Trim(),
-                            TransactionTag = "YearEndCloseReversal"
-                        })
-                        .ToList()
-                };
-
-                await _financePostingEngine.PostAsync(reversalRequest);
-            }
-
-            fiscalYear.IsClosed = false;
-            fiscalYear.IsActive = true;
-            fiscalYear.Status = "Open";
-            fiscalYear.ClosedDate = null;
-            fiscalYear.ClosedByUserId = null;
-            fiscalYear.RetainedEarningsTransferComplete = false;
-            fiscalYear.RetainedEarningsTransferDate = null;
-            fiscalYear.ClosingJournalEntryId = null;
-            fiscalYear.NetIncomeTransferred = 0m;
-            fiscalYear.YearEndClosingNotes = string.IsNullOrWhiteSpace(fiscalYear.YearEndClosingNotes)
-                ? $"Reopened {DateTime.UtcNow:u}: {reason.Trim()}"
-                : $"{fiscalYear.YearEndClosingNotes}\nReopened {DateTime.UtcNow:u}: {reason.Trim()}";
-
-            await _context.SaveChangesAsync();
-            await dbTransaction.CommitAsync();
-
-            return new PeriodCloseResultDto
-            {
-                Success = true,
-                Message = $"Fiscal year '{fiscalYear.FiscalYearName}' reopened. The year-end closing entry was reversed.",
-                FiscalPeriodId = fiscalYear.Id,
-                PeriodName = fiscalYear.FiscalYearName
-            };
+                    // Same lock as the posting engine: close/reopen and ordinary postings cannot race.
+                    if (_context.Database.IsSqlServer())
+                    {
+                        var resource = $"FIN:POSTING-REPRESENTATION:{TenantId:N}";
+                        await _context.Database.ExecuteSqlInterpolatedAsync($@"
+DECLARE @result int;
+EXEC @result = sys.sp_getapplock @Resource = {resource}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 15000;
+IF @result < 0 THROW 51000, 'Could not acquire Finance year-end lock.', 1;");
+                    }
+                    var result = await action();
+                    await transaction.CommitAsync();
+                    return result;
+                }
+                catch
+                {
+                    await transaction.RollbackAsync();
+                    _context.ChangeTracker.Clear();
+                    throw;
+                }
+            });
         }
 
         public async Task<FinanceDashboardDto> GetFinanceDashboardAsync()
         {
             var tenantId = TenantId;
             var today = DateTime.UtcNow.Date;
-
             var fiscalYear = await _context.FiscalYears
+                .AsNoTracking()
                 .Where(fy => fy.TenantId == tenantId && !fy.IsDeleted && fy.StartDate <= today && fy.EndDate >= today)
                 .OrderByDescending(fy => fy.StartDate)
                 .FirstOrDefaultAsync();
 
             var startDate = fiscalYear?.StartDate.Date ?? new DateTime(today.Year, 1, 1);
-            var endDate = fiscalYear?.EndDate.Date ?? new DateTime(today.Year, 12, 31);
+            return await GetFinanceDashboardAsync(startDate, today);
+        }
 
-            var activity = await _context.AccountTransactions
-                .Where(t => t.TenantId == tenantId
-                    && !t.IsDeleted
-                    && t.TransactionDate >= startDate
-                    && t.TransactionDate <= endDate
-                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
-                .Select(t => new
+        public async Task<FinanceDashboardDto> GetFinanceDashboardAsync(DateTime startDate, DateTime endDate)
+        {
+            var tenantId = TenantId;
+            startDate = startDate.Date;
+            endDate = endDate.Date;
+            if (startDate > endDate)
+                throw new ArgumentException("Finance dashboard start date cannot be later than the end date.");
+            if ((endDate - startDate).TotalDays > 3660)
+                throw new ArgumentException("Finance dashboard date range cannot exceed 10 years.");
+
+            var endExclusive = endDate.AddDays(1);
+            var periodDays = (endDate - startDate).Days + 1;
+            var comparisonEndDate = startDate.AddDays(-1);
+            var comparisonStartDate = comparisonEndDate.AddDays(-(periodDays - 1));
+            var currency = await _tenantSettings.GetBaseCurrencyReferenceAsync();
+
+            // Reuse the same book and posting-status boundary as the statutory Finance reports.
+            // Reversed entries remain in the ledger so their reversing lines preserve net truth.
+            var activity = BuildPostedLedgerQuery(tenantId, bookClassification: null)
+                .Where(transaction => transaction.TransactionDate >= comparisonStartDate
+                    && transaction.TransactionDate < endExclusive
+                    && (transaction.Account.AccountType == AccountType.Revenue
+                        || transaction.Account.AccountType == AccountType.Expense));
+
+            var currentTotals = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate)
+                .GroupBy(transaction => transaction.Account.AccountType)
+                .Select(group => new
                 {
-                    t.Account.AccountType,
-                    t.Account.AccountName,
-                    t.TransactionDate,
-                    t.DebitAmount,
-                    t.CreditAmount
+                    AccountType = group.Key,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
                 })
                 .ToListAsync();
 
-            var revenue = activity
-                .Where(t => t.AccountType == AccountType.Revenue)
-                .Sum(t => t.CreditAmount - t.DebitAmount);
-            var expenses = activity
-                .Where(t => t.AccountType == AccountType.Expense)
-                .Sum(t => t.DebitAmount - t.CreditAmount);
+            var comparisonTotals = await activity
+                .Where(transaction => transaction.TransactionDate < startDate)
+                .GroupBy(transaction => transaction.Account.AccountType)
+                .Select(group => new
+                {
+                    AccountType = group.Key,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
+                })
+                .ToListAsync();
 
+            var monthlyTotals = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate)
+                .GroupBy(transaction => new
+                {
+                    transaction.TransactionDate.Year,
+                    transaction.TransactionDate.Month,
+                    transaction.Account.AccountType
+                })
+                .Select(group => new
+                {
+                    group.Key.Year,
+                    group.Key.Month,
+                    AccountType = group.Key.AccountType,
+                    Debit = group.Sum(transaction => transaction.DebitAmount),
+                    Credit = group.Sum(transaction => transaction.CreditAmount)
+                })
+                .ToListAsync();
+
+            var expenseChart = await activity
+                .Where(transaction => transaction.TransactionDate >= startDate
+                    && transaction.Account.AccountType == AccountType.Expense)
+                .GroupBy(transaction => transaction.Account.AccountName)
+                .Select(group => new FinanceDashboardBreakdownPointDto
+                {
+                    Name = group.Key,
+                    Value = group.Sum(transaction => transaction.DebitAmount - transaction.CreditAmount)
+                })
+                .Where(point => point.Value > 0)
+                .OrderByDescending(point => point.Value)
+                .Take(8)
+                .ToListAsync();
+
+            var currentTotalsByType = currentTotals.ToDictionary(
+                item => item.AccountType,
+                item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
+            var comparisonTotalsByType = comparisonTotals.ToDictionary(
+                item => item.AccountType,
+                item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
+            var revenue = currentTotalsByType.GetValueOrDefault(AccountType.Revenue);
+            var expenses = currentTotalsByType.GetValueOrDefault(AccountType.Expense);
+            var previousRevenue = comparisonTotalsByType.GetValueOrDefault(AccountType.Revenue);
+            var previousExpenses = comparisonTotalsByType.GetValueOrDefault(AccountType.Expense);
+            var netProfit = revenue - expenses;
+            var previousNetProfit = previousRevenue - previousExpenses;
+
+            var monthlyLookup = monthlyTotals
+                .ToDictionary(
+                    item => (item.Year, item.Month, item.AccountType),
+                    item => item.AccountType == AccountType.Revenue ? item.Credit - item.Debit : item.Debit - item.Credit);
             var monthly = new List<FinanceDashboardMonthlyPointDto>();
             var monthCursor = new DateTime(startDate.Year, startDate.Month, 1);
             var lastMonth = new DateTime(endDate.Year, endDate.Month, 1);
-            while (monthCursor <= lastMonth && monthly.Count < 12)
+            while (monthCursor <= lastMonth)
             {
-                var monthEnd = monthCursor.AddMonths(1);
-                var monthRows = activity.Where(t => t.TransactionDate >= monthCursor && t.TransactionDate < monthEnd).ToList();
                 monthly.Add(new FinanceDashboardMonthlyPointDto
                 {
-                    Name = monthCursor.ToString("MMM"),
-                    Revenue = monthRows.Where(t => t.AccountType == AccountType.Revenue).Sum(t => t.CreditAmount - t.DebitAmount),
-                    Expenses = monthRows.Where(t => t.AccountType == AccountType.Expense).Sum(t => t.DebitAmount - t.CreditAmount)
+                    Name = monthCursor.ToString("MMM yy"),
+                    Revenue = monthlyLookup.GetValueOrDefault((monthCursor.Year, monthCursor.Month, AccountType.Revenue)),
+                    Expenses = monthlyLookup.GetValueOrDefault((monthCursor.Year, monthCursor.Month, AccountType.Expense))
                 });
-                monthCursor = monthEnd;
+                monthCursor = monthCursor.AddMonths(1);
             }
 
-            var expenseChart = activity
-                .Where(t => t.AccountType == AccountType.Expense)
-                .GroupBy(t => t.AccountName)
-                .Select(g => new FinanceDashboardBreakdownPointDto
-                {
-                    Name = g.Key,
-                    Value = g.Sum(t => t.DebitAmount - t.CreditAmount)
-                })
-                .Where(p => p.Value > 0)
-                .OrderByDescending(p => p.Value)
-                .Take(8)
-                .ToList();
-
-            // Cash on hand comes from the posted cash/bank ledger (source of truth), matching
-            // the cash position report rather than stored snapshots.
+            // Closing cash is authoritative as at the selected period end. The report service
+            // supplies its opening balance, so this is not a sum of heterogeneous currencies.
             var cashLedger = await GenerateCashBankLedgerAsync(new CashBankLedgerRequestDto
             {
-                StartDate = today,
-                EndDate = today
+                StartDate = endDate,
+                EndDate = endDate
             });
 
             return new FinanceDashboardDto
             {
+                CurrencyCode = currency.CurrencyCode,
+                CurrencySymbol = currency.CurrencySymbol,
+                CurrencyDecimalPlaces = currency.DecimalPlaces,
+                RangeStartDate = startDate,
+                RangeEndDate = endDate,
+                ComparisonStartDate = comparisonStartDate,
+                ComparisonEndDate = comparisonEndDate,
                 Kpis = new FinanceDashboardKpisDto
                 {
                     Revenue = revenue,
                     Expenses = expenses,
-                    NetProfit = revenue - expenses,
-                    CashOnHand = cashLedger.TotalClosingBalance
+                    NetProfit = netProfit,
+                    CashOnHand = cashLedger.TotalClosingBalance,
+                    PreviousRevenue = previousRevenue,
+                    PreviousExpenses = previousExpenses,
+                    PreviousNetProfit = previousNetProfit,
+                    RevenueChangePercent = CalculateDashboardChange(revenue, previousRevenue),
+                    ExpensesChangePercent = CalculateDashboardChange(expenses, previousExpenses),
+                    NetProfitChangePercent = CalculateDashboardChange(netProfit, previousNetProfit)
                 },
                 Monthly = monthly,
                 ExpenseChart = expenseChart
             };
         }
 
-        private async Task<(Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
+        internal static decimal? CalculateDashboardChange(decimal current, decimal previous)
+        {
+            if (previous == 0m)
+                return current == 0m ? 0m : null;
+
+            return decimal.Round((current - previous) * 100m / Math.Abs(previous), 1);
+        }
+
+        private async Task<(Guid? PostingEventId, Guid? ClosingJournalEntryId, decimal NetIncome)> TransferRetainedEarningsAsync(
             FiscalYear fiscalYear,
-            Guid retainedEarningsAccountId)
+            YearEndBookCloseCycle cycle)
         {
             var tenantId = TenantId;
 
             var retainedEarningsAccountExists = await _context.Accounts
-                .AnyAsync(a => a.TenantId == tenantId && a.Id == retainedEarningsAccountId && !a.IsDeleted);
+                .AnyAsync(a => a.TenantId == tenantId && a.Id == cycle.RetainedEarningsAccountId
+                    && a.AccountType == AccountType.Equity && a.Status == AccountStatus.Active && !a.IsDeleted);
             if (!retainedEarningsAccountExists)
-                throw new ArgumentException($"Retained earnings account {retainedEarningsAccountId} not found");
+                throw new InvalidOperationException("Retained earnings must be an active tenant equity account.");
+            if (!await _context.AccountAccountingBooks.AnyAsync(item => item.TenantId == tenantId
+                && item.AccountingBookId == cycle.AccountingBookId && item.AccountId == cycle.RetainedEarningsAccountId
+                && item.IsEnabled && !item.IsDeleted))
+                throw new InvalidOperationException("Retained earnings must have an enabled mapping in the selected accounting book.");
 
-            // Get all revenue and expense accounts with balances for the year
-            var periodIds = fiscalYear.FiscalPeriods.Select(p => p.Id).ToList();
+            var plan = await YearEndClosingPlan.BuildAsync(_context, cycle);
+            if (plan.Lines.Count == 0) return (null, null, 0m);
 
-            var revenueExpenseTransactions = await _context.AccountTransactions
-                .Include(t => t.Account)
-                .Where(t => t.TenantId == tenantId
-                    && periodIds.Contains(t.FiscalPeriodId)
-                    && !t.IsDeleted
-                    && (t.PostingStatus == "Posted" || t.PostingStatus == "Reversed")
-                    && (t.Account.AccountType == AccountType.Revenue || t.Account.AccountType == AccountType.Expense))
-                .ToListAsync();
-
-            // Calculate balances by account
-            var accountBalances = revenueExpenseTransactions
-                .GroupBy(t => t.AccountId)
-                .Select(g => new
-                {
-                    AccountId = g.Key,
-                    Account = g.First().Account,
-                    Balance = g.Sum(t => t.CreditAmount - t.DebitAmount) // Revenue positive, Expense negative
-                })
-                .Where(b => Math.Abs(b.Balance) > 0.01m)
-                .ToList();
-
-            decimal netIncome = accountBalances.Sum(b => b.Balance);
-
-            // A year with no revenue/expense activity closes without a closing journal.
-            if (accountBalances.Count == 0)
-            {
-                return (null, 0m);
-            }
-
-            var lastPeriod = fiscalYear.FiscalPeriods.OrderByDescending(p => p.EndDate).First();
-
-            // Zero each account against its actual net balance rather than by account type so
-            // contra balances (e.g. negative revenue) never produce negative posting amounts.
-            var lines = new List<FinancePostingLineDto>();
-            foreach (var acctBalance in accountBalances)
-            {
-                lines.Add(new FinancePostingLineDto
-                {
-                    AccountId = acctBalance.AccountId,
-                    Description = acctBalance.Account.AccountType == AccountType.Revenue
-                        ? "Year-end close - Revenue account"
-                        : "Year-end close - Expense account",
-                    DebitAmount = acctBalance.Balance > 0 ? acctBalance.Balance : 0m,
-                    CreditAmount = acctBalance.Balance < 0 ? Math.Abs(acctBalance.Balance) : 0m,
-                    TransactionTag = "YearEndClose"
-                });
-            }
-
-            lines.Add(new FinancePostingLineDto
-            {
-                AccountId = retainedEarningsAccountId,
-                Description = $"Year-end close - Net Income transfer: {netIncome:N2}",
-                DebitAmount = netIncome < 0 ? Math.Abs(netIncome) : 0m, // Net loss = debit
-                CreditAmount = netIncome > 0 ? netIncome : 0m, // Net income = credit
-                TransactionTag = "YearEndClose"
-            });
+            var lastPeriod = fiscalYear.FiscalPeriods.Where(p => !p.IsDeleted
+                && p.StartDate.Date <= fiscalYear.EndDate.Date && p.EndDate.Date >= fiscalYear.EndDate.Date)
+                .OrderByDescending(p => p.EndDate).FirstOrDefault()
+                ?? throw new InvalidOperationException("No fiscal period covers the year-end posting date.");
 
             // Post through the finance posting engine so the closing entry gets a posting
             // event, idempotency protection, and correct exact-book balance movements.
@@ -2974,22 +3063,61 @@ namespace ErpSystem.Api.Services.Finance.GL
             {
                 SourceModule = "GL",
                 SourceDocumentType = "YearEndClose",
-                SourceDocumentId = fiscalYear.Id,
+                SourceDocumentId = cycle.Id,
                 SourceDocumentTenantId = tenantId,
                 SourceDocumentReference = fiscalYear.FiscalYearCode,
                 Description = $"Year-end close - Transfer to Retained Earnings for {fiscalYear.FiscalYearName}",
                 PostingDate = fiscalYear.EndDate.Date,
                 FiscalPeriodId = lastPeriod.Id,
                 JournalType = "Year-End Close",
-                FunctionalCurrencyCode = await _tenantSettings.GetBaseCurrencyAsync(),
-                IdempotencyKey = $"GL:YearEndClose:{tenantId:N}:{fiscalYear.Id:N}",
+                AccountingBookCode = cycle.AccountingBookCode,
+                FunctionalCurrencyCode = cycle.FunctionalCurrencyCode,
+                IdempotencyKey = $"GL:YearEndClose:{tenantId:N}:{cycle.AccountingBookId:N}:{cycle.Id:N}",
                 AllowPostingToClosedPeriod = true,
-                Lines = lines
+                Lines = plan.Lines
             };
 
-            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
+            var postingResult = await _financePostingEngine.PostYearEndAsync(postingRequest, cycle.Id);
 
-            return (postingResult.JournalEntryId, netIncome);
+            return (postingResult.PostingEventId, postingResult.JournalEntryId, plan.NetIncome);
+        }
+
+        private IFinanceSourceBookAuthorityService RequireSourceBookAuthority() =>
+            _sourceBookAuthority ?? throw new InvalidOperationException(
+                "Finance source-book authority is not configured for year-end close and reopen.");
+
+        private static FinanceSourceBookAuthorityFreezeRequest BuildYearEndAuthorityRequest(
+            YearEndBookCloseCycle cycle,
+            DateTime effectiveDate,
+            string postingAction,
+            string freezeStage,
+            string sourceDocumentType = "YearEndClose") => new()
+        {
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = sourceDocumentType,
+            SourceDocumentId = cycle.Id,
+            PostingAction = postingAction,
+            EffectiveDate = effectiveDate.Date,
+            TransactionCurrencyCode = cycle.FunctionalCurrencyCode,
+            FreezeStage = freezeStage
+        };
+
+        private async Task<FinanceSourceBookAuthorityResult> RequireBoundYearEndAuthorityAsync(
+            YearEndBookCloseCycle cycle,
+            DateTime effectiveDate,
+            string postingAction,
+            string sourceDocumentType = "YearEndClose")
+        {
+            var authority = await RequireSourceBookAuthority().RequireForPostingAsync(
+                BuildYearEndAuthorityRequest(cycle, effectiveDate, postingAction,
+                    FinanceSourceBookAuthorityFreezeStages.PrePost, sourceDocumentType));
+            var bound = await RequireSourceBookAuthority().RequireBoundOriginalAsync(authority.AuthorityId);
+            if (bound.AccountingBookId != cycle.AccountingBookId ||
+                !string.Equals(bound.AccountingBookCode, cycle.AccountingBookCode, StringComparison.Ordinal) ||
+                !string.Equals(bound.FunctionalCurrencyCode, cycle.FunctionalCurrencyCode, StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    "The retained year-end source-book authority conflicts with the exact close cycle.");
+            return bound;
         }
 
         #endregion

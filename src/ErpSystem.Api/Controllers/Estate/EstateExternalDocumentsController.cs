@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Interfaces.Ehc;
+using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
@@ -7,9 +8,11 @@ using System.Text.Json;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
+using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Interfaces;
@@ -20,6 +23,8 @@ using ErpSystem.Core.Services.Estate;
 using ErpSystem.Api.Services.DocumentManagement;
 using ErpSystem.Api.Services.Estate;
 using ErpSystem.Api.Services.Notifications;
+using ErpSystem.Api.Services.Otp;
+using ErpSystem.Api.Services.Sms;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -27,6 +32,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using QuestPDF.Fluent;
 using QuestPDF.Infrastructure;
+using System.ComponentModel.DataAnnotations;
+using System.Net.Mail;
+using System.Security.Cryptography;
+using System.Text;
 using QColors = QuestPDF.Helpers.Colors;
 
 namespace ErpSystem.Api.Controllers.Estate;
@@ -37,6 +46,8 @@ namespace ErpSystem.Api.Controllers.Estate;
 public sealed class EstateExternalDocumentsController : ControllerBase
 {
     private const string PortalRecipientFieldKey = "dispatchedto";
+    private static readonly string[] ActiveSalesAllocationStatuses =
+        ["Reserved", "PendingApproval", "Approved", "Allocated", "Sold", "Leased"];
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
     private readonly IProcedureCaseService _procedureCaseService;
@@ -46,6 +57,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     private readonly IOpportunityService _opportunityService;
     private readonly IEhcTicketService _ticketService;
     private readonly ICaptchaVerificationService _captchaService;
+    private readonly IOtpService _otpService;
+    private readonly ITenantSmsSender _tenantSmsSender;
+    private readonly ITenantEmailSender _tenantEmailSender;
     private readonly ILogger<EstateExternalDocumentsController> _logger;
 
     public EstateExternalDocumentsController(
@@ -58,6 +72,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         IOpportunityService opportunityService,
         IEhcTicketService ticketService,
         ICaptchaVerificationService captchaService,
+        IOtpService otpService,
+        ITenantSmsSender tenantSmsSender,
+        ITenantEmailSender tenantEmailSender,
         ILogger<EstateExternalDocumentsController> logger)
     {
         _db = db;
@@ -69,6 +86,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _opportunityService = opportunityService;
         _ticketService = ticketService;
         _captchaService = captchaService;
+        _otpService = otpService;
+        _tenantSmsSender = tenantSmsSender;
+        _tenantEmailSender = tenantEmailSender;
         _logger = logger;
     }
 
@@ -312,11 +332,15 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? []
             : await _db.EstateManagedAssets
                 .AsNoTracking()
+                .Include(asset => asset.Demarcations.Where(parcel => !parcel.IsDeleted))
                 .Where(asset => asset.TenantId == tenantId
                     && !asset.IsDeleted
                     && (propertyReferences.Contains(asset.AssetCode)
                         || (asset.ProjectUnitCode != null
-                            && propertyReferences.Contains(asset.ProjectUnitCode))))
+                            && propertyReferences.Contains(asset.ProjectUnitCode))
+                        || asset.Demarcations.Any(parcel => !parcel.IsDeleted
+                            && parcel.ChildFixedAssetReference != null
+                            && propertyReferences.Contains(parcel.ChildFixedAssetReference))))
                 .ToListAsync(cancellationToken);
 
         var requests = cases
@@ -331,7 +355,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 var asset = managedAssets.FirstOrDefault(candidate =>
                     string.Equals(candidate.AssetCode, listingReference, StringComparison.OrdinalIgnoreCase)
                     || string.Equals(candidate.AssetCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase));
+                    || string.Equals(candidate.ProjectUnitCode, propertyUnit, StringComparison.OrdinalIgnoreCase)
+                    || candidate.Demarcations.Any(parcel => !parcel.IsDeleted
+                        && (string.Equals(parcel.ChildFixedAssetReference, listingReference, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(parcel.ChildFixedAssetReference, propertyUnit, StringComparison.OrdinalIgnoreCase))));
                 if (asset?.RightOfEntryDate is { } actualPossessionDate)
                 {
                     fieldValues["actualPossessionDate"] = actualPossessionDate.ToString("yyyy-MM-dd");
@@ -1344,7 +1371,37 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .FirstOrDefaultAsync(cancellationToken);
         if (signedLegalAgreement is null || string.IsNullOrWhiteSpace(signedLegalAgreement.FileUrl))
         {
-            return Conflict(new { success = false, message = "The Head of Legal signed PDF is not yet available for the customer." });
+            var generatedReference = FieldValue(fields, "generatedAgreementReference");
+            if (string.IsNullOrWhiteSpace(generatedReference))
+            {
+                return Conflict(new { success = false, message = "The generated agreement is not yet available for the customer." });
+            }
+
+            var generatedRecord = await _db.CentralDocumentRecords
+                .AsNoTracking()
+                .Include(item => item.Versions.Where(version => !version.IsDeleted))
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.DocumentReference == generatedReference)
+                .OrderByDescending(item => item.UpdatedAt ?? item.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+            var generatedVersion = generatedRecord is null
+                ? null
+                : ResolveCurrentDocumentVersion(generatedRecord);
+            var generatedPath = generatedVersion is null
+                ? null
+                : FirstNonBlank(generatedVersion.RenditionPath, generatedVersion.RepositoryPath);
+            if (generatedRecord is null || generatedVersion is null || string.IsNullOrWhiteSpace(generatedPath))
+            {
+                return Conflict(new { success = false, message = "The generated agreement file is not yet available for the customer." });
+            }
+
+            var generatedStream = await _fileStorageService.DownloadFileAsync(
+                generatedPath,
+                !string.IsNullOrWhiteSpace(generatedVersion.RenditionPath)
+                    ? generatedRecord.Id
+                    : generatedVersion.FileUploadRecordId ?? generatedRecord.Id);
+            return File(generatedStream, "application/pdf", SafeDownloadFileName(generatedVersion.FileName, "property-agreement.pdf"));
         }
         var signedStream = await _fileStorageService.DownloadFileAsync(
             signedLegalAgreement.FileUrl,
@@ -1450,6 +1507,49 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         procedureCase.LastActionById = userId.Value;
         procedureCase.UpdatedAt = now;
         procedureCase.LastModifiedById = userId.Value;
+
+        var linkedLegalCase = await _db.ProcedureCases
+            .Include(item => item.Documents.Where(document => !document.IsDeleted))
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.EntityType == "LegalPropertyAgreementReview"
+                && item.Fields.Any(field => !field.IsDeleted
+                    && field.Key == "sourceProcedureCaseId"
+                    && field.Value == procedureCase.Id.ToString()),
+                cancellationToken);
+        if (linkedLegalCase is not null)
+        {
+            var legalDocument = linkedLegalCase.Documents.FirstOrDefault(document =>
+                string.Equals(document.Name, "Customer signed agreement", StringComparison.OrdinalIgnoreCase));
+            if (legalDocument is null)
+            {
+                legalDocument = new ProcedureCaseDocument
+                {
+                    TenantId = tenantId,
+                    ProcedureCaseId = linkedLegalCase.Id,
+                    Name = "Customer signed agreement",
+                    RequiredFrom = "Head of Legal Signature",
+                    ProvidedBy = "Customer",
+                    IsMandatory = true,
+                    CreatedAt = now,
+                    CreatedById = userId.Value
+                };
+                linkedLegalCase.Documents.Add(legalDocument);
+            }
+
+            legalDocument.FileName = upload.OriginalFileName;
+            legalDocument.FileUrl = upload.FilePath;
+            legalDocument.Notes = string.IsNullOrWhiteSpace(notes)
+                ? $"Uploaded by customer for {procedureCase.ReferenceNumber ?? procedureCase.Title}."
+                : notes.Trim();
+            legalDocument.UploadedById = userId.Value;
+            legalDocument.UploadedAt = now;
+            legalDocument.UpdatedAt = now;
+            legalDocument.LastModifiedById = userId.Value;
+            linkedLegalCase.LastActionById = userId.Value;
+            linkedLegalCase.UpdatedAt = now;
+            linkedLegalCase.LastModifiedById = userId.Value;
+        }
         try
         {
             await _db.SaveChangesAsync(cancellationToken);
@@ -1490,6 +1590,37 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return BadRequest(new { success = false, message = "Unsupported Estate service request type." });
         }
 
+        EstateManagedAsset? selectedProperty = null;
+        if (!string.IsNullOrWhiteSpace(request.PropertyReference))
+        {
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var userId = GetUserId();
+            if (tenantId == Guid.Empty || userId is null)
+            {
+                return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
+            }
+
+            var customerIds = await PortalCustomers(tenantId, userId.Value)
+                .Select(customer => customer.Id)
+                .ToListAsync(cancellationToken);
+            var propertyReference = request.PropertyReference.Trim();
+            selectedProperty = await _db.EstateManagedAssets.AsNoTracking().FirstOrDefaultAsync(asset =>
+                asset.TenantId == tenantId
+                && !asset.IsDeleted
+                && asset.CustomerBusinessPartnerId.HasValue
+                && customerIds.Contains(asset.CustomerBusinessPartnerId.Value)
+                && (asset.Status == EstateManagedAssetStatus.Reserved
+                    || asset.Status == EstateManagedAssetStatus.Leased
+                    || asset.Status == EstateManagedAssetStatus.Occupied
+                    || asset.Status == EstateManagedAssetStatus.Sold)
+                && (asset.ProjectUnitCode == propertyReference || asset.AssetCode == propertyReference),
+                cancellationToken);
+            if (selectedProperty is null)
+            {
+                return BadRequest(new { success = false, message = "Select a property linked to your account." });
+            }
+        }
+
         var reference = BuildExternalReference("PORTAL");
         var applicantName = string.IsNullOrWhiteSpace(request.ApplicantName)
             ? _currentUserService.UserName
@@ -1498,6 +1629,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ? _currentUserService.Email ?? _currentUserService.UserName
             : request.Contact.Trim();
         var fieldValues = BuildFieldValues(definition, request, reference, contact);
+        if (definition.EntityType == "EstateFacilityMaintenance" && selectedProperty is not null)
+            fieldValues["estateManagedAssetId"] = selectedProperty.Id.ToString();
 
         try
         {
@@ -1567,6 +1700,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
+        var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1574,6 +1708,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
+        if (activeAllocatedListingIds.Length > 0)
+            query = query.Where(asset => !activeAllocatedListingIds.Contains(asset.Id));
 
         var portalUserId = GetUserId();
         if (portalUserId.HasValue && businessPartnerId.HasValue)
@@ -1663,6 +1799,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
                 && !item.EstateManagedAsset.ProjectId.HasValue
                 && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+        if (activeAllocatedListingIds.Length > 0)
+            demarcationQuery = demarcationQuery.Where(item => !activeAllocatedListingIds.Contains(item.Id));
 
         if (normalizedListingType != null)
         {
@@ -1685,6 +1823,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             demarcationQuery = demarcationQuery.Where(item =>
                 item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ChildFixedAssetReference != null && item.ChildFixedAssetReference.ToLower().Contains(normalizedSearch))
                 || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
                 || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
                 || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
@@ -1755,6 +1894,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedListingType = NormalizeListingType(listingType);
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
+        var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1762,6 +1902,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
                     || asset.AssetType == EstateManagedAssetType.Facility));
+        if (activeAllocatedListingIds.Length > 0)
+            query = query.Where(asset => !activeAllocatedListingIds.Contains(asset.Id));
 
         if (normalizedListingType != null)
         {
@@ -1808,6 +1950,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
                 && !item.EstateManagedAsset.ProjectId.HasValue
                 && !item.EstateManagedAsset.IsPublishedToExternalPortal);
+        if (activeAllocatedListingIds.Length > 0)
+            demarcationQuery = demarcationQuery.Where(item => !activeAllocatedListingIds.Contains(item.Id));
 
         if (normalizedListingType != null)
         {
@@ -1830,6 +1974,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         {
             demarcationQuery = demarcationQuery.Where(item =>
                 item.Description.ToLower().Contains(normalizedSearch)
+                || (item.ChildFixedAssetReference != null && item.ChildFixedAssetReference.ToLower().Contains(normalizedSearch))
                 || item.EstateManagedAsset.AssetCode.ToLower().Contains(normalizedSearch)
                 || item.EstateManagedAsset.Name.ToLower().Contains(normalizedSearch)
                 || (item.EstateManagedAsset.Description != null && item.EstateManagedAsset.Description.ToLower().Contains(normalizedSearch))
@@ -2053,10 +2198,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
         var listingReference = demarcationListing is null
             ? asset.AssetCode
-            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
         var listingName = demarcationListing is null
             ? asset.Name
-            : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+            : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
         var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
         var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
         var listingPrice = demarcationListing is null
@@ -2180,6 +2327,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["offerAmount"] = requestType == "Purchase" ? request.OfferAmount?.ToString("0.##") : null,
             ["groundRentRequired"] = (demarcationListing?.ExternalGroundRentRequired ?? asset.ExternalGroundRentRequired) == true ? "Yes" : "No",
             ["premiumChargeRequired"] = (demarcationListing?.ExternalPremiumChargeRequired ?? asset.ExternalPremiumChargeRequired) == true ? "Yes" : "No",
+            ["premiumChargeAmount"] = (demarcationListing?.ExternalPremiumChargeAmount ?? asset.ExternalPremiumChargeAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
             ["salesAmountPaid"] = "0.00",
             ["estateRemainingAmount"] = (requestType == "Purchase" ? request.OfferAmount : publishedAmount)?.ToString("0.00", CultureInfo.InvariantCulture),
             ["salePaymentStatus"] = requestType is "Purchase" or "Lease" ? "Pending Estate payment" : null,
@@ -2282,6 +2430,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         try
         {
             var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            if (await HasActiveSalesAllocationForListingAsync(tenantId, listingId, cancellationToken))
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = "This property has already been reserved and is no longer accepting enquiries."
+                });
+            }
             var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
                 .FirstOrDefaultAsync(item => item.Id == listingId
                     && item.TenantId == tenantId
@@ -2338,8 +2494,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 });
             }
             var reference = demarcationListing is null ? asset.AssetCode
-                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+                : EstateLandDemarcationReference.DisplayReference(
+                    demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
             var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
             var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
             var price = type == "Rent"
@@ -2418,19 +2576,290 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     }
 
     [AllowAnonymous]
+    [HttpPost("/api/estate/public/property-enquiry-contacts/challenges")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> RequestPublicPropertyEnquiryContactChallenge(
+        [FromBody] PublicPropertyEnquiryContactChallengeRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+            return BadRequest(new { success = false, message = "Select Email or Phone and enter a valid contact." });
+        if (request.ListingId == Guid.Empty)
+            return BadRequest(new { success = false, message = "A property listing is required." });
+        if (!TryNormalizePublicContact(request.Channel, request.Contact, out var channel, out var normalizedContact, out var validationMessage))
+        {
+            return BadRequest(new { success = false, message = validationMessage ?? "Select Email or Phone and enter a valid contact." });
+        }
+
+        try
+        {
+            var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+            if (tenantId == Guid.Empty)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "Verification is unavailable right now. Please try again later." });
+
+            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            await _captchaService.EnsureCaptchaValidAsync(
+                tenantId,
+                request.CaptchaToken,
+                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken);
+
+            var (asset, _) = await LoadExternalListingForEnquiryAsync(tenantId, request.ListingId, cancellationToken);
+            if (asset is null)
+                return NotFound(new { success = false, message = "Listing was not found or is not available." });
+
+            var now = DateTime.UtcNow;
+            var verification = new EhcPublicPropertyEnquiryVerification
+            {
+                TenantId = tenantId,
+                ListingId = request.ListingId,
+                Channel = channel,
+                ContactHash = HashPublicContact(normalizedContact),
+                RequestedAtUtc = now,
+                ExpiresAtUtc = now.AddMinutes(10),
+                CreatedAt = now,
+                CreatedBy = "public-property-enquiry"
+            };
+            _db.EhcPublicPropertyEnquiryVerifications.Add(verification);
+            await _db.SaveChangesAsync(cancellationToken);
+
+            var otpChannel = channel == "Email" ? OtpChannel.Email : OtpChannel.Sms;
+            var code = await _otpService.CreateOtpAsync(
+                tenantId,
+                OtpPurpose.PublicPropertyEnquiry,
+                otpChannel,
+                normalizedContact,
+                TimeSpan.FromMinutes(10),
+                maxAttempts: 5,
+                cancellationToken);
+
+            try
+            {
+                if (otpChannel == OtpChannel.Email)
+                {
+                    await _tenantEmailSender.SendAsync(
+                        tenantId,
+                        normalizedContact,
+                        "Property enquiry verification code",
+                        $"<p>Your property enquiry verification code is <strong>{code}</strong>. It expires in 10 minutes.</p>",
+                        isHtml: true,
+                        cancellationToken: cancellationToken);
+                }
+                else
+                {
+                    await _tenantSmsSender.SendOtpAsync(
+                        tenantId,
+                        normalizedContact,
+                        $"Your property enquiry verification code is {code}. It expires in 10 minutes.",
+                        cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                verification.IsDeleted = true;
+                verification.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync(cancellationToken);
+                HttpContext.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = ex;
+                _logger.LogError(ex,
+                    "Public property enquiry {Channel} verification delivery failed for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    channel,
+                    tenantId,
+                    request.ListingId,
+                    HttpContext.TraceIdentifier);
+
+                var deliveryLabel = otpChannel == OtpChannel.Email ? "email" : "SMS";
+                var problem = new ProblemDetails
+                {
+                    Status = StatusCodes.Status503ServiceUnavailable,
+                    Title = "Verification code could not be sent",
+                    Detail = $"The {deliveryLabel} verification code could not be sent. Ask an administrator to check the tenant {deliveryLabel} settings, then try again.",
+                    Instance = Request.Path
+                };
+                problem.Extensions["code"] = otpChannel == OtpChannel.Email
+                    ? "PUBLIC_ENQUIRY_EMAIL_DELIVERY_FAILED"
+                    : "PUBLIC_ENQUIRY_SMS_DELIVERY_FAILED";
+                problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, problem);
+            }
+
+            return Accepted(new
+            {
+                success = true,
+                data = new
+                {
+                    channel,
+                    maskedContact = MaskPublicContact(channel, normalizedContact),
+                    expiresInSeconds = 600
+                },
+                message = "If the contact can receive messages, a verification code has been sent."
+            });
+        }
+        catch (CaptchaVerificationException ex)
+        {
+            return BadRequest(new { success = false, message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            HttpContext.Items[SystemExceptionResultLoggingFilter.HandledExceptionItemKey] = ex;
+            _logger.LogError(ex,
+                "Public property enquiry verification challenge failed for listing {ListingId}; trace {TraceId}",
+                request.ListingId,
+                HttpContext.TraceIdentifier);
+            var problem = new ProblemDetails
+            {
+                Status = StatusCodes.Status503ServiceUnavailable,
+                Title = "Verification is temporarily unavailable",
+                Detail = "Verification is unavailable right now. Please try again later. If the problem continues, contact your administrator.",
+                Instance = Request.Path
+            };
+            problem.Extensions["code"] = "PUBLIC_ENQUIRY_VERIFICATION_UNAVAILABLE";
+            problem.Extensions["correlationId"] = HttpContext.TraceIdentifier;
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, problem);
+        }
+    }
+
+    [AllowAnonymous]
+    [HttpPost("/api/estate/public/property-enquiry-contacts/verifications")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> VerifyPublicPropertyEnquiryContact(
+        [FromBody] PublicPropertyEnquiryContactVerificationRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        if (request is null)
+            return BadRequest(new { success = false, message = "The verification request is invalid." });
+        if (request.ListingId == Guid.Empty)
+            return BadRequest(new { success = false, message = "A property listing is required." });
+        if (!TryNormalizePublicContact(request.Channel, request.Contact, out var channel, out var normalizedContact, out var validationMessage))
+        {
+            return BadRequest(new { success = false, message = validationMessage ?? "The verification request is invalid." });
+        }
+
+        try
+        {
+            var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+            if (tenantId == Guid.Empty)
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "Verification is unavailable right now. Please try again later." });
+
+            var now = DateTime.UtcNow;
+            var contactHash = HashPublicContact(normalizedContact);
+            var challenge = await _db.EhcPublicPropertyEnquiryVerifications
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId &&
+                               !item.IsDeleted &&
+                               item.ListingId == request.ListingId &&
+                               item.Channel == channel &&
+                               item.ContactHash == contactHash &&
+                               item.VerifiedAtUtc == null &&
+                               item.ExpiresAtUtc > now)
+                .OrderByDescending(item => item.RequestedAtUtc)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (challenge is null)
+                return BadRequest(new { success = false, message = "The verification code is invalid or has expired." });
+
+            var otpResult = await _otpService.VerifyOtpAsync(
+                tenantId,
+                OtpPurpose.PublicPropertyEnquiry,
+                channel == "Email" ? OtpChannel.Email : OtpChannel.Sms,
+                normalizedContact,
+                request.OtpCode,
+                consumeOnSuccess: true,
+                cancellationToken);
+            await _db.EhcPublicPropertyEnquiryVerifications
+                .Where(item => item.Id == challenge.Id && item.VerifiedAtUtc == null && !item.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.VerificationAttemptCount, item => item.VerificationAttemptCount + 1)
+                    .SetProperty(item => item.LastAttemptAtUtc, now)
+                    .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+            if (!otpResult.Success)
+                return BadRequest(new { success = false, message = "The verification code is invalid or has expired." });
+
+            var token = CreatePublicContactVerificationToken();
+            var tokenHash = HashPublicContact(token);
+            var expiresAt = now.AddMinutes(10);
+
+            var claimed = await _db.EhcPublicPropertyEnquiryVerifications
+                .Where(item => item.Id == challenge.Id && item.VerifiedAtUtc == null && !item.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.VerifiedAtUtc, now)
+                    .SetProperty(item => item.VerificationTokenHash, tokenHash)
+                    .SetProperty(item => item.ExpiresAtUtc, expiresAt)
+                    .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+            if (claimed != 1)
+                return BadRequest(new { success = false, message = "The verification code is invalid or has expired." });
+
+            var contact = await _db.EhcPublicPropertyEnquiryContacts.FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId && !item.IsDeleted && item.Channel == channel &&
+                item.NormalizedContact == normalizedContact, cancellationToken);
+            var linkedCustomer = await FindApprovedCustomerBusinessPartnerIdAsync(tenantId, channel, normalizedContact, cancellationToken);
+            if (contact is not null)
+            {
+                contact.LastVerifiedAtUtc = now;
+                contact.BusinessPartnerId = linkedCustomer;
+                contact.UpdatedAt = now;
+                await _db.SaveChangesAsync(cancellationToken);
+                await _db.EhcPublicPropertyEnquiryVerifications
+                    .Where(item => item.Id == challenge.Id && item.ContactId == null)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ContactId, contact.Id), cancellationToken);
+                await LinkHistoricalPublicEnquiriesAsync(contact, cancellationToken);
+            }
+
+            return Ok(new
+            {
+                success = true,
+                data = new
+                {
+                    verificationToken = token,
+                    expiresAtUtc = expiresAt,
+                    profile = new
+                    {
+                        contactName = string.IsNullOrWhiteSpace(contact?.ContactName) ? null : contact.ContactName,
+                        contactEmail = channel == "Email" ? normalizedContact : null,
+                        contactPhone = channel == "Phone" ? normalizedContact : null,
+                        linkedCustomer = linkedCustomer.HasValue,
+                        requiresPortalLogin = linkedCustomer.HasValue,
+                        externalPortalPath = linkedCustomer.HasValue
+                            ? "/login?redirect=%2Fexternal-portal%2Fproperty-listings"
+                            : null
+                    }
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Public property enquiry contact verification failed for listing {ListingId}; trace {TraceId}",
+                request.ListingId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                new { success = false, message = "Verification is unavailable right now. Please try again later." });
+        }
+    }
+
+    [AllowAnonymous]
     [HttpPost("/api/estate/public/listings/{listingId:guid}/enquiries")]
     [EnableRateLimiting("SensitivePolicy")]
     public async Task<IActionResult> CreatePublicListingEnquiry(Guid listingId,
-        [FromBody] CreatePropertyListingEnquiryRequest request, CancellationToken cancellationToken)
+        [FromBody] PublicPropertyListingEnquiryRequestDto request, CancellationToken cancellationToken)
     {
-        if (request is null || request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
-            return BadRequest(new { success = false, message = "Enter an enquiry message of up to 4,000 characters and a submission identifier." });
-        if (string.IsNullOrWhiteSpace(request.ContactName))
-            return BadRequest(new { success = false, message = "Enter your name before sending the enquiry." });
-        if (string.IsNullOrWhiteSpace(request.ContactPhone))
-            return BadRequest(new { success = false, message = "Enter your phone number before sending the enquiry." });
-        if (!string.IsNullOrWhiteSpace(request.ContactEmail) && !request.ContactEmail.Contains('@', StringComparison.Ordinal))
-            return BadRequest(new { success = false, message = "Enter a valid email address or leave the email field empty." });
+        if (request is null)
+        {
+            return BadRequest(new { success = false, message = "Enter the contact details and enquiry message." });
+        }
+
+        var validationResults = new List<ValidationResult>();
+        if (!Validator.TryValidateObject(request, new ValidationContext(request), validationResults, validateAllProperties: true))
+        {
+            return BadRequest(new
+            {
+                success = false,
+                message = validationResults.FirstOrDefault()?.ErrorMessage ?? "The enquiry details are invalid."
+            });
+        }
 
         try
         {
@@ -2446,20 +2875,72 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 return NotFound(new { success = false, message = "Listing was not found or is not available." });
             }
 
+            var selectedContact = string.Equals(request.PreferredContactMethod, "Email", StringComparison.OrdinalIgnoreCase)
+                ? request.ContactEmail
+                : request.ContactPhone;
+            if (!TryNormalizePublicContact(request.PreferredContactMethod, selectedContact, out var channel,
+                    out var normalizedContact, out var contactValidationMessage))
+            {
+                return BadRequest(new { success = false, message = contactValidationMessage ?? "The selected contact is invalid." });
+            }
+
+            var now = DateTime.UtcNow;
+            var tokenHash = HashPublicContact(request.ContactVerificationToken);
+            var contactHash = HashPublicContact(normalizedContact);
+            var grant = await _db.EhcPublicPropertyEnquiryVerifications.AsNoTracking().FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId &&
+                !item.IsDeleted &&
+                item.ListingId == listingId &&
+                item.Channel == channel &&
+                item.ContactHash == contactHash &&
+                item.VerificationTokenHash == tokenHash &&
+                item.VerifiedAtUtc != null &&
+                item.ExpiresAtUtc > now,
+                cancellationToken);
+            if (grant is null)
+                return BadRequest(new { success = false, message = "Verify your selected contact method before sending the enquiry." });
+
+            if (grant.ConsumedAtUtc.HasValue && grant.ConsumedSubmissionId != request.SubmissionId)
+                return BadRequest(new { success = false, message = "This contact verification has already been used. Request a new code." });
+
+            var publicContact = grant.ContactId.HasValue
+                ? await _db.EhcPublicPropertyEnquiryContacts.FirstOrDefaultAsync(item =>
+                    item.Id == grant.ContactId.Value && item.TenantId == tenantId && !item.IsDeleted &&
+                    item.Channel == channel && item.NormalizedContact == normalizedContact,
+                    cancellationToken)
+                : await _db.EhcPublicPropertyEnquiryContacts.FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId && !item.IsDeleted && item.Channel == channel &&
+                    item.NormalizedContact == normalizedContact,
+                    cancellationToken);
+            if (grant.ContactId.HasValue && publicContact is null)
+                return BadRequest(new { success = false, message = "Verify your selected contact method before sending the enquiry." });
+
+            var linkedCustomer = await FindApprovedCustomerBusinessPartnerIdAsync(tenantId, channel, normalizedContact, cancellationToken);
+            if (linkedCustomer.HasValue)
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    code = "CUSTOMER_PORTAL_REQUIRED",
+                    message = "This verified contact belongs to an existing customer. Sign in to the external portal to continue.",
+                    externalPortalPath = "/login?redirect=%2Fexternal-portal%2Fproperty-listings"
+                });
+            }
+
             var duplicate = await FindDuplicatePropertyEnquiryAsync(
                 tenantId,
                 listingId,
                 request.SubmissionId,
                 businessPartnerId: null,
-                contactEmail: request.ContactEmail,
-                contactPhone: request.ContactPhone,
+                contactEmail: channel == "Email" ? normalizedContact : null,
+                contactPhone: channel == "Phone" ? normalizedContact : null,
                 cancellationToken);
             if (duplicate is not null)
             {
                 return Conflict(new
                 {
                     success = false,
-                    message = $"You already have an active enquiry for this property ({duplicate.TicketNumber}). Sales will continue from that request."
+                    message = "You already have an active enquiry for this property. Sales will continue from that request."
                 });
             }
 
@@ -2475,25 +2956,81 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
             }
 
-            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
-            await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
-                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
-                HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
-
-            var requester = await ResolvePublicPropertyEnquiryRequesterAsync(tenantId, cancellationToken);
-            if (requester is null)
+            var workflowActor = await ResolvePublicPropertyEnquiryWorkflowActorAsync(tenantId, cancellationToken);
+            if (workflowActor is null)
             {
                 _logger.LogError(
-                    "No active public property enquiry requester account exists for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    "No active public property enquiry workflow actor exists for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
                     tenantId,
                     listingId,
                     HttpContext.TraceIdentifier);
                 return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
             }
 
+            if (!grant.ConsumedAtUtc.HasValue)
+            {
+                var consumed = await _db.EhcPublicPropertyEnquiryVerifications
+                    .Where(item => item.Id == grant.Id && item.ConsumedAtUtc == null && !item.IsDeleted)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(item => item.ConsumedAtUtc, now)
+                        .SetProperty(item => item.ConsumedSubmissionId, request.SubmissionId)
+                        .SetProperty(item => item.UpdatedAt, now), cancellationToken);
+                if (consumed != 1)
+                {
+                    var concurrentlyConsumed = await _db.EhcPublicPropertyEnquiryVerifications.AsNoTracking()
+                        .FirstOrDefaultAsync(item => item.Id == grant.Id, cancellationToken);
+                    if (concurrentlyConsumed?.ConsumedSubmissionId != request.SubmissionId)
+                        return BadRequest(new { success = false, message = "This contact verification has already been used. Request a new code." });
+                }
+            }
+
+            if (publicContact is null)
+            {
+                publicContact = new EhcPublicPropertyEnquiryContact
+                {
+                    TenantId = tenantId,
+                    Channel = channel,
+                    NormalizedContact = normalizedContact,
+                    ContactName = request.ContactName.Trim(),
+                    LastVerifiedAtUtc = grant.VerifiedAtUtc ?? now,
+                    CreatedAt = now,
+                    CreatedBy = "public-property-enquiry"
+                };
+                _db.EhcPublicPropertyEnquiryContacts.Add(publicContact);
+                try
+                {
+                    await _db.SaveChangesAsync(cancellationToken);
+                }
+                catch (DbUpdateException) when (_db.Entry(publicContact).State == EntityState.Added)
+                {
+                    // A different verified grant for this same tenant/contact may submit at the
+                    // same time. The filtered unique index owns identity: reuse its winning row.
+                    _db.Entry(publicContact).State = EntityState.Detached;
+                    publicContact = await _db.EhcPublicPropertyEnquiryContacts.FirstAsync(item =>
+                        item.TenantId == tenantId && !item.IsDeleted && item.Channel == channel &&
+                        item.NormalizedContact == normalizedContact, cancellationToken);
+                }
+            }
+            else if (string.IsNullOrWhiteSpace(publicContact.ContactName))
+            {
+                publicContact.ContactName = request.ContactName.Trim();
+                publicContact.UpdatedAt = now;
+                await _db.SaveChangesAsync(cancellationToken);
+            }
+
+            if (!grant.ContactId.HasValue)
+            {
+                await _db.EhcPublicPropertyEnquiryVerifications
+                    .Where(item => item.Id == grant.Id && item.ContactId == null)
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(item => item.ContactId, publicContact.Id), cancellationToken);
+            }
+            await LinkHistoricalPublicEnquiriesAsync(publicContact, cancellationToken);
+
             var reference = demarcationListing is null ? asset.AssetCode
-                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+                : EstateLandDemarcationReference.DisplayReference(
+                    demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : EstateLandDemarcationReference.DisplayReference(
+                demarcationListing.ChildFixedAssetReference, asset.AssetCode, demarcationListing.DemarcationNumber);
             var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
             var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
             var price = type == "Rent"
@@ -2501,13 +3038,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 : type == "Lease"
                     ? (demarcationListing is null ? asset.ExternalListingPrice : ResolveDemarcationLeaseAmount(demarcationListing))
                     : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
-            var contactName = request.ContactName.Trim();
-            var contactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim();
-            var contactPhone = request.ContactPhone.Trim();
+            var contactName = publicContact.ContactName;
+            var contactEmail = channel == "Email" ? normalizedContact : null;
+            var contactPhone = channel == "Phone" ? normalizedContact : null;
             var contactReference = string.IsNullOrWhiteSpace(request.ContactReference) ? null : request.ContactReference.Trim();
+            var alternativePhoneNumber = string.IsNullOrWhiteSpace(request.AlternativePhoneNumber)
+                ? null
+                : request.AlternativePhoneNumber.Trim();
+            var preferredContactMethod = request.PreferredContactMethod.Trim();
             var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
                 string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
-                null, contactName, contactName, contactEmail, contactPhone, contactReference);
+                null, contactName, contactName, contactEmail, contactPhone, contactReference,
+                alternativePhoneNumber, preferredContactMethod, publicContact.Id);
             var ticket = await _ticketService.CreatePublicPropertyEnquiryAsync(new CreateEhcTicketRequestDto
             {
                 TicketType = EhcTicketType.Enquiry,
@@ -2517,10 +3059,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 Description = request.Message.Trim(),
                 RelatedEntityType = "EstateListing",
                 RelatedEntityReference = reference
-            }, property, request.SubmissionId, tenantId, requester.Id, requester.UserName, cancellationToken);
+            }, property, request.SubmissionId, tenantId, workflowActor.Id, workflowActor.UserName, cancellationToken);
+            publicContact.LastEnquiryAtUtc = now;
+            publicContact.UpdatedAt = now;
+            await _db.SaveChangesAsync(cancellationToken);
             return Ok(new { success = true, data = ticket });
         }
-        catch (CaptchaVerificationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
         catch (ArgumentException ex)
         {
             _logger.LogError(ex,
@@ -2562,6 +3106,203 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
+    private static bool TryNormalizePublicContact(
+        string? requestedChannel,
+        string? value,
+        out string channel,
+        out string normalizedContact,
+        out string? validationMessage)
+    {
+        channel = string.Equals(requestedChannel?.Trim(), "Email", StringComparison.OrdinalIgnoreCase)
+            ? "Email"
+            : string.Equals(requestedChannel?.Trim(), "Phone", StringComparison.OrdinalIgnoreCase)
+                ? "Phone"
+                : string.Empty;
+        normalizedContact = string.Empty;
+        validationMessage = null;
+        if (channel.Length == 0)
+        {
+            validationMessage = "Select Email or Phone as the preferred contact method.";
+            return false;
+        }
+
+        if (channel == "Email")
+        {
+            var candidate = value?.Trim().ToLowerInvariant() ?? string.Empty;
+            try
+            {
+                var parsed = new MailAddress(candidate);
+                if (!string.Equals(parsed.Address, candidate, StringComparison.OrdinalIgnoreCase) || candidate.Length > 320)
+                    throw new FormatException();
+                normalizedContact = candidate;
+                return true;
+            }
+            catch (FormatException)
+            {
+                validationMessage = "Enter a valid email address.";
+                return false;
+            }
+        }
+
+        var trimmed = value?.Trim() ?? string.Empty;
+        if (trimmed.StartsWith("00", StringComparison.Ordinal))
+            trimmed = $"+{trimmed[2..]}";
+        if (!trimmed.StartsWith('+') || trimmed.Length is < 9 or > 16 ||
+            trimmed[1] == '0' || trimmed.Skip(1).Any(character => !char.IsDigit(character)))
+        {
+            validationMessage = "Enter a valid international phone number including its country code.";
+            return false;
+        }
+
+        normalizedContact = trimmed;
+        return true;
+    }
+
+    private static string HashPublicContact(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+
+    private static string CreatePublicContactVerificationToken()
+        => Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+
+    private static string MaskPublicContact(string channel, string normalizedContact)
+    {
+        if (channel == "Email")
+        {
+            var separator = normalizedContact.IndexOf('@');
+            if (separator <= 0) return "***";
+            var local = normalizedContact[..separator];
+            var visible = local[..Math.Min(2, local.Length)];
+            return $"{visible}***{normalizedContact[separator..]}";
+        }
+
+        return normalizedContact.Length <= 4
+            ? "****"
+            : $"***{normalizedContact[^4..]}";
+    }
+
+    private async Task<Guid?> FindApprovedCustomerBusinessPartnerIdAsync(
+        Guid tenantId,
+        string channel,
+        string normalizedContact,
+        CancellationToken cancellationToken)
+    {
+        var query = _db.BusinessPartners.AsNoTracking().Where(partner =>
+            partner.TenantId == tenantId && !partner.IsDeleted && partner.IsActive &&
+            partner.ApprovalStatus == "Approved" &&
+            _db.BusinessPartnerRoles.Any(role => role.TenantId == tenantId && !role.IsDeleted &&
+                role.BusinessPartnerId == partner.Id && role.RoleType == BusinessPartnerRoleType.Customer &&
+                role.Status == BusinessPartnerRoleStatus.Active));
+
+        if (channel == "Email")
+        {
+            return await query
+                .Where(partner =>
+                    (partner.PrimaryEmail != null && partner.PrimaryEmail.Trim().ToLower() == normalizedContact) ||
+                    (partner.UserId != null && _db.Users.Any(user => user.Id == partner.UserId &&
+                        user.TenantId == tenantId && user.IsActive && user.Email != null &&
+                        user.Email.Trim().ToLower() == normalizedContact)) ||
+                    _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId && !link.IsDeleted &&
+                        link.IsActive && link.BusinessPartnerId == partner.Id &&
+                        link.User.IsActive && link.User.Email != null && link.User.Email.Trim().ToLower() == normalizedContact))
+                .Select(partner => (Guid?)partner.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        var candidates = await query
+            .Select(partner => new { partner.Id, partner.PrimaryPhone, partner.UserId })
+            .ToListAsync(cancellationToken);
+        foreach (var candidate in candidates)
+        {
+            if (NormalizeStoredPhone(candidate.PrimaryPhone) == normalizedContact)
+                return candidate.Id;
+        }
+
+        var candidateIds = candidates.Select(item => item.Id).ToList();
+        var directUserIds = candidates.Where(item => item.UserId.HasValue)
+            .Select(item => item.UserId!.Value)
+            .ToList();
+        var directUserPhones = await _db.Users.AsNoTracking()
+            .Where(user => user.TenantId == tenantId && user.IsActive && directUserIds.Contains(user.Id) &&
+                           user.PhoneNumber != null)
+            .Select(user => new { user.Id, user.PhoneNumber })
+            .ToListAsync(cancellationToken);
+        foreach (var directUser in directUserPhones)
+        {
+            if (NormalizeStoredPhone(directUser.PhoneNumber) != normalizedContact) continue;
+            var partner = candidates.First(item => item.UserId == directUser.Id);
+            return partner.Id;
+        }
+
+        var linkedUserPhones = await _db.BusinessPartnerUsers.AsNoTracking()
+            .Where(link => link.TenantId == tenantId && !link.IsDeleted && link.IsActive &&
+                           candidateIds.Contains(link.BusinessPartnerId) &&
+                           link.User.IsActive && link.User.PhoneNumber != null)
+            .Select(link => new { link.BusinessPartnerId, link.User.PhoneNumber })
+            .ToListAsync(cancellationToken);
+        foreach (var linkedUser in linkedUserPhones)
+        {
+            if (NormalizeStoredPhone(linkedUser.PhoneNumber) == normalizedContact)
+                return linkedUser.BusinessPartnerId;
+        }
+        return null;
+    }
+
+    private static string? NormalizeStoredPhone(string? phone)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return null;
+        var trimmed = phone.Trim();
+        var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+        if (digits.StartsWith("00", StringComparison.Ordinal))
+            return $"+{digits[2..]}";
+        if (trimmed.StartsWith('+'))
+            return $"+{digits}";
+        // The ERP's local operating country is Ghana. Only the unambiguous Ghana local form is
+        // expanded; other international contacts must already include their country code.
+        if (digits.Length == 10 && digits[0] == '0')
+            return $"+233{digits[1..]}";
+        return null;
+    }
+
+    private async Task LinkHistoricalPublicEnquiriesAsync(
+        EhcPublicPropertyEnquiryContact contact,
+        CancellationToken cancellationToken)
+    {
+        var candidates = await _db.EhcTickets
+            .Where(ticket => ticket.TenantId == contact.TenantId && !ticket.IsDeleted &&
+                             ticket.RequesterUserId == null &&
+                             ticket.PublicPropertyEnquiryContactId == null &&
+                             ticket.PropertyListingContextJson != null)
+            .ToListAsync(cancellationToken);
+        var changed = false;
+        foreach (var ticket in candidates)
+        {
+            EhcPropertyListingContextDto? context;
+            try
+            {
+                context = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson!);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            var rawContact = contact.Channel == "Email" ? context?.ContactEmail : context?.ContactPhone;
+            var normalized = contact.Channel == "Email"
+                ? rawContact?.Trim().ToLowerInvariant()
+                : NormalizeStoredPhone(rawContact);
+            if (!string.Equals(normalized, contact.NormalizedContact, StringComparison.Ordinal)) continue;
+            ticket.PublicPropertyEnquiryContactId = contact.Id;
+            ticket.UpdatedAt = DateTime.UtcNow;
+            changed = true;
+        }
+
+        if (changed)
+            await _db.SaveChangesAsync(cancellationToken);
+    }
+
     private IQueryable<BusinessPartner> PortalEnquiryPartners(Guid tenantId, Guid userId)
         => _db.BusinessPartners.AsNoTracking().Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
             && p.ApprovalStatus == "Approved" && (BusinessPartnerRoles.SupplierTypes.Contains(p.PartnerType) || BusinessPartnerRoles.CustomerTypes.Contains(p.PartnerType))
@@ -2573,6 +3314,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         Guid listingId,
         CancellationToken cancellationToken)
     {
+        if (await HasActiveSalesAllocationForListingAsync(tenantId, listingId, cancellationToken))
+            return (null, null);
+
         var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
             .FirstOrDefaultAsync(item => item.Id == listingId
                 && item.TenantId == tenantId
@@ -2599,6 +3343,46 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : null;
 
         return (asset ?? demarcationListing?.EstateManagedAsset, demarcationListing);
+    }
+
+    private async Task<Guid[]> GetActiveSalesAllocationListingIdsAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty)
+            return [];
+
+        var sourceItemIds = await _db.SalesAllocations.AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && !item.IsDeleted
+                && (item.AdapterKey == "land-management" || item.AdapterKey == "property-register")
+                && ActiveSalesAllocationStatuses.Contains(item.Status))
+            .Select(item => item.SourceItemId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        return sourceItemIds
+            .Select(value => Guid.TryParse(value, out var id) ? id : Guid.Empty)
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToArray();
+    }
+
+    private Task<bool> HasActiveSalesAllocationForListingAsync(
+        Guid tenantId,
+        Guid listingId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || listingId == Guid.Empty)
+            return Task.FromResult(false);
+
+        var sourceItemId = listingId.ToString("D");
+        return _db.SalesAllocations.AsNoTracking().AnyAsync(item =>
+            item.TenantId == tenantId
+            && !item.IsDeleted
+            && (item.AdapterKey == "land-management" || item.AdapterKey == "property-register")
+            && item.SourceItemId == sourceItemId
+            && ActiveSalesAllocationStatuses.Contains(item.Status), cancellationToken);
     }
 
     private async Task<DuplicatePropertyEnquiry?> FindDuplicatePropertyEnquiryAsync(
@@ -2677,7 +3461,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return null;
     }
 
-    private async Task<PublicPropertyEnquiryRequester?> ResolvePublicPropertyEnquiryRequesterAsync(
+    private async Task<PublicPropertyEnquiryWorkflowActor?> ResolvePublicPropertyEnquiryWorkflowActorAsync(
         Guid tenantId,
         CancellationToken cancellationToken)
     {
@@ -2686,14 +3470,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .Where(user => user.TenantId == tenantId && user.IsActive
                 && (user.UserName == "external" || user.Email == "external@default.com"))
             .OrderBy(user => user.UserName)
-            .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "external"))
-            .FirstOrDefaultAsync(cancellationToken)
-            ?? await _db.Users
-                .AsNoTracking()
-                .Where(user => user.TenantId == tenantId && user.IsActive)
-                .OrderBy(user => user.UserName)
-                .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "public-enquiry"))
-                .FirstOrDefaultAsync(cancellationToken);
+            .Select(user => new PublicPropertyEnquiryWorkflowActor(user.Id, user.UserName ?? "external"))
+            .FirstOrDefaultAsync(cancellationToken);
     }
 
     private static string? NormalizeContactPhone(string? value)
@@ -2704,7 +3482,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     }
 
     private sealed record DuplicatePropertyEnquiry(Guid Id, string TicketNumber, EhcTicketStatus Status);
-    private sealed record PublicPropertyEnquiryRequester(Guid Id, string UserName);
+    private sealed record PublicPropertyEnquiryWorkflowActor(Guid Id, string UserName);
 
     private HashSet<string> BuildIdentityTerms()
     {
@@ -2962,6 +3740,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.ExternalMonthlyRent,
             asset.ExternalGroundRentRequired,
             asset.ExternalPremiumChargeRequired,
+            asset.ExternalPremiumChargeAmount,
             asset.ExternalLeaseTermMonths,
             asset.GroundRentPayable,
             asset.GroundRentRatePerAcre,
@@ -2997,15 +3776,13 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             .OrderByDescending(document => document.IsPrimaryListingImage)
             .ThenByDescending(document => document.CreatedAt)
             .FirstOrDefault();
-        var landReference = EstateLandDemarcationReference.Build(
-            asset.AssetCode,
-            demarcation.DemarcationNumber);
-
         return new
         {
             Id = demarcation.Id,
-            AssetCode = landReference,
-            Name = $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}",
+            AssetCode = EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber),
+            Name = EstateLandDemarcationReference.DisplayReference(
+                demarcation.ChildFixedAssetReference, asset.AssetCode, demarcation.DemarcationNumber),
             asset.AssetType,
             asset.Status,
             Description = FirstNonBlank(demarcation.ExternalListingNotes, demarcation.Description, asset.Description),
@@ -3025,6 +3802,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcation.ExternalMonthlyRent,
             demarcation.ExternalGroundRentRequired,
             demarcation.ExternalPremiumChargeRequired,
+            demarcation.ExternalPremiumChargeAmount,
             demarcation.ExternalLeaseTermMonths,
             demarcation.GroundRentPayable,
             demarcation.GroundRentRatePerAcre,
@@ -3400,8 +4178,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     {
         var reviewStatus = FieldValue(fields, "legalAgreementReviewStatus");
         if (!string.IsNullOrWhiteSpace(reviewStatus)
-            && reviewStatus.Contains("head of legal", StringComparison.OrdinalIgnoreCase)
-            && reviewStatus.Contains("signed", StringComparison.OrdinalIgnoreCase))
+            && ((reviewStatus.Contains("head of legal", StringComparison.OrdinalIgnoreCase)
+                    && reviewStatus.Contains("signed", StringComparison.OrdinalIgnoreCase))
+                || (reviewStatus.Contains("approved by legal", StringComparison.OrdinalIgnoreCase)
+                    && reviewStatus.Contains("customer signature", StringComparison.OrdinalIgnoreCase))))
         {
             return true;
         }
@@ -3880,16 +4660,21 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return defaultPublicTenantId;
         }
 
-        return await _db.Tenants
-            .AsNoTracking()
-            .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
-            .OrderBy(tenant => tenant.DefaultPriority)
-            .Select(tenant => tenant.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+        return Guid.Empty;
     }
 
     private static string? FirstNonBlank(params string?[] values)
         => values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private static CentralDocumentVersion? ResolveCurrentDocumentVersion(CentralDocumentRecord record)
+        => record.Versions
+            .Where(version => !version.IsDeleted)
+            .OrderByDescending(version =>
+                string.Equals(version.VersionNumber, record.CurrentVersion, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version =>
+                string.Equals(version.Status, "Current", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version => version.PublishedAt ?? version.CreatedAt)
+            .FirstOrDefault();
 
     private static string BuildExternalReference(string prefix)
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
@@ -3920,8 +4705,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["issueDescription"] = request.Description,
             ["complaintDescription"] = request.Description,
             ["serviceImpact"] = request.ServiceImpact,
-            ["reportedPriority"] = request.Priority,
-            ["customerReportedUrgency"] = request.Priority,
+            ["reportedPriority"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
+            ["customerReportedUrgency"] = definition.EntityType == "EstateFacilityMaintenance" ? null : request.Priority,
             ["requester"] = request.ApplicantName,
             ["requesterType"] = "Tenant / occupant",
             ["complainantName"] = request.ApplicantName,
@@ -3944,7 +4729,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         foreach (var item in request.AdditionalValues ?? new Dictionary<string, string?>())
         {
-            if (!string.IsNullOrWhiteSpace(item.Key))
+            if (!string.IsNullOrWhiteSpace(item.Key)
+                && !(definition.EntityType == "EstateFacilityMaintenance"
+                    && new[] {
+                        "priority", "reportedPriority", "customerReportedUrgency", "maintenanceTypeId", "handoffDescription",
+                        "estimatedHours", "estimatedCost", "serviceProviderBusinessPartnerId", "serviceProviderContractId",
+                        "propertyUnit", "propertyNumber", "estateManagedAssetId", "issueDescription"
+                    }
+                        .Contains(item.Key.Trim(), StringComparer.OrdinalIgnoreCase)))
             {
                 values[item.Key.Trim()] = item.Value;
             }

@@ -42,6 +42,10 @@ public class CashTransaction : BaseEntity
 
     public decimal Amount { get; set; }
 
+    [System.ComponentModel.DataAnnotations.Schema.Column(TypeName = "decimal(20,6)")]
+    public decimal RoundingAdjustmentAmount { get; set; }
+    public Guid? FinanceRoundingEvidenceId { get; set; }
+
     [Required]
     [MaxLength(3)]
     public string Currency { get; set; } = "GHS";
@@ -146,6 +150,8 @@ public class CashTransaction : BaseEntity
     public string? CancellationReason { get; set; }
 
     public Guid? JournalEntryId { get; set; }
+    public Guid? SourceBookAuthorityId { get; set; }
+    public virtual FinanceSourceBookAuthority? SourceBookAuthority { get; set; }
 
     public DateTime? PostedDate { get; set; }
 

@@ -157,12 +157,14 @@ public sealed class EhcTicketService : IEhcTicketService
                 Email = Clip(property.ContactEmail, 100),
                 Phone = Clip(property.ContactPhone, 20),
                 LeadSource = PropertyListingLeadSource,
-                LeadStatus = "Qualified",
-                QualificationScore = 40,
+                LeadStatus = "New",
+                QualificationScore = 0,
                 EstimatedValue = property.Price ?? 0m,
                 AssignedToId = ticket.AssignedToUserId,
-                ConvertedCustomerId = property.BusinessPartnerId,
-                ConvertedDate = now,
+                // BusinessPartnerId belongs to the canonical Procurement partner model; it is not
+                // the legacy Sales Customer foreign key used by Lead.ConvertedCustomerId.
+                ConvertedCustomerId = null,
+                ConvertedDate = null,
                 Notes = Clip(BuildPropertySnapshotSummary(property, ticket), 2000),
                 CreatedAt = now,
                 CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
@@ -170,36 +172,6 @@ public sealed class EhcTicketService : IEhcTicketService
             };
             await _unitOfWork.Repository<Lead>().AddAsync(lead);
             ticket.CrmLeadId = lead.Id;
-            changed = true;
-        }
-
-        if (!ticket.CrmOpportunityId.HasValue)
-        {
-            var opportunity = new Opportunity
-            {
-                TenantId = ticket.TenantId,
-                ReferenceNumber = ticket.TicketNumber,
-                Status = "Active",
-                EffectiveDate = now,
-                Name = Clip($"Property enquiry: {property.ListingName}", 200)!,
-                Description = Clip($"{BuildPropertySnapshotSummary(property, ticket)}\n\n{ticket.Description}", 2000),
-                CustomerId = property.BusinessPartnerId,
-                LeadId = ticket.CrmLeadId,
-                Stage = "Qualification",
-                Probability = 10,
-                Amount = property.Price ?? 0m,
-                Currency = NormalizeCurrency(property.Currency),
-                ExpectedCloseDate = now.AddDays(90),
-                LeadSource = PropertyListingLeadSource,
-                OpportunityType = "New Business",
-                AssignedToId = ticket.AssignedToUserId,
-                Notes = $"Source ticket: {ticket.TicketNumber}",
-                CreatedAt = now,
-                CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
-                CreatedById = ticket.CreatedById
-            };
-            await _unitOfWork.Repository<Opportunity>().AddAsync(opportunity);
-            ticket.CrmOpportunityId = opportunity.Id;
             changed = true;
         }
 
@@ -368,6 +340,21 @@ public sealed class EhcTicketService : IEhcTicketService
         $"Source: {property.Source}; Listing: {property.ListingReference} — {property.ListingName}; " +
         $"Type: {property.ListingType}; Currency: {property.Currency}; Listing ID: {property.ListingId}; EHC ticket: {ticket.TicketNumber}.";
 
+    private static EhcPropertyListingContextDto? TryParsePropertyListingContext(EhcTicket ticket)
+    {
+        if (string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson)) return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson);
+        }
+        catch (JsonException)
+        {
+            // A malformed historical snapshot must not make the enquiry register unreadable.
+            return null;
+        }
+    }
+
     private static string NormalizeCurrency(string? currency) => string.IsNullOrWhiteSpace(currency)
         ? "USD"
         : Clip(currency.Trim().ToUpperInvariant(), 3)!;
@@ -386,6 +373,13 @@ public sealed class EhcTicketService : IEhcTicketService
         CancellationToken cancellationToken)
     {
         if (tenantId == Guid.Empty) return;
+        if (string.Equals(audience, "Requester", StringComparison.OrdinalIgnoreCase) &&
+            (!data.TryGetValue("requesterUserId", out var requesterValue) || requesterValue is null ||
+             requesterValue is Guid requesterId && requesterId == Guid.Empty))
+        {
+            // Anonymous property enquirers are contacted by email; they have no ERP notification audience.
+            return;
+        }
 
         try
         {
@@ -579,7 +573,12 @@ public sealed class EhcTicketService : IEhcTicketService
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.ToString());
+        if (!ticket.RequesterUserId.HasValue)
+        {
+            return "/property-listings";
+        }
+
+        var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.Value.ToString());
         if (requester?.AuthenticationProvider == AuthenticationProvider.Local)
         {
             return $"{ExternalPortalTicketPathPrefix}/{ticket.Id}";
@@ -670,6 +669,7 @@ public sealed class EhcTicketService : IEhcTicketService
             submissionId,
             _currentUserService.TenantId.Value,
             requesterId,
+            requesterId,
             _currentUserService.UserName ?? "EHC property enquiry",
             returnRequesterView: true,
             cancellationToken);
@@ -680,13 +680,13 @@ public sealed class EhcTicketService : IEhcTicketService
         EhcPropertyListingContextDto property,
         Guid submissionId,
         Guid tenantId,
-        Guid requesterUserId,
-        string requesterName,
+        Guid workflowActorUserId,
+        string workflowActorName,
         CancellationToken cancellationToken = default)
     {
         if (!IsPropertyListingLeadSource(property.Source) || property.ListingId == Guid.Empty || submissionId == Guid.Empty)
             throw new ArgumentException("A property listing and submission identifier are required.");
-        if (tenantId == Guid.Empty || requesterUserId == Guid.Empty)
+        if (tenantId == Guid.Empty || workflowActorUserId == Guid.Empty)
             throw new InvalidOperationException("A tenant and system requester are required.");
 
         return await CreatePropertyEnquiryCoreAsync(
@@ -694,8 +694,9 @@ public sealed class EhcTicketService : IEhcTicketService
             property,
             submissionId,
             tenantId,
-            requesterUserId,
-            string.IsNullOrWhiteSpace(requesterName) ? "public property enquiry" : requesterName.Trim(),
+            requesterId: null,
+            workflowActorUserId,
+            string.IsNullOrWhiteSpace(workflowActorName) ? "public property enquiry" : workflowActorName.Trim(),
             returnRequesterView: false,
             cancellationToken);
     }
@@ -705,7 +706,8 @@ public sealed class EhcTicketService : IEhcTicketService
         EhcPropertyListingContextDto property,
         Guid submissionId,
         Guid tenantId,
-        Guid requesterId,
+        Guid? requesterId,
+        Guid workflowActorUserId,
         string actorName,
         bool returnRequesterView,
         CancellationToken cancellationToken)
@@ -716,7 +718,7 @@ public sealed class EhcTicketService : IEhcTicketService
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                await _unitOfWork.AcquireTransactionLockAsync($"property-enquiry:{tenantId}:{requesterId}:{submissionId}", cancellationToken);
+                await _unitOfWork.AcquireTransactionLockAsync($"property-enquiry:{tenantId}:{requesterId?.ToString() ?? "anonymous"}:{submissionId}", cancellationToken);
                 var existing = await _ticketRepository.Query().AsNoTracking().FirstOrDefaultAsync(t =>
                     t.TenantId == tenantId && t.RequesterUserId == requesterId
                     && t.ExternalSubmissionId == submissionId && !t.IsDeleted, cancellationToken);
@@ -727,7 +729,7 @@ public sealed class EhcTicketService : IEhcTicketService
                         throw new ArgumentException("This submission identifier has already been used for a different enquiry.");
                     result = returnRequesterView
                         ? await GetMyTicketByIdAsync(existing.Id, cancellationToken)
-                        : await GetTicketByIdAsync(existing.Id, cancellationToken);
+                        : await GetTicketByIdForTenantAsync(existing.Id, tenantId, cancellationToken);
                 }
                 else
                 {
@@ -740,8 +742,10 @@ public sealed class EhcTicketService : IEhcTicketService
                         cancellationToken,
                         tenantId,
                         requesterId,
+                        workflowActorUserId,
                         actorName,
-                        returnRequesterView);
+                        returnRequesterView,
+                        anonymousRequester: !requesterId.HasValue);
                 }
                 await _unitOfWork.CommitAsync(cancellationToken);
             }
@@ -761,8 +765,10 @@ public sealed class EhcTicketService : IEhcTicketService
         CancellationToken cancellationToken,
         Guid? tenantIdOverride = null,
         Guid? requesterUserIdOverride = null,
+        Guid? workflowActorUserIdOverride = null,
         string? actorNameOverride = null,
-        bool returnRequesterView = true)
+        bool returnRequesterView = true,
+        bool anonymousRequester = false)
     {
         var tenantId = tenantIdOverride ?? _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
@@ -770,12 +776,17 @@ public sealed class EhcTicketService : IEhcTicketService
             throw new InvalidOperationException("Tenant context is required.");
         }
 
-        var requesterUserId = requesterUserIdOverride ?? Guid.Empty;
-        if (requesterUserId == Guid.Empty &&
-            (!Guid.TryParse(_currentUserService.UserId, out requesterUserId) || requesterUserId == Guid.Empty))
+        Guid? requesterUserId = requesterUserIdOverride;
+        if (!anonymousRequester && !requesterUserId.HasValue)
         {
-            throw new InvalidOperationException("Authenticated user context is required.");
+            if (!Guid.TryParse(_currentUserService.UserId, out var currentRequesterUserId) || currentRequesterUserId == Guid.Empty)
+                throw new InvalidOperationException("Authenticated user context is required.");
+            requesterUserId = currentRequesterUserId;
         }
+
+        var workflowActorUserId = workflowActorUserIdOverride ?? requesterUserId ?? Guid.Empty;
+        if (workflowActorUserId == Guid.Empty)
+            throw new InvalidOperationException("A workflow system actor is required.");
         var actorName = string.IsNullOrWhiteSpace(actorNameOverride)
             ? _currentUserService.UserName
             : actorNameOverride.Trim();
@@ -836,6 +847,7 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var ticket = new EhcTicket
         {
+            PublicPropertyEnquiryContactId = property?.PublicContactId,
             PropertyListingContextJson = property == null ? null : JsonSerializer.Serialize(property),
             ExternalSubmissionId = submissionId,
             TenantId = tenantId,
@@ -852,7 +864,7 @@ public sealed class EhcTicketService : IEhcTicketService
             RelatedEntityType = request.RelatedEntityType?.Trim(),
             RelatedEntityReference = request.RelatedEntityReference?.Trim(),
             CreatedBy = actorName,
-            CreatedById = requesterUserId,
+            CreatedById = workflowActorUserId,
             CreatedAt = now
         };
 
@@ -873,17 +885,18 @@ public sealed class EhcTicketService : IEhcTicketService
 
         // Start workflow instance (drives status transitions)
         var workflowName = await ResolveWorkflowNameForTicketAsync(ticket, cancellationToken);
-        var workflowInstance = await _workflowEngine.StartWorkflowAsync(
-            workflowName,
-            ticket.Id,
-            requesterUserId,
-            dataContext: new
-            {
-                ticketId = ticket.Id,
-                ticketNumber = ticket.TicketNumber,
-                ticketType = ticket.TicketType.ToString(),
-                priority = ticket.Priority.ToString()
-            });
+        var workflowContext = new
+        {
+            ticketId = ticket.Id,
+            ticketNumber = ticket.TicketNumber,
+            ticketType = ticket.TicketType.ToString(),
+            priority = ticket.Priority.ToString()
+        };
+        var workflowInstance = anonymousRequester
+            ? await _workflowEngine.StartWorkflowForTenantAsync(
+                workflowName, tenantId, ticket.Id, workflowActorUserId, workflowContext)
+            : await _workflowEngine.StartWorkflowAsync(
+                workflowName, ticket.Id, workflowActorUserId, workflowContext);
 
         ticket.WorkflowInstanceId = workflowInstance.Id;
         await ticketRepo.UpdateAsync(ticket);
@@ -895,9 +908,9 @@ public sealed class EhcTicketService : IEhcTicketService
             TicketId = ticket.Id,
             FromStatus = null,
             ToStatus = EhcTicketStatus.New,
-            ChangedByUserId = requesterUserId,
+            ChangedByUserId = workflowActorUserId,
             CreatedBy = actorName,
-            CreatedById = requesterUserId,
+            CreatedById = workflowActorUserId,
             CreatedAt = now,
             Notes = "Ticket created"
         });
@@ -921,31 +934,34 @@ public sealed class EhcTicketService : IEhcTicketService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        await PublishTicketTopicAsync(
-            tenantId,
-            activity: "Created",
-            audience: "Requester",
-            ticketId: ticket.Id,
-            triggeredByUserId: requesterUserId,
-            data: new Dictionary<string, object>
-            {
-                ["ticketId"] = ticket.Id,
-                ["ticketNumber"] = ticket.TicketNumber,
-                ["ticketType"] = ticket.TicketType.ToString(),
-                ["priority"] = ticket.Priority.ToString(),
-                ["source"] = ticket.Source.ToString(),
-                ["status"] = ticket.Status.ToString(),
-                ["requesterUserId"] = requesterUserId,
-                ["ActionUrl"] = $"{ExternalPortalTicketPathPrefix}/{ticket.Id}"
-            },
-            cancellationToken);
+        if (requesterUserId.HasValue)
+        {
+            await PublishTicketTopicAsync(
+                tenantId,
+                activity: "Created",
+                audience: "Requester",
+                ticketId: ticket.Id,
+                triggeredByUserId: requesterUserId.Value,
+                data: new Dictionary<string, object>
+                {
+                    ["ticketId"] = ticket.Id,
+                    ["ticketNumber"] = ticket.TicketNumber,
+                    ["ticketType"] = ticket.TicketType.ToString(),
+                    ["priority"] = ticket.Priority.ToString(),
+                    ["source"] = ticket.Source.ToString(),
+                    ["status"] = ticket.Status.ToString(),
+                    ["requesterUserId"] = requesterUserId.Value,
+                    ["ActionUrl"] = $"{ExternalPortalTicketPathPrefix}/{ticket.Id}"
+                },
+                cancellationToken);
+        }
 
         await PublishTicketTopicAsync(
             tenantId,
             activity: "Created",
             audience: "Internal",
             ticketId: ticket.Id,
-            triggeredByUserId: requesterUserId,
+            triggeredByUserId: workflowActorUserId,
             data: new Dictionary<string, object>
             {
                 ["ticketId"] = ticket.Id,
@@ -954,16 +970,14 @@ public sealed class EhcTicketService : IEhcTicketService
                 ["priority"] = ticket.Priority.ToString(),
                 ["source"] = ticket.Source.ToString(),
                 ["status"] = ticket.Status.ToString(),
-                ["requesterUserId"] = requesterUserId,
+                ["requesterUserId"] = requesterUserId ?? Guid.Empty,
                 ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
             },
             cancellationToken);
 
-        var dto = await GetMyTicketByIdAsync(ticket.Id, cancellationToken);
-        if (!returnRequesterView)
-        {
-            dto = await GetTicketByIdAsync(ticket.Id, cancellationToken);
-        }
+        var dto = returnRequesterView
+            ? await GetMyTicketByIdAsync(ticket.Id, cancellationToken)
+            : await GetTicketByIdForTenantAsync(ticket.Id, tenantId, cancellationToken);
         if (dto == null)
         {
             throw new InvalidOperationException("Failed to load created ticket.");
@@ -1659,15 +1673,21 @@ public sealed class EhcTicketService : IEhcTicketService
         var now = DateTime.UtcNow;
         var requesterActionUrl = await ResolveRequesterActionUrlAsync(ticket, cancellationToken);
 
-        var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.ToString());
+        var requester = ticket.RequesterUserId.HasValue
+            ? await _userManager.FindByIdAsync(ticket.RequesterUserId.Value.ToString())
+            : null;
+        var publicContact = TryParsePropertyListingContext(ticket);
+        var requesterName = requester == null
+            ? publicContact?.ContactName?.Trim() ?? string.Empty
+            : $"{requester.FirstName} {requester.LastName}".Trim();
         var tokens = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["TicketNumber"] = ticket.TicketNumber,
             ["ticketNumber"] = ticket.TicketNumber,
             ["Status"] = ticket.Status.ToString(),
             ["status"] = ticket.Status.ToString(),
-            ["RequesterName"] = requester == null ? string.Empty : $"{requester.FirstName} {requester.LastName}".Trim(),
-            ["requesterName"] = requester == null ? string.Empty : $"{requester.FirstName} {requester.LastName}".Trim(),
+            ["RequesterName"] = requesterName,
+            ["requesterName"] = requesterName,
             ["PortalUrl"] = requesterActionUrl,
             ["portalUrl"] = requesterActionUrl,
         };
@@ -1718,20 +1738,23 @@ public sealed class EhcTicketService : IEhcTicketService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
-        await PublishTicketTopicAsync(
-            tenantId,
-            activity: "Message",
-            audience: "Requester",
-            ticketId: ticket.Id,
-            triggeredByUserId: authorUserId,
-            data: new Dictionary<string, object>
-            {
-                ["ticketId"] = ticket.Id,
-                ["ticketNumber"] = ticket.TicketNumber,
-                ["requesterUserId"] = ticket.RequesterUserId,
-                ["ActionUrl"] = requesterActionUrl
-            },
-            cancellationToken);
+        if (ticket.RequesterUserId.HasValue)
+        {
+            await PublishTicketTopicAsync(
+                tenantId,
+                activity: "Message",
+                audience: "Requester",
+                ticketId: ticket.Id,
+                triggeredByUserId: authorUserId,
+                data: new Dictionary<string, object>
+                {
+                    ["ticketId"] = ticket.Id,
+                    ["ticketNumber"] = ticket.TicketNumber,
+                    ["requesterUserId"] = ticket.RequesterUserId.Value,
+                    ["ActionUrl"] = requesterActionUrl
+                },
+                cancellationToken);
+        }
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -1944,6 +1967,16 @@ public sealed class EhcTicketService : IEhcTicketService
             return null;
         }
 
+        var ticket = await _ticketRepository.GetByIdWithDetailsAsync(id, tenantId, cancellationToken);
+        return ticket == null ? null : await MapToDetailDtoAsync(ticket, includeInternal: true, cancellationToken);
+    }
+
+    private async Task<EhcTicketDetailDto?> GetTicketByIdForTenantAsync(
+        Guid id,
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty) return null;
         var ticket = await _ticketRepository.GetByIdWithDetailsAsync(id, tenantId, cancellationToken);
         return ticket == null ? null : await MapToDetailDtoAsync(ticket, includeInternal: true, cancellationToken);
     }
@@ -2473,7 +2506,9 @@ public sealed class EhcTicketService : IEhcTicketService
         {
             try
             {
-                var requester = await _userManager.FindByIdAsync(ticket.RequesterUserId.ToString());
+                var requester = ticket.RequesterUserId.HasValue
+                    ? await _userManager.FindByIdAsync(ticket.RequesterUserId.Value.ToString())
+                    : null;
                 // Phase 2: request CSAT only for external-portal (local-auth) requesters.
                 if (requester?.AuthenticationProvider == AuthenticationProvider.Local)
                 {
@@ -3093,9 +3128,10 @@ public sealed class EhcTicketService : IEhcTicketService
 
     private static EhcTicketListItemDto MapToInternalListItemDto(EhcTicket ticket, int? feedbackRating, DateTime? feedbackSubmittedAtUtc)
     {
+        var publicContact = TryParsePropertyListingContext(ticket);
         var requesterName = ticket.RequesterUser != null
             ? $"{ticket.RequesterUser.FirstName} {ticket.RequesterUser.LastName}".Trim()
-            : null;
+            : publicContact?.ContactName?.Trim();
 
         return new EhcTicketListItemDto
         {
@@ -3121,7 +3157,9 @@ public sealed class EhcTicketService : IEhcTicketService
             AssignedToName = ticket.AssignedToUser != null
                 ? $"{ticket.AssignedToUser.FirstName} {ticket.AssignedToUser.LastName}".Trim()
                 : null,
-            RequesterName = string.IsNullOrWhiteSpace(requesterName) ? ticket.RequesterUser?.UserName : requesterName,
+            RequesterName = string.IsNullOrWhiteSpace(requesterName)
+                ? ticket.RequesterUser?.UserName ?? publicContact?.ContactEmail
+                : requesterName,
             RequesterAuthenticationProvider = ticket.RequesterUser?.AuthenticationProvider.ToString()
         };
     }
@@ -3165,6 +3203,7 @@ public sealed class EhcTicketService : IEhcTicketService
 
     private async Task<EhcTicketDetailDto> MapToDetailDtoAsync(EhcTicket ticket, bool includeInternal, CancellationToken cancellationToken)
     {
+        var publicContact = TryParsePropertyListingContext(ticket);
         var feedbackRepo = _unitOfWork.Repository<EhcTicketFeedback>();
         var feedback = await feedbackRepo
             .GetQueryable(f => f.TenantId == ticket.TenantId && !f.IsDeleted && f.TicketId == ticket.Id)
@@ -3247,7 +3286,7 @@ public sealed class EhcTicketService : IEhcTicketService
 
         return new EhcTicketDetailDto
         {
-            PropertyListing = string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson) ? null : JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson),
+            PropertyListing = publicContact,
             Id = ticket.Id,
             TicketNumber = ticket.TicketNumber,
             TicketType = ticket.TicketType,
@@ -3278,9 +3317,9 @@ public sealed class EhcTicketService : IEhcTicketService
                 ? $"{ticket.AssignedToUser.FirstName} {ticket.AssignedToUser.LastName}".Trim()
                 : null,
             RequesterName = includeInternal
-                ? (ticket.RequesterUser != null ? $"{ticket.RequesterUser.FirstName} {ticket.RequesterUser.LastName}".Trim() : null)
+                ? (ticket.RequesterUser != null ? $"{ticket.RequesterUser.FirstName} {ticket.RequesterUser.LastName}".Trim() : publicContact?.ContactName)
                 : null,
-            RequesterEmail = includeInternal ? ticket.RequesterUser?.Email : null,
+            RequesterEmail = includeInternal ? ticket.RequesterUser?.Email ?? publicContact?.ContactEmail : null,
             RequesterAuthenticationProvider = includeInternal ? ticket.RequesterUser?.AuthenticationProvider.ToString() : null,
             RootCauseId = includeInternal ? ticket.RootCauseId : null,
             RootCauseCode = includeInternal ? ticket.RootCause?.Code : null,

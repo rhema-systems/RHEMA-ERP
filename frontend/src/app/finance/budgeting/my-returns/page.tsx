@@ -118,7 +118,7 @@ export default function MyBudgetReturnsPage() {
                                 returns.map((ret) => (
                                     <TableRow key={ret.id}>
                                         <TableCell className="font-medium">
-                                            {ret.segmentValueName || 'Unknown Segment'}
+                                            {ret.distributionDimensionName || ret.segmentValueName || 'Unassigned distribution'}
                                         </TableCell>
                                         <TableCell>
                                             {ret.budgetScenarioName || ret.budgetScenarioId}

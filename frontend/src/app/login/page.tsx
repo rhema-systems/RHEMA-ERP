@@ -8,7 +8,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Building2, Eye, EyeOff, Loader2, Shield, Check } from 'lucide-react';
+import { Eye, EyeOff, Loader2, Shield, Check, Mail, LockKeyhole } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
@@ -19,6 +19,13 @@ import { authService } from '../../services/auth';
 import { settingsService } from '../../services/settings';
 import { apiService } from '../../services/api.service';
 import { tenantService } from '../../services/tenant';
+import { browserSessionCoordinator } from '../../services/browser-session-coordinator';
+import { LoginPresentation } from '../../components/auth/LoginPresentation';
+import {
+  DEFAULT_LOGIN_PAGE_STYLE,
+  loginAppearanceService,
+  type LoginPageStyle,
+} from '../../services/login-appearance';
 import type { LoginRequest, LoginResponse, OtpChannel } from '../../types';
 import {
   buildTenantSelectRedirectUrl,
@@ -43,8 +50,9 @@ const makeLoginSchema = (requireRecaptcha: boolean) => z.object({
 
 type LoginForm = z.infer<ReturnType<typeof makeLoginSchema>>;
 
-// Component that uses useSearchParams - must be wrapped in Suspense
-function LoginFormWithSearchParams() {
+// One authentication implementation is composed into either public presentation shell.
+// This component uses useSearchParams and must remain inside Suspense.
+function SharedAuthenticationForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [successMessage, setSuccessMessage] = useState('');
@@ -52,7 +60,7 @@ function LoginFormWithSearchParams() {
   const [twoFactorToken, setTwoFactorToken] = useState('');
   const [twoFactorCode, setTwoFactorCode] = useState('');
   const [storedLoginData, setStoredLoginData] = useState<{ username: string; password: string; rememberMe: boolean } | null>(null);
-  const [authMode, setAuthMode] = useState<'password' | 'otp'>('password');
+  const [authMode] = useState<'password' | 'otp'>('password');
   const [otpStage, setOtpStage] = useState<'request' | 'verify'>('request');
   const [otpChannel, setOtpChannel] = useState<OtpChannel>('Email');
   const [otpIdentifier, setOtpIdentifier] = useState('');
@@ -69,6 +77,25 @@ function LoginFormWithSearchParams() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = getRedirectTargetFromSearchParams(searchParams);
+
+  const { data: loginAppearance, isPending: isLoginAppearancePending } = useQuery({
+    queryKey: ['publicLoginAppearance'],
+    queryFn: () => loginAppearanceService.getPublicLoginAppearance(),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+  });
+  const loginPageStyle: LoginPageStyle = loginAppearance?.loginPageStyle ?? DEFAULT_LOGIN_PAGE_STYLE;
+  const isDarkPremium = loginPageStyle === 'DarkPremium';
+  const primaryActionClass = `h-10 w-full text-sm font-semibold ${isDarkPremium
+    ? 'bg-blue-500 text-white hover:bg-blue-400 focus-visible:ring-sky-300'
+    : 'bg-blue-600 text-white hover:bg-blue-700'}`;
+  const fieldLabelClass = `text-xs font-semibold tracking-wide ${isDarkPremium ? 'text-slate-200' : 'text-slate-600'}`;
+  const fieldControlClass = isDarkPremium
+    ? 'border-white/15 bg-white/10 text-white placeholder:text-slate-400 focus-visible:ring-sky-400'
+    : 'bg-white';
+  const fieldIconClass = isDarkPremium ? 'text-slate-300' : 'text-slate-500';
+  const mutedTextClass = isDarkPremium ? 'text-slate-300' : 'text-slate-500';
 
   // Check for success message from URL parameters
   useEffect(() => {
@@ -229,6 +256,16 @@ function LoginFormWithSearchParams() {
       user: storedUser as LoginResponse['user'],
     });
   }, [redirectAfterLogin, showTwoFactor]);
+
+  useEffect(() => browserSessionCoordinator.subscribe(event => {
+    if (event.type !== 'login' || showTwoFactor) return;
+    const storedToken = authService.getStoredToken();
+    if (!storedToken) return;
+    void redirectAfterLogin({
+      token: storedToken,
+      user: authService.getStoredUser() as LoginResponse['user'],
+    });
+  }), [redirectAfterLogin, showTwoFactor]);
 
   const loginMutation = useMutation({
     mutationFn: (data: LoginRequest) => authService.login(data),
@@ -427,49 +464,36 @@ function LoginFormWithSearchParams() {
     verifyOtpMutation,
   ]);
 
+  if (isLoginAppearancePending) {
+    return <LoginPageLoading />;
+  }
+
   if (isRedirecting) {
-    return <LoginPageLoading message="Signing you in..." />;
+    return <LoginPageLoading message="Signing you in..." loginPageStyle={loginPageStyle} />;
   }
 
   return (
-    <div className="min-h-screen flex items-start justify-center px-4 py-6 sm:py-8 relative overflow-hidden">
-      {/* Background Image */}
-      <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: 'url(/login.svg)' }}
-      ></div>
-
-      <div className="relative w-full max-w-md space-y-4">
-        {/* Logo and Header */}
-        <div className="text-center">
-          <div className="flex justify-center mb-3">
-            <div className="relative">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg ring-1 ring-white/10">
-                <Building2 className="h-6 w-6 text-white" />
-              </div>
-              <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-25"></div>
-            </div>
-          </div>
-          <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-lg">
-            ERP System
-          </h1>
-          <p className="mt-1 text-sm text-white/90 drop-shadow">
-            Enterprise Resource Planning Platform
-          </p>
-        </div>
-
-        {/* Login Card */}
-        <Card className="backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 shadow-2xl border border-white/30 dark:border-slate-700/50 rounded-2xl">
-          <CardHeader className="space-y-1 p-5 pb-4">
-            <CardTitle className="text-xl font-bold text-center">
-              {showTwoFactor ? '2FA Verification' : authMode === 'otp' ? (otpRequiresTwoFactor ? '2FA Verification' : 'Sign In with Code') : 'Sign In'}
+    <LoginPresentation style={loginPageStyle}>
+        <Card
+          data-testid="shared-login-form"
+          data-login-card
+        >
+          <CardHeader data-login-card-header className="space-y-1">
+            <CardTitle data-login-card-title className="text-xl font-bold">
+              {showTwoFactor
+                ? '2FA Verification'
+                : authMode === 'otp'
+                  ? (otpRequiresTwoFactor ? '2FA Verification' : 'Sign In with Code')
+                  : isDarkPremium
+                    ? <>Sign In to <span>RHEMA-ERP</span></>
+                    : <>Welcome to <span>RHEMA-ERP</span></>}
             </CardTitle>
-            <CardDescription className="text-center">
+            <CardDescription data-login-card-description className={isDarkPremium ? 'text-slate-300' : ''}>
               {showTwoFactor
                 ? 'Please enter your authentication code to complete login'
                 : authMode === 'otp'
                   ? (otpRequiresTwoFactor ? 'Enter your authenticator code to complete login' : 'We will send a one-time code to your email or phone')
-                  : 'Enter your credentials to access your account'
+                  : 'Enterprise Resource Planning Platform'
               }
             </CardDescription>
 
@@ -492,62 +516,35 @@ function LoginFormWithSearchParams() {
               </div>
             )}
           </CardHeader>
-          <CardContent className="px-5 pb-5">
-            {/* Auth mode switch (not shown during password 2FA step) */}
-            {!showTwoFactor && (
-              <div className="grid grid-cols-2 gap-2 mb-4">
-                <Button
-                  type="button"
-                  variant={authMode === 'password' ? 'default' : 'outline'}
-                  onClick={() => {
-                    setAuthMode('password');
-                    setOtpStage('request');
-                    setOtpRequiresTwoFactor(false);
-                    setOtpErrorMessage('');
-                    setOtpInfoMessage('');
-                  }}
-                >
-                  Password
-                </Button>
-                <Button
-                  type="button"
-                  variant={authMode === 'otp' ? 'default' : 'outline'}
-                  onClick={() => {
-                    setAuthMode('otp');
-                    setShowTwoFactor(false);
-                    setTwoFactorCode('');
-                    setStoredLoginData(null);
-                    setOtpErrorMessage('');
-                    setOtpInfoMessage('');
-                    setOtpStage('request');
-                    setOtpRequiresTwoFactor(false);
-                  }}
-                >
-                  One-time code
-                </Button>
-              </div>
-            )}
-
+          <CardContent data-login-card-content>
             {authMode === 'password' ? (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
 
               {/* Username Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                  <Label htmlFor="username" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    USER NAME OR EMAIL ADDRESS
+                  <Label htmlFor="username" className={fieldLabelClass}>
+                    Username or Email Address
                   </Label>
                   <div className="relative">
+                    <Mail
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 ${fieldIconClass}`}
+                    />
                     <Input
+                      data-login-field
                       id="username"
                       type="text"
-                      placeholder="admin"
-                      className={errors.username ? 'border-red-500' : ''}
+                      placeholder="Enter your username or email"
+                      autoComplete="username"
+                      aria-invalid={Boolean(errors.username)}
+                      aria-describedby={errors.username ? 'username-error' : undefined}
+                      className={`pl-10 ${fieldControlClass} ${errors.username ? 'border-red-500' : ''}`}
                       {...register('username')}
                     />
                   </div>
                   {errors.username && (
-                    <p className="text-sm text-red-500 flex items-center gap-1">
+                    <p id="username-error" role="alert" className="text-sm text-red-500 flex items-center gap-1">
                       <Shield className="h-3 w-3" />
                       {errors.username.message}
                     </p>
@@ -558,15 +555,23 @@ function LoginFormWithSearchParams() {
               {/* Password Field - Hidden during 2FA step */}
               {!showTwoFactor && (
                 <div className="space-y-2">
-                  <Label htmlFor="password" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
-                    PASSWORD
+                  <Label htmlFor="password" className={fieldLabelClass}>
+                    Password
                   </Label>
                   <div className="relative">
+                    <LockKeyhole
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 ${fieldIconClass}`}
+                    />
                     <Input
+                      data-login-field
                       id="password"
                       type={showPassword ? 'text' : 'password'}
-                      placeholder="Admin123!"
-                      className={`pr-12 ${errors.password ? 'border-red-500' : ''}`}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                      aria-invalid={Boolean(errors.password)}
+                      aria-describedby={errors.password ? 'password-error' : undefined}
+                      className={`pl-10 pr-12 ${fieldControlClass} ${errors.password ? 'border-red-500' : ''}`}
                       {...register('password')}
                     />
                     <Button
@@ -578,14 +583,14 @@ function LoginFormWithSearchParams() {
                       onClick={() => setShowPassword(!showPassword)}
                     >
                       {showPassword ? (
-                        <EyeOff className="h-4 w-4 text-slate-500" />
+                        <EyeOff className={`h-4 w-4 ${isDarkPremium ? 'text-slate-300' : 'text-slate-500'}`} />
                       ) : (
-                        <Eye className="h-4 w-4 text-slate-500" />
+                        <Eye className={`h-4 w-4 ${isDarkPremium ? 'text-slate-300' : 'text-slate-500'}`} />
                       )}
                     </Button>
                   </div>
                   {errors.password && (
-                    <p className="text-sm text-red-500 flex items-center gap-1">
+                    <p id="password-error" role="alert" className="text-sm text-red-500 flex items-center gap-1">
                       <Shield className="h-3 w-3" />
                       {errors.password.message}
                     </p>
@@ -596,18 +601,19 @@ function LoginFormWithSearchParams() {
               {/* Two-Factor Authentication Field - Only shown when required */}
               {showTwoFactor && (
                 <div className="space-y-2">
-                  <Label htmlFor="twoFactorCode" className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                  <Label htmlFor="twoFactorCode" className={fieldLabelClass}>
                     AUTHENTICATION CODE
                   </Label>
                   <div className="relative">
                     <Input
+                      data-login-field
                       id="twoFactorCode"
                       type="text"
                       value={twoFactorCode}
                       onChange={(e) => handleTwoFactorCodeChange(e.target.value)}
                       onKeyDown={handleTwoFactorKeyDown}
                       placeholder="Enter 6-digit code"
-                      className="text-center text-lg font-mono tracking-widest"
+                      className={`text-center text-lg font-mono tracking-widest ${fieldControlClass}`}
                       maxLength={6}
                       autoComplete="one-time-code"
                       inputMode="numeric"
@@ -627,7 +633,7 @@ function LoginFormWithSearchParams() {
                         ✓ Code complete - verifying automatically. If needed, you can still click "Verify Code".
                       </span>
                     ) : (
-                      <span className="text-slate-500">
+                      <span className={mutedTextClass}>
                         Enter the 6-digit code from your authenticator app
                       </span>
                     )}
@@ -643,7 +649,7 @@ function LoginFormWithSearchParams() {
                         setTwoFactorToken('');
                         setStoredLoginData(null); // Clear stored credentials when going back
                       }}
-                      className="text-slate-500 hover:text-slate-700"
+                      className={isDarkPremium ? 'text-slate-300 hover:text-white' : 'text-slate-500 hover:text-slate-700'}
                     >
                       ← Back to login
                     </Button>
@@ -651,23 +657,14 @@ function LoginFormWithSearchParams() {
                 </div>
               )}
 
-              {/* Remember Me & Forgot Password - Hidden during 2FA step */}
+              {/* Password recovery - Hidden during 2FA step */}
               {!showTwoFactor && (
-                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      id="rememberMe"
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      {...register('rememberMe')}
-                    />
-                    <Label htmlFor="rememberMe" className="text-sm font-normal">
-                      Remember me for 30 days
-                    </Label>
-                  </div>
+                <div className="flex justify-end">
                   <a
                     href="/forgot-password"
-                    className="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors"
+                    className={isDarkPremium
+                      ? 'text-sm font-medium text-sky-300 transition-colors hover:text-sky-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-400'
+                      : 'text-sm font-medium text-blue-600 transition-colors hover:text-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'}
                   >
                     Forgot password?
                   </a>
@@ -676,8 +673,8 @@ function LoginFormWithSearchParams() {
 
               {/* Success Message */}
               {successMessage && (
-                <div className="rounded-lg bg-green-50 dark:bg-green-900/20 p-4 border border-green-200 dark:border-green-800">
-                  <p className="text-sm text-green-700 dark:text-green-400 flex items-center gap-2">
+                <div role="status" aria-live="polite" className="rounded-lg bg-green-50 p-4 border border-green-200">
+                  <p className="text-sm text-green-700 flex items-center gap-2">
                     <Shield className="h-4 w-4" />
                     {successMessage}
                   </p>
@@ -686,8 +683,8 @@ function LoginFormWithSearchParams() {
 
               {/* Error Message */}
               {errors.root && (
-                <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
-                  <p className="text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                <div role="alert" aria-live="assertive" className="rounded-lg bg-red-50 p-4 border border-red-200">
+                  <p className="text-sm text-red-700 flex items-center gap-2">
                     <Shield className="h-4 w-4" />
                     {errors.root.message}
                   </p>
@@ -709,11 +706,11 @@ function LoginFormWithSearchParams() {
                     <p className="text-sm text-red-500 text-center">{errors.recaptchaToken.message}</p>
                   )}
                   {failedAttempts > 0 && (
-                    <p className="text-sm text-amber-600 dark:text-amber-400 text-center">
+                    <p className={`text-sm text-center ${isDarkPremium ? 'text-amber-300' : 'text-amber-600'}`}>
                       Additional verification required due to multiple failed login attempts
                     </p>
                   )}
-                  <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                  <p className={`text-xs text-center ${mutedTextClass}`}>
                     Using {securitySettings.captchaProvider === 'recaptcha' ? 'Google reCAPTCHA' : 'hCAPTCHA'}
                   </p>
                 </div>
@@ -721,8 +718,9 @@ function LoginFormWithSearchParams() {
 
               {/* Submit Button */}
               <Button
+                data-login-primary-action
                 type="submit"
-                className="w-full h-10 text-sm font-semibold"
+                className={primaryActionClass}
                 disabled={loginMutation.isPending || (showTwoFactor && twoFactorCode.replace(/\D/g, '').length !== 6)}
               >
                 {loginMutation.isPending ? (
@@ -749,8 +747,8 @@ function LoginFormWithSearchParams() {
 
                 {/* Error message */}
                 {otpErrorMessage && (
-                  <div className="rounded-lg bg-red-50 dark:bg-red-900/20 p-4 border border-red-200 dark:border-red-800">
-                    <p className="text-sm text-red-700 dark:text-red-400 flex items-center gap-2">
+                  <div role="alert" aria-live="assertive" className="rounded-lg bg-red-50 p-4 border border-red-200">
+                    <p className="text-sm text-red-700 flex items-center gap-2">
                       <Shield className="h-4 w-4" />
                       {otpErrorMessage}
                     </p>
@@ -760,11 +758,12 @@ function LoginFormWithSearchParams() {
                 {/* Channel */}
                 {!otpRequiresTwoFactor && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    <Label htmlFor="otpChannel" className={fieldLabelClass}>
                       CHANNEL
                     </Label>
                     <select
-                      className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:bg-slate-900 dark:border-slate-600"
+                      id="otpChannel"
+                      className={`h-10 w-full rounded-md border px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 ${fieldControlClass}`}
                       value={otpChannel}
                       onChange={(e) => setOtpChannel(e.target.value as OtpChannel)}
                       disabled={otpStage === 'verify'}
@@ -778,15 +777,18 @@ function LoginFormWithSearchParams() {
                 {/* Identifier */}
                 {!otpRequiresTwoFactor && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    <Label htmlFor="otpIdentifier" className={fieldLabelClass}>
                       {otpChannel === 'Email' ? 'EMAIL ADDRESS' : 'PHONE NUMBER'}
                     </Label>
                     <Input
+                      data-login-field
+                      id="otpIdentifier"
                       type={otpChannel === 'Email' ? 'email' : 'tel'}
                       placeholder={otpChannel === 'Email' ? 'you@company.com' : '+233XXXXXXXXX'}
                       value={otpIdentifier}
                       onChange={(e) => setOtpIdentifier(e.target.value)}
                       disabled={otpStage === 'verify'}
+                      className={fieldControlClass}
                     />
                   </div>
                 )}
@@ -794,14 +796,17 @@ function LoginFormWithSearchParams() {
                 {/* OTP code */}
                 {otpStage === 'verify' && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    <Label htmlFor="otpCode" className={fieldLabelClass}>
                       ONE-TIME CODE
                     </Label>
                     <Input
+                      data-login-field
+                      id="otpCode"
                       inputMode="numeric"
                       placeholder="123456"
                       value={otpCode}
                       onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className={fieldControlClass}
                     />
                     <div className="flex items-center justify-between">
                       <Button
@@ -840,14 +845,17 @@ function LoginFormWithSearchParams() {
                 {/* 2FA code (if enabled) */}
                 {otpRequiresTwoFactor && (
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
+                    <Label htmlFor="otpTwoFactorCode" className={fieldLabelClass}>
                       AUTHENTICATOR CODE
                     </Label>
                     <Input
+                      data-login-field
+                      id="otpTwoFactorCode"
                       inputMode="numeric"
                       placeholder="123456"
                       value={otpTwoFactorCode}
                       onChange={(e) => setOtpTwoFactorCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className={fieldControlClass}
                     />
                     <p className="text-xs text-center">
                       {verifyOtpMutation.isPending ? (
@@ -859,7 +867,7 @@ function LoginFormWithSearchParams() {
                           ✓ Codes complete - signing you in automatically.
                         </span>
                       ) : (
-                        <span className="text-slate-500">
+                        <span className={mutedTextClass}>
                           Enter the 6-digit code from your authenticator app
                         </span>
                       )}
@@ -878,7 +886,7 @@ function LoginFormWithSearchParams() {
                         onChange={(token) => setOtpRecaptchaToken(token || '')}
                       />
                     </div>
-                    <p className="text-xs text-center text-slate-500 dark:text-slate-400">
+                    <p className={`text-xs text-center ${mutedTextClass}`}>
                       Using {securitySettings.captchaProvider === 'recaptcha' ? 'Google reCAPTCHA' : 'hCAPTCHA'}
                     </p>
                   </div>
@@ -887,8 +895,9 @@ function LoginFormWithSearchParams() {
                 {/* Action buttons */}
                 {otpStage === 'request' ? (
                   <Button
+                    data-login-primary-action
                     type="button"
-                    className="w-full h-10 text-sm font-semibold"
+                    className={primaryActionClass}
                     disabled={requestOtpMutation.isPending || !otpIdentifier.trim()}
                     onClick={() => {
                       setOtpErrorMessage('');
@@ -911,8 +920,9 @@ function LoginFormWithSearchParams() {
                   </Button>
                 ) : (
                   <Button
+                    data-login-primary-action
                     type="button"
-                    className="w-full h-10 text-sm font-semibold"
+                    className={primaryActionClass}
                     disabled={verifyOtpMutation.isPending || otpCode.replace(/\D/g, '').length !== 6 || (otpRequiresTwoFactor && otpTwoFactorCode.replace(/\D/g, '').length !== 6)}
                     onClick={() => {
                       setOtpErrorMessage('');
@@ -940,8 +950,10 @@ function LoginFormWithSearchParams() {
 
             {/* Preserve the supplier application entry point and its existing availability policy. */}
             {allowSelfRegistration && (
-              <div className="mt-4 border-t border-slate-200 pt-4 text-center dark:border-slate-700">
-                <Button asChild variant="outline" className="h-10 w-full text-sm font-semibold">
+              <div className={`mt-4 border-t pt-4 text-center ${isDarkPremium ? 'border-white/15' : 'border-slate-200'}`}>
+                <Button data-login-secondary-action asChild variant="outline" className={isDarkPremium
+                  ? 'h-10 w-full border-white/20 bg-white/5 text-sm font-semibold text-slate-100 hover:bg-white/10 hover:text-white'
+                  : 'h-10 w-full text-sm font-semibold'}>
                   <Link href="/supplier-application">
                     <Shield className="mr-2 h-4 w-4" />
                     Apply as a supplier
@@ -952,40 +964,56 @@ function LoginFormWithSearchParams() {
 
           </CardContent>
         </Card>
-
-        {/* Footer */}
-        <div className="text-center text-xs text-white/70 drop-shadow">
-          <p>© 2025 ERP System. All rights reserved.</p>
-          <p className="mt-1">Secure enterprise management platform</p>
-        </div>
-      </div>
-    </div>
+    </LoginPresentation>
   );
 }
 
 // Loading component for Suspense fallback
-function LoginPageLoading({ message = 'Loading login page...' }: { message?: string }) {
-  return (
-    <div className="min-h-screen flex items-start justify-center px-4 py-6 sm:py-8 relative overflow-hidden">
-      {/* Background Image */}
-      <div
-        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-        style={{ backgroundImage: 'url(/login.svg)' }}
-      ></div>
+function LoginPageLoading({
+  message = 'Loading login page...',
+  loginPageStyle,
+}: {
+  message?: string;
+  loginPageStyle?: LoginPageStyle;
+}) {
+  if (!loginPageStyle) {
+    return (
+      <main className="grid min-h-svh place-items-center bg-slate-950 px-6 text-slate-100">
+        <div
+          role="status"
+          data-login-loading-style="Pending"
+          className="flex items-center space-x-3 rounded-2xl border border-white/10 bg-white/5 p-6 shadow-2xl"
+        >
+          <Loader2 className="h-8 w-8 animate-spin text-sky-300" />
+          <span className="font-medium">{message}</span>
+        </div>
+      </main>
+    );
+  }
 
-      <div role="status" className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-6 rounded-2xl shadow-2xl border border-white/30">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="text-slate-900 dark:text-slate-100 font-medium">{message}</span>
+  const isDarkPremium = loginPageStyle === 'DarkPremium';
+
+  return (
+    <LoginPresentation style={loginPageStyle}>
+      <div
+        role="status"
+        data-login-loading-style={loginPageStyle}
+        className={`relative flex items-center space-x-3 rounded-2xl border p-6 shadow-2xl backdrop-blur-sm ${isDarkPremium
+          ? 'border-white/15 bg-slate-950/80 text-white shadow-black/40'
+          : 'border-white/30 bg-white/95 text-slate-900'}`}
+      >
+        <Loader2 className={`h-8 w-8 animate-spin ${isDarkPremium ? 'text-sky-300' : 'text-blue-600'}`} />
+        <span className="font-medium">{message}</span>
       </div>
-    </div>
+    </LoginPresentation>
   );
 }
 
-// Main page component that wraps LoginFormWithSearchParams in Suspense
+// Main page component that wraps the shared authentication form in Suspense.
 export default function LoginPage() {
   return (
     <Suspense fallback={<LoginPageLoading />}>
-      <LoginFormWithSearchParams />
+      <SharedAuthenticationForm />
     </Suspense>
   );
 }

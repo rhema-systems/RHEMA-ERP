@@ -67,6 +67,42 @@ public sealed partial class ApInvoicePostingMigrationTests
     }
 
     [Theory]
+    [InlineData("Service")]
+    [InlineData("Inventory")]
+    [InlineData("Product")]
+    public async Task ManualNonPoInvoice_ShouldRejectGovernedSourceLineTypes(string type)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+
+        var create = () => service.CreateAsync(new VendorInvoiceCreateDto
+        {
+            BusinessPartnerId = fixture.Supplier.Id,
+            InvoiceDate = fixture.Invoice.InvoiceDate,
+            SupplierInvoiceNumber = $"GOVERNED-{type}",
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            LineItems =
+            [
+                new()
+                {
+                    LineItemType = type,
+                    Description = "Untrusted manual source line",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            ]
+        });
+
+        await create.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must originate from their governed source modules*");
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task SupplierCharge_ShouldRejectIneligibleCapturedAccount(bool otherTenant)

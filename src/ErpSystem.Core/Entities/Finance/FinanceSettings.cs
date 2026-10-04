@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Base;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 
 namespace ErpSystem.Core.Entities.Finance
 {
@@ -315,6 +316,46 @@ namespace ErpSystem.Core.Entities.Finance
         /// resolves FIN-LIM-0034 by allowing an authorised tenant policy decision when needed.
         /// </summary>
         public bool RequireDepreciationBeforePeriodClose { get; set; } = true;
+
+        // Precision and rounding domains are deliberately independent. Currency
+        // minor units remain authoritative at the ledger boundary.
+        [Range(0, PrecisionRoundingPolicy.MaximumUnitPriceDecimalPlaces)]
+        public int UnitPriceDecimalPlaces { get; set; } = 4;
+
+        [Range(PrecisionRoundingPolicy.MinimumExchangeRateDecimalPlaces, PrecisionRoundingPolicy.MaximumExchangeRateDecimalPlaces)]
+        public int ExchangeRateInputDecimalPlaces { get; set; } = 10;
+
+        [Range(PrecisionRoundingPolicy.MinimumExchangeRateDecimalPlaces, PrecisionRoundingPolicy.MaximumExchangeRateDecimalPlaces)]
+        public int ExchangeRateDisplayDecimalPlaces { get; set; } = 6;
+
+        [Range(0, PrecisionRoundingPolicy.MaximumPercentageDecimalPlaces)]
+        public int TaxPercentageDecimalPlaces { get; set; } = 4;
+
+        public GovernedRoundingMethod TaxRoundingMethod { get; set; } = GovernedRoundingMethod.Nearest;
+        public TaxRoundingScope TaxRoundingScope { get; set; } = TaxRoundingScope.Line;
+
+        [Column(TypeName = "decimal(18,6)")]
+        public decimal? TaxRoundingIncrement { get; set; }
+
+        public bool InvoiceRoundingEnabled { get; set; }
+
+        [Column(TypeName = "decimal(18,6)")]
+        public decimal? InvoiceRoundingIncrement { get; set; }
+
+        public GovernedRoundingMethod InvoiceRoundingMethod { get; set; } = GovernedRoundingMethod.Nearest;
+        public Guid? InvoiceRoundingGainAccountId { get; set; }
+        public virtual Account? InvoiceRoundingGainAccount { get; set; }
+        public Guid? InvoiceRoundingLossAccountId { get; set; }
+        public virtual Account? InvoiceRoundingLossAccount { get; set; }
+
+        [Column(TypeName = "decimal(20,4)")]
+        public decimal SettlementToleranceAmount { get; set; }
+
+        [Column(TypeName = "decimal(9,6)")]
+        public decimal SettlementTolerancePercentage { get; set; }
+
+        [Range(0, CurrencyMinorUnitPolicy.MaximumDecimalPlaces)]
+        public int ReportDisplayDecimalPlaces { get; set; } = 2;
 
         // Procurement/Finance invoice-match tolerances belong to the same tenant Finance policy.
         // Retaining them alongside the correction controls lets the incoming three-way-match
