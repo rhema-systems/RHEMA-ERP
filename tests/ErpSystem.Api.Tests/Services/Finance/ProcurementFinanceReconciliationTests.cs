@@ -3,6 +3,7 @@ using ErpSystem.Api.Controllers.Finance;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Enums;
@@ -38,7 +39,20 @@ public sealed class ProcurementFinanceReconciliationTests
         invoice.AutoInvoiceRequestHash = new string('a', 64);
         var other = new PurchaseOrder { TenantId = tenant, OrderNumber = "PO-CONSOLIDATED", BusinessPartnerId = fixture.PurchaseOrder.BusinessPartnerId,
             OrderDate = new DateTime(2026, 7, 1), CreatedAt = new DateTime(2026, 7, 1), Status = "Approved", ApprovedAt = new DateTime(2026, 7, 1), TotalAmount = 40m, Currency = "GHS" };
-        var otherItem = new PurchaseOrderItem { TenantId = tenant, PurchaseOrderId = other.Id, ItemDescription = "Second PO", OrderedQuantity = 4, UnitPrice = 10 };
+        var sourceLine = fixture.PurchaseOrder.Items.Single();
+        var otherItem = new PurchaseOrderItem
+        {
+            TenantId = tenant,
+            PurchaseOrderId = other.Id,
+            ItemDescription = "Second PO",
+            OrderedQuantity = 4,
+            UnitOfMeasure = "EA",
+            UnitOfMeasureId = sourceLine.UnitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = sourceLine.UnitOfMeasureCodeSnapshot,
+            UnitOfMeasureDecimalPlacesSnapshot = sourceLine.UnitOfMeasureDecimalPlacesSnapshot,
+            UnitOfMeasureRoundingIncrementSnapshot = sourceLine.UnitOfMeasureRoundingIncrementSnapshot,
+            UnitPrice = 10
+        };
         other.Items.Add(otherItem); db.PurchaseOrders.Add(other);
         invoice.LineItems.Add(new VendorInvoiceLineItem { TenantId = tenant, VendorInvoiceId = invoice.Id,
             PurchaseOrderItemId = fixture.PurchaseOrder.Items.Single().Id, Quantity = 6, UnitPrice = 10 });
@@ -897,8 +911,21 @@ public sealed class ProcurementFinanceReconciliationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
-
         var accountingBookId = Guid.NewGuid();
+        var unitOfMeasureId = Guid.NewGuid();
+        db.UnitsOfMeasure.Add(new UnitOfMeasure
+        {
+            Id = unitOfMeasureId,
+            TenantId = tenantId,
+            Code = "EA",
+            Name = "Each",
+            Category = "Quantity",
+            IsBaseUnit = true,
+            IsActive = true,
+            DecimalPlaces = 0,
+            RoundingIncrement = 1m,
+            CreatedBy = "seed"
+        });
         db.AccountingBooks.Add(new AccountingBook
         {
             Id = accountingBookId,
@@ -935,6 +962,10 @@ public sealed class ProcurementFinanceReconciliationTests
             OrderedQuantity = 10m,
             RemainingQuantity = 0m,
             UnitOfMeasure = "EA",
+            UnitOfMeasureId = unitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = "EA",
+            UnitOfMeasureDecimalPlacesSnapshot = 0,
+            UnitOfMeasureRoundingIncrementSnapshot = 1m,
             UnitPrice = 10m,
             LineTotal = 100m
         };
@@ -958,7 +989,11 @@ public sealed class ProcurementFinanceReconciliationTests
             ReceivedQuantity = 10m,
             AcceptedQuantity = 10m,
             OrderedQuantitySnapshot = 10m,
-            UnitOfMeasure = "EA"
+            UnitOfMeasure = "EA",
+            UnitOfMeasureId = unitOfMeasureId,
+            UnitOfMeasureCodeSnapshot = "EA",
+            UnitOfMeasureDecimalPlacesSnapshot = 0,
+            UnitOfMeasureRoundingIncrementSnapshot = 1m
         });
         po.Receipts.Add(receipt);
         db.PurchaseOrders.Add(po);
