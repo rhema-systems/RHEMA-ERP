@@ -9,8 +9,8 @@ target_ref: origin/master
 depends_on: none
 migration_status: authored-unapplied
 verification_status: passed
-integration_commit: this-ledger-commit
-pull_request: pending
+integration_commit: 28dc3449656de9fa26a47d79b65e5360ac34e897
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/343
 ---
 
 # Finance UAT workstream: consolidated precision completion
@@ -71,7 +71,7 @@ No focused failure remains. Existing compiler warnings are baseline warnings. De
 
 ## Remaining work
 
-Push the integration branch, create one PR to `master`, record its URL, and await review.
+Await PR review and merge. No implementation or focused verification work remains.
 
 ## Authorization boundaries
 
@@ -79,4 +79,4 @@ Push and one PR are authorized. `git pull`, primary-checkout mutation, migration
 
 ## Integration outcome
 
-One mechanical calendar-test conflict preserved both compatible tests and resolved to an empty cherry-pick. Model parity and all focused verification are green. Pull request pending creation.
+One mechanical calendar-test conflict preserved both compatible tests and resolved to an empty cherry-pick. Model parity and all focused verification are green. Integration reconciliation commit: `28dc3449656de9fa26a47d79b65e5360ac34e897`. Pull request: https://github.com/rhema-systems/RHEMA-ERP/pull/343.
