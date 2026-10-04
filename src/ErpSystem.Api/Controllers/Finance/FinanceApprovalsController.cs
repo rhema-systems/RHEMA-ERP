@@ -45,6 +45,7 @@ public class FinanceApprovalsController : ControllerBase
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
+        Normalize("JournalBatch"),
         Normalize("RecurringJournalTemplate"),
         Normalize("RecurringJournalOccurrence"),
         Normalize("RecurringJournalOccurrenceWaiver"),
@@ -426,6 +427,36 @@ public class FinanceApprovalsController : ControllerBase
                 continue;
             }
 
+            if (IsJournalBatch(entityType))
+            {
+                if (instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var batch = await _db.JournalBatches.AsNoTracking().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId &&
+                    item.Id == instance.EntityId &&
+                    !item.IsDeleted &&
+                    item.ApprovalStatus == JournalBatchApprovalStatus.PendingApproval &&
+                    item.WorkflowInstanceId == instance.Id &&
+                    item.CreatedById != currentUserId.Value &&
+                    item.SubmittedByUserId != currentUserId.Value,
+                    cancellationToken);
+                if (batch == null ||
+                    !await _workflowService.CanUserApproveAsync("JournalBatch", batch.Id, currentUserId.Value))
+                    continue;
+
+                var batchApproval = await MapApprovalAsync(
+                    approval,
+                    canApprove: false,
+                    canReject: false,
+                    approveDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    rejectDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    cancellationToken);
+                batchApproval.DecisionOnDetailPage = true;
+                results.Add(batchApproval);
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -542,6 +573,11 @@ public class FinanceApprovalsController : ControllerBase
         if (!IsFinanceEntity(entityType))
         {
             return BadRequest("This approval is not a finance workflow approval.");
+        }
+        if (IsJournalBatch(entityType))
+        {
+            return BadRequest(
+                "Journal batch decisions must be completed from the journal batch so every journal receives a governed decision.");
         }
 
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -3090,6 +3126,9 @@ public class FinanceApprovalsController : ControllerBase
     private static bool IsBusinessPartner(string? entityType)
         => Normalize(entityType) == "BUSINESSPARTNER";
 
+    private static bool IsJournalBatch(string? entityType)
+        => Normalize(entityType) == "JOURNALBATCH";
+
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
 
@@ -3113,6 +3152,7 @@ public class FinanceApprovalsController : ControllerBase
             "RECURRINGJOURNALTEMPLATE" => $"/finance/recurring-journals/{entityId:D}",
             "RECURRINGJOURNALOCCURRENCE" or "RECURRINGJOURNALOCCURRENCEWAIVER" =>
                 "/finance/recurring-journals",
+            "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
             _ => "/finance/approvals"
         };
     }
@@ -3122,6 +3162,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         return key is "EXCHANGERATE"
             or "FINANCEBUDGETOVERRIDE"
+            or "JOURNALBATCH"
             or "VENDORPAYMENT"
             or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"
@@ -3263,6 +3304,7 @@ public class FinanceApprovalsController : ControllerBase
             "BANKRECONCILIATION" => "Bank Reconciliation",
             "CHEQUE" => "Cheque",
             "EXCHANGERATE" => "Exchange Rate",
+            "JOURNALBATCH" => "Journal Batch",
             "FIXEDASSET" => "Fixed Asset",
             "FIXEDASSETDEPRECIATIONRUN" => "Depreciation Run",
             "ASSETDEPRECIATIONSCHEDULE" => "Depreciation",

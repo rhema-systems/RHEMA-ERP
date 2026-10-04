@@ -355,6 +355,92 @@ public sealed class JournalBatchServiceTests
     [Fact]
     [Trait("Batch", "GeneralLedger")]
     [Trait("Category", "Controls")]
+    public async Task RemovedDraftJournal_ShouldBecomeEligibleAndReattachWithoutDuplicateMembership()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenantId);
+        var journals = SeedJournals(db, tenantId, period.Id);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var batch = await service.CreateAsync(new CreateJournalBatchDto
+        {
+            Description = "Detach and reattach",
+            FiscalPeriodId = period.Id,
+            AccountingBookId = BookId(db, tenantId),
+            ControlCurrencyCode = "GHS",
+            ExpectedDebitTotal = 100m
+        });
+        batch = await service.AddExistingJournalAsync(batch.Id, journals[0].Id);
+        var originalItemId = batch.Items.Single().Id;
+
+        batch = await service.RemoveJournalAsync(batch.Id, journals[0].Id);
+
+        batch.Items.Should().BeEmpty();
+        (await service.GetEligibleDraftJournalsAsync(batch.Id, null))
+            .Should().ContainSingle(item => item.Id == journals[0].Id);
+
+        batch = await service.AddExistingJournalAsync(batch.Id, journals[0].Id);
+
+        batch.Items.Should().ContainSingle();
+        batch.Items.Single().Id.Should().Be(originalItemId);
+        var memberships = await db.JournalBatchItems.IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId && item.JournalEntryId == journals[0].Id)
+            .ToListAsync();
+        memberships.Should().ContainSingle();
+        memberships.Single().IsDeleted.Should().BeFalse();
+    }
+
+    [Fact]
+    [Trait("Batch", "GeneralLedger")]
+    [Trait("Category", "Approval")]
+    public async Task SubmittedBatch_ShouldBlockMakerAndAllowAssignedIndependentChecker()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var period = SeedPeriod(db, tenantId);
+        var journals = SeedJournals(db, tenantId, period.Id);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateService(db, tenantId, workflow: workflow.Object, currentUserId: makerId);
+        var batch = await CreateDraftBatchAsync(maker, period.Id, journals);
+
+        batch = await maker.SubmitAsync(batch.Id);
+
+        batch.CanReview.Should().BeFalse();
+        var selfReview = () => maker.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
+        {
+            Decisions = batch.Items.Select(item => new JournalBatchReviewDecisionDto
+            {
+                JournalBatchItemId = item.Id,
+                Decision = JournalBatchReviewDecision.Approved
+            }).ToList()
+        });
+        await selfReview.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Maker-checker*");
+
+        db.ChangeTracker.Clear();
+        var checker = CreateService(db, tenantId, workflow: workflow.Object, currentUserId: checkerId);
+        var checkerView = await checker.GetByIdAsync(batch.Id);
+        checkerView!.CanReview.Should().BeTrue();
+
+        var reviewed = await checker.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
+        {
+            Decisions = checkerView.Items.Select(item => new JournalBatchReviewDecisionDto
+            {
+                JournalBatchItemId = item.Id,
+                Decision = JournalBatchReviewDecision.Approved
+            }).ToList()
+        });
+        reviewed.ApprovalStatus.Should().Be(JournalBatchApprovalStatus.Approved);
+        reviewed.ApprovedByUserId.Should().Be(checkerId);
+    }
+
+    [Fact]
+    [Trait("Batch", "GeneralLedger")]
+    [Trait("Category", "Controls")]
     public async Task ValidateAsync_ShouldEnforceIndependentBatchTotalAndJournalCount()
     {
         var tenantId = Guid.NewGuid();
@@ -428,7 +514,8 @@ public sealed class JournalBatchServiceTests
         batch = await service.SubmitAsync(batch.Id);
         db.ChangeTracker.Clear(); // Each controller request resolves a fresh scoped DbContext in production.
 
-        var reviewed = await service.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var reviewed = await checker.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
         {
             Decisions =
             [
@@ -506,7 +593,8 @@ public sealed class JournalBatchServiceTests
         batch = await service.AddExistingJournalAsync(batch.Id, journals[1].Id);
         batch = await service.SubmitAsync(batch.Id);
         db.ChangeTracker.Clear();
-        batch = await service.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        batch = await checker.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
         {
             Decisions = batch.Items.Select(item => new JournalBatchReviewDecisionDto
             {
@@ -566,7 +654,8 @@ public sealed class JournalBatchServiceTests
             .ThrowsAsync(new InvalidOperationException("Simulated posting failure."));
         var service = CreateService(db, tenantId, journalService.Object, workflow.Object);
 
-        var batch = await CreateApprovedBatchAsync(service, period.Id, journals);
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var batch = await CreateApprovedBatchAsync(service, checker, period.Id, journals);
         db.ChangeTracker.Clear();
 
         var act = () => service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto
@@ -610,8 +699,10 @@ public sealed class JournalBatchServiceTests
             .SetupSequence(item => item.PostJournalEntryForBatchAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new JournalEntryDto { Id = journals[0].Id, Status = "Posted" })
             .ThrowsAsync(new InvalidOperationException("Later posting run failed."));
-        var service = CreateService(db, tenantId, journalService.Object, CreateWorkflow().Object);
-        var batch = await CreateApprovedBatchAsync(service, period.Id, journals);
+        var workflow = CreateWorkflow();
+        var service = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var batch = await CreateApprovedBatchAsync(service, checker, period.Id, journals);
         db.ChangeTracker.Clear();
 
         await service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto
@@ -662,7 +753,8 @@ public sealed class JournalBatchServiceTests
             .ThrowsAsync(new InvalidOperationException("SignalR is unavailable."));
         var service = CreateService(db, tenantId, journalService.Object, workflow.Object);
 
-        var batch = await CreateApprovedBatchAsync(service, period.Id, [journals[0]]);
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var batch = await CreateApprovedBatchAsync(service, checker, period.Id, [journals[0]]);
         db.ChangeTracker.Clear();
 
         var run = await service.PostAsync(batch.Id, new CreateJournalBatchPostingRunDto
@@ -833,6 +925,7 @@ public sealed class JournalBatchServiceTests
         var workflow = CreateWorkflow();
         var journalService = CreateJournalService(db, tenantId);
         var service = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
 
         var source = await service.CreateAsync(new CreateJournalBatchDto
         {
@@ -847,7 +940,7 @@ public sealed class JournalBatchServiceTests
         source = await service.AddExistingJournalAsync(source.Id, journals[1].Id);
         source = await service.SubmitAsync(source.Id);
         db.ChangeTracker.Clear();
-        source = await service.ReviewStageAsync(source.Id, new JournalBatchReviewStageDto
+        source = await checker.ReviewStageAsync(source.Id, new JournalBatchReviewStageDto
         {
             Decisions = source.Items.Select(item => new JournalBatchReviewDecisionDto
             {
@@ -877,7 +970,7 @@ public sealed class JournalBatchServiceTests
         (await service.GetByIdAsync(source.Id))!.ReversalStatus.Should().Be(JournalBatchReversalStatus.ReversalPending);
 
         db.ChangeTracker.Clear();
-        reversal = await service.ReviewStageAsync(reversal.Id, new JournalBatchReviewStageDto
+        reversal = await checker.ReviewStageAsync(reversal.Id, new JournalBatchReviewStageDto
         {
             Decisions = reversal.Items.Select(item => new JournalBatchReviewDecisionDto
             {
@@ -912,8 +1005,10 @@ public sealed class JournalBatchServiceTests
         var journals = SeedJournals(db, tenantId, period.Id);
         await db.SaveChangesAsync();
         var workflow = CreateWorkflow();
-        var service = CreateService(db, tenantId, CreateJournalService(db, tenantId).Object, workflow.Object);
-        var source = await CreateApprovedBatchAsync(service, period.Id, journals);
+        var journalService = CreateJournalService(db, tenantId);
+        var service = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var checker = CreateService(db, tenantId, journalService.Object, workflow.Object);
+        var source = await CreateApprovedBatchAsync(service, checker, period.Id, journals);
         db.ChangeTracker.Clear();
         await service.PostAsync(source.Id, new CreateJournalBatchPostingRunDto
         {
@@ -962,11 +1057,13 @@ public sealed class JournalBatchServiceTests
         ApplicationDbContext db,
         Guid tenantId,
         IJournalEntryService? journalEntries = null,
-        IWorkflowService? workflow = null)
+        IWorkflowService? workflow = null,
+        Guid? currentUserId = null)
     {
+        var resolvedUserId = currentUserId ?? Guid.NewGuid();
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
-        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(service => service.UserId).Returns(resolvedUserId.ToString());
         currentUser.SetupGet(service => service.UserName).Returns("journal.batch.tester");
         currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
         currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
@@ -1115,11 +1212,12 @@ public sealed class JournalBatchServiceTests
     }
 
     private static async Task<JournalBatchDetailDto> CreateApprovedBatchAsync(
-        JournalBatchService service,
+        JournalBatchService maker,
+        JournalBatchService checker,
         Guid fiscalPeriodId,
         IReadOnlyCollection<JournalEntry> journals)
     {
-        var batch = await service.CreateAsync(new CreateJournalBatchDto
+        var batch = await maker.CreateAsync(new CreateJournalBatchDto
         {
             Description = "Approved posting test batch",
             FiscalPeriodId = fiscalPeriodId,
@@ -1129,10 +1227,10 @@ public sealed class JournalBatchServiceTests
             ExpectedJournalCount = journals.Count
         });
         foreach (var journal in journals)
-            batch = await service.AddExistingJournalAsync(batch.Id, journal.Id);
+            batch = await maker.AddExistingJournalAsync(batch.Id, journal.Id);
 
-        batch = await service.SubmitAsync(batch.Id);
-        return await service.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
+        batch = await maker.SubmitAsync(batch.Id);
+        return await checker.ReviewStageAsync(batch.Id, new JournalBatchReviewStageDto
         {
             Decisions = batch.Items.Select(item => new JournalBatchReviewDecisionDto
             {

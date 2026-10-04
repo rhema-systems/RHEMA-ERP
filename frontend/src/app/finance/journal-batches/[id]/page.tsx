@@ -41,6 +41,7 @@ import { fileUploadService } from '@/services/file-upload.service';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { Account, AccountingBook, CreateAccountTransactionDto, FinanceDimensionAccountRule, FinanceDimensionDefinition, FiscalPeriod } from '@/types/finance';
 import { getMissingRequiredManualDimension, resolveManualDimensionValues } from '@/lib/finance/manual-journal-dimensions';
+import { formatJournalBatchMoney } from '@/lib/finance/journal-batch-money';
 import type {
     JournalBatchDetail,
     JournalBatchItem,
@@ -64,9 +65,6 @@ const newLine = (transactionType: 'Debit' | 'Credit'): EntryLine => ({
     amount: '',
     dimensions: {},
 });
-
-const money = (value: number, currency: string) =>
-    new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(value);
 
 const today = () => new Date().toISOString().slice(0, 10);
 const errorDescription = (error: any) => {
@@ -113,6 +111,8 @@ export default function JournalBatchDetailPage() {
     const [eligibleDraftsError, setEligibleDraftsError] = useState<string>();
     const [eligibleDraftsOpen, setEligibleDraftsOpen] = useState(false);
     const eligibleDraftRequest = useRef(0);
+    const entryEditorRef = useRef<HTMLDivElement>(null);
+    const entryDescriptionRef = useRef<HTMLInputElement>(null);
     const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
     const [editingBatch, setEditingBatch] = useState(false);
     const [batchForm, setBatchForm] = useState({ description: '', expectedDebitTotal: '', expectedJournalCount: '', notes: '' });
@@ -358,15 +358,30 @@ export default function JournalBatchDetailPage() {
                 key: line.id || crypto.randomUUID(),
                 accountId: line.accountId,
                 transactionType: line.transactionType,
-                amount: String(line.amount),
+                amount: String(line.amount ?? line.debitAmount ?? line.creditAmount ?? ''),
                 dimensions: Object.fromEntries((line.dimensions || []).map((dimension) => [dimension.dimensionCode, dimension.valueCode])),
             })));
-            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            window.requestAnimationFrame(() => {
+                entryEditorRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+                entryDescriptionRef.current?.focus({ preventScroll: true });
+            });
         } catch (error: any) {
             toast({ title: 'Unable to edit journal', description: error.message, variant: 'destructive' });
         } finally {
             setBusy(null);
         }
+    };
+
+    const removeJournal = async (item: JournalBatchItem) => {
+        const removed = await run(
+            `remove-${item.id}`,
+            () => journalBatchDataService.removeJournal(id, item.journalEntryId),
+            'Journal removed',
+        );
+        if (!removed) return;
+        if (editingJournalId === item.journalEntryId) resetEntry();
+        setSelectedDraftJournal(undefined);
+        await loadEligibleDrafts(eligibleDraftSearch);
     };
 
     const submitReview = () => {
@@ -532,9 +547,9 @@ export default function JournalBatchDetailPage() {
             )}
 
             <div className="grid gap-4 md:grid-cols-4">
-                <Card><CardHeader className="pb-2"><CardDescription>Expected total</CardDescription><CardTitle>{money(batch.expectedDebitTotal, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
-                <Card><CardHeader className="pb-2"><CardDescription>Actual debit</CardDescription><CardTitle>{money(batch.actualDebitTotal, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
-                <Card><CardHeader className="pb-2"><CardDescription>Variance</CardDescription><CardTitle className={batch.variance === 0 ? 'text-emerald-600' : 'text-destructive'}>{money(batch.variance, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Expected total</CardDescription><CardTitle>{formatJournalBatchMoney(batch.expectedDebitTotal, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Actual debit</CardDescription><CardTitle>{formatJournalBatchMoney(batch.actualDebitTotal, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
+                <Card><CardHeader className="pb-2"><CardDescription>Variance</CardDescription><CardTitle className={batch.variance === 0 ? 'text-emerald-600' : 'text-destructive'}>{formatJournalBatchMoney(batch.variance, batch.controlCurrencyCode)}</CardTitle></CardHeader></Card>
                 <Card><CardHeader className="pb-2"><CardDescription>Entries</CardDescription><CardTitle>{batch.entryCount}{batch.expectedJournalCount ? ` / ${batch.expectedJournalCount}` : ''}</CardTitle></CardHeader></Card>
             </div>
 
@@ -572,7 +587,7 @@ export default function JournalBatchDetailPage() {
                                         <td className="p-3 text-center"><Checkbox aria-label={`Select ${item.journalEntryNumber} for posting`} disabled={!canPost || !readyItems.some((ready) => ready.id === item.id)} checked={postSelection.includes(item.id)} onCheckedChange={(checked) => setPostSelection((current) => checked === true ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /></td>
                                         <td className="p-3"><Link className="font-mono text-primary hover:underline" href={`/finance/journal-entries/${item.journalEntryId}`}>{item.journalEntryNumber}</Link><div className="text-xs text-muted-foreground">{new Date(item.entryDate).toLocaleDateString()}</div></td>
                                         <td className="p-3">{item.description}<div className="text-xs text-muted-foreground">{item.lineCount} lines</div></td>
-                                        <td className="p-3 text-right">{money(item.totalDebit, batch.controlCurrencyCode)}</td>
+                                        <td className="p-3 text-right">{formatJournalBatchMoney(item.totalDebit, batch.controlCurrencyCode)}</td>
                                         {showReview && <td className="p-3">
                                             {item.reviewStatus === 'Pending' && canReview ? (
                                                 <div className="min-w-52 space-y-2">
@@ -584,7 +599,7 @@ export default function JournalBatchDetailPage() {
                                         <td className="p-3"><Badge variant="outline">{item.postingStatus}</Badge></td>
                                         <td className="p-3 text-right">
                                             {canEditBatch && <Button size="sm" variant="ghost" onClick={() => editItem(item)}>Edit</Button>}
-                                            {canEditBatch && <Button size="sm" variant="ghost" onClick={() => run(`remove-${item.id}`, () => journalBatchDataService.removeJournal(id, item.journalEntryId), 'Journal removed')}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
+                                            {canEditBatch && <Button size="sm" variant="ghost" aria-label={`Remove ${item.journalEntryNumber} from batch`} onClick={() => removeJournal(item)}><Trash2 className="h-4 w-4 text-destructive" /></Button>}
                                         </td>
                                     </tr>
                                 ))}
@@ -610,12 +625,12 @@ export default function JournalBatchDetailPage() {
             </Card>
 
             {(canAddToBatch || (editingJournalId && canEditBatch)) && (
-                <Card>
+                <Card ref={entryEditorRef}>
                     <CardHeader><CardTitle>{editingJournalId ? 'Edit journal entry' : 'Add journal entry'}</CardTitle><CardDescription>Enter a base-currency journal here, or create a fully governed foreign-currency draft in Manual Journals and attach it below. The journal must balance before it can be saved.</CardDescription></CardHeader>
                     <CardContent className="space-y-5">
                         <div className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-2"><Label>Date</Label><Input type="date" value={entry.transactionDate} onChange={(event) => setEntry({ ...entry, transactionDate: event.target.value })} /></div>
-                            <div className="space-y-2"><Label>Description</Label><Input value={entry.description} onChange={(event) => setEntry({ ...entry, description: event.target.value })} /></div>
+                            <div className="space-y-2"><Label htmlFor="journal-batch-entry-description">Description</Label><Input ref={entryDescriptionRef} id="journal-batch-entry-description" value={entry.description} onChange={(event) => setEntry({ ...entry, description: event.target.value })} /></div>
                             <div className="space-y-2"><Label>Reference</Label><Input value={entry.reference} onChange={(event) => setEntry({ ...entry, reference: event.target.value })} /></div>
                         </div>
                         <ManualJournalDimensionDefaults definitions={financeDimensions} effectiveDate={entry.transactionDate} values={defaultDimensions} onChange={setDefaultDimensions} onApplyToAll={() => applyDimensionsToAllLines(defaultDimensions)} disabled={dimensionsLoading} />
@@ -630,7 +645,7 @@ export default function JournalBatchDetailPage() {
                                     <td className="min-w-52 p-3"><ManualJournalDimensionCell definitions={financeDimensions} rules={dimensionRules} effectiveDate={entry.transactionDate} lineNumber={index + 1} accountId={line.accountId} accountLabel={accounts.find((account) => account.id === line.accountId)?.accountName} values={line.dimensions} defaults={defaultDimensions} previousValues={index > 0 ? lines[index - 1].dimensions : undefined} loading={dimensionsLoading} onChange={(dimensions) => setLines((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, dimensions } : item))} onApplyToAll={applyDimensionsToAllLines} /></td>
                                     <td className="p-3"><Button variant="ghost" size="icon" disabled={lines.length <= 2} onClick={() => setLines(lines.filter((_, itemIndex) => itemIndex !== index))}><Trash2 className="h-4 w-4" /></Button></td>
                                 </tr>)}</tbody>
-                                <tfoot><tr className="border-t font-medium"><td className="p-3" colSpan={2}>Debit {money(lineDebit, batch.controlCurrencyCode)} / Credit {money(lineCredit, batch.controlCurrencyCode)}</td><td className="p-3 text-right" colSpan={2}>{Math.abs(lineDebit - lineCredit) < 0.005 ? <span className="text-emerald-600">Balanced</span> : <span className="text-destructive">Out by {money(Math.abs(lineDebit - lineCredit), batch.controlCurrencyCode)}</span>}</td></tr></tfoot>
+                                <tfoot><tr className="border-t font-medium"><td className="p-3" colSpan={2}>Debit {formatJournalBatchMoney(lineDebit, batch.controlCurrencyCode)} / Credit {formatJournalBatchMoney(lineCredit, batch.controlCurrencyCode)}</td><td className="p-3 text-right" colSpan={2}>{Math.abs(lineDebit - lineCredit) < 0.005 ? <span className="text-emerald-600">Balanced</span> : <span className="text-destructive">Out by {formatJournalBatchMoney(Math.abs(lineDebit - lineCredit), batch.controlCurrencyCode)}</span>}</td></tr></tfoot>
                             </table>
                         </div>
                         <div className="flex flex-wrap justify-between gap-2">
@@ -691,7 +706,7 @@ export default function JournalBatchDetailPage() {
             {batch.postingRuns.length > 0 && (
                 <Card>
                     <CardHeader><CardTitle>Posting runs</CardTitle></CardHeader>
-                    <CardContent><div className="space-y-2">{batch.postingRuns.map((runItem) => <div className="flex flex-wrap justify-between gap-2 rounded-md border p-3" key={runItem.id}><div><span className="font-medium">Run {runItem.runNumber}</span> <Badge variant="outline">{runItem.status}</Badge><div className="text-xs text-muted-foreground">{new Date(runItem.requestedAt).toLocaleString()}</div></div><div className="text-right">{runItem.selectedEntryCount} entries<div className="font-medium">{money(runItem.selectedDebitTotal, batch.controlCurrencyCode)}</div></div></div>)}</div></CardContent>
+                    <CardContent><div className="space-y-2">{batch.postingRuns.map((runItem) => <div className="flex flex-wrap justify-between gap-2 rounded-md border p-3" key={runItem.id}><div><span className="font-medium">Run {runItem.runNumber}</span> <Badge variant="outline">{runItem.status}</Badge><div className="text-xs text-muted-foreground">{new Date(runItem.requestedAt).toLocaleString()}</div></div><div className="text-right">{runItem.selectedEntryCount} entries<div className="font-medium">{formatJournalBatchMoney(runItem.selectedDebitTotal, batch.controlCurrencyCode)}</div></div></div>)}</div></CardContent>
                 </Card>
             )}
             <ConfirmationDialog open={confirmation === 'submit'} onOpenChange={(open) => { if (!open) setConfirmation(null); }}

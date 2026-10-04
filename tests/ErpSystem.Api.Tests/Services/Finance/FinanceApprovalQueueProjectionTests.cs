@@ -136,6 +136,71 @@ public sealed class FinanceApprovalQueueProjectionTests
 
     [Fact]
     [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Journal_batch_should_be_visible_only_to_checker_and_require_detail_page_decisions()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var approvalId = AddApprovalGraph(db, tenantId,
+            WorkflowInstanceStatus.InProgress, WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "JournalBatch", initiatorId: makerId,
+            approverRole: "Financial Controller");
+        var instance = db.WorkflowApprovals.Local.Single(item => item.Id == approvalId)
+            .StepInstance.WorkflowInstance;
+        db.JournalBatches.Add(new JournalBatch
+        {
+            Id = instance.EntityId,
+            TenantId = tenantId,
+            BatchNumber = "JB-2026-00001",
+            Description = "Independent batch review",
+            FiscalPeriodId = Guid.NewGuid(),
+            AccountingBookId = Guid.NewGuid(),
+            BookClassification = "BASE",
+            ControlCurrencyCode = "GHS",
+            ExpectedDebitTotal = 1_000m,
+            ApprovalRequired = true,
+            ApprovalStatus = JournalBatchApprovalStatus.PendingApproval,
+            PostingStatus = JournalBatchPostingStatus.NotReady,
+            ReversalStatus = JournalBatchReversalStatus.NotReversed,
+            WorkflowInstanceId = instance.Id,
+            CreatedById = makerId,
+            SubmittedByUserId = makerId,
+            SubmittedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var maker = CreateQueueController(db, tenantId, makerId);
+        var makerResponse = await maker.GetPending(CancellationToken.None);
+        var makerRows = ((OkObjectResult)makerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        makerRows.Should().BeEmpty();
+
+        var checker = CreateQueueController(db, tenantId, checkerId);
+        var checkerResponse = await checker.GetPending(CancellationToken.None);
+        var checkerRows = ((OkObjectResult)checkerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(
+            row => row.EntityType == "JournalBatch" &&
+                   row.DocumentType == "Journal Batch" &&
+                   row.DecisionOnDetailPage &&
+                   row.DetailHref == $"/finance/journal-batches/{instance.EntityId:D}" &&
+                   !row.CanApprove &&
+                   !row.CanReject);
+
+        var bypass = await checker.Approve(
+            approvalId,
+            new FinanceApprovalsController.FinanceApprovalActionRequest { Comments = "Bypass item decisions" },
+            CancellationToken.None);
+        bypass.Result.Should().BeOfType<BadRequestObjectResult>();
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
     public async Task Book_transition_queue_should_show_only_the_assigned_independent_checker_and_require_book_decision_path()
     {
         await using var db = CreateContext();
@@ -448,6 +513,8 @@ public sealed class FinanceApprovalQueueProjectionTests
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookInitialization", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookApplicabilityPolicy", It.IsAny<Guid>(), userId))
+            .ReturnsAsync(true);
+        workflow.Setup(value => value.CanUserApproveAsync("JournalBatch", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         var display = new Mock<IWorkflowEntityDisplayService>();
         display.Setup(value => value.GetEntityDisplayInfoAsync(It.IsAny<string>(), It.IsAny<Guid>()))
