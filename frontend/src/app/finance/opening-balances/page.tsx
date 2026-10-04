@@ -25,6 +25,7 @@ import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -38,6 +39,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { GovernedOpeningPreflight } from '@/components/finance/opening-balances/GovernedOpeningPreflight';
 import { GovernedOpeningSources } from '@/components/finance/opening-balances/GovernedOpeningSources';
 import { DEFAULT_ACCOUNTING_BOOKS, getAccountingBookName, isAccountEligibleForBook } from '@/lib/finance/accounting-books';
+import { getEligibleFixedAssetBookValueIds, getFixedAssetBulkSelectionState, reconcileFixedAssetSelection, toggleAllEligibleFixedAssets } from '@/lib/finance/fixed-asset-opening-selection';
 import { canLoadOpeningBalanceQueries, canPostOpeningBalanceBatch, hasCompleteGovernedOpeningHeader, isOpeningBalanceBatchImmutable, openingBalanceQueryKeys } from '@/lib/finance/opening-balance-governance';
 import type { CreateOpeningStockAdjustmentDto, GovernedInventoryOpeningResult } from '@/lib/finance/opening-balance-governance';
 import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
@@ -244,6 +246,23 @@ export default function OpeningBalancesPage() {
         queryFn: () => financeDataService.getSubledgerOpeningBalanceReadiness(),
         enabled: queryScopeEnabled,
     });
+
+    const eligibleFixedAssetBookValueIds = useMemo(
+        () => getEligibleFixedAssetBookValueIds(
+            subledgerReadinessQuery.data?.fixedAssetCandidates ?? [],
+            header.bookClassification),
+        [header.bookClassification, subledgerReadinessQuery.data?.fixedAssetCandidates]);
+    const fixedAssetBulkSelectionState = getFixedAssetBulkSelectionState(
+        selectedFixedAssetBookValueIds,
+        eligibleFixedAssetBookValueIds);
+    const selectedEligibleFixedAssetCount = reconcileFixedAssetSelection(
+        selectedFixedAssetBookValueIds,
+        eligibleFixedAssetBookValueIds).length;
+
+    useEffect(() => {
+        setSelectedFixedAssetBookValueIds(current =>
+            reconcileFixedAssetSelection(current, eligibleFixedAssetBookValueIds));
+    }, [eligibleFixedAssetBookValueIds]);
 
     const specializedOptionsQuery = useQuery({
         queryKey: openingBalanceQueryKeys.specializedOptions(currentTenantCode),
@@ -1732,7 +1751,15 @@ export default function OpeningBalancesPage() {
                                 <table className="w-full min-w-[900px]">
                                     <thead>
                                         <tr className="border-b bg-muted/50">
-                                            <th className="w-12 p-3"></th>
+                                            <th className="w-12 p-3 text-center">
+                                                <Checkbox
+                                                    aria-label="Select all ready fixed assets"
+                                                    checked={fixedAssetBulkSelectionState}
+                                                    disabled={!canPrepareOpeningBalances || busyAction !== null || eligibleFixedAssetBookValueIds.length === 0}
+                                                    onCheckedChange={() => setSelectedFixedAssetBookValueIds(current =>
+                                                        toggleAllEligibleFixedAssets(current, eligibleFixedAssetBookValueIds))}
+                                                />
+                                            </th>
                                             <th className="p-3 text-left font-medium">Asset</th>
                                             <th className="p-3 text-left font-medium">Book / As Of</th>
                                             <th className="p-3 text-right font-medium">Cost</th>
@@ -1779,19 +1806,21 @@ export default function OpeningBalancesPage() {
                                 <p className="text-sm text-muted-foreground">
                                     Uses {header.bookClassification}, opening date {header.openingDate || '-'}, and the selected fiscal period from the GL Batch tab.
                                 </p>
-                                <div className="flex gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <span className="text-sm text-muted-foreground" aria-live="polite">
+                                        {selectedEligibleFixedAssetCount} of {eligibleFixedAssetBookValueIds.length} ready selected
+                                    </span>
                                     <Button
                                         variant="outline"
-                                        onClick={() => setSelectedFixedAssetBookValueIds((subledgerReadinessQuery.data?.fixedAssetCandidates ?? [])
-                                            .filter(candidate => candidate.bookClassification === header.bookClassification && !candidate.openingPostedToGl)
-                                            .map(candidate => candidate.fixedAssetBookValueId))}
-                                        disabled={!canPrepareOpeningBalances || busyAction !== null}
+                                        onClick={() => setSelectedFixedAssetBookValueIds(current =>
+                                            toggleAllEligibleFixedAssets(current, eligibleFixedAssetBookValueIds))}
+                                        disabled={!canPrepareOpeningBalances || busyAction !== null || eligibleFixedAssetBookValueIds.length === 0}
                                     >
-                                        Select Ready
+                                        {fixedAssetBulkSelectionState === true ? 'Clear Ready' : 'Select Ready'}
                                     </Button>
                                     <Button onClick={handleCreateFixedAssetBatch} disabled={!canPrepareOpeningBalances || busyAction !== null || selectedFixedAssetBookValueIds.length === 0}>
                                         {busyAction === 'fixed-assets' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Database className="mr-2 h-4 w-4" />}
-                                        Prepare GL Batch
+                                        Prepare GL Batch ({selectedEligibleFixedAssetCount})
                                     </Button>
                                 </div>
                             </div>
