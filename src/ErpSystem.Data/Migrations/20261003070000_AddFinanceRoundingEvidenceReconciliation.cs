@@ -68,7 +68,7 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
         AddSourceColumns(migrationBuilder, "VendorInvoice");
         AddSourceColumns(migrationBuilder, "CustomerPayment");
         AddSourceColumns(migrationBuilder, "VendorPayment");
-        AddSourceColumns(migrationBuilder, "CashTransactions");
+        AddSourceColumns(migrationBuilder, "CashTransaction");
         migrationBuilder.AddColumn<Guid>("FinanceRoundingEvidenceId", "FinancePostingEvents", "uniqueidentifier", nullable: true);
 
         migrationBuilder.CreateIndex("IX_FinanceRoundingEvidence_TenantId_ExchangeRateId", "FinanceRoundingEvidence", new[] { "TenantId", "ExchangeRateId" });
@@ -80,14 +80,14 @@ public partial class AddFinanceRoundingEvidenceReconciliation : Migration
         AddSourceEvidenceLink(migrationBuilder, "VendorInvoice");
         AddSourceEvidenceLink(migrationBuilder, "CustomerPayment");
         AddSourceEvidenceLink(migrationBuilder, "VendorPayment");
-        AddSourceEvidenceLink(migrationBuilder, "CashTransactions");
+        AddSourceEvidenceLink(migrationBuilder, "CashTransaction");
         AddSourceEvidenceLink(migrationBuilder, "FinancePostingEvents", adjustment: false);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         DropSourceEvidenceLink(migrationBuilder, "FinancePostingEvents", adjustment: false);
-        DropSourceEvidenceLink(migrationBuilder, "CashTransactions");
+        DropSourceEvidenceLink(migrationBuilder, "CashTransaction");
         DropSourceEvidenceLink(migrationBuilder, "VendorPayment");
         DropSourceEvidenceLink(migrationBuilder, "CustomerPayment");
         DropSourceEvidenceLink(migrationBuilder, "VendorInvoice");
