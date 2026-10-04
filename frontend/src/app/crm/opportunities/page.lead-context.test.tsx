@@ -6,7 +6,8 @@ import CrmOpportunitiesPage from './page';
 const mocks = vi.hoisted(() => ({
   query: 'leadId=lead-1&new=1', getLead: vi.fn(), getLeads: vi.fn(),
   getOpportunities: vi.fn(), getOpportunity: vi.fn(), createOpportunity: vi.fn(),
-  listPartners: vi.fn(), error: vi.fn(), getBaseCurrency: vi.fn(), getActive: vi.fn(),
+  getOpportunityStages: vi.fn(), listPartners: vi.fn(), error: vi.fn(),
+  getBaseCurrency: vi.fn(), getActive: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useSearchParams: () => new URLSearchParams(mocks.query) }));
 vi.mock('@/services/crmService', () => ({ crmService: mocks }));
@@ -24,6 +25,9 @@ beforeEach(() => {
   mocks.getLead.mockResolvedValue(lead);
   mocks.getOpportunities.mockResolvedValue(emptyPage);
   mocks.listPartners.mockResolvedValue([{ id: 'customer-1', partnerName: 'Ama Customer', partnerType: 'Customer', status: 'Active' }]);
+  mocks.getOpportunityStages.mockResolvedValue([
+    { stageId: 'qualification', name: 'Qualification', defaultProbability: 10, isClosed: false },
+  ]);
   mocks.createOpportunity.mockResolvedValue({ opportunityId: 'created' });
   mocks.getOpportunity.mockResolvedValue({ opportunityId: 'created', name: 'Created opportunity', stage: 'Prospecting', amount: 0,
     weightedValue: 0, currency: 'GHS', probability: 10, expectedCloseDate: '2026-10-31', createdAt: '2026-10-01', quotes: [], relatedContracts: [], relatedProjects: [],

@@ -281,6 +281,17 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             EffectiveDate = DateTime.UtcNow, FirstName = "Ama", LastName = "Mensah", LeadStatus = "Qualified" };
         var partner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-CONVERT-001",
             PartnerName = "Ama Mensah", PartnerType = "Customer", ApprovalStatus = "Approved", IsActive = true };
+        var wonStage = new OpportunityStageDefinition
+        {
+            TenantId = tenantId,
+            Code = "CLOSED_WON",
+            Name = "Closed Won",
+            SortOrder = 100,
+            IsActive = true,
+            IsClosed = true,
+            IsWon = true,
+            DefaultProbability = 100
+        };
         var opportunity = new Opportunity { TenantId = tenantId, Name = "Public property enquiry",
             LeadId = lead.Id, Stage = "Qualification", Probability = 20, Amount = 1000m, Currency = "GHS" };
         var ticket = new EhcTicket { TenantId = tenantId, TicketNumber = "EHC-CONVERT-001",
@@ -299,7 +310,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             TicketId = ticket.Id, LeadId = lead.Id, OpportunityId = opportunity.Id,
             ReceiptNumber = "PDR-CONVERT-001", Amount = 200m, Currency = "GHS",
             Status = ProspectDepositReceiptStatuses.Cleared, ReceivedAt = DateTime.UtcNow };
-        db.AddRange(salesUnit, lead, partner, opportunity, ticket, prospect, receipt);
+        db.AddRange(salesUnit, lead, partner, wonStage, opportunity, ticket, prospect, receipt);
         await db.SaveChangesAsync();
 
         var user = new Mock<ICurrentUserService>();
@@ -320,6 +331,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
         Assert.Equal(EhcPropertyProspectStatuses.Converted, result.Status);
         var savedOpportunity = await db.Opportunities.AsNoTracking().SingleAsync(item => item.Id == opportunity.Id);
         Assert.Equal("Closed Won", savedOpportunity.Stage);
+        Assert.Equal(wonStage.Id, savedOpportunity.StageDefinitionId);
         Assert.Equal(100, savedOpportunity.Probability);
         Assert.NotNull(savedOpportunity.ActualCloseDate);
         Assert.Equal(partner.Id, savedOpportunity.CustomerId);

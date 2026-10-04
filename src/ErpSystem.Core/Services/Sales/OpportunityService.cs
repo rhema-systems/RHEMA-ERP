@@ -215,7 +215,11 @@ public class OpportunityService : IOpportunityService
     public async Task<List<OpportunitySummaryDto>> GetPipelineAsync(Guid? assignedToId = null)
     {
         var query = _opportunityRepo.GetQueryable()
-            .Where(o => o.StageDefinitionId.HasValue && o.StageDefinition != null && !o.StageDefinition.IsClosed);
+            .Where(o =>
+                (o.StageDefinitionId.HasValue && o.StageDefinition != null && !o.StageDefinition.IsClosed) ||
+                (!o.StageDefinitionId.HasValue &&
+                 o.Stage != "Closed Won" &&
+                 o.Stage != "Closed Lost"));
 
         if (assignedToId.HasValue)
             query = query.Where(o => o.AssignedToId == assignedToId.Value);

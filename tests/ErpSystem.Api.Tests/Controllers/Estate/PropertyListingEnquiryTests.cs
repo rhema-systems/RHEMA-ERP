@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.ComponentModel.DataAnnotations;
 using ErpSystem.Api.Controllers.Estate;
 using ErpSystem.Api.Controllers.Ehc;
@@ -84,6 +86,46 @@ public sealed class PropertyListingEnquiryTests
         db.AddRange(asset, portion, partner, new EhcTicketCategory { TenantId = tenantId, Code = "PROPERTY-LISTING", Name = "Property enquiry", AppliesToType = EhcTicketType.Enquiry });
         await db.SaveChangesAsync(); return (asset, portion, partner);
     }
+
+    private async Task<string> SeedVerifiedPublicContactAsync(
+        ApplicationDbContext db,
+        Guid listingId,
+        Guid submissionId,
+        string email)
+    {
+        const string token = "verified-contact-token-for-property-enquiry";
+        var normalizedContact = email.Trim().ToLowerInvariant();
+        var now = DateTime.UtcNow;
+        var contact = new EhcPublicPropertyEnquiryContact
+        {
+            TenantId = tenantId,
+            Channel = "Email",
+            NormalizedContact = normalizedContact,
+            ContactName = "Ama Mensah",
+            LastVerifiedAtUtc = now
+        };
+        var grant = new EhcPublicPropertyEnquiryVerification
+        {
+            TenantId = tenantId,
+            ListingId = listingId,
+            Channel = "Email",
+            ContactHash = Hash(normalizedContact),
+            RequestedAtUtc = now,
+            VerifiedAtUtc = now,
+            ExpiresAtUtc = now.AddMinutes(10),
+            VerificationTokenHash = Hash(token),
+            Contact = contact,
+            ContactId = contact.Id,
+            ConsumedAtUtc = now,
+            ConsumedSubmissionId = submissionId
+        };
+        db.AddRange(contact, grant);
+        await db.SaveChangesAsync();
+        return token;
+    }
+
+    private static string Hash(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
 
     [Theory]
     [InlineData(EstateManagedAssetType.Land, "land-management", true)]
@@ -247,7 +289,8 @@ public sealed class PropertyListingEnquiryTests
             ContactName = "Ama Mensah",
             ContactEmail = "ama@example.com",
             ContactPhone = "+233 20 555 0101",
-            PreferredContactMethod = "InternalWorkflow"
+            PreferredContactMethod = "InternalWorkflow",
+            ContactVerificationToken = "12345678901234567890123456789012"
         };
         var submissionValidationResults = new List<ValidationResult>();
         Assert.False(Validator.TryValidateObject(
@@ -404,18 +447,20 @@ public sealed class PropertyListingEnquiryTests
                 })
             .ReturnsAsync(new EhcTicketDetailDto { TicketNumber = "EHC-PUBLIC-001" });
 
+        var submissionId = Guid.NewGuid();
+        var verificationToken = await SeedVerifiedPublicContactAsync(
+            db, seeded.Portion.Id, submissionId, "ama@example.test");
         var result = await Controller(db, tickets).CreatePublicListingEnquiry(
             seeded.Portion.Id,
             new PublicPropertyListingEnquiryRequestDto
             {
-                SubmissionId = Guid.NewGuid(),
+                SubmissionId = submissionId,
                 Message = "  Please send the deposit and viewing details.  ",
                 ContactName = "  Ama Mensah  ",
                 ContactEmail = "ama@example.test",
-                ContactPhone = "  +233 24 555 0101  ",
                 PreferredContactMethod = "Email",
-                AlternativePhoneNumber = "+233 50 100 2000",
-                ContactReference = "  GH-REF-100  "
+                ContactReference = "  GH-REF-100  ",
+                ContactVerificationToken = verificationToken
             },
             default);
 
@@ -431,8 +476,8 @@ public sealed class PropertyListingEnquiryTests
         Assert.Null(capturedProperty.BusinessPartnerId);
         Assert.Equal("Ama Mensah", capturedProperty.ContactName);
         Assert.Equal("ama@example.test", capturedProperty.ContactEmail);
-        Assert.Equal("+233 24 555 0101", capturedProperty.ContactPhone);
-        Assert.Equal("+233 50 100 2000", capturedProperty.AlternativePhoneNumber);
+        Assert.Null(capturedProperty.ContactPhone);
+        Assert.Null(capturedProperty.AlternativePhoneNumber);
         Assert.Equal("Email", capturedProperty.PreferredContactMethod);
         Assert.Equal("GH-REF-100", capturedProperty.ContactReference);
         Assert.Equal(tenantId, capturedTenantId);
@@ -457,15 +502,18 @@ public sealed class PropertyListingEnquiryTests
         await db.SaveChangesAsync();
 
         var tickets = new Mock<IEhcTicketService>();
+        var submissionId = Guid.NewGuid();
+        var verificationToken = await SeedVerifiedPublicContactAsync(
+            db, seeded.Portion.Id, submissionId, "ama@example.test");
         var result = await Controller(db, tickets).CreatePublicListingEnquiry(
             seeded.Portion.Id,
             new PublicPropertyListingEnquiryRequestDto
             {
-                SubmissionId = Guid.NewGuid(),
+                SubmissionId = submissionId,
                 Message = "Please contact me about this listing.",
                 ContactName = "Ama Mensah",
                 ContactEmail = "ama@example.test",
-                ContactPhone = "+233245550101"
+                ContactVerificationToken = verificationToken
             },
             default);
 

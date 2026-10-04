@@ -215,6 +215,16 @@
           "guardKind": "data-precondition"
         }
       ]
+    },
+    {
+      "sqlFile": "CrmOpportunityCustomerMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20261004010000_LinkOpportunityCustomerToBusinessPartner",
+          "sourceSha256": "709ED4BA4E32E24197CDEC069C114CB7698D0571322A9ED2836229165382E46C",
+          "guardKind": "data-precondition"
+        }
+      ]
     }
   ]
 }

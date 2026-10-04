@@ -150,10 +150,16 @@ public sealed class EnterpriseDashboardProjectionService
 
         var currentOpportunities = _context.Opportunities.AsNoTracking()
             .Where(value => value.TenantId == tenantId && !value.IsDeleted);
-        var openOpportunities = currentOpportunities
+        var governedOpenOpportunities = currentOpportunities
             .Where(value => value.StageDefinitionId.HasValue
                 && value.StageDefinition != null
                 && !value.StageDefinition.IsClosed);
+        var openOpportunities = currentOpportunities
+            .Where(value =>
+                (value.StageDefinitionId.HasValue && value.StageDefinition != null && !value.StageDefinition.IsClosed) ||
+                (!value.StageDefinitionId.HasValue &&
+                 value.Stage != "Closed Won" &&
+                 value.Stage != "Closed Lost"));
         var visiblePipelineOpportunities = currentOpportunities
             .Where(value => value.StageDefinitionId.HasValue
                 && value.StageDefinition != null
@@ -166,6 +172,7 @@ public sealed class EnterpriseDashboardProjectionService
             value.NextFollowUpDate.HasValue && value.NextFollowUpDate.Value <= followUpWindow,
             cancellationToken);
         var openOpportunityCount = await openOpportunities.CountAsync(cancellationToken);
+        var governedOpenOpportunityCount = await governedOpenOpportunities.CountAsync(cancellationToken);
 
         var scopedOpportunityIds = openOpportunities.Select(value => value.Id);
         var activeQuoteCount = await _context.Quotes.AsNoTracking().CountAsync(value =>
@@ -212,7 +219,7 @@ public sealed class EnterpriseDashboardProjectionService
                 EnteredAt = group.Max(history => (DateTime?)history.EnteredAt)
             });
         var stageHealthQuery =
-            from opportunity in openOpportunities
+            from opportunity in governedOpenOpportunities
             join latestEntry in latestStageEntries
                 on new
                 {
@@ -268,9 +275,9 @@ public sealed class EnterpriseDashboardProjectionService
                 IsLost = stage.IsLost,
                 OpportunityCount = amounts.Sum(value => value.Count),
                 QuoteCount = quoteCountsByStage.GetValueOrDefault(stage.Id),
-                PercentageOfActivePipeline = stage.IsClosed || openOpportunityCount == 0
+                PercentageOfActivePipeline = stage.IsClosed || governedOpenOpportunityCount == 0
                     ? 0m
-                    : decimal.Round(amounts.Sum(value => value.Count) * 100m / openOpportunityCount, 2),
+                    : decimal.Round(amounts.Sum(value => value.Count) * 100m / governedOpenOpportunityCount, 2),
                 AverageAgeDays = !hasHealth
                     ? 0m
                     : decimal.Round(Math.Max(0m, (decimal)health.AverageAgeDays), 1),
