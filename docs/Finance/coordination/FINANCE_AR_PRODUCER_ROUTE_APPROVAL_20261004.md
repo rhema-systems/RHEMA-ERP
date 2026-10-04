@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-04-A
-integration_status: ready_for_review
+integration_status: pr_open
 integration_decision: include
 candidate_branch: codex/finance-ar-producer-route-approval
 candidate_head: 3baf1bca8
@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none
 verification_status: passed
 integration_commit: pending
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/345
 ---
 
 # Finance AR trusted producer route at final approval
@@ -54,6 +54,5 @@ pull_request: pending
 
 ## Remaining work
 
-- Push the branch and create a separate PR against `master`.
 - After review, merge and deploy through the normal release path.
 - Ask the reporter to retry final approval on the retained Sales-generated invoice after deployment; do not recreate or edit it merely to bypass the failure.
