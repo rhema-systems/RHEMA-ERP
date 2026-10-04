@@ -22,6 +22,10 @@ the module, with every discovered issue fixed, and ruled that nothing is deferre
 has not started (the user: "don't start the actual development yet").
 
 **START HERE:**
+0. **Re-checked against HEAD 1163bbc47 on 2026-10-04** (after the travel final closure and master merge
+   #13 landed on hrdev; § 3c). The module's own backend and screens did not change. F-27 is already in
+   HEAD — lane 5's item is a browser re-test, not a build. One new finding, F-57 (lane 5). The leave and
+   Finance references are updated to HEAD; the drill service is named correctly (lane 2).
 1. § 1a is settled. **§ 1b holds the nine decisions raised by the review.** D-12 (recurring events
    are a light series) and D-17 (no milestone link) are settled, and with them what the migration
    contains. **Seven remain pending the user** — D-10, D-11, D-13, D-14, D-15, D-16 and D-18 — each
@@ -106,16 +110,17 @@ are pending; each is needed before the lanes in its "Blocks" column, and none bl
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
-| **5** | Screens: the shared select fix, removes, event page, diaries, landing, site picker | — | ☐ | browser walk |
+| **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13, D-16 | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
 
 ---
 
-## 3. The headline findings (verified in source on 2026-10-01, HEAD 9f4b3206c)
+## 3. The headline findings (verified in source on 2026-10-01, HEAD 9f4b3206c; re-checked at HEAD 1163bbc47 on 2026-10-04 — § 3c)
 
 Beyond the § 21 ledger. File references are to `src/ErpSystem.Core/Services/HR/CompanyScheduleService.cs`
-unless stated.
+unless stated. The service, repository, mapping and controller are unchanged at 1163bbc47, so every
+line reference into them still holds; references elsewhere are given at 1163bbc47.
 
 ### 3a. From the first read
 
@@ -152,9 +157,9 @@ unless stated.
 ### 3b. Found by the review (2026-10-01)
 
 **Cross-cutting**
-- **F-27 · lane 5 · HR-wide** The shared `SelectField` (`frontend/src/components/hr/employee/tabs/fields.tsx`) writes a blank into the form when its value arrives before its async options. Inside a `<form>`, Radix Select 2.2.6 keeps a hidden native `<select>` (`SelectBubbleInput`): when the value changes it sets the native value and dispatches `change`; with no `<option>` for that value yet the native value reads back `''`, Radix calls `onValueChange('')`, and `SelectField` stores it. Required pickers show the placeholder (the room's site, F-19); **optional pickers (`allowEmpty`) clear, and Save writes the blank to the database**. Intermittent: with the option list still cached the options exist first. Confirmed in the library code, not yet reproduced in a browser.
-- **F-28 · lane 1** Leave's holiday set is tenant-wide: `LeaveService.GetChargeableDaysAsync` takes no employee, `LeaveUsageReader` loads one set and reuses it for every employee, and `LeaveReminderService` uses one set for every plan. A per-employee closure cannot be unioned into them, as the first draft planned.
-- **F-29 · lane 1** `IHrWorkingDayCalculator` ignores closures, so the discipline statutory clocks count a company-wide shutdown as working days.
+- **F-27 · lane 5 · HR-wide** The shared `SelectField` (`frontend/src/components/hr/employee/tabs/fields.tsx`) writes a blank into the form when its value arrives before its async options. Inside a `<form>`, Radix Select 2.2.6 keeps a hidden native `<select>` (`SelectBubbleInput`): when the value changes it sets the native value and dispatches `change`; with no `<option>` for that value yet the native value reads back `''`, Radix calls `onValueChange('')`, and `SelectField` stores it. Required pickers show the placeholder (the room's site, F-19); **optional pickers (`allowEmpty`) clear, and Save writes the blank to the database**. Intermittent: with the option list still cached the options exist first. Confirmed in the library code, not yet reproduced in a browser. **✅ In HEAD since 2026-10-02:** the travel final closure met the same defect on its policy form (its finding C6) and landed this plan's guard, `if (next === '') return;` (`fields.tsx:340`, commit `19f20f2f2`). Lane 5 re-tests the room edit page in a browser; nothing to build.
+- **F-28 · lane 1** Leave's holiday set is tenant-wide: `LeaveService.GetChargeableDaysAsync` takes no employee, `LeaveUsageReader` loads one set and reuses it for every employee, and `LeaveReminderService` uses one set for every plan. A per-employee closure cannot be unioned into them, as the first draft planned. *At 1163bbc47: `GetChargeableDaysAsync` `LeaveService.cs:3941` (the holiday read :3949; `CalculateLeaveDaysAsync` :3956, called from create, update, recall, extension and reschedule); `LeaveUsageReader.cs:82`; `LeaveReminderService.cs:966`. The travel closure added `MarkTravelConflictsAsync` to LeaveService, which shifted every line after :1804 and does not touch day-counting.*
+- **F-29 · lane 1** `IHrWorkingDayCalculator` ignores closures, so the discipline statutory clocks count a company-wide shutdown as working days. *At 1163bbc47 the calculator has a new consumer: travel's `StaffTravelAttendancePosting` (`:171`, travel lane 9a) skips its holidays when it posts trip days to attendance as on duty. Once company-wide non-working closures join that set (lane 1), travel will stop posting on-duty days on a closure as well, the same way it treats holidays. Lane 1's source check confirms that is wanted.*
 - **F-30 · lane 2** Most repository list reads (events by range, organiser, status, category and upcoming; rooms by location, available and active; bookings by room, booker, range, status and pending; milestones; closures) load every tenant's rows and filter in memory. The guide's "C-28 is the only unscoped read" is wrong.
 
 **Notifications**
@@ -191,7 +196,64 @@ unless stated.
 **Data, documents, fiscal**
 - **F-54 · lanes 2, 6** Scenario 110 attaches event files as JSON paths, which breaks once attachments are uploads; existing path-only rows cannot be downloaded, because `HrDocumentDownload`'s legacy fallback knows only older folders.
 - **F-55 · lane 4** The free-text `CompanyProfile.LogoUrl` is substituted into offer, probation, asset and interview letters and emails — the hazard the seal and signature uploads were built to remove — and any `HR.Company.Write` holder can set it.
-- **F-56 · lane 4** D-6 misses a consumer: the manpower budget form computes its fiscal period from HR's start month (`fiscalPeriodFor`). And Finance's fiscal-year read documents a Finance permission it does not yet enforce, so a screen calling it directly would break the day it does.
+- **F-56 · lane 4** D-6 misses a consumer: the manpower budget form computes its fiscal period from HR's start month (`fiscalPeriodFor`). And Finance's fiscal-year read documents a Finance permission it does not yet enforce, so a screen calling it directly would break the day it does. *At 1163bbc47 (`src/ErpSystem.Api/Controllers/Finance/FiscalPeriodController.cs`): `GET fiscal-years` :61, `fiscal-years/{id}` :90 and `fiscal-periods` :350 still document "Requires Finance.Read" and carry only the class-level `[Authorize]`; the merge added `GET fiscal-years/{id}/book-close-cycles` (:292), which does enforce `ViewFinance`, so the enforcement is arriving. `fiscalPeriodFor` is `ManpowerBudgetFormFields.tsx:21`, used there at :249 and by `manpower-budgets/new/page.tsx:49-51`.*
+
+### 3c. Re-checked at HEAD 1163bbc47 (2026-10-04)
+
+The plan was committed in `fe14a9ca0` on top of 9f4b3206c. hrdev then took the travel final closure
+(lanes 1c–10) and master merge #13 (`1163bbc47`, PRs #276–#350). The re-check compared 9f4b3206c with
+HEAD file by file.
+
+**Unchanged — every finding stands as written:** `CompanyScheduleService.cs`,
+`CompanyScheduleRepository.cs`, `CompanyScheduleMappingExtensions.cs`, `CompanyScheduleController.cs`,
+every `frontend/src/app/hr/company-schedule/` screen, `HrWorkingDayCalculator.cs`,
+`HrAudienceResolver.cs`, `LeaveUsageReader.cs`, `LeaveReminderService.cs`,
+`IControlledFileUploadService.cs`, `HrAttachmentUpload.cs`, `HrAnnouncementService.cs`. Both
+migration templates lane 0 names are still in the tree.
+
+**Changed:**
+- **F-27 is fixed in HEAD** (travel C6, `19f20f2f2`; § 3b). Lane 5 is a browser re-test.
+- **`LeaveService.cs`** gained the travel-conflict marker; its line numbers moved (F-28 updated).
+  Day-counting is untouched.
+- **Finance's fiscal controller** changed: the year-end close is now per accounting book (an exact
+  book and an idempotency key; `GET fiscal-years/{id}/book-close-cycles`, on `ViewFinance`), and
+  `FiscalYears` gained a unique `(TenantId, Year)` index (`20261001231335_AddFiscalYearTenantYearInvariant`).
+  Its three reads are still unenforced (F-56 updated). For lane 4 this means one Finance year per
+  year label in a tenant, so `IHrFiscalCalendar`'s lookup is unambiguous. **The card's "status" is
+  now a lane 4 source-check question:** a year's own `Status` / `IsClosed` against its per-book close
+  cycles.
+- **`ApplicationDbContext.HR.cs`** gained performance, probation and travel configuration. Nothing
+  in it touches this module; lane 0's additions go beside the company-schedule block as planned.
+- **A new working-day consumer**, travel's attendance posting (F-29 updated).
+
+**Corrected in the plan:**
+- **Lane 2, C-51:** there is no `EmergencyDrillService`. Drills are recorded by `SheEmergencyService`
+  (`src/ErpSystem.Core/Services/HR/SafetyEmergencyGovernanceServices.cs`: `AddDrillAsync` :294,
+  `UpdateDrillAsync` :312, `DeleteDrillAsync` :323).
+- **Lane 2, notifications:** the travel closure built `StaffTravelNotices` (travel lane 8a,
+  `src/ErpSystem.Core/Services/HR/StaffTravelNotices.cs`). It is a closer model for this module's
+  per-event notices to named people than the announcement broadcast:
+  - one topic per event and audience;
+  - in the app and by email for a person with a login, by email alone for a person without one, and
+    the desk told when nobody can be reached;
+  - never told of one's own act;
+  - never failing the act;
+  - tenant-explicit for the sweep.
+
+  `HrPendingApprovers` resolves the people an engine stage is waiting on (D-10).
+
+**New:**
+- **F-57 · lane 5** `frontend/src/components/layout/sidebar-hr-gates.test.ts` fails on
+  `/hr/company-schedule/my-schedule` (`sidebar.tsx:1328`). The entry is deliberately ungated, because
+  the server takes the employee from the token (round 4, D5). But it was never added to the test's
+  `KEEP_OPEN` list, and the test's own rule says a self surface must be listed there with its reason.
+  The travel closure recorded the failure as pre-existing and left it. `/hr/leave/calendar` fails the
+  same test; that entry belongs to leave and is not this plan's. Lane 7's Company Calendar entry and
+  lane 5's opened Team Schedule entry (R4-10B.3) must join `KEEP_OPEN` in the same change that ungates
+  them.
+
+**Migration state:** UAT holds 142 history rows, the repo's chain exactly, since merge #13 was applied
+on 2026-10-04 with the user's go. Lane 0's migration will be the only one pending on UAT.
 
 ---
 
@@ -256,7 +318,8 @@ the user's go.
 - [ ] **Leave, redesigned by the review (F-28).**
       - Company-wide closures that are not working days join `IHrWorkingDayCalculator`'s holiday set, so
         leave, the discipline statutory clocks (F-29) and the diary agree with no change at those call
-        sites.
+        sites. So does travel's on-duty posting (`StaffTravelAttendancePosting`, § 3c). The source
+        check confirms that a trip day on a closure should not post as on duty.
       - Site and unit closures become a per-employee overlay: the employee is threaded through
         `GetChargeableDaysAsync` / `CalculateLeaveDaysAsync`, and `LeaveUsageReader` and
         `LeaveReminderService` keep the company set once plus an overlay per employee.
@@ -361,8 +424,11 @@ the user's go.
 
 **Notifications** (F-31…F-36; *review: the first draft only reworded the Reminders card*)
 - [ ] Every company-schedule notice also goes **in-app** to internal recipients: an
-      `EntityActivityEvent` carrying `RecipientUserIds` on topics seeded with in-app on — the pattern in
-      `HrAnnouncementService.NotifyAudienceAsync`.
+      `EntityActivityEvent` with the recipients in `Data["RecipientUserIds"]`, on topics seeded with
+      in-app on — the pattern in `HrAnnouncementService.NotifyAudienceAsync`. *At 1163bbc47 a closer
+      model exists, travel's `StaffTravelNotices` (§ 3c): one notices class owning every topic, login /
+      email-only / unreachable handled, the actor left out, never failing the act. Choose between the
+      two at the source check.*
 - [ ] Deliveries are counted from the email result; the Reminders card and the toasts show issued and
       delivered (R4-6.3).
 - [ ] Invitations wait while an event awaits approval and go on approval; "Send reminder now" and
@@ -397,7 +463,9 @@ the user's go.
       `CreateEventAttachmentDto` deleted; `AttachmentsPanel` becomes an upload panel with download
       links (the recruitment requisition pattern). **Legacy path-only rows read "reference only — no
       file stored", with no download link (F-54).**
-- [ ] (D-9, C-51) `SourceEntityType` / `SourceEntityId`: `EmergencyDrillService` creates a company
+- [ ] (D-9, C-51) `SourceEntityType` / `SourceEntityId`: `SheEmergencyService` (`AddDrillAsync` /
+      `UpdateDrillAsync` / `DeleteDrillAsync` in `SafetyEmergencyGovernanceServices.cs`; *the first
+      text named an `EmergencyDrillService` that does not exist*) creates a company
       event (category CompanyEvent, type Internal, organiser = the drill's coordinator, site = the
       drill's location, all-day on `NextDrillScheduledDate`, name "Emergency drill: plan name") when a
       drill is recorded with a next date, and moves it when that date changes; the event page shows
@@ -455,7 +523,9 @@ the user's go.
       permission it does not yet enforce (F-56)*. The two HR screens are replaced by one read-only
       **Fiscal calendar** card on it (years, status, periods; "Set up and closed in Finance", a link to
       Finance's screen). The HR `fiscal-years` / `periods` endpoints and `FiscalYearService` are removed
-      from the controller and registration; tables and DTOs untouched this slice.
+      from the controller and registration; tables and DTOs untouched this slice. *At 1163bbc47 Finance
+      closes a year per accounting book (§ 3c): what the card calls a year's status — the year's own
+      `Status` / `IsClosed`, or its book-close cycles — is settled at this lane's source check.*
 - [ ] `IHrFiscalCalendar` answering the fiscal year for a date from Finance's years, falling back to
       `FiscalYearStartMonth` only when Finance has none; `StaffRequisitionService` uses it, **and so
       does the manpower budget form's fiscal period (`fiscalPeriodFor`, F-56)**; the settings screen
@@ -469,14 +539,17 @@ the user's go.
 
 **State:** *(filled when it lands)*
 
-### Lane 5 — Screens (C-1, C-16, R4-3.1, R4-6.1, R4-6.2, R4-6.3, R4-6.6, R4-10A.1, R4-10A.3, R4-10B.1…R4-10B.4, F-19…F-23, F-26, F-27)
+### Lane 5 — Screens (C-1, C-16, R4-3.1, R4-6.1, R4-6.2, R4-6.3, R4-6.6, R4-10A.1, R4-10A.3, R4-10B.1…R4-10B.4, F-19…F-23, F-26, F-27, F-57)
 
-- [ ] **The shared select (F-27), corrected by the review.** Reproduce first: a cold load of the room
-      edit page with the location list not cached. Then, in `SelectField`'s `onValueChange`, ignore
-      `next === ''` — Radix refuses an empty option value, so a blank can only come from the hidden
-      native select, and `NONE_VALUE` is how a real "none" is chosen. One guard fixes every HR form at
-      once; the room edit page also seeds the form only once both the room and the locations are
-      loaded. *The first draft's "key the Select on the option count" would not have worked.*
+- [ ] **The shared select (F-27) — a browser re-test; the guard is in HEAD.** The review's fix, ignoring
+      `next === ''` in `SelectField`'s `onValueChange`, landed with the travel final closure (C6,
+      `19f20f2f2`, `fields.tsx:340`). Re-test: a cold load of the room edit page with the location list
+      not cached shows the site, and a Save keeps it; an optional picker on the event edit page survives
+      a cold load and a Save. Only if the site is still blank: the room edit page seeds the form once
+      both the room and the locations are loaded.
+- [ ] **(F-57)** `/hr/company-schedule/my-schedule` joins `KEEP_OPEN` in `sidebar-hr-gates.test.ts`
+      with its reason (self-service, keyed on the caller's token, round 4 D5), so the test passes for
+      this module's entries. The opened Team Schedule entry (R4-10B.3, below) joins in the same change.
 - [ ] `allowRemove={canDelete}` on the attachments and tasks panels and the closures / milestones tabs;
       the participants and attendance panels offer remove on `Write` (lane 2); room Delete hidden
       without `HR.Company.Admin`.
@@ -521,7 +594,8 @@ the user's go.
       participant row's `EmployeeId` is the caller's (D-8), **and refused on a cancelled or completed
       event and after the RSVP deadline**; the organiser is told of each answer. On a series it answers
       one date or all of them (D-12). The HR-desk `respond` door is unchanged.
-- [ ] `/hr/company-schedule/calendar` (sidebar "Company Calendar", no permission) and `/me/calendar`
+- [ ] `/hr/company-schedule/calendar` (sidebar "Company Calendar", no permission — **listed in
+      `KEEP_OPEN` with its reason, F-57**) and `/me/calendar`
       in the portal: month and week views as a hand-built grid with bands per entry broken at week
       boundaries (the `LeaveCalendar.tsx` approach; no new dependency); kind filters; legend;
       click-through; "Today"; an invitation entry offers Accept / Decline / Tentative to its invitee;
@@ -608,7 +682,8 @@ One batch, lane 0. D-12 and D-17 settled its content — no series table, no mil
 and its data steps wait on the UAT counts lane 0 takes first. The user scaffolds (`ef.ps1 migrations add CompanyScheduleFinalReview`); the body is
 rewritten as guarded SQL; the Designer and snapshot are kept; the user builds; applied to UAT with the
 built DLL's `apply-migrations` after the user's go. Proof: `__EFMigrationsHistory` gains the row and
-every new column, index and table exists on UAT.
+every new column, index and table exists on UAT. *UAT holds 142 history rows at 1163bbc47, the repo's
+chain exactly, so this migration is the only one pending there (§ 3c).*
 
 **State:** *(filled when it lands)*
 
@@ -622,8 +697,8 @@ every new column, index and table exists on UAT.
 - `node run-final-review.mjs` twice from different states; then `run-slice0..3.mjs` and
   `run-round4-d.mjs`. After each run, count what it wrote (notifications by recipient, minted logins,
   minted leave types) before calling it clean.
-- Browser walk: a cold load of the room edit page (F-27) before and after the fix; create a room and
-  edit it (site shown); an optional picker on the event edit page survives a cold load and a Save;
+- Browser walk: a cold load of the room edit page (F-27; the guard is in HEAD, so there is no "before"
+  to see); create a room and edit it (site shown); an optional picker on the event edit page survives a cold load and a Save;
   create each closure type (form shape, server refusals); upload two documents to a milestone and
   download one; the calendar as `hr.head` and as a plain staff login, including the staff event view
   and a reply; if D-14, an invitation's calendar file opens in Outlook.
@@ -639,6 +714,8 @@ every new column, index and table exists on UAT.
 - **New from the first read (26):** F-1…F-26 (§ 3a). The review found F-4 and F-5 overstated and
   F-19's cause wrong; all three stay, annotated.
 - **New from the review (30):** F-27…F-56 (§ 3b).
+- **At HEAD 1163bbc47 (re-check, 2026-10-04; § 3c):** all of the above stand, except **F-27, FIXED in
+  HEAD** by the travel final closure (C6). **New (1):** F-57.
 
 ---
 
@@ -667,3 +744,13 @@ every new column, index and table exists on UAT.
   table) and **D-17** (the milestone link dropped; C-41 closed as decided), both as recommended. Lane 0
   needs no series table and loses the two milestone-link columns. Seven decisions remain pending
   (D-10, D-11, D-13…D-16, D-18); none blocks lane 0, which starts with the read-only UAT counts.
+- **2026-10-04** — **Re-checked against HEAD 1163bbc47** (the travel final closure and master merge
+  #13 had landed since `fe14a9ca0`); § 3c. The module's backend and screens are unchanged, so every
+  finding and line reference into them stands.
+  - F-27 is fixed in HEAD (travel C6), so lane 5's item becomes a browser re-test.
+  - F-28, F-29 and F-56 carry the 1163bbc47 references.
+  - Finance's per-book year close becomes a lane 4 source-check question.
+  - Lane 2 names the real drill service (`SheEmergencyService`) and points at travel's
+    `StaffTravelNotices` as the closer notice model.
+  - New: F-57, the sidebar gate test (lane 5, with lane 7's entry).
+  - No decision changed. Lane 0 starts.
