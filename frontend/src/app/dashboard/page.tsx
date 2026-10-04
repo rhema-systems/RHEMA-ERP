@@ -51,6 +51,10 @@ import { useAuth } from '../../hooks/use-auth';
 import { getAuthenticatedHomePath, getExternalPortalPath, isCandidateUser, isConsultantClientUser, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
 import { formatCurrencyAmount } from '../../lib/currency';
+import {
+  getDashboardLoadErrorPresentation,
+  isDashboardAccessError,
+} from '../../lib/dashboard-load-error';
 import { authService } from '../../services/auth';
 import { dashboardService, getUnavailableDashboardModules, resolveDashboardReportingCurrency } from '../../services/dashboard';
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
@@ -243,6 +247,7 @@ export default function Dashboard() {
     enabled: !shouldRouteToExternalPortal && rangeQuery !== null,
     staleTime: 60_000,
     placeholderData: (previousData) => previousData,
+    retry: (failureCount, error) => !isDashboardAccessError(error) && failureCount < 2,
   });
 
   const { data: systemHealth, error: systemHealthError } = useQuery({
@@ -272,15 +277,20 @@ export default function Dashboard() {
   const displayName = user?.firstName || storedUser?.firstName || user?.username || storedUser?.username || 'User';
 
   if (dashboardError && !data) {
+    const errorPresentation = getDashboardLoadErrorPresentation(dashboardError);
     return (
       <DashboardLayout>
         <Alert variant="destructive">
-          <AlertTriangle className="h-4 w-4" />
+          {errorPresentation.accessDenied
+            ? <ShieldAlert className="h-4 w-4" />
+            : <AlertTriangle className="h-4 w-4" />}
           <AlertDescription className="flex items-center justify-between gap-4">
-            <span>The enterprise dashboard could not be loaded. Please retry.</span>
-            <Button variant="outline" size="sm" onClick={() => refetch()}>
-              Retry
-            </Button>
+            <span>{errorPresentation.message}</span>
+            {errorPresentation.canRetry && (
+              <Button variant="outline" size="sm" onClick={() => refetch()}>
+                Retry
+              </Button>
+            )}
           </AlertDescription>
         </Alert>
       </DashboardLayout>
