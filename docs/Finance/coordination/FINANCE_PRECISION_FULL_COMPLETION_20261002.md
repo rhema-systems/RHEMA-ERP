@@ -87,6 +87,6 @@
 - Integration reconciliation preserves Procurement-owned commercial UOM increments and evidence at `decimal(18,6)`; no four-decimal narrowing was accepted. The RFQ quote-item shadow UOM relationship was also retained to avoid a destructive generated drop.
 - The model snapshot was reconciled to the authored migrations. A definitive `dotnet ef migrations has-pending-model-changes` check now exits 0 with no pending changes.
 - Combined verification passed: solution/API builds; 2/2 relational AR/AP JPY/KWD/CLF tests; 24/24 commercial UOM tests; 72/72 guard/customer/calendar/journal tests; 74/74 settings/tax/cash-rounding/migration tests; 22/22 precision-policy tests; 52/52 unit-accounting/UOM tests; 18-file frontend lint; and 5/5 recurring-journal frontend tests.
-- All migrations remain authored and unapplied. No database was contacted or mutated.
+- All migrations remain authored and unapplied. No migration was applied to a UAT, development, or user database; the relational precision tests used isolated LocalDB databases created and deleted by their fixtures.
 - Consolidated integration reconciliation commit: `28dc3449656de9fa26a47d79b65e5360ac34e897`.
 - Consolidated PR: https://github.com/rhema-systems/RHEMA-ERP/pull/343.

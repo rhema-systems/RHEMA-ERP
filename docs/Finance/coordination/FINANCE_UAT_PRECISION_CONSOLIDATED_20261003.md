@@ -50,7 +50,7 @@ Included and **unapplied**: `20261002143000_EnableInvoiceCashRoundingPosting`,
 `20261002213000_FinancePrecisionStorageCorrections`,
 `20261003070000_AddFinanceRoundingEvidenceReconciliation`, and
 `20261003090000_AddSalesCommercialQuantityAuthorities`.
-Migration IDs are ordered with no duplicate 14-digit IDs. No database was mutated.
+Migration IDs are ordered with no duplicate 14-digit IDs. No migration was applied to a UAT, development, or user database; the relational tests used uniquely named LocalDB databases created with `EnsureCreatedAsync` and removed with `EnsureDeletedAsync`.
 
 ## Verification evidence
 
