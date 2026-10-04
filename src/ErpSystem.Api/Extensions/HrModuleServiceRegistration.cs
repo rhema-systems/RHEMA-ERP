@@ -807,6 +807,8 @@ public static class HrModuleServiceRegistration
         // the separation service it feeds rather than with the asset services it reads, so that the
         // one place this crosses areas is visible from the side that consumes it.
         services.AddScoped<AssetCustodyClearanceBridge>();
+        // Travel final closure, lane 9 (D-56…D-58): staff travel's side of a separation.
+        services.AddScoped<StaffTravelSeparationBridge>();
         // The sixth reminder engine in the system, after SHE, movements, discipline, travel and
         // probation. Same shape: a run header, one dispatch row per reminder, a dedupe key.
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();

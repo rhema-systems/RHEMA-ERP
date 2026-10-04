@@ -104,7 +104,10 @@ baseline (D-13); lane 0 was built the same day.**
    reminders 222, the regression unchanged twice — committed `67cb65f83`; its first sweep put Kumasi's two days on duty.
    **9b** the leave warning (D-55) — on the leave request page, and at the user's word as a badge on the approvals list
    (proven end to end on a scratch copy, and in a browser) — touchpoints 55/55 twice, the regression unchanged twice —
-   **staged 2026-10-04**. Next: **9c** (separation, D-56…D-58), then **9d** (the payroll hand-off). **From 9c on the run cadence
+   committed `c2e21c5be`. **9c** separation (D-56…D-58) — the clearance's Travel block, the approval's cascade, no trip
+   after the leaving day, the recovered advance settled in travel without a posting; touchpoints 71/71 twice, the cascade
+   and the release 36/36 twice on a scratch copy, one regression pass unchanged — **staged 2026-10-04**. Next: **9d** (the
+   payroll hand-off), then the lane's close (two regression passes). **From 9c on the run cadence
    is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
    (`tools/run-regression.sh <tag> [2]`).
 13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
@@ -207,7 +210,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
 | **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
-| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b staged 2026-10-04 (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser) |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c staged 2026-10-04 (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged) |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
@@ -3078,6 +3081,73 @@ unchanged — portal **177** (563921, 260088), compliance **96** (622332, 317704
 user then set the cadence above (§ 7) from 9c on. After the runs: the demo's four trips as they were, attendance at 56 (the
 two on duty Kumasi's), no planted leave, fixture row, login or mail setting left.
 
+**As built — slice 9c, separation (2026-10-04).** No migration. Travel's side lives in one class,
+`StaffTravelSeparationBridge` (Core, scoped, tenant-explicit) — travel decides what counts as open and how an advance
+settles; separation owns the form, the approval and the settlement, as `AssetCustodyClearanceBridge` keeps HR Assets'
+answer in HR Assets.
+- *The Travel block (D-56, V6).* `GetClearanceAsync` fills `SeparationClearanceDto.Travel`, read live: every trip of the
+  leaver not cancelled, rejected or closed, with its live bookings (`StaffTravelBookingRules.IsLive`, all four kinds);
+  every advance not fully settled, written off, rejected or cancelled; every claim not paid or rejected. Each trip says what
+  happens to it — a draft, submission or trip sent back *"Cancelled when the separation is approved"*, or, once it is,
+  *"Not cancelled by the separation's approval — cancel it on its page"*; approved and under way *"Goes ahead unless the
+  travel desk cancels it — bookings and money may hang off it"*; completed *"…the trip closes once they have"*. An advance
+  not paid out is *"withdrawn with its trip"*; cash out is *"deducted from the final settlement, and settled in travel when
+  the settlement is released"*. Advisory: no clearance line, nothing in `BlockedReason` or `CanComplete`. The clearance
+  page shows it as a **Staff travel** card under the items (`SeparationTravelPanel`), each trip and claim opening on the
+  desk's own page. Frontend type-check (scoped) and lint clean.
+- *The approval's cascade (D-57, V8).* After the separation's save, once its status is **Approved** — in `ApproveAsync`
+  (the last stage, not an intermediate one) and in `SubmitAsync` (a published route that approves at submission) —
+  `CancelLeaverTripsAsync` cancels the leaver's Draft, Submitted and ReturnedForRevision trips one by one through
+  `IStaffTravelRequestService.CancelAsync` (which withdraws the approval in progress, holds and undisbursed advances,
+  gives up attendance and tells the traveller and the desk), reason *"Left the organisation on {d MMM yyyy} — separation
+  SEP-…"*, by the approver as an employee. Best-effort: a refusal is logged and the trip stays, named in the Travel block;
+  a login with no employee record cancels nothing and logs why. ⚠ The mobile inbox (`/workflow/inbox` → `mobile/actions`)
+  completes a step through the engine alone and syncs no record's status — a separation approved there stays
+  PendingApproval, so its trips are not cancelled either; that path bypasses every adapter-based area alike, and is not
+  travel's to fix.
+- *No trip after the leaving day (D-57).* `StaffTravelRequestService.RequireNotGoneByAsync`, at create and submit:
+  *"{name} leaves the organisation on {dd MMM yyyy} under an approved separation, so a trip starting on {dd MMM yyyy}
+  is not raised"* (or *submitted*). The day is the separation's effective date, else its last working day, for any
+  separation from Approved to Completed; a trip on the day itself is allowed. Once the separation completes the employee
+  record refuses anything anyway (lane 1).
+- *The recovered advance (D-58, V7).* `ApproveSettlementReviewAsync` — Internal Audit's release — calls
+  `ApplyFinalSettlementRecoveryAsync` inside the settlement's posting callback, before its save: each
+  `TravelAdvanceRecovery` line naming an advance (`SourceTravelAdvanceId`) settles that advance in travel by what it
+  deducted, up to what is still out; the status follows (`StaffTravelAdvanceRules.SettlementStatus`), and the trip carries
+  an internal note — *"Advance TA-…: GHS n recovered from the final settlement of separation SEP-…, released on {day}.
+  Settled in travel without a travel posting — the settlement's journal is the posting."* No travel posting: lane 3's
+  refund would credit the staff advances receivable a second time. It commits or rolls back with Finance's journal. ⚠
+  **Idempotent by construction:** the posting adapter runs the callback inside EF's execution strategy, which may run it
+  again after a transient failure, and a rollback leaves tracked values changed — so the amounts are read as the database
+  holds them (no tracking) and set absolutely, never incremented in place.
+- *Guide.* Chapter 16 — separation joins the places travel shows up outside its menu.
+- *Harness.* `run-final-touchpoints.mjs` §8 on UAT: a separation for the fixture traveller raised as a draft through
+  separation's API and marked approved in SQL (submitted, it would reach UAT's Managing Director); its clearance's Travel
+  block — an approved trip going ahead, a draft named as not cancelled, an advance not paid out, nothing closed, nothing
+  holding the clearance; the draft refused at submit and a trip after the day refused at create, one before it raised.
+  Clean-up soft-deletes the separation. The cascade and the release, which need the MD and Internal Audit, are proven end
+  to end on a scratch copy by `tools/prove-separation-travel-scratch.mjs` (refuses unless `DEMO_DB` names a scratch copy).
+
+**Suites (9c).** No migration (set-diff 112 = 112 before the API's start). The scheduled run **15/15** (328839).
+`run-final-touchpoints.mjs` **55 → 71** (§8): **71/71 twice** (042915, 127588). **The cascade and the release, end to end on a
+scratch copy** (`ErpSystemDB_TravelL9cScratch`, a COPY_ONLY restore of UAT, the API started on it):
+`prove-separation-travel-scratch.mjs` **36/36 twice** (246573, 297579) — trips A and B approved (A with an advance of 400
+approved and paid out by the two officers), D a draft, S submitted, R sent back; a separation raised, submitted and approved
+by a minted Managing Director: D, S and R cancelled with *"Left the organisation on 3 Nov 2026 — separation SEP-…"*, S's
+approval withdrawn, A and B left; a trip after the day refused, one before it raised; the clearance's Travel block listing
+A, B and the new draft (named as not cancelled by the approval) and the advance as cash out, holding nothing; clearance
+completed, the settlement deducting 400, finalised, released by a minted Internal Auditor — the advance **fully settled,
+400 settled, nothing out**, the internal note on A, **no `TRAVEL_ADVANCE_REFUNDED` record**, the settlement's own
+`SEPARATION_SETTLEMENT_RELEASED` record, and the Travel block no longer listing the advance. The API's log: *"3 of the
+leaver's 3 trip(s) not yet approved cancelled"* both times, no warning. The servers stopped, the copy dropped, its backup
+deleted. **The regression — one pass, the cadence's first use** (`tools/run-regression.sh 9c`, 15 minutes, all unchanged):
+portal **177** (201138), compliance **96** (235873), bookings **148** (263254), money **288** (287992), policy **131** (336658),
+lifecycle **257** (354538), truth **118** (431559), approvals **123** (439996), fleet **194** (472812), touchpoints **71**
+(526168); reminders after it **222/222** (595358). The re-delete pass found nothing to re-delete after the pass or after
+reminders — not by construction: the pass deleted 138 trips carrying 2,675 notices, none live afterwards. After the runs: the
+demo's four trips as they were (Kumasi approved with its two days on duty, two awaiting approval, Sebrepor completed),
+attendance at 56, no separation or trip of the day's runs left live.
+
 ### Lane 10 — Docs, demo pack, harness, hand-offs
 
 - [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
@@ -3395,3 +3465,10 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   without opening a request — proven end to end on a scratch copy of UAT (a real leave request, routed by leave's live
   route to every Manager-role holder) and in a browser (Edge, the badge and its tooltip on the row). Touchpoints 55/55
   twice; the regression unchanged twice. The user set the run cadence from 9c on (§ 7). Staged. Next: 9c.
+- **2026-10-04, later** — The user committed 9b (`c2e21c5be`). **Slice 9c built** — separation (D-56, D-57, D-58): the
+  clearance's Travel block, the approval cancelling the leaver's trips not yet approved, travel refusing a trip after the
+  leaving day, Internal Audit's release settling the advance the settlement recovered — with no travel posting, and
+  idempotent under the posting's retry. Touchpoints 71/71 twice on UAT (a planted approved separation); the cascade and
+  the release 36/36 twice end to end on a scratch copy. The first pass at the new cadence: one regression pass, unchanged,
+  in 15 minutes (a post-slice run at the old cadence had reached about 75). Found on the way: the mobile inbox approves through the engine
+  alone and syncs no record's status, for every adapter-based area (as built, 9c). Staged. Next: 9d.

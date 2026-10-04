@@ -29,6 +29,7 @@ import {
 import { separationService } from '@/services/hr/separation.service';
 import { ExitInterviewTab } from '@/components/hr/separations/exit-interview-tab';
 import { SeparationMedicalBoardPanel } from '@/components/hr/separations/SeparationMedicalBoardPanel';
+import { SeparationTravelPanel } from '@/components/hr/separations/SeparationTravelPanel';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
@@ -566,6 +567,9 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                   ))}
                 </CardContent>
               </Card>
+
+              {/* Travel final closure, lane 9 (D-56): the leaver's staff travel — advisory, outside the gate. */}
+              <SeparationTravelPanel travel={clearance.travel} />
 
               {clearance.canComplete && (
                 <Button onClick={() => run(() => separationService.completeClearance(id))} disabled={act.isPending}>

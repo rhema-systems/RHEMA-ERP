@@ -216,6 +216,21 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         return traveller;
     }
 
+    /// <summary>
+    /// Lane 9 (O-14's separation half, D-57): a trip that starts after the traveller leaves under an approved separation is
+    /// not raised or submitted. <see cref="RequireTravellerAsync"/> refuses only once the separation has completed and the
+    /// record says so; between its approval and that, the leaving day is already known.
+    /// </summary>
+    private async Task RequireNotGoneByAsync(
+        Guid tenantId, TravellerFacts traveller, DateOnly tripStart, string verb, CancellationToken cancellationToken)
+    {
+        if (await StaffTravelSeparationBridge.LeavesBeforeAsync(_unitOfWork, tenantId, traveller.Id, tripStart, cancellationToken)
+            is DateOnly gone)
+            throw new InvalidOperationException(
+                $"{traveller.Name} leaves the organisation on {gone:dd MMM yyyy} under an approved separation, so a trip starting " +
+                $"on {tripStart:dd MMM yyyy} is not {verb}.");
+    }
+
     /// <summary>What the server decides about a trip: the traveller's unit, and whether it crosses a border.</summary>
     private static void ApplyServerFacts(StaffTravelRequest entity, TravellerFacts traveller)
     {
@@ -755,6 +770,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
         tenantId = RequireCurrentTenant(tenantId);
         await _currency.RequireKnownCurrencyAsync(createDto.CurrencyCode, cancellationToken);
         var traveller = await RequireTravellerAsync(tenantId, createDto.EmployeeId, requireActive: true, cancellationToken);
+        await RequireNotGoneByAsync(tenantId, traveller, createDto.TravelStartDate, "raised", cancellationToken);
         await RequireKnownCountriesAsync(tenantId, createDto.OriginCountryId, createDto.DestinationCountryId, cancellationToken);
         RequireDatesInOrder(createDto.TravelStartDate, createDto.TravelEndDate);
         await RequireParentRequestAsync(tenantId, traveller.Id, createDto.ParentRequestId, selfId: null, cancellationToken);
@@ -1257,6 +1273,7 @@ public class StaffTravelRequestService : IStaffTravelRequestService
             throw new InvalidOperationException("Only draft or returned requests can be submitted.");
 
         var traveller = await RequireTravellerAsync(tenantId, entity.EmployeeId, requireActive: true, cancellationToken);
+        await RequireNotGoneByAsync(tenantId, traveller, entity.TravelStartDate, "submitted", cancellationToken);
         // A draft written before lane 1 may still carry a unit and an international flag the payload
         // chose; the policy below must be resolved on the facts.
         ApplyServerFacts(entity, traveller);

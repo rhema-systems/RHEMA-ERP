@@ -568,6 +568,65 @@ public class SeparationClearanceDto
 
     /// <summary>Why not, when <see cref="CanComplete"/> is false.</summary>
     public string? BlockedReason { get; set; }
+
+    /// <summary>
+    /// The leaver's staff travel, read live (travel final closure, lane 9, D-56) — advisory: it is no clearance line and
+    /// does not enter <see cref="CanComplete"/>; the money settles through the final settlement.
+    /// </summary>
+    public SeparationTravelDto Travel { get; set; } = new();
+}
+
+/// <summary>What a leaver still has open in staff travel (travel final closure, lane 9, D-56).</summary>
+public class SeparationTravelDto
+{
+    /// <summary>Trips not cancelled, rejected or closed.</summary>
+    public List<SeparationTravelTripDto> Trips { get; set; } = new();
+
+    /// <summary>Advances not settled, written off, rejected or cancelled.</summary>
+    public List<SeparationTravelAdvanceDto> Advances { get; set; } = new();
+
+    /// <summary>Claims not paid or rejected.</summary>
+    public List<SeparationTravelClaimDto> Claims { get; set; } = new();
+}
+
+public class SeparationTravelTripDto
+{
+    public Guid Id { get; set; }
+    public string RequestNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public DateOnly TravelStartDate { get; set; }
+    public DateOnly TravelEndDate { get; set; }
+    public string Destination { get; set; } = string.Empty;
+
+    /// <summary>Bookings pending, on hold, confirmed or ticketed.</summary>
+    public int LiveBookings { get; set; }
+
+    /// <summary>What happens to it with this separation.</summary>
+    public string Note { get; set; } = string.Empty;
+}
+
+public class SeparationTravelAdvanceDto
+{
+    public Guid Id { get; set; }
+    public Guid TripId { get; set; }
+    public string? TripNumber { get; set; }
+    public string AdvanceNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public decimal Unsettled { get; set; }
+    public string Note { get; set; } = string.Empty;
+}
+
+public class SeparationTravelClaimDto
+{
+    public Guid Id { get; set; }
+    public Guid TripId { get; set; }
+    public string? TripNumber { get; set; }
+    public string ClaimNumber { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
 }
 
 // =============================================================================
