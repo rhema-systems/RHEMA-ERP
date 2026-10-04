@@ -2158,6 +2158,41 @@ Save only what the dispatcher changed: set the status, attempt count and sent ti
 tracking write those columns (no `Update` on an already-tracked entity), or use one `ExecuteUpdateAsync … WHERE Id = @id
 AND IsDeleted = 0` per outcome; and save per notification, not once per batch.
 
+## 37. Payroll — no intake for a one-off amount owed to an employee, so a claim "paid through payroll" reaches nobody (2026-10-04)
+
+**Owner:** Payroll. **Severity:** medium — a missing capability, not broken code; until it exists HR must not offer
+payment through payroll. **Found:** HR's travel closure, finding O-6 (2026-10-01), decided as D-10 in lane 3; written up in
+lane 9. **Full report:** `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`.
+
+### What is broken
+
+Two HR claim screens let an officer settle an approved claim through payroll — travel's **Payroll offset**
+(`TravelPaymentMethod.PayrollOffset`) and medical's **Salary deduction** (`PaymentMethod.SalaryDeduction`). Both mark the
+claim *Paid*; neither sends anything to payroll, because payroll has no intake for "pay this employee this one-off amount
+in the next period". Bonus, back-pay and promotion arrears have their own policies; `PayrollEmployeeComponent` is a
+standing per-employee setting; `PayrollImportBatch` reconciles legacy staff numbers. HR's Finance posting already leaves
+the staff claims payable for payroll's journal to clear — the amount never reaches a payslip.
+
+### What was proven
+
+Read 2026-10-04: `TravelPaymentMethod.PayrollOffset` and `PaymentMethod.SalaryDeduction` have no reader outside HR's
+posting factory, which posts nothing for them beyond the advance a travel claim set off. On UAT no claim has used either
+method (the paid travel claims are bank transfers; one medical claim, by bank transfer).
+
+### What it blocks
+
+Paying staff claims through payroll. **Travel is protected:** since 2026-10-02 its pay dialog hides the option and the
+API refuses it (D-10). **Medical is not:** its claim page still offers *Salary deduction* — HR will decide separately
+whether to switch it off the same way.
+
+### What a fix needs
+
+First a decision from payroll (and TDC): should claims be paid through payroll at all? If not, nothing is built — travel's
+refusal stays and medical's option is switched off. If so, a payroll intake for a one-off amount per employee, with a
+reference back to the claim, a way to withdraw an item not yet paid, and the pay period that paid it reported back, so HR
+marks the claim *Paid* only once it is. Currency and tax treatment are payroll's to rule. The hand-off lists exactly what
+HR would send.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

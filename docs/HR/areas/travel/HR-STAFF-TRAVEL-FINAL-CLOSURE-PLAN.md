@@ -106,8 +106,9 @@ baseline (D-13); lane 0 was built the same day.**
    (proven end to end on a scratch copy, and in a browser) — touchpoints 55/55 twice, the regression unchanged twice —
    committed `c2e21c5be`. **9c** separation (D-56…D-58) — the clearance's Travel block, the approval's cascade, no trip
    after the leaving day, the recovered advance settled in travel without a posting; touchpoints 71/71 twice, the cascade
-   and the release 36/36 twice on a scratch copy, one regression pass unchanged — **staged 2026-10-04**. Next: **9d** (the
-   payroll hand-off), then the lane's close (two regression passes). **From 9c on the run cadence
+   and the release 36/36 twice on a scratch copy, one regression pass unchanged — committed `738e3acaf`. **9d** the payroll
+   hand-off (D-10) — `HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` and cross-module row #37, documents only — **staged 2026-10-04**.
+   Next: the lane's close — two regression passes. **From 9c on the run cadence
    is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
    (`tools/run-regression.sh <tag> [2]`).
 13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
@@ -210,7 +211,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
 | **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
-| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c staged 2026-10-04 (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged) |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c committed `738e3acaf` (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged); 9d staged 2026-10-04 (the payroll hand-off and row #37 — documents only); the close's two passes owed |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
@@ -2870,15 +2871,16 @@ the user as a separate item.
 
 ### Lane 9 — Cross-module touchpoints (O-12, O-13, O-14, D-10)
 
-- [ ] **Attendance:** a `TravelAttendancePostingService` on the model of
+- [x] **Attendance** *(slice 9a, `67cb65f83` — as `StaffTravelAttendancePosting`, with a link column, D-53)*: a `TravelAttendancePostingService` on the model of
   `LeaveAttendancePostingService` — an approved trip posts its working days as `OnDuty` (the enum value
   that has never had a writer); *Request change* and cancel reverse or re-post; an existing punch is
   never overwritten.
-- [ ] **Leave:** a leave submission warns when the employee has an approved trip on those days, through
-  leave's existing warning path.
-- [ ] **Separation:** the clearance lists a leaver's open trips, bookings and undisbursed advances (it
-  lists outstanding advances already); the separation's approval cancels Draft and Submitted trips.
-- [ ] **Payroll:** the D-10 hand-off; the payroll-offset row in the cross-module defects document.
+- [x] **Leave** *(slice 9b, `c2e21c5be` — computed on every read, since leave has no warning path, V5/D-55)*: a leave
+  submission warns when the employee has an approved trip on those days, through leave's existing warning path.
+- [x] **Separation** *(slice 9c, `738e3acaf` — and ReturnedForRevision trips too, D-57; the recovered advance settled, D-58)*:
+  the clearance lists a leaver's open trips, bookings and undisbursed advances (it lists outstanding advances already);
+  the separation's approval cancels Draft and Submitted trips.
+- [x] **Payroll** *(slice 9d)*: the D-10 hand-off; the payroll-offset row in the cross-module defects document.
 
 Suite `run-final-touchpoints.mjs`: attendance rows written and reversed; the leave warning; the
 separation lists.
@@ -3101,10 +3103,10 @@ answer in HR Assets.
   `IStaffTravelRequestService.CancelAsync` (which withdraws the approval in progress, holds and undisbursed advances,
   gives up attendance and tells the traveller and the desk), reason *"Left the organisation on {d MMM yyyy} — separation
   SEP-…"*, by the approver as an employee. Best-effort: a refusal is logged and the trip stays, named in the Travel block;
-  a login with no employee record cancels nothing and logs why. ⚠ The mobile inbox (`/workflow/inbox` → `mobile/actions`)
-  completes a step through the engine alone and syncs no record's status — a separation approved there stays
-  PendingApproval, so its trips are not cancelled either; that path bypasses every adapter-based area alike, and is not
-  travel's to fix.
+  a login with no employee record cancels nothing and logs why. ⚠ The generic inbox (`/workflow/inbox` → `mobile/actions`)
+  completes a step through the engine alone and applies no status adapter — a separation approved there stays
+  PendingApproval, so its trips are not cancelled either. That is **cross-module defect #15** (open since 2026-08-26), true of
+  every adapter-based area alike, and not travel's to fix.
 - *No trip after the leaving day (D-57).* `StaffTravelRequestService.RequireNotGoneByAsync`, at create and submit:
   *"{name} leaves the organisation on {dd MMM yyyy} under an approved separation, so a trip starting on {dd MMM yyyy}
   is not raised"* (or *submitted*). The day is the separation's effective date, else its last working day, for any
@@ -3147,6 +3149,29 @@ lifecycle **257** (354538), truth **118** (431559), approvals **123** (439996), 
 reminders — not by construction: the pass deleted 138 trips carrying 2,675 notices, none live afterwards. After the runs: the
 demo's four trips as they were (Kumasi approved with its two days on duty, two awaiting approval, Sebrepor completed),
 attendance at 56, no separation or trip of the day's runs left live.
+
+**As built — slice 9d, payroll (2026-10-04).** Documents only; no code, no run. V9 held: D-10's refusal is in
+`StaffTravelFinanceService.PayClaimAsync`, the pay dialog offers bank transfer, cash, cheque and corporate card, and UAT has
+no claim paid by payroll offset (its paid claims are bank transfers, all of them deleted harness rows).
+- *The hand-off* — `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`, in `HANDOFF-PAYROLL-LEAVE.md`'s shape,
+  self-contained for the payroll owner: what payroll offset did (O-6) and what D-10 did; that HR's posting already leaves
+  the staff claims payable for payroll's journal, so what is missing is the amount reaching a payslip; that payroll has
+  no intake for a one-off amount per employee (bonus, back-pay and arrears are their own policies,
+  `PayrollEmployeeComponent` is a standing setting, `PayrollImportBatch` reconciles staff numbers); what travel would send
+  per claim (number, employee, `NetPayable`, currency, what it was for, when) and need back (the pay period that paid it,
+  a way to withdraw an item not yet paid — travel voids payments); and the asks — first, whether claims should be paid
+  through payroll at all (if not, D-10 stays and nothing is built), then the intake, then currency and tax as payroll's to
+  rule. It is the note `HANDOFF-FINANCE-HR-POSTING-ROUTES.md` § 3 said would be raised with the payroll owner.
+- *The cross-module row* — **#37** in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`, in that file's shape.
+- *Found while writing it — medical's twin, not travel's:* a medical claim can still be paid by **Salary deduction**
+  (`PaymentMethod.SalaryDeduction`), offered on the medical claim page's pay dialog; its posting is skipped as *"settled
+  through payroll"* and nothing reaches payroll — O-6 again, unrefused. UAT has no such claim. Named in the hand-off and
+  #37; whether to switch it off the way D-10 did is the user's call, for the medical area.
+- *Guide.* Chapter 9's pay step named *mobile money* and *payroll* among the methods; it now names the four the dialog
+  offers and why payroll offset is not one.
+- *The lane's checklist* — the four touchpoints ticked with their slices.
+- *Corrected:* 9c's as-built note had the generic inbox's stranded approvals as a finding; it is cross-module defect
+  **#15**, recorded since 2026-08-26.
 
 ### Lane 10 — Docs, demo pack, harness, hand-offs
 
@@ -3470,5 +3495,10 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   leaving day, Internal Audit's release settling the advance the settlement recovered — with no travel posting, and
   idempotent under the posting's retry. Touchpoints 71/71 twice on UAT (a planted approved separation); the cascade and
   the release 36/36 twice end to end on a scratch copy. The first pass at the new cadence: one regression pass, unchanged,
-  in 15 minutes (a post-slice run at the old cadence had reached about 75). Found on the way: the mobile inbox approves through the engine
-  alone and syncs no record's status, for every adapter-based area (as built, 9c). Staged. Next: 9d.
+  in 15 minutes (a post-slice run at the old cadence had reached about 75). Met on the way: the generic inbox approves through
+  the engine alone and moves no record — cross-module defect #15, already recorded (as built, 9c). Staged. Next: 9d.
+- **2026-10-04, later** — The user committed 9c (`738e3acaf`). **Slice 9d written** — documents only: the payroll hand-off
+  (`HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`) that D-10 promised and V9 found unwritten, and cross-module row #37. Found while
+  writing it: medical still offers *Salary deduction*, the same gap D-10 closed for travel — named in both, the user's
+  call. 9c's note on stranded inbox approvals corrected to defect #15. Lane 9's checklist ticked. Staged. Next: the lane's
+  close — two regression passes.

@@ -1829,7 +1829,9 @@ not by itself settle the claim — this does."* Three radio outcomes — **Appro
     the figures are confirmed once it is recorded.
 ```
 
-then **Method** *(bank transfer, cheque, cash, mobile money, payroll)* and **Reference**.
+then **Method** *(bank transfer, cash, cheque, corporate card)* and **Reference**. *Payroll offset* is not offered and the
+server refuses it (closure lane 3, D-10): payroll cannot receive a travel claim yet, so it would reach nobody — the
+question is with the payroll owner (`docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`).
 
 > ⚠ **The dialog deliberately does not show `netPayable`.** The advance is recovered *inside* the
 > pay call, so until it completes `netPayable` still reads as the full approved amount — showing it
