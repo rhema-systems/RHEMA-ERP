@@ -81,7 +81,11 @@ its advance pays in full, and policy supersession is date-blind) and a Fleet rev
 company-vehicle "reservation" is a draft nobody approves). It owns this plan's **D-29** row (unchanged:
 the rule register stays read-only), **lane 10's travel sweep** (its lane 8), **lane 9's travel-policy
 door** (its D-3: HR is granted `HR.Travel.Admin`, narrowed in code) and **row 9.19** (its lane 7). The
-user accepted it and **development is held until the user says go**.
+user accepted it the same day. **State 2026-10-04: the closure is COMPLETE — lanes 0–10** — the sweep (its lane 8), the
+policy door (its lane 4, slice 4c) and row 9.19 (its lane 7, slice 7c1) are built; D-29 stands unchanged. Lane 10
+rewrote the system guide whole, rebuilt the demo pack's travel scenarios, retired the old harness and wrote the Fleet
+hand-off; its close ran two regression passes unchanged. What stays open is deferred by decision (the plan's § 6) or
+another team's (cross-module #15, #23, #34–#38).
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
@@ -1374,6 +1378,11 @@ declared finished without pretending these are closed.
       bare `[Authorize]` behind the external-user allowlist, with procurement exposed *today*;
       **#9** Projects' maintenance follow-through throws for every tenant; **#10** maintenance
       numbers collide within one second behind unique indexes.
+- [ ] **Fleet double-books vehicles and drivers, and approves submitted trips with nobody asked** — cross-module defect
+      **#38** (2026-10-04), full report [`HANDOFF-FLEET-STAFF-TRAVEL.md`](../integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md):
+      Fleet's clash check sees dispatched trips only, a driver is checked for a licence only, no `FLEET_TRIP` route is
+      seeded and submit has no guard; HR offers a read of who is on leave or travelling, and asks for a Fleet-owned read
+      of a trip's incidents. Travel protects its own legs meanwhile.
 - [ ] **Payroll cannot receive a staff claim** — cross-module defect **#37** (2026-10-04; the file holds 37 entries now),
       full report [`HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`](../integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md). A claim
       "paid through payroll" was marked Paid with nobody paying the employee. Travel's *Payroll offset* is refused
@@ -1482,7 +1491,10 @@ is wrong; the letter is the likelier. Decide with TDC which unit the flat figure
 > **2026-10-01: staff travel's sweep is owned by the travel final closure, lane 8**
 > (`docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md`). Correction to the paragraph below: the
 > travel sweep does tell somebody — the HR role, in the app — through its own notification topics; it
-> tells no traveller, approver or finance desk. Lane 8 moves it onto leave's pattern.
+> tells no traveller, approver or finance desk. Lane 8 moves it onto leave's pattern. **✅ Done 2026-10-03** (its
+> slices 8a–8c): each reminder goes to whoever acts — the owner, the traveller, the stage's named approvers, the desk —
+> in the app and by email, logged once and published; the sweep also moves trips under way, completed and closed by
+> date, reads Fleet's signals, and (lane 9a) keeps trip days on attendance. Its first scheduled run was measured.
 
 **Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
 sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
@@ -1681,7 +1693,7 @@ closure's D-99):** extension goes the way confirmation does — a request decide
 through the workflow — and HR is not granted the probation tier; it is built in that closure's lane F (F1). **Travel's
 door is settled (2026-10-01, the travel final closure's D-3):** the HR role is granted `HR.Travel.Admin`, narrowed in
 code — a second officer authorises a booking above the policy cap (its D-8), a policy's author cannot approve it, and
-every delete is status-guarded; built in that closure's lane 4. Training budgets and plans, talent reviews and the
+every delete is status-guarded; **✅ built 2026-10-02** in that closure's lane 4 (slices 4a–4c). Training budgets and plans, talent reviews and the
 vacancy reconcile are still owed. Until then the demo seeds
 `TrainingBudgetTransactions`, `StaffMovementApprovalLevels` and `ProbationExtensions` directly.
 
@@ -1707,7 +1719,7 @@ vacancy reconcile are still owed. Until then the demo seeds
 | 9.16 | SHE / medical FK guards | `SheHazardCorrectiveActions.CorrectiveActionTemplateId`, several `UploadedById`/`ConductedById`/`EmployeeId` columns, `MedicalInsuranceClaims.MedicalExpenseClaimId`, `MedicalInsurancePolicyDependents (PolicyId, DependentId)` unvalidated → 500 not 404/409 | medium |
 | 9.17 | `POST /onboarding-plans/tasks/{id}/complete` | gated `HR.Orientation.Write`; a new starter cannot tick their own task (Book 1 §6 step 5 implies they can) | medium |
 | 9.18 | `DELETE /safety/incidents/witnesses/{id}` | needs `HR.She.Admin` while the POST needs Write | low |
-| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers. **Owned by the travel final closure, lane 7 (E1)** | medium |
+| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers. **Owned by the travel final closure, lane 7 (E1)** — **✅ closed 2026-10-03** (slice 7c1, `584993d0a`): `POST /staff-travel/me/risk-assessments/{id}/acknowledge` and a portal screen; on the desk the button became a read-only state | medium |
 | 9.20 | asset requisitions | an approved requisition cannot be edited, withdrawn or rejected (all 409) | low |
 | 9.21 | `StaffDemotion.GradeLevelDecrease` / `StaffPromotion.GradeLevelIncrease` | silently recomputed from optional grade ids → 0 | low |
 | 9.22 | disciplinary termination | raises an `EmployeeSeparation` in Draft with no effective date | low |

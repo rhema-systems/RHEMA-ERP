@@ -107,7 +107,7 @@ sweep, since nobody else owns it.
 
 Status key: 🔲 to record · ✅ recorded, awaiting the sweep · ⏳ area not yet built
 
-### Area 12 — Staff Travel ✅ *(surveyed 2026-08-17; area not yet built)*
+### Area 12 — Staff Travel ✅ *(surveyed 2026-08-17; built since, and closed by the travel final closure 2026-10-01…04 — rows 12.6–12.8 added then)*
 
 Source: `plans/HR-Area-12-Travel-Build-Plan.md` §7.4. Measured fact: **zero** references to
 `GLAccount`, cost centre, `ProjectId`, `Payroll`, `BudgetEntry` or `SupplierId` across all 34
@@ -120,6 +120,14 @@ travel entities.
 | 12.3 | Advance settled against a claim - **POSTS 2026-09-20** (the Cr receivable leg of `TRAVEL_CLAIM_PAID`) | `StaffTravelExpenseClaim.AdvanceDeducted` | ~~The contra-entry that clears the receivable has no accounting counterpart.~~ **⚠ Note: the travel-side arithmetic now EXISTS as of slice 4** — paying a claim deducts and settles the linked advance, capped at the outstanding balance. Before that, nothing wrote `AdvanceDeducted` or `SettledAmount` at all, so employees were paid in full despite holding an advance and the advance stayed outstanding for ever. The sweep therefore inherits correct travel-side numbers to post from, not a blank field. |
 | 12.4 | Trip budget committed / consumed | `StaffTravelBudget` | Per-trip envelope (flight / accommodation / per-diem / transport / misc) with no link to `BudgetEntry`, `UnitBudget`, a GL account or a cost centre. The breakdown is legitimately travel-owned; the missing part is that it must **consume from** the department's finance budget. |
 | 12.5 | Booking cost committed | `StaffTravel{Flight,Hotel,GroundTransport,CarRental}Booking` | `EstimatedCost` / `ActualCost` per booking, no commitment accounting. |
+| 12.6 | Advance cash handed back - **POSTS since 2026-10-02** (travel closure lane 3: `TRAVEL_ADVANCE_REFUNDED`, Dr staff payments clearing / Cr staff advances receivable) | `StaffTravelAdvance` | One refund per advance; recorded by the desk's *Cash back*. |
+| 12.7 | Advance written off - **POSTS since 2026-10-02** (lane 3: `TRAVEL_ADVANCE_WRITTEN_OFF`, Dr staff receivable write-off / Cr staff advances receivable) | `StaffTravelAdvance` | Uses the existing *staff receivable write-off* role (posting slice 4's, for waived surcharges, fines and bonds); a tenant that mapped it posts this too. |
+| 12.8 | Advance recovered from a leaver's final settlement - **posts NOTHING in travel, by design** (travel closure 9c, D-58) | `StaffTravelAdvance` via `SeparationSettlementLine.SourceTravelAdvanceId` | The settlement's own journal (`SEPARATION_SETTLEMENT_RELEASED`) credits the receivable; travel only marks the advance settled. A refund through 12.6 would credit it twice. |
+
+**The dated rate (travel closure lane 3, B12), beyond travel.** `HrCurrencyBridge.GetRateToBaseAsync` reads the rate in
+force on the date asked — Finance's own lookup order, the direct quote then the inverse, to six places. Until lane 3 it
+checked that the date had a rate, then converted at today's. It is shared, so **HR's Finance posting adapter** (every
+foreign-currency HR posting) and **staff requisition costs** now value at their own date too, not only travel's expenses.
 
 ⚠ **What slice 4 already fixed, so the sweep does not re-litigate it.** The travel-side money
 arithmetic is now correct and tested against known quantities: advance settlement exists and is

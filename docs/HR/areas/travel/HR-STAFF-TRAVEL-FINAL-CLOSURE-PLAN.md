@@ -110,11 +110,26 @@ baseline (D-13); lane 0 was built the same day.**
    and the release 36/36 twice on a scratch copy, one regression pass unchanged — committed `738e3acaf`. **9d** the payroll
    hand-off (D-10) — `HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` and cross-module row #37, documents only — committed `954b6b464`.
    **The close** — two regression passes, every suite unchanged twice, after two harness gaps of the new cadence were
-   closed (and one unexplained SQL error recorded) — **staged 2026-10-04**. **From 9c on the run cadence
+   closed (and one unexplained SQL error recorded) — committed `2201a5f7d`. **From 9c on the run cadence
    is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
    (`tools/run-regression.sh <tag> [2]`).
-13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
-   `bad482a8d`.
+13. **Lane 10** (docs, demo pack, harness, hand-offs) — **SOURCE-CHECKED 2026-10-04** against `2201a5f7d` (W1–W10;
+   slices 10a–10h; decisions D-59…D-62 taken by the user, all as recommended). ⚠ `hr.head` cannot approve the demo's
+   policy — C3 refuses its author — so `hr.officer` does (W2). **10a** the record — the Fleet hand-off and #38, #15
+   naming travel, the Finance backlog's refund, write-off and dated-rate notes, the HR README and the finish plan —
+   staged 2026-10-04. **10b** the harness — the old suites retired to `retired/`, 43 uncovered checks moved into truth,
+   bookings, policy and compliance (each twice on UAT), a second fixture retirement when a background job writes
+   mid-teardown — **done 2026-10-04**. **10c** the demo pack — the policy approved by `hr.officer` before the trips are
+   submitted, the Hilton through D-8, a health clearance, three rerun bugs fixed; proven on a fresh scratch database,
+   15/15 three times, travel 28/28 tables; UAT untouched — **done 2026-10-04**. **10d** the guide's rules and model —
+   seven rules, chapter 1, chapter 13, Appendix B — **done 2026-10-04**. **10e** the trip at the desk — chapters 3, 3a
+   (new), 4, 5 (but 5.4) and 6 — **done 2026-10-04**. **10f** money and registers — 5.4, 7, 8, 8a (new), 9, 10, 10a
+   (new), 11, 12, 13a (new), and the alerts page's stale footnote — **done 2026-10-04**. **10g** the workbook and the
+   record — chapter 2 (both databases side by side), 14–18, § 19 as a pointer to § 3d, Appendices A and C — **done
+   2026-10-04**; the guide is rewritten whole. **10h** the close — the memories; two regression passes on UAT, every
+   suite unchanged (1,646 a pass, reminders 222, the scheduled run 15) — **done 2026-10-04**. **Lane 10 COMPLETE** —
+   staged as one commit, at the user's choice. **With it the travel final closure is complete:** lanes 0–10, decisions
+   D-1…D-62. What stays open is deferred by decision (§ 6) or another team's (#15, #23, #34–#38).
 
 **House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
 `dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
@@ -191,6 +206,10 @@ lane's slice.
 | **D-56** | The clearance never sees travel (V6) | **A computed, read-only Travel block**, read live like the asset register: open trips, live bookings, advances undisbursed and cash out, open claims. Advisory — it does not block completion; the money flows through the settlement. Lane 9, slice 9c. |
 | **D-57** | A separation's approval touches no trip, and a leaver can still travel (V8) | **The approval cancels the leaver's Draft, Submitted and ReturnedForRevision trips** — after its save, each through travel's own cancel, best-effort, *"Left the organisation on {day}"*; any it cannot cancel is named in the Travel block. Approved and under-way trips are listed for the desk. Travel refuses, at create and submit, a trip that starts after an approved separation's day. Lane 9, slice 9c. |
 | **D-58** | An advance the final settlement recovered stays out in travel (V7) | **The settlement's release settles it in travel** — unsettled to nothing, fully settled, *"recovered from the final settlement"* as an internal note on its trip — with no travel posting: the settlement's journal is the posting. Lane 9, slice 9c. |
+| **D-59** | The sixteen old suites cannot start on UAT and are superseded (W9) | **Retire them all** — and slice12, slice13, lane5b-visa, the probes and smokes — **moving the 35–45 checks no `run-final-*` suite makes** into those suites; a README table names the lane that ended each. Lane 10, slice 10b. |
+| **D-60** | The demo's policy is a draft, so nothing binds the demo (W2, W6) | **The demo approves its policy:** `hr.officer` approves `hr.head`'s draft before the trips are submitted, so the Hilton goes through D-8 and the Sebrepor claim needs its receipt. Lane 10, slice 10c. |
+| **D-61** | A rerun of the pack on UAT changes the demo (W8) | **Prove the updated pack on a scratch copy; UAT's demo is left as it is.** Applying it to UAT — a rerun or a rebuild — is a separate go when the next demo is prepared. Lane 10, slice 10c. |
+| **D-62** | The Fleet hand-off was never written (W5) | **One hand-off document** in the payroll hand-off's shape **and one defects row**, offering HR's availability read (leave and trips) for FX-7. Lane 10, slice 10a. |
 
 **Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
 stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
@@ -214,7 +233,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
 | **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
 | **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ✅ complete 2026-10-04 — source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c committed `738e3acaf` (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged); 9d committed `954b6b464` (the payroll hand-off and row #37 — documents only); the close: two regression passes clean (2026-10-04) |
-| **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
+| **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ✅ complete 2026-10-04 — two regression passes unchanged (1,646 a pass, reminders 222, scheduled 15); staged as one commit. Source-checked 2026-10-04 (W1–W10; slices 10a–10h; D-59…D-62 taken); 10a staged 2026-10-04 (the record — documents only); 10b done 2026-10-04 (old suites retired, 43 checks moved; truth 136, bookings 153, policy 137, compliance 110, each twice); 10c done 2026-10-04 (the demo pack on a fresh scratch database: 15/15 three times, travel 28/28 tables; UAT untouched); 10d done 2026-10-04 (the guide's rules, chapter 1, chapter 13, Appendix B); 10e done 2026-10-04 (chapters 3, 3a, 4, 5 but 5.4, 6); 10f done 2026-10-04 (5.4, 7, 8, 8a, 9, 10, 10a, 11, 12, 13a; the alerts footnote); 10g done 2026-10-04 (chapter 2, 14–18, § 19, Appendices A and C — the guide rewritten whole); 10h done 2026-10-04 (memories, the two passes) |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
 document, the guide and the memory carry the new state, and the slice is staged for the user.
@@ -3214,18 +3233,353 @@ started on UAT at 13:50 UTC; the scheduled run **15/15** (882446) first.
 
 - [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
   D-3, T-3 is fixed, T-5 is stale, T-6 stays) and every chapter a lane changed; § 19 points here.
-- [ ] `docs/HR/README.md`, `HR-FINISH-PLAN.md` (lane 10's travel sweep, lane 9's travel-policy door,
-  row 9.19, D-29), `HR-FINANCE-INTEGRATION-BACKLOG.md` (the FX note, the refund event).
-- [ ] `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`: #15 lists travel among the unprotected entities; the
+- [x] `docs/HR/README.md`, `HR-FINISH-PLAN.md` (lane 10's travel sweep, lane 9's travel-policy door,
+  row 9.19, D-29), `HR-FINANCE-INTEGRATION-BACKLOG.md` (the FX note, the refund event). *(10a)*
+- [x] `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`: #15 lists travel among the unprotected entities; the
   Fleet hand-offs (planned-window conflicts, driver leave and trip availability at dispatch — offer HR's
   availability read — a seeded fleet-trip approval definition with the no-definition guard, an
-  incidents-by-trip read); the payroll-offset row.
-- [ ] The demo pack (`dev-harness\hr-demo-smoke\scenarios\080-travel.mjs`, `081-travel-logistics.mjs`):
-  `hr.head` approves the policy (D-3), the London trip's over-cap hotel is authorised by a second
+  incidents-by-trip read); the payroll-offset row. *(10a; the payroll row is #37, 9d)*
+- [x] *(10c — proven on a fresh scratch database; UAT untouched, D-61)* The demo pack (`dev-harness\hr-demo-smoke\scenarios\080-travel.mjs`, `081-travel-logistics.mjs`):
+  ~~`hr.head` approves the policy (D-3)~~ **`hr.officer` approves `hr.head`'s draft before the trips are submitted
+  (D-3, C3, D-60 — W2)**, the London trip's over-cap hotel is authorised by a second
   officer (D-8), a claim is filed with a receipt; the verify-tables gate covers the new rows.
-- [ ] The travel harness README with its regression count; each of the sixteen old suites re-pointed
-  or retired where a rule changed, naming the lane that changed it.
+- [x] The travel harness README with its regression count; each of the sixteen old suites re-pointed
+  or retired where a rule changed, naming the lane that changed it. *(10b — all retired, D-59; 43 checks moved)*
 - [ ] Memory: the two travel memories updated; the closure memory records each lane's state.
+
+**Source check (2026-10-04, HEAD `2201a5f7d`).** Every checklist item re-read against the documents, the harness, the
+demo pack and the code; nothing run. Ten:
+- **W1 — the guide is staler than the checklist says.** Beyond the six rules, 18 of its chapters, sections and
+  appendices need a rewrite and 13 more need small fixes; § 19 logs lanes 0–5 only, still calls 5b and 4c *staged*, and about 30 fixed
+  T-rows read as open (T-3, T-5, T-8–T-10, T-12, T-15–T-17, T-21, T-22, T-27–T-32, T-35–T-40, T-46, T-50, T-52–T-54,
+  T-56–T-58). Rule 3 and Rule 5 fall; Rules 1, 2 and 6 need D-1, D-2/D-16, D-7, D-8, D-15, O-2 and the delete guards.
+  The menu has ten items, not six; the portal six screens, not four; 32 tables, not 31. Two workbook writes now fail:
+  **LW3** (a budget on a draft trip — D-16) and **LW10** as `hr.head` (the reviewer cannot pay — D-2). The parts lanes
+  already edited in place (chapter 5.1, 9's pay methods, 14's reference, 15's reference, 16's newer rows and the boxes)
+  are current.
+- **W2 — ⚠ "`hr.head` approves the policy" cannot happen.** Lane 4's C3 (`StaffTravelPolicyService.cs:303-310`) refuses
+  approval by the officer who drafted or last changed a policy, and the demo's policy is drafted by `hr.head` — on UAT
+  and in `080-travel.mjs:127`. The approver is **`hr.officer`**; the checklist's wording predates C3.
+- **W3 — programme docs.** `docs/HR/README.md`'s travel row still says *lanes 6–10 to go*; the finish plan still holds
+  travel "until the user says go" (l.75-84), still promises lane 8's sweep work (l.1482-1485), and carries the
+  travel-policy door (l.1681) and row 9.19 (l.1710, done in 7c1 `584993d0a`) as open; the Finance backlog has neither
+  `TRAVEL_ADVANCE_REFUNDED` nor `TRAVEL_ADVANCE_WRITTEN_OFF` (catalogue l.62-64), nor B12's dated rate — which reaches
+  HR's posting adapter and staff requisitions too — nor 9c's recovery that posts nothing.
+- **W4 — #15 names no HR entity.** Its line *"no HR entity is protected"* (defects l.39) is where travel belongs: a trip
+  approved from the generic inbox stays Submitted, skips lane 2's line rule and stamps no `ApprovedById`, and posts no
+  attendance or notice; a separation approved there cancels no trip (9c).
+- **W5 — the Fleet hand-off was never written.** D-12 and D-27 sent FX-2 (Fleet's clash check sees Dispatched trips
+  only), FX-7 (a driver checked for a licence only, not for leave or another trip), FX-9 (no seeded fleet-trip
+  approval; Fleet's submit lacks the no-definition guard, so a submitted trip auto-approves) and an incidents-by-trip
+  read to the Fleet owner; no row or hand-off exists. Defects l.285 also tells readers to re-run `run-slice6.mjs`.
+- **W6 — the demo pack has not run since lanes 1–5 patched it** (last UAT run 29 Sep). Against the closed rules: the
+  draft policy binds nothing, so 081's over-cap Hilton is simply confirmed and D-8 is never shown; once the policy is
+  approved the Hilton is created *Pending* and its confirm refused until `hr.officer` — the only persona with travel
+  Admin who is neither booker nor traveller — authorises it; the claim's receipt rule binds only if the policy is
+  approved **before** the trips are submitted (a request records its policy at submission), so the approval must sit
+  before 080's submit loop; the upload needs the scanner stub (the wrapper starts one). Three bugs a rerun would hit:
+  081 creates the four travel documents again on every run (it matches the number against a list that lane 7a masks
+  to the last four), standing the verified originals down; Sebrepor's car hire is skipped once the sweep has completed
+  the trip; London's hotel is refused when day+75 falls on a Saturday (checkout past the return day + 1).
+- **W7 — the verify-tables gate** lacks `StaffTravelHealthClearances` (lane 7b's table — the pack clears no health
+  requirement, so it would be empty), and only counts rows: the new facts need `runbook-counts.json` entries (an
+  approved policy, an authorised exception, a receipted claim line, trip days on attendance).
+- **W8 — a rerun on UAT changes the demo:** London (on the retired one-step route) approved by `hr.officer` with a
+  budget — notices, on-duty days for `hr.head`, one fewer trip waiting in the walk — the Kumasi budget approved, the
+  four documents duplicated. The plan's rule (l.707) is that UAT's demo trips are not re-run.
+- **W9 — the sixteen old suites cannot run.** `setup.mjs:27` supplies a staff number, which the staff-number rule now
+  refuses (`StaffNumberService.cs:133-137`), so each dies at its first fixture; their actors hang off the tenant's first
+  real unit (lane 2 then asks its real head); no teardown in a `finally`, logins never switched off, and the fixture is
+  named so no teardown here can find it. Every one is superseded by a `run-final-*` suite except about 35–45 checks
+  (the dashboard, list-read names, `initiatedById`, segment and car-rental derivations, the visa register's uniqueness,
+  the rule-code revive, an alert's body). Plan § 7's *"sixteen as lane 0 re-pointed them"* is stale — none was.
+  `run-lane5b-visa.mjs` is the most dangerous: it gives a demo traveller a primary passport and sets Ghana→UK Prohibited.
+- **W10 — the harness README**: eleven suite rows stop at lane 9a; the regression is **1,825** assertions a pass (ten
+  suites 1,603 + reminders 222), **1,840** with the scheduled run, **1,910** with the posting proof.
+
+**Slices (proposed).**
+- **10a — the record** (documents only): W3, W4, W5 — the HR README, the finish plan, the Finance backlog, #15, a Fleet
+  hand-off and its defects row, defects l.285; this lane's checklist corrected (W2).
+- **10b — the harness** (W9, W10): the old suites retired with a table naming the lane that ended each; the uncovered
+  checks moved into `run-final-*` suites (each touched suite twice on UAT); the README's rows and count.
+- **10c — the demo pack** (W2, W6, W7): 080/081 on the closed rules — the policy approved by `hr.officer` before the
+  submit loop, the Hilton through D-8, the Sebrepor claim with a receipt, a health requirement cleared, the three bugs
+  fixed; verify-tables and the runbook counts; **proven on a scratch copy** (D-61). The pack is outside git: backed up
+  before it is edited.
+- **10d–10g — the guide** (W1), in four parts: the rules and the model (top matter, Rules, ch 1, 13, App. B); the trip
+  at the desk (ch 3–6 and an Approvals chapter); money and registers (5.4, ch 7–12 and the Advances, Policy Breaches and
+  Travel Documents screens); the workbook and the record (ch 2, 14–18, § 19 → a pointer to § 3d, App. A and C) — last,
+  after 10c, whose demo it describes.
+- **10h — the close**: the memories; two regression passes (§ 7).
+
+**Decisions (the user, 2026-10-04 — all four as recommended; the alternatives are kept below as the record):** D-59…D-62,
+now in § 1.
+- **D-59 — the old suites.** *Recommended:* retire all sixteen (and slice12, slice13, lane5b-visa, the probes and
+  smokes), moving the 35–45 checks no `run-final-*` suite makes into those suites. (Alternatives: retire without moving
+  — loses the dashboard and register checks; or re-point all in place — 3–5 days, mostly duplicating lanes 1–8.)
+- **D-60 — the demo's policy.** *Recommended:* the demo approves its policy — `hr.officer` approving `hr.head`'s draft,
+  before the trips are submitted — so the caps bind the demo: the Hilton shows D-8, the Sebrepor claim needs its
+  receipt, London's cost meets the single-trip limit. (Alternative: keep it a draft; then neither D-8 nor the receipt
+  rule can be shown.)
+- **D-61 — UAT's demo.** *Recommended:* prove the updated pack on a scratch copy and leave UAT's demo as it is; applying
+  it to UAT (a rerun, or a rebuild) is a separate go when the next demo is prepared. (Alternative: rerun on UAT now,
+  after a restore point — London approved, the policy binding every later trip on UAT, the Hilton rebooked through
+  D-8.)
+- **D-62 — the Fleet hand-off.** *Recommended:* one document in the payroll hand-off's shape plus one defects row,
+  offering HR's availability read (leave and trips) for FX-7. (Alternative: four defects rows, no hand-off.)
+
+**As built — slice 10a, the record (2026-10-04).** Documents only.
+- *The Fleet hand-off (D-62, W5)* — `docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md`, self-contained for the
+  Fleet owner. It says what travel does with Fleet through its one seam, and sets out four things, each re-read in
+  Fleet's code on 2026-10-04:
+  - **§ 1:** the clash check (`EnsureNoDispatchedConflictAsync`, l.885-901, on create, update and dispatch) sees
+    dispatched trips only and compares no dates. Planned trips for the same hours are all accepted, and a vehicle that
+    is out refuses next month's trip too.
+  - **§ 2:** a driver is checked for a licence only. HR offers its availability read: who is on leave or travelling.
+  - **§ 3:** no `FLEET_TRIP` route is seeded, and submit (l.346) has no guard, so the engine approves with nobody asked.
+  - **§ 4:** a Fleet-owned read of a trip's incidents. Travel reads `FleetIncidents` directly because Fleet's reads
+    need `MaintenanceRead`.
+  - Cross-module defect **#38** points at it.
+- *#15 (W4)* — staff travel and separation named under *What it blocks*. A trip approved from the generic inbox stays
+  Submitted and skips the checks travel's approve makes before the engine: the line authority, and never the traveller.
+  By the route's design, an HR officer who is travelling could approve their own trip at the HR stage from the inbox
+  (read from the code, not tried). It also gets no `ApprovedById`, no attendance days and no notices. A separation
+  approved there cancels no trip. The re-verification table's row notes it.
+- *Defects l.285* — the step "re-run `run-slice6.mjs`" now says that suite is retired (D-59) and names the suites that
+  check the rate today.
+- *The Finance backlog (W3)* — rows 12.6 (`TRAVEL_ADVANCE_REFUNDED`), 12.7 (`TRAVEL_ADVANCE_WRITTEN_OFF`, on the existing
+  write-off role) and 12.8 (9c's recovery, which posts nothing by design); B12's dated rate and its reach beyond
+  travel; 12.1's payroll offset (2026-10-04, earlier).
+- *The HR README* — the plan's row now carries lanes 6–9 and lane 10 under way; the guide's row warns it is being
+  rewritten and that LW3 and LW10 as `hr.head` fail meanwhile.
+- *The finish plan* — the travel paragraph (lanes 0–9 complete; D-29 unchanged), the sweep note (done 2026-10-03), the
+  policy door (built 2026-10-02) and row 9.19 (closed in 7c1); the hand-offs lane gains #38 beside #37.
+- *This lane's checklist* — the demo item corrected to `hr.officer` (W2, C3); the two record items ticked.
+
+**As built — slice 10b, the harness (2026-10-04).** No code; the harness lives outside the repository.
+- *Retired (D-59).* The sixteen August suites, slice12, slice13 and lane5b-visa, the three smokes, the seven probes,
+  `audit-content.mjs` and the old helpers (`setup.mjs`, `api.mjs`, `teardown-run.mjs`, `workflow-definition.mjs`,
+  `fixtures.json`) — 35 files — moved to `dev-harness/hr-travel/retired/`. Its README has a table naming, for each,
+  what it covered, the lane or decision that ended it and what covers it now. Nothing current imported them; only
+  `clamd-stub.mjs` stays beside the `run-final-*` suites.
+- *Moved, not lost — 43 checks no `run-final-*` suite made:*
+  - **truth §9:** the initiator is the caller, never the payload (old slice 7);
+  - **truth §10:** every list read names its traveller and destination — all, paged, by status, by employee, by date
+    range and the traveller's own (old slice 0);
+  - **truth §11:** the dashboard — cost by currency, the upcoming count apart from its list, six labelled months, every
+    spotlight row named, the run's trip among the newest five (old slice 11). A draft counts, so nothing is submitted;
+    the old "the total is the naive sum" assertion was dropped, since both figures sum the same rows by construction;
+  - **bookings §16:** a segment's duration from its times, a hotel's nights × rate, a car's days × rate, an untouched
+    optional time sent as null (old slices 8 and 8-ui);
+  - **policy §12b:** one live rule per code, and a removed code reused by reviving its row (old slice 12);
+  - **compliance §4b:** the destination's current alerts carry the revised body and source (old slice 13);
+  - **compliance §9:** the visa register on the suite's own pair, a fourth free destination and a second passport
+    country — names on create, edit and list; the pair fixed; a duplicate refused, naming both countries; another
+    passport accepted; a retired pair re-entered; the lookup returning the live row (old lane5b-visa).
+- *The shared teardown.* After the fixture's retirement, if anything but notices is left, it retires a second time.
+  The first 10b policy run failed only that count: HR's identity reconciliation, holding a fixture employee as a
+  candidate, wrote a state row 0.36 s after the retirement deleted it. That job stops taking a deleted employee. The
+  straggler was removed.
+- *The harness README.* The two generations became one; the regression count; the retirement; seven passages that
+  said "until lane 3/4/8" or "the fixture stays" brought up to date; every suite row's latest result.
+- *Defects l.285* (10a) and *§ 7* — no longer send anyone to the old suites.
+
+**Suites (10b).** No migration (112 = 112); the API started on UAT at 16:06 UTC; the scheduled run **15/15** (989399).
+Each touched suite twice: truth **118 → 136**, **136/136 twice** (694261, 959592); bookings **148 → 153**, **153/153
+twice** (739982, 003353); compliance **96 → 110**, **110/110 twice** (859096, 119242); policy **131 → 137**, 136/137 then
+137/137 (803013, 063863; 803013's one failure was the teardown straggler above), then **137/137 twice** on the fixed
+teardown (247958, 302848). No regression pass: no travel code changed (§ 7). The regression is now **1,868** a pass
+(ten suites 1,646 + reminders 222), **1,883** with the scheduled run, **1,953** with the posting proof. After the runs:
+the demo's four trips as they were, attendance 56, no trip, register entry, alert or fixture row live; the API stopped.
+
+**As built — slice 10c, the demo pack (2026-10-04).** The pack sits outside any repository, so the four files it changes
+were backed up first to `dev-harness/hr-demo-smoke/_backups/2026-10-04-before-travel-10c/`.
+- *`080-travel.mjs` — the policy binds (D-60).*
+  - The policy, its rules and its approval moved **before the submit loop**: a request records the policy it was
+    checked against at submission, so approved later the policy would have bound the bookings but never the claims.
+  - `hr.head` drafts it; `hr.officer` approves it (C3).
+  - Under it: London's 62,000 sits under the 75,000 single-trip limit; the Sebrepor claim's fuel line (180) needs its
+    receipt (above GHS 100; the per-diem line is exempt); Sebrepor's claim falls inside the 14-day window
+    (`nextWeekday(-12)` is at most 12 days back).
+- *`081-travel-logistics.mjs`.*
+  - **D-8 end to end:** London's Hilton at 3,200 (above 2,400) is booked by `hr.head` with the exception asked, so it
+    is saved Pending. `hr.officer` (neither the booker nor the traveller) authorises it, then it is confirmed. The
+    steps are driven by the exception's state, so a rerun resumes where the last run stopped; the old fall-back to
+    the ceiling went.
+  - **Lagos's yellow-fever requirement ticked** through `requests/{id}/health-requirements/{id}/clear`, so lane 7b's
+    `StaffTravelHealthClearances` holds a row; the online declaration stays unticked.
+  - **Three bugs fixed:**
+    - travel documents are matched on the holder and the last four characters, since lane 7 masks the number on
+      list reads (a rerun had filed all four again and stood the verified passports down);
+    - a hotel's checkout stays inside the trip (a start moved off a weekend had pushed it past the return day + 1);
+    - Sebrepor's car hire is booked first, and `ground` finds an existing booking whatever the trip's status — the
+      sweep completes a past trip on its first run, after which it takes no new booking.
+  - A stale comment about risk acknowledgement corrected (E1).
+- *The gates.* `demo-coverage-manifest.csv` gains `StaffTravelHealthClearances` (required); 081's own table list too.
+  **`runbook-counts.json` is unchanged** — a deviation from W7: it holds one query per number the books state, and
+  Book 2 §3 states none of the new facts (its policy line — "class of travel by grade … exceptions are requested and
+  approved" — stays true). The facts are checked by `dev-harness/hr-travel/tools/check-demo-travel-scratch.mjs`
+  instead (read-only; scratch copies only). Book 2 §3 can gain the D-8 walk when the books are next revised.
+- *The proof (D-61) — on a fresh scratch database, UAT untouched.*
+  - `New-UatDatabase.ps1 -Database ErpSystemDB_TravelL10cScratch -SkipScenarios -SkipConfirm` built it in 4
+    minutes: the migration chain and the seeders, no failed seeder, the two-stage travel route active, the personas
+    present including `hr.officer`.
+  - The API was started on the copy and 080 then 081 run three times:
+    - **run 1:** 4 requests, 3 approved, the advance disbursed, 3 claim lines; in 081, 1 health clearance and 1
+      exception authorised. The only refusals were the designed ones (London's flight is not ticketed without an
+      approved visa, T-24; Kumasi's taxi is not completed before the trip);
+    - **run 2:** nothing new;
+    - **run 3:** after the host's sweep at 16:55 had moved Sebrepor under way and completed it — nothing new, its car
+      hire found.
+  - `check-demo-travel-scratch.mjs` **15/15 after each run**:
+    - four requests;
+    - the policy approved by `hr.officer`, and every trip checked against it at submission;
+    - Kumasi and London approved, Lagos awaiting approval;
+    - the Hilton confirmed with its exception authorised by `hr.officer`, not its requester;
+    - the Sebrepor claim submitted with three lines, the fuel line receipted;
+    - four documents, the two verified passports still primary;
+    - Lagos's clearance;
+    - Sebrepor's car hire completed;
+    - three trips on attendance.
+  - `verify-tables.mjs`: **travel 28 of 28** required tables hold data (the other areas' scenarios were not run). The
+    API stopped, the copy dropped.
+- *Not done, by D-61:* the pack is not run on UAT. Applying it there — a rerun (London approved and its Hilton rebooked
+  through D-8, the policy binding every later trip) or a rebuild — is a separate go when the next demo is prepared.
+
+**As built — slice 10d, the guide: rules and model (2026-10-04).** `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`; every fact
+re-read in the code before it was written (the request page's **eight** tabs — the eighth, Workflow, drawn by its
+own component; eight kinds of compliance record; a Critical trip's acknowledgement holding the **ticket**, not the
+approval).
+- *Status and scope.* The status names the rewritten parts and says the plan is right where a not-yet-rewritten
+  chapter disagrees. Ten menu items and the four new screens (Approvals, Advances, Policy Breaches, Travel
+  Documents — chapters 3a, 8a, 13a, 10a, written in 10e–10f, so no chapter is renumbered); 26 pages, 32 tables;
+  the six portal screens.
+- *The rules — seven now.*
+  - **1 —** whether the policy is in force: UAT's is a draft (D-61), a rebuilt demo's in force (D-60); the state
+    labels, the five moments it binds, and the claims following the policy recorded at submission.
+  - **2 —** authority by the act: who each Admin act is refused to, what is never deleted, and the Write-tier
+    rules (D-7, D-2).
+  - **3 (new) —** two-stage approval, and UAT's Lagos and London on the old one-step route.
+  - **4 —** the rule register kept apart from D-8's booking breaches.
+  - **5 (new) —** money takes two people; payroll offset gone; the old currency rule reduced to a footnote (Finance
+    fixed its conversion; the dashboard and claims queue still do not add currencies).
+  - **6 —** recovery on payment, with the waiver, D-15 and Void payment.
+  - **7 (new) —** the nightly sweep moves trips and keeps attendance.
+  - The first edition's Rules 3 (dropdowns) and 5 (inverted rates) fell.
+- *Conventions.* The Write row names D-7, D-2 and D-16.
+- *Chapter 1.*
+  - **The diagram:** the policy box as D-1 left it, dated and scoped; submission records the policy; approval puts
+    days on attendance; health clearances; the four extra advance states; the hotel breach Pending (D-8).
+  - **The tables:** 32, with health clearances, the breach columns and the attendance link.
+  - **Enums:** the lists built from them; nine advance states; Prohibited and Critical.
+  - **§1.4:** the rollup as lanes 3 and 6 built it.
+  - **§1.5:** rewritten — every setting binds, two dropped, the scope and versions, T-9 fixed, the
+    claims-follow-submission footnote.
+  - **§1.6:** adds the generic inbox (#15).
+- *Chapter 13.* Rewritten.
+  - The state labels, Draft a policy, Approve refused to its author and Withdraw.
+  - The approved-policy card; Scope; all eleven settings in Card 2.
+  - A walk that forks on the State column: on UAT the Draft sentence and LIVE WRITE 13, with its tenant-wide
+    warning; on a rebuilt demo, who signed it and the Hilton on Policy Breaches.
+  - Behind the page; gaps T-1 (by D-61), T-4, T-49, T-51; T-2, T-9 and T-50 fixed.
+- *Appendix B.* The portal's surface as lane 7 grew it; the decision door (`StaffTravelApprovalsController`, the
+  service deciding who); Read, Write and Admin as they are; the closing note no longer calls the unlinked admin Rule
+  1's cause.
+
+**As built — slice 10e, the guide: the trip at the desk (2026-10-04).** Chapters 3, 3a (new), 4, 5 (all but 5.4) and 6,
+from the pages' code and UAT's own rows (read-only). The walks fork where UAT — not re-run, D-61 — differs from a rebuilt
+demo: UAT's London flight is **Ticketed** (booked before the visa rule), its Hilton carries no exception state, and Lagos
+and London are on the one-step route.
+- *Ch 3:* all eleven types on the filter (T-12); the `?employeeId=` banner; Pending approval forked; open Lagos on UAT,
+  London on a rebuilt demo.
+- *Ch 3a (new) — Approvals:* the approver's own queue; its columns; who each trip waits for on UAT and on a rebuilt
+  demo; never the generic inbox (#15).
+- *Ch 4:* every list from the enums (Rule 3's 400s gone); HR's currency door (O-19); no unit picker (lane 1); the visa
+  switch and its override reason (D-39); the **Policy and limits** card (T-16); what the server refuses at create (a
+  leaver, a trip after an approved separation's day) and at submission (a past departure without a reason, an
+  overlapping trip, the single-trip limit) and what it only **warns** of (approved leave, insurance, a passport expiring).
+- *Ch 5 header and 5.1:* each control as the page draws it — Submit after departure, Approve/Reject/Return from viewer
+  actions, Request change, Mark completed disabled before the start, Close trip, Cancel's refusals and cascade, Did not
+  travel; the stage banner, the alert banner, the driver's line; eight tabs; On attendance and Travel policy on the
+  Overview.
+- *5.2 Itinerary:* the server's statuses and Finalise; six leg types; Linked booking and the date flag; LW2 before
+  Finalise.
+- *5.3 Bookings:* the verbs on the ⋯ menu; every dialog's fields (Supplier, the exception request); the policy's bite
+  and D-8; the company vehicle; the ticket's three waits; a walk that shows D-8 on a rebuilt demo, and on UAT — after §
+  2.4's Option B — live on Kumasi (from 5 October the refusal also names the hotel notice).
+- *5.5 Compliance:* the six cards as they are (no documents card — they moved to their register, ch 10a); the
+  traveller-only acknowledgement; health requirements ticked.
+- *5.6–5.8 and ch 6:* the comment rules (D-21); the seven attachment types and the traveller's files; LW6 forked by
+  Rule 3; the full route table; T-28 corrected; the edit page's locked states and Request change.
+
+**As built — slice 10f, the guide: money and registers (2026-10-04).** Chapters 5.4, 7, 8, 8a (new), 9 and 9b, 10, 10a
+(new), 11, 12 and 13a (new), from the pages' code and UAT's own rows (read-only); the walks fork where UAT differs from
+a rebuilt demo. One code change: the alerts page's footnote.
+- *5.4 Finance:* the budget only on an approved trip (D-16), in its currency, its derived figures and **Approve the
+  budget** (D-19); the advance actions by status; the Finance column; LW3 as `hr.officer` approving Kumasi's (UAT) or
+  Sebrepor's (rebuilt) budget. T-20 open; T-21, T-22 fixed.
+- *Ch 7 groups:* the status verbs (Open / Close / Reopen / Cancel — In progress and Completed from the sweep); places
+  taken; *Add a traveller* and *Link an existing request*; Remove and Delete leave the trips standing. T-30–T-32 fixed.
+- *Ch 8 claims queue:* *Awaiting payment* includes Partially approved (B7); portal claims land here. T-33, T-34 open.
+- *Ch 8a (new) — Advances:* Overdue settlements (the server's read, before the sweep marks it), Cash out, All; the
+  chase-list footnote; Kumasi's GHS 2,500 out until 3 Nov.
+- *Ch 9 and 9b claims:* the four dialogs as they are — the expense review (whole or part, the reason the claimant
+  sees), the claim review's four outcomes, the pay dialog with the waiver (O-2), *Void payment*; the claim types are
+  Post Travel · Advance Settlement · Partial Claim · Amendment (the first edition invented three) and there is no currency
+  field (B11); LW 8–10 with `hr.head` refused at pay and `hr.officer` paying; the Kumasi recovery beat; the undo is the
+  void. T-35–T-39 and T-57 fixed.
+- *Ch 10 and 10a:* the register now sets the trip's visa flag (D-39) — a table by requirement type; stale entries
+  (T-40); the documents register (7a): masking, one primary per type, a change unverifies, a verified one is not
+  deleted; UAT's four documents. T-41 open.
+- *Ch 11 alerts:* an active alert fans out at once (7a), inactive goes to nobody and activating later sends nothing;
+  remove refused once sent; the demo caution for Ghana/Kumasi. T-44, T-46 fixed; T-45 a warning.
+- *Ch 12 dashboard:* the four tiles as drawn; UAT's figures on 4 Oct. T-47, T-48 open.
+- *Ch 13a (new) — Policy Breaches:* the D-8 register and its two views; London's Hilton on a rebuilt demo, empty on UAT.
+- *The alerts page footnote* (`frontend/src/app/hr/travel/alerts/page.tsx`) still said *"Raising an alert here sends
+  nothing by itself"* — untrue since 7a. It now says what the create does. Text only.
+- *Seen while writing, not fixed:* **verifying a travel document is not refused on one's own** — the two-person rule
+  does not reach it. Recorded in ch 10a's gaps as TDC's call.
+- *Pronouns:* the walks' lines no longer give the demo personas a gender (5.4 and the new chapters).
+
+**As built — slice 10g, the guide: the workbook and the record (2026-10-04).** The rest of the guide, so it is rewritten
+whole; its status line says so. Documents only.
+- *Ch 2 — the prep:* both databases side by side — the four trips (UAT: Lagos and London Submitted on the one-step
+  route, Sebrepor Completed; rebuilt: London approved, all four under the policy), and every table where they differ
+  (budgets 4 unapproved vs 2; flights and hotels 2+2 vs 1+1; health clearances; reminder runs). § 2.2 warns that
+  re-running 080 on UAT would approve the policy (D-60) — the change D-61 left undone — and that `DEMO_DB` defaults to
+  UAT. § 2.4's SQL shortcut is gone (it skipped the author rule the chapter demonstrates). § 2.5 is new — *who does the
+  second half* (`hr.officer`'s acts); three windows; ten tabs.
+- *Ch 14:* the walk as `hr.head` (Admin since lane 4); *Recent sweeps* forked; the preview's as-of date on the
+  short-dated passport's 30-day rung; gaps closed out (T-52, T-53, F2, T-7).
+- *Ch 15:* window C; Sebrepor completed; the claim on the Money tab; six screens; gaps closed out (T-54–T-56).
+- *Ch 16:* eleven places — Finance's dated rate through HR's door, Procurement's suppliers (T-8), the policy from the
+  traveller's unit and its ancestry (O-5), Workflow and #15, **Payroll (nothing, #37)**, and the General Ledger as it
+  is (posting since 2026-09-20 and lane 3; *Unposted* on UAT; #35).
+- *Ch 17 — reset:* every live write's undo as it now is — the budget's approval withdrawn by an edit, LW 7 back to In
+  progress (not Approved), LW 8–9's SQL with the real column names, **LW 10 undone by Void payment** (no SQL), the
+  Kumasi beat's claim; a rebuild flips every fork to the rebuilt side.
+- *Ch 18 — short path:* London for the bookings; the policy's State forked; Rule 6 said rather than the pay dialog
+  opened; the "do not" list without the retired 400s and 403.
+- *§ 19:* 237 lines of the first walk's findings become a pointer to § 3d — where each T-finding stands, the ten still
+  open by chapter, the lane-10 observation — and *What is genuinely strong here*, corrected for D-8, C3, two-person
+  money and the sweep.
+- *Appendices:* A — 26 routes with the persona for each second half, the generic inbox marked *not for travel*; C — the
+  plan first, the harness's 1,868 a pass, the two hand-offs, defects #15 and #34–#38 (#1 and #2 resolved).
+- *Rule 1, ch 13 and ch 2:* UAT's Lagos and London carry the draft policy from a hand link made before lane 1 — so the
+  "submitted under no policy" sentences now name Kumasi and Sebrepor only (`ApprovedPolicyAsync` would hold Lagos's and
+  London's claims to it once approved).
+- *`docs/HR/README.md`:* the guide's row describes the rewritten guide.
+
+**As built — slice 10h, the close (2026-10-04).** The travel memories brought up to date; then the lane-close proof on
+UAT — migrations 112 = 112 before the API started, so it applied nothing. The scheduled sweep **15/15** first; then
+`tools/run-regression.sh 10close 2` — both passes identical, every suite unchanged: truth **136**, lifecycle **257**,
+approvals **123**, money **288**, policy **137**, bookings **153**, fleet **194**, compliance **110**, portal **177**,
+touchpoints **71** (1,646 a pass); reminders **222** after them — **1,883** with the scheduled run. Each re-delete pass:
+0 live notices left, against 1,484 fixture notices in its scope that the teardowns had already deleted (so the zero is
+not vacuous); UAT holds exactly its four demo trips. The API log held only the known noise — the payroll profile's
+foreign key refused 666 times (cross-module #23; HR's fallback catches it) and dead-lettered notification emails; the
+one-off SQL error 102 of lane 9's close did not recur. Lane 10 changed no travel code (the alerts footnote is text),
+so these passes are the closure's final proof rather than a check on the lane.
 
 ---
 
@@ -3322,8 +3676,9 @@ fleet trip.
 
 ## 7. Verification
 
-- Each lane's suite green **twice** on UAT, then the full travel regression (the sixteen existing
-  suites as lane 0 re-pointed them, plus the new ones), its count recorded in the harness README.
+- Each lane's suite green **twice** on UAT, then the full travel regression — the `run-final-*` suites (the sixteen old
+  suites were never re-pointed; they are retired, D-59, their uncovered checks moved into these), its count recorded in
+  the harness README.
   **From slice 9c on (the user, 2026-10-04 — a post-slice run had reached 75 minutes):** a slice that changes no travel
   code runs its own suite twice and no regression; a slice that changes travel code runs its own suite twice and **one**
   full regression pass; **two passes only when a lane closes**. In the harness, the teardown's re-delete of resurrected
@@ -3545,3 +3900,36 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   fixture chief and posting a planted leave mid-teardown, with no per-suite wait left to absorb the dispatcher (#36) —
   both closed in the harness, and one unexplained SQL syntax error in the sweep, recorded with its evidence. Rerun: two
   passes, every suite unchanged twice. Staged (with the four logging edits). Next: lane 10.
+- **2026-10-04, later** — The user committed the close (`2201a5f7d`). **Lane 10 source-checked** — three read-only
+  surveys (the guide, the old suites, the demo pack) checked by hand where they mattered: W1–W10, slices 10a–10h;
+  D-59…D-62 proposed and **taken by the user, all as recommended**. The checklist's *"`hr.head` approves the policy"*
+  cannot happen (C3); `hr.officer` does. **Slice 10a written** — documents only: the Fleet hand-off and #38 (each line
+  re-read in Fleet's code; two of the first draft's claims corrected against it), #15 naming travel and separation, the
+  Finance backlog's rows 12.6–12.8 and the dated-rate note, the HR README and the finish plan. Staged. Next: 10b.
+- **2026-10-04, later** — **Slice 10b built** — the harness. The 35 old files retired to `retired/` (a table naming
+  what ended each); 43 checks no current suite made moved into truth §9–§11, bookings §16, policy §12b and compliance
+  §4b and §9, each suite twice on UAT. The first policy run met a third background-job race at teardown (HR's identity
+  reconciliation, 0.36 s after the retirement), now settled by a second retirement. The regression is 1,868 a pass.
+  Next: 10c.
+- **2026-10-04, later** — The user chose to commit lane 10 once, at its end. **Slice 10c built** — the demo pack (backed
+  up first; it is in no repository). 080 approves the policy as `hr.officer` before the trips are submitted; 081 takes
+  London's Hilton through D-8, ticks a health requirement, and no longer refiles documents, overruns a trip or loses
+  Sebrepor's car hire to the sweep. Proven on a fresh scratch database built by `New-UatDatabase.ps1`: 15/15 after each
+  of three runs (the third after the sweep had completed Sebrepor), travel 28/28 tables; dropped after. UAT untouched
+  (D-61). Next: the guide (10d–10g).
+- **2026-10-04, later** — **Slice 10d written** — the guide's rules and model: seven rules (two new, two fallen),
+  the conventions, chapter 1, chapter 13 and Appendix B, each fact re-read in the code. Next: 10e.
+- **2026-10-04, later** — **Slice 10e written** — the guide's trip at the desk: chapters 3, 3a (Approvals, new), 4, 5
+  and 6, from the pages' code and UAT's own rows; the walks fork where UAT (not re-run, D-61) differs from a rebuilt
+  demo. Next: 10f.
+- **2026-10-04, later** — **Slice 10f written** — money and registers: 5.4, 7, 8, 8a, 9, 10, 10a, 11, 12 and 13a. The
+  first edition's claim types were invented and its claim chapter's five gaps are all closed; the alerts page's
+  footnote contradicted 7a and is corrected (text only). One observation for TDC: a document's verifier may be its
+  owner. Next: 10g.
+- **2026-10-04, later** — **Slice 10g written** — chapter 2 with both databases side by side, 14–18, § 19 as a pointer
+  to § 3d, Appendices A and C; the guide is rewritten whole. Found on the way: re-running 080 on UAT would approve the
+  policy (now said in § 2.2), and UAT's Lagos and London carry the draft policy by a pre-lane-1 hand link. Next: 10h.
+- **2026-10-04, later** — **Slice 10h, the close.** Memories brought up to date; the scheduled sweep 15/15, then two
+  regression passes on UAT, every suite unchanged (1,646 a pass), reminders 222; re-delete 0 left of 1,484 fixture
+  notices in scope; the API log only the known noise. **Lane 10 complete; the travel final closure complete.** Staged
+  as one commit for the user.

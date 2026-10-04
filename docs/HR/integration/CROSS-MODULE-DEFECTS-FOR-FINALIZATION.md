@@ -36,7 +36,7 @@ file carrying the defect received no change in this range.
 | 12 | Payroll payslip snapshots (FYI) | n/a | informational entry |
 | 13 | Payroll profile create never worked | **Open** | `PayrollService.cs` untouched |
 | 14 | Workflow pending feeds die mid-stream | **Open** | no `ReferenceHandler`/`IgnoreCycles` anywhere; master's only `WorkflowController` change is an unrelated new endpoint |
-| 15 | Generic approval strands the entity | **Partly mitigated, Finance only** | master added a `SupplierDebitNote` guard returning 409 `FINANCE_DOMAIN_APPROVAL_REQUIRED` pointing at the domain route. The generic hole is unchanged and **no HR entity is protected** — but this is now the precedent pattern for protecting one |
+| 15 | Generic approval strands the entity | **Partly mitigated, Finance only** | master added a `SupplierDebitNote` guard returning 409 `FINANCE_DOMAIN_APPROVAL_REQUIRED` pointing at the domain route. The generic hole is unchanged and **no HR entity is protected** — but this is now the precedent pattern for protecting one. *(2026-10-04: staff travel and separation named in § 15 — what a trip and a separation lose when approved there.)* |
 | 16 | Notification feed planting | **Open upstream** | `NotificationsController` untouched (HR gated its own path in slice 11) |
 | 17 | Fixed-asset approval links to a dead route | **Open** | `ActionUrl` still `/finance/fixed-assets/register/{id}`; `register/[id]/` still contains only `edit/` |
 | 18 | Payroll loans readable by anyone | **Open** | `PayrollController.cs` untouched |
@@ -282,8 +282,9 @@ recorded in `StaffTravelCurrencyBridge.GetRateToBaseAsync`, and the travel harne
    seeded pairs, and correct any existing rows.
 3. Check every other writer of `ExchangeRate` for the same transposition — the seeder is unlikely
    to be the only place the ambiguity was resolved the wrong way.
-4. Re-run `dev-harness/hr-travel/run-slice6.mjs`; it prints the effective rate and warns when it is
-   implausible, so it will confirm the fix without needing an edit.
+4. ~~Re-run `dev-harness/hr-travel/run-slice6.mjs`~~ — retired with the old travel suites (2026-10-04, travel closure
+   D-59; it could no longer start on UAT). The rate travel uses is now checked by `run-final-truth.mjs` §1 and
+   `run-final-money.mjs` (the expense date's rate, B12).
 
 ---
 
@@ -1106,6 +1107,19 @@ approved; the requester sees a request stuck in Submitted with no approval pendi
 module on the engine is affected. The HR portal inbox (slice 11) is READ-AND-NAVIGATE for
 exactly this reason: rows deep-link to the record page, whose module commands do the whole
 job.
+
+**Staff travel, named (2026-10-04, travel closure lane 10).** A trip approved from the generic inbox stays
+**Submitted**. It also skips everything travel's own approve does after the engine:
+- the checks travel's approve makes before the engine — at stage 1 the traveller's line authority, and never the
+  traveller themselves (D-7; the route leaves `PreventInitiatorApproval` off because the service is the control). By
+  the route's design, then, an HR officer who is travelling could approve their own trip at the HR stage from the inbox
+  (read from the code, not tried);
+- the final approver's `ApprovedById`;
+- the trip's working days on attendance;
+- the traveller's and desk's notices.
+
+An **employee separation** approved there stays PendingApproval and cancels none of the leaver's trips (travel closure
+9c). Travel's own door is the desk's *Approvals* queue and the trip page, whose verbs carry the whole outcome.
 
 ### What a fix needs
 
@@ -2192,6 +2206,44 @@ refusal stays and medical's option is switched off. If so, a payroll intake for 
 reference back to the claim, a way to withdraw an item not yet paid, and the pay period that paid it reported back, so HR
 marks the claim *Paid* only once it is. Currency and tax treatment are payroll's to rule. The hand-off lists exactly what
 HR would send.
+
+## 38. Fleet — a vehicle or driver can be double-booked, and a submitted fleet trip is approved by nobody (2026-10-04)
+
+**Owner:** Fleet (`src/ErpSystem.Core/Services/Maintenance/Fleet/FleetTripService.cs`). **Severity:** medium — both
+put trips and vehicles wrong on Fleet's own screens, whoever books them. **Found:** HR's travel closure, the Fleet review
+(FX-2, FX-7, FX-9, 2026-10-01), handed off under D-12, D-27 and D-62. **Full report:**
+`docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md`.
+
+### What is broken
+
+- **The clash check sees dispatched trips only, and no dates** (`EnsureNoDispatchedConflictAsync`, l.885-901). Planned
+  trips for the same hours are all accepted. A vehicle that is out refuses every other trip for it, next month's too.
+- **A driver is checked for a licence only** — not for approved leave, or another trip not yet dispatched.
+- **No `FLEET_TRIP` approval route is seeded**, and `SubmitForApprovalAsync` (l.346) has no guard for a missing route.
+  The engine then approves the submission at once, with nobody asked.
+
+### What was proven
+
+Read from the code, 2026-10-01 and again 2026-10-04 (the lines above).
+
+Travel's own legs are protected on travel's side (`StaffTravelFleetService`):
+- strict overlap against planned trips;
+- compliance at drop-off;
+- driver leave and other trips;
+- submission only under a published route (D-27).
+
+### What it blocks
+
+Nothing in travel. In Fleet: double-booked vehicles and drivers, and fleet trips approved without an approver.
+
+### What a fix needs
+
+- Compare overlapping planned windows of live trips.
+- Seed a route and refuse submission without one.
+
+HR offers a read-only availability read (approved leave and staff travel) for the driver check. The hand-off also asks
+for a Fleet-owned read of a trip's incidents: travel reads the `FleetIncidents` table directly today, because Fleet's
+reads need `MaintenanceRead`.
 
 ## How to use this file
 

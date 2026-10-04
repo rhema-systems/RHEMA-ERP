@@ -295,9 +295,10 @@ export default function TravelAlertsPage() {
 
       <p className="text-xs text-muted-foreground">
         An alert appears automatically on the travel desk&apos;s view of any trip to that country
-        while it is in force. A traveller sees it only once it is sent to them — from the
-        trip&apos;s Compliance tab — which emails them and puts it on their own travel page to
-        confirm they have read it. Raising an alert here sends nothing by itself.
+        while it is in force. Raised active, it goes at once to the traveller of every approved or
+        under-way trip to the destination in its dates — in the app and by email, and on their own
+        travel page to confirm they have read it. A trip approved later is sent it from its
+        Compliance tab. Raised inactive, it goes to nobody.
       </p>
 
       <Dialog open={open} onOpenChange={setOpen}>

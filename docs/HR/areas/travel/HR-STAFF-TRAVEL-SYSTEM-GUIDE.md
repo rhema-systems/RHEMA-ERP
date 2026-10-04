@@ -1,36 +1,42 @@
 # HR Staff Travel — System Guide and Demonstration Workbook
 
-**Status:** written 2026-09-17 from the source — page components, forms, the eight controllers, the
-services, the policy guard, the EF model, the workflow definitions, the seeded permission map and
-the two demo scenarios. It describes what the code is built to do. Where a screen offers something
-the server will refuse, the step says so rather than smoothing it over. **The open work on every
-finding in § 19 is tracked in `HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` (2026-10-01).**
+**Status:** written 2026-09-17 from the source; **rewritten whole in the travel final closure's lane 10
+(2026-10-04)** against what lanes 0–9 built — every chapter re-read in the code and against UAT's own rows, with the
+walks forking where UAT (not re-run, D-61) differs from a database the demo pack builds today. Where this guide and
+`HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` ever disagree, **the plan is right** — its § 3d gives every T-finding's state,
+and each lane's *As built* what changed. It describes what the code does; where a screen offers something the server
+refuses, the step says so.
 
-**Scope:** the whole **Staff Travel** group of the HR sidebar — all six menu items — plus the six
-screens that hang off them without a menu entry, the **two setup areas** under Administration →
-HR → Travel, and the **four self-service screens** in the employee portal.
+**Scope:** the whole **Staff Travel** group of the HR sidebar (*Human Resources → Time & Leave → Staff
+Travel*) — **ten menu items** — plus the screens that hang off them without a menu entry, the **two setup
+areas** under Administration → HR → Travel, and the **six self-service screens** in the employee portal.
 
 | # | Menu item | Route | Chapter |
 |---|---|---|---|
 | 1 | Register | `/hr/travel` | 3 |
+| 2 | Approvals | `/hr/travel/approvals` — every employee sees it; it lists only their own decisions | 3a |
 | — | *(no menu entry)* Raise a request | `/hr/travel/new` | 4 |
-| — | *(no menu entry)* The request, and its seven tabs | `/hr/travel/[id]` | 5 |
+| — | *(no menu entry)* The request, and its eight tabs | `/hr/travel/[id]` | 5 |
 | — | *(no menu entry)* Amend a request | `/hr/travel/[id]/edit` | 6 |
-| 2 | Group Travel | `/hr/travel/groups` (+ `[id]`) | 7 |
-| 3 | Expense Claims | `/hr/travel/claims` | 8 |
+| 3 | Group Travel | `/hr/travel/groups` (+ `[id]`) | 7 |
+| 4 | Expense Claims | `/hr/travel/claims` | 8 |
+| 5 | Advances | `/hr/travel/advances` | 8a |
 | — | *(no menu entry)* The claim | `/hr/travel/claims/[id]` | 9 |
 | — | *(no menu entry)* New claim | `/hr/travel/claims/new` | 9 |
-| 4 | Visa Requirements | `/hr/travel/visa-requirements` | 10 |
-| 5 | Destination Alerts | `/hr/travel/alerts` | 11 |
-| 6 | Dashboard | `/hr/travel/dashboard` | 12 |
+| 6 | Policy Breaches | `/hr/travel/breaches` | 13a |
+| 7 | Visa Requirements | `/hr/travel/visa-requirements` | 10 |
+| 8 | Travel Documents | `/hr/travel/documents` | 10a |
+| 9 | Destination Alerts | `/hr/travel/alerts` | 11 |
+| 10 | Dashboard | `/hr/travel/dashboard` | 12 |
 | — | *(Administration)* Travel Policies | `/administration/hr/travel/policies` (+ `new`, `[id]`) | 13 |
 | — | *(Administration)* Travel Reminders | `/administration/hr/travel/reminders` | 14 |
-| — | *(portal)* My Travel | `/me/travel` (+ `new`, `[id]`, `[id]/edit`) | 15 |
+| — | *(portal)* My Travel | `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `claims/[id]`, `documents`) | 15 |
 
-**Twenty screens** over **thirty-one tables**, with seven tabs inside a single travel request. This
-is the deepest module in HR by nesting: a trip carries an itinerary carrying legs carrying
-activities, four kinds of booking, a budget, advances, claims carrying lines, and six kinds of
-compliance record.
+**Twenty-six pages** over **thirty-two tables**, with eight tabs inside a single travel request (four of
+them — itinerary, bookings, finance, compliance — drawn for the desk only; an approver sees overview,
+comments, attachments and workflow). This is the deepest module in
+HR by nesting: a trip carries an itinerary carrying legs carrying activities, four kinds of booking, a
+budget, advances, claims carrying lines, and eight kinds of compliance record.
 
 > **One thing to know before you say a word about scope.** The signed SRS contains **no
 > staff-travel requirement** — its single "travel" hit is a National Service allowance. This module
@@ -69,136 +75,168 @@ as they stand. Change the names, keep the order of the ideas — the order is do
 
 ---
 
-## Before anything else: the six rules that decide whether this demo works
+## Before anything else: the seven rules that decide whether this demo works
 
-Travel is the most *impressive* module in HR — it has genuine depth, a real enforcement mechanism
-and a money chain that ends in a bank transfer — and it has six behaviours that will catch you out
-live. Read these twice.
+Travel is the most *impressive* module in HR. It has genuine depth, real enforcement and a money chain that ends
+in a bank transfer, and it has seven behaviours that will catch you out live. Read these twice. They replace
+the six of the first edition (2026-09-17): its Rules 3 and 5 are gone (fixed), and Rules 1, 2 and 6 changed.
 
-### Rule 1 — The travel policy on this database is a **draft**, so no cap binds
+### Rule 1 — Find out whether the travel policy is in force before you promise a cap
 
-This is the module's best story and its biggest trap in the same sentence.
+The policy is the module's best story, and **whether it binds depends on the database you are on.**
 
-The travel policy **genuinely refuses bookings** — a First-class ticket above the cap, a hotel over
-the nightly ceiling — and only a travel **administrator** may authorise the breach. That is a real
-financial control and it is properly built.
+A policy is a draft until a travel administrator approves it, and **a draft binds nothing**. The guard reads
+only an approved policy. Look before you speak: *Administration → HR → Travel → Policies*, the **State** column:
 
-But a policy is a **draft until it is approved**, and the guard checks for that:
+| State | What it means for the demo |
+|---|---|
+| **Draft — not enforcing** | No cap binds. A First-class fare and a GHS 9,000-a-night hotel are accepted without a murmur. **This is UAT today** — its *TDC Staff Travel Policy 2026* was drafted and never approved, so no trip was checked against it (Lagos and London carry it only because they were linked by hand before lane 1) |
+| **In force** | The caps bind (§ 1.5). **This is a demo database built by the pack since 2026-10-04** (closure lane 10, D-60) — `hr.officer` approved `hr.head`'s draft before the trips were submitted |
+| **Approved — in force from …** | approved to start on a later date; the version before it governs until the day before |
+| **Not in force** / **Expired** | superseded by a later version, or past its end date |
 
-```
-    var policy = candidates.FirstOrDefault(
-        p => p.TenantId == request.TenantId && p.ApprovedById is not null);
-    if (policy is null) return TravelPolicyCaps.None;      // ← no policy, no cap
-```
+**When it is in force, it binds at five moments** (closure lane 1 and lane 4, D-1):
 
-The demo's *TDC Staff Travel Policy 2026* was created and **never approved**. Approving is
-`HR.Travel.Admin` **and** the endpoint demands the caller be linked to an employee record. Until
-closure lane 4 no demo login held both. **Since lane 4 (slice 4c, D-3) the HR role holds Admin**, so
-**`hr.officer`** can sign it. `hr.head` drafted it, and whoever drafted or last changed a policy does
-not approve it. The demo pack still leaves it a draft: lane 10 decides what the demo's trips should
-meet first.
+- **at submission** — the trip's estimated cost against the single-trip limit, and the trip **records the
+  policy it was checked against**;
+- **at booking** — a cabin class and a hotel rate against their caps, and the advance-booking notice (21 days
+  for a flight, 14 for a hotel on the demo's policy);
+- **at booking, when the policy makes preferred vendors mandatory** — a booking names a supplier;
+- **at claim submission** — a receipt for every non-per-diem line above the threshold (GHS 100 on the demo's
+  policy), and the claim window (14 days after the trip ends). These two follow the policy **the trip recorded
+  at submission**: a trip submitted under no policy is held to none, whatever is approved later;
+- **a breach is not refused outright** if the booker asks for an exception with a reason. The booking is
+  saved **Pending**, and nobody can confirm or ticket it until a **different** travel administrator
+  authorises it on *Staff Travel → Policy Breaches* (Rule 2, D-8).
 
-**What this means for you:** on this database the Bookings tab will accept a First-class fare and a
-GHS 9,000-a-night hotel without a murmur. **Do not offer to demonstrate the cap refusing
-something** unless you have done § 2.4's prep. The policy screen says *Draft* in its State column,
-which is the honest hook — chapter 13 turns it into the strongest thirty seconds in the module.
-This is finding **T-1**.
+So on UAT, do not offer to show a cap refusing something unless § 2.4's preparation has been done; the
+*Draft — not enforcing* badge is the honest hook (chapter 13). On a freshly built demo database, the London
+trip's Hilton (3,200 a night against a 2,400 ceiling) **is** the cap at work: booked Pending, authorised by
+`hr.officer`, then confirmed. Finding **T-1** — open on UAT by choice (D-61), closed on a rebuilt demo.
 
 ### Rule 2 — HR administers travel, but nobody authorises what they did themselves
 
-> **Changed by closure lane 4 (slice 4c, 2026-10-02, D-3).** Until then `HR` held `HR.Travel.Read`,
-> `Write` and `Approve`, but **not** `HR.Travel.Admin`, so `hr.head` could not delete anything,
-> approve a policy or authorise a breach (**T-2**). The HR desk now holds Admin. The separation that
-> used to come from the role now comes from **the act**: each authority is refused to whoever did
-> the thing it checks.
-
-In this module Admin is **not just deletion**:
+Since closure lane 4 (slice 4c, D-3) the HR role holds **`HR.Travel.Admin`**. The separation that used to come
+from the role comes from **the act**: each authority is refused to whoever did the thing it checks. Every
+refusal names its reason, so pressing the button is safe.
 
 | Act | Tier | Refused to |
 |---|---|---|
-| Delete a request, attachment, itinerary, leg, activity, any booking, any segment, a claim, a claim line, an advance, a per-diem rate, a policy *(draft)*, a rule, a document, a visa requirement, a risk assessment, an alert, an insurance record, a health requirement, a group | **Admin** | — *(a booking with a policy exception is cancelled, not deleted — lane 4, D-20)* |
-| Delete a comment | its author, or **Admin** | everyone else. **Editing** a comment is its author's alone (lane 4, D-21) |
-| **Approve a travel policy** — which is what makes its caps bind at all | **Admin** | whoever drafted or last changed it |
+| **Approve a travel policy** — which is what makes it bind at all | **Admin** | whoever drafted or last changed it |
 | **Withdraw a travel policy** | **Admin** | — |
-| **Authorise or refuse a booking's policy exception** — *Staff Travel → Policy Breaches* (lane 4, D-8) | **Admin** | whoever booked it or asked for the exception |
-| **Decide a policy exception** | **Admin** | whoever raised it |
+| **Authorise or refuse a booking's policy exception** (*Policy Breaches*, D-8) | **Admin** | whoever booked it, whoever asked for the exception, and the traveller |
+| **Decide a policy exception** (the older register, no screen — Rule 4) | **Admin** | whoever raised it |
+| **Approve a trip's budget** | **Admin** | the traveller, and whoever set or last changed the budget (D-19) |
 | **Write off an advance** | **Admin** | the advance's own traveller |
-| **Approve a trip's budget** | **Admin** | the traveller, and whoever set or last changed the budget (lane 4, D-19) |
-| **Void a claim's payment** | **Admin** | the claimant and whoever paid it |
-| **The entire Reminders screen, reads included** | **Admin** | — *(the desk that renews a passport sees the queue, T-52)* |
+| **Void a claim's payment** | **Admin** | the claimant, and whoever paid it |
+| **The Reminders screen, reads included** | **Admin** | — *(the desk that renews a passport sees the queue, T-52)* |
+| **Delete** | **Admin**, and only while the record is still a draft of itself | see below |
+| **Edit a comment** | its **author** only (D-21) | everyone else — deleting one is its author's or an administrator's |
+
+**What cannot be deleted at all, whoever asks** (closure lanes 1, 4, 5, 7 — a deletion would erase a record
+someone relied on):
+
+- a travel request that is not a **Draft** — cancel it instead;
+- a booking that is not **Pending** — cancel it, so the record of what was booked stays; and a flight or hotel
+  carrying a policy exception (pending, authorised or refused), at any status — it is the breach register;
+- the itinerary version **in force** (a superseded one can be removed);
+- a **verified** travel document, an **acknowledged** risk assessment, an alert that has been **sent**.
+
+Two more rules sit on the ordinary **Write** tier, where no administrator is involved:
+
+- **Nobody decides their own trip** — at either approval stage (D-7). `hr.head`'s London trip is approved by
+  her line authority and then by `hr.officer`.
+- **Money needs two people** (D-2, D-16): whoever approves an advance does not pay it out; whoever reviewed a
+  claim — or any of its lines — does not pay it; nobody approves, pays or is paid their own. Rule 5.
 
 > **`HR.Travel.Admin` is a financial authority here, not a housekeeping one.** It decides what the
 > organisation may spend on travel and who may exceed it. Holding it, an HR officer still cannot
 > sign a policy they wrote, wave through their own booking's breach or approve a budget they set.
-> **A second HR officer does** — on the demo, `hr.officer` for what `hr.head` did. Each refusal
-> names the reason, so pressing the button is safe.
+> **A second HR officer does** — on the demo, `hr.officer` for what `hr.head` did.
 
-### Rule 3 — Two dropdown values on the request form will 400
+### Rule 3 — A trip is approved in two stages, and two of UAT's trips are on the old route
 
-`TravelRequestForm` offers a **Purpose** list and a **Risk level** list written from examples rather
-than from the enums:
+Since closure lane 2 (D-7) a trip goes first to the **traveller's line authority** — addressed by name to their
+supervisor and the head of their unit or a unit above it, whoever can sign in — and then to **HR**, who sets the
+approved budget. Approve, Reject and Return appear only for whoever may decide at the stage the trip is on;
+everyone else sees *"Waiting for …"* (§ 1.6).
 
-| Dropdown | Offers | The C# enum actually has |
-|---|---|---|
-| **Purpose** | BusinessDevelopment · ClientMeeting · Conference · Training · SiteVisit · Audit · **Negotiation** · Other | …plus Inspection, ProjectWork, GovernmentEngagement, PersonalCombined, Emergency — and **no Negotiation** |
-| **Risk level** | Low · Medium · High · **Extreme** | Low · Medium · High · **Critical** · **Prohibited** — and **no Extreme** |
-
-Enums bind by name (`JsonStringEnumConverter`), so choosing **Negotiation** or **Extreme** produces
-a **400** the form cannot attribute to a field — it surfaces as a red *"Could not create the
-request"* toast with a JSON binder message.
-
-**The defaults are safe** (*Client meeting* and *Low*). **Do not choose those two values.** Five
-real purposes and two real risk levels are unreachable, which is the other half of the same bug.
-This is finding **T-3**.
+On **UAT**, the two trips still awaiting approval — **Lagos (TR-2026-00002)** and **London (TR-2026-00003)** —
+were submitted before the change and stay on the **one-step route** they were submitted on: HR decides them in
+one step. A trip submitted **today**, or on a freshly built demo database, takes both stages. Know which you
+are showing before you say how many signatures it needs.
 
 ### Rule 4 — The policy's rule register is read-only, and that is a decision, not an omission
 
-Open a policy and you will find a **Rules** table you cannot edit. The API carries create, update
-and delete for rules, all harness-covered. They are deliberately not wired to a screen, because:
+Open a policy and you will find a **Rules** table you cannot edit. The API carries create, update and delete
+for rules; they are deliberately not wired to a screen, because **`StaffTravelPolicyRule` is enforced by
+nothing**. The guard binds on the policy's own fields (§ 1.5); no code path reads a *rule*, so `ruleType`,
+`limitValue` and `violationAction` describe a mechanism that does not run.
 
-> **`StaffTravelPolicyRule` is enforced by nothing.** The guard refuses bookings on the policy's own
-> scalar caps (`MaxFlightClass*`, `MaxHotelRate*`). No code path anywhere reads a *rule*, so
-> `ruleType`, `limitValue` and `violationAction` describe a mechanism that does not run.
+The reasoning is worth saying out loud, because it is a good answer: *an editable control that does nothing
+creates false assurance, and that is worse than no control.* A rule set to **Block** is a promise to whoever
+configured it. Finding **T-4**, recorded as a decision (finish plan D-29), not a defect.
 
-The reasoning, which is worth saying out loud because it is a good answer: *an editable control
-that does nothing creates false assurance, and that is worse than no control.* A rule set to
-**Block** is a promise to whoever configured it; a warning banner is a weak defence to an auditor
-looking at a screenshot. So authoring ships **on the day evaluation lands**, not before.
+Keep two things apart when someone asks about "exceptions":
 
-Chapter 13 has the say-line. This is finding **T-4** — recorded as a decision, not a defect.
+- a **booking exception** (D-8) — a booking above a cap, saved Pending until a second administrator authorises
+  it. It has a screen, *Staff Travel → Policy Breaches*, and it binds;
+- a **policy exception** (`StaffTravelPolicyException`) — an older register of a recorded breach and its
+  decision, kept and decided by an administrator who did not raise it, with **no screen** (T-49).
 
-### Rule 5 — Do not ask for a converted total. Anywhere.
+### Rule 5 — Money takes two people, and payroll is not one of the ways to pay
 
-Finance's currency conversion is **inverted** — `1 USD → GHS` returns `0.08` — and travel
-**delegates to it deliberately** rather than doing its own arithmetic, because two answers about
-one trip is worse than one wrong one shared with the rest of the product.
+Since closure lane 3 (D-2, D-16) the money chain cannot be run by one person:
 
-Everything downstream was built around that. The **dashboard splits its totals per currency and
-refuses to add them up**, and says so on the screen:
+- an **advance** is requested, approved by one officer and **paid out by another**; it is raised only on an
+  approved or under-way trip (money after the trip is a claim);
+- a **claim** is reviewed line by line, then approved, then **paid by someone who reviewed neither the claim nor
+  any of its lines**; nobody reviews or pays their own;
+- **Payroll offset is gone** from the pay dialog and refused by the server (D-10): payroll cannot receive a
+  claim, so a claim "paid" that way reached nobody. The question is with the payroll owner
+  (`docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`).
 
-> *"Travel is costed in 2 currencies. These are not added together — doing so would need an
-> exchange rate, and travel takes rates from Finance rather than inventing one."*
+**For the demo:** `hr.head` cannot both review and pay a claim, nor approve and pay out an advance. The
+second HR officer, **`hr.officer`**, does the other half. A walk that has one persona do both will be
+refused at the second step, with the reason on screen.
 
-On the demo database **everything is costed in GHS**, so you will see the single-currency layout
-and the question never arises. If someone asks for "the total travel spend in cedis", the answer
-is the sentence above. This is finding **T-5**, and it is owned by Finance, not by travel.
+*The currency footnote that used to be a rule.* Finance's conversion was fixed on 2026-09-10, and travel now
+converts at **Finance's rate for the day**: each expense at its own date's rate (B12), a foreign advance at the
+payment day's rate (D-15), the hotel cap in the policy's own currency. Only the **dashboard** and the claims
+queue still refuse to add totals in different currencies — on purpose; they show one row per currency.
 
 ### Rule 6 — The advance is recovered when the claim is **paid**, not when it is approved
 
-Travel's worst historical defect was that `AdvanceDeducted` and `SettledAmount` had **no writer
-anywhere**, so an employee who took a GHS 2,500 advance and then claimed GHS 2,500 of expenses was
-**paid twice**. It is fixed, and the fix has a shape you need to know before you open the pay
-dialog:
+An employee who took a GHS 2,500 advance and then claimed GHS 2,500 of expenses used to be **paid twice**. It
+is fixed, and the fix has a shape you need to know before you open the pay dialog:
 
 - recovery happens **inside the pay call**, not on review or approval;
-- so until you press **Record payment**, `netPayable` still reads as the **full approved amount**;
-- the dialog therefore **deliberately does not show `netPayable`** — it shows *Approved*, *Less
-  advance*, *To pay*, computed with the server's own `min(outstanding, approved)` rule and labelled
-  **anticipated**.
+- so until you press **Record payment**, the claim's payable still reads as the **full approved amount**;
+- the dialog therefore **does not show the payable figure** — it shows *Approved*, *Less advance*, *To pay*,
+  computed with the server's own `min(outstanding, approved)` rule and labelled **anticipated**;
+- if the traveller still holds advance cash on the trip that this claim does not name, paying in full needs a
+  reason in the **waiver** box (O-2);
+- an advance in another currency is valued at **the payment day's rate** (D-15); whatever a rate movement
+  leaves on it is refunded or written off;
+- **Void payment** undoes the payment *and* the recovery (T-39) — no SQL needed to take a payment back.
 
-If you quote the claim's *Payable* figure and then pay it, the number on screen will change and you
-will look wrong. Read the dialog, not the table. This is finding **T-6** — a defect that was fixed
-properly, and the only thing left is that the two screens disagree until the moment of payment.
+If you quote the claim's *Payable* figure and then pay it, the number on screen will change and you will look
+wrong. Read the dialog, not the table. Finding **T-6** — fixed properly; the two screens disagree only until
+the moment of payment.
+
+### Rule 7 — Trips move by themselves, once a night
+
+Since closure lane 8 (slice 8c) the **nightly travel sweep** runs **11 minutes after the API starts**, then
+daily, and it changes what you will find:
+
+- an approved trip goes **under way** on its departure date (or when Fleet dispatches its company vehicle);
+- a trip is **completed** the day after it ends, and its traveller is told the last day to claim;
+- a completed trip is **closed** once its claim window has passed and nothing is left open;
+- every approved trip's working days are kept on the traveller's **attendance** as *On duty* (lane 9a).
+
+So a demo database started for the first time moves its past trips at once: on a freshly built one, **Sebrepor
+is completed** within minutes. Rehearse on the database you will present, after it has been running for a
+quarter of an hour, not straight after a rebuild.
 
 ---
 
@@ -226,7 +264,7 @@ named after its `DbSet<>` property in `ApplicationDbContext.HR.cs` — `StaffTra
 | Permission | Grants | Held by the `HR` role? |
 |---|---|---|
 | `HR.Travel.Read` | every read — requests, itineraries, bookings, advances, claims, travel documents, visa requirements, health requirements, alerts, insurance, risk assessments and policies | **yes** |
-| `HR.Travel.Write` | raise and amend travel on behalf of staff; make and change every kind of booking; build itineraries; set budgets; request, approve and disburse advances; create, submit, review and **pay** expense claims; record documents, visas, insurance, risk assessments and alerts; author policies and their rules | **yes** |
+| `HR.Travel.Write` | raise and amend travel on behalf of staff; make and change every kind of booking; build itineraries; set budgets; request, approve and disburse advances; create, submit, review and **pay** expense claims; record documents, visas, insurance, risk assessments and alerts; author policies and their rules — **never on one's own trip, and never both halves of a payment** (D-7, D-2, D-16 — Rules 2 and 5) | **yes** |
 | `HR.Travel.Admin` | **delete anything**; **approve and withdraw a travel policy**; **authorise a booking above the policy cap**; decide a policy exception; write off an advance; approve a budget; void a payment; maintain per-diem rates' deletion; **the whole Reminders screen, reads included** — each refused to whoever did the act it checks (Rule 2) | **yes**, since closure lane 4 (D-3) — **no** before |
 | `HR.Travel.Approve` | interim authority to approve a travel request **where no workflow definition is published**. A `STAFF_TRAVEL_REQUEST` definition **is** seeded and published, so in practice this does nothing | **yes** |
 
@@ -259,11 +297,12 @@ everything traces back to the request.
 
 ```
  ┌──────────── THE RULEBOOK (Administration → HR → Travel) ───────────────────┐
- │  StaffTravelPolicy   ⚠ a DRAFT until approved — see Rule 1                 │
+ │  StaffTravelPolicy   binds only once APPROVED — Rule 1; dated versions,    │
+ │    a unit's policy covers the units under it; limits in its own currency   │
  │    max cabin class domestic / international                                │
  │    max hotel rate  domestic / international                                │
- │    advance-booking days · cheapest fare · preferred vendor                 │
- │    max single trip · max annual · receipt required above · submission days │
+ │    advance-booking days flight / hotel · preferred vendor mandatory        │
+ │    max single trip · receipt required above · claim window (days)          │
  │      └── StaffTravelPolicyRule  (read-only; enforced by NOTHING — Rule 4)  │
  │  StaffTravelPerDiemRate — per country/city: daily, meals, incidentals      │
  └──────────────────────────────┬─────────────────────────────────────────────┘
@@ -278,7 +317,9 @@ everything traces back to the request.
  │  Draft → Submitted → Approved → InProgress → Completed → Closed            │
  │       ↘ ReturnedForRevision   ↘ Rejected   ↘ Cancelled                     │
  │                                                                            │
- │  ⚙ Submit / Approve / Reject run on the WORKFLOW ENGINE — see § 1.6        │
+ │  ⚙ Submit / Approve / Reject run on the WORKFLOW ENGINE — two stages § 1.6 │
+ │  ⚙ submission records the POLICY it was checked against                    │
+ │  ⚙ approved: its working days on the traveller's ATTENDANCE as On duty     │
  └──┬──────┬──────┬──────┬──────┬──────┬────────────────────────────────────┬─┘
     │      │      │      │      │      │                                    │
     ▼      ▼      ▼      ▼      ▼      ▼                                    ▼
@@ -288,6 +329,8 @@ everything traces back to the request.
     │          │          │           ├── StaffTravelVisaRequirement        │
     │          │          │           ├── StaffTravelVisaApplication        │
     │          │          │           ├── StaffTravelHealthRequirement      │
+    │          │          │           │     └── StaffTravelHealthClearance  │
+    │          │          │           │         (ticked per trip — 7b)      │
     │          │          │           ├── StaffTravelInsurancePolicy        │
     │          │          │           ├── StaffTravelRiskAssessment         │
     │          │          │           └── StaffTravelAlert → Notification   │
@@ -296,6 +339,8 @@ everything traces back to the request.
     │          │          │      variance — DERIVED, recomputed on read)
     │          │          ├── StaffTravelAdvance  Requested → Approved →
     │          │          │      Disbursed → PartiallySettled → FullySettled
+    │          │          │      (or Rejected · Cancelled · Overdue · WrittenOff;
+    │          │          │       two people: approver ≠ payer — Rule 5)
     │          │          └── StaffTravelExpenseClaim
     │          │                 └── StaffTravelExpenseClaimLine
     │          │                 Draft → Submitted → UnderReview →
@@ -303,7 +348,8 @@ everything traces back to the request.
     │          │                              ⛔ the advance is recovered HERE
     │          │
     │          ├── StaffTravelFlightBooking → StaffTravelFlightSegment
-    │          ├── StaffTravelHotelBooking       ⛔ policy caps refuse here
+    │          ├── StaffTravelHotelBooking       ⛔ over a cap: Pending until a
+    │          │                                    SECOND admin authorises (D-8)
     │          ├── StaffTravelGroundTransport
     │          └── StaffTravelCarRentalBooking
     │
@@ -322,17 +368,21 @@ look.
 first automatically, at the moment of payment. That link is the single most valuable thing in this
 module and it is the one that was broken (Rule 6).
 
-**3. The policy is a control, not a document.** It genuinely refuses a booking. Whether it is *in
-force* is a separate question from whether it *exists* — which is Rule 1 and chapter 13.
+**3. The policy is a control, not a document.** Once approved it binds at submission, at booking and
+at the claim, and a breach waits for a second officer (Rule 1). Whether it is *in force* is a separate
+question from whether it *exists* — which is Rule 1 and chapter 13.
 
-**4. Compliance is per destination, not per trip.** Visa requirements, health requirements and
+**4. Compliance is per destination, then ticked per trip.** Visa requirements, health requirements and
 destination alerts are recorded against a **country**, and the trip's Compliance tab resolves them
 for this traveller's passport and this destination. Record them once; every future trip there
-inherits them.
+inherits them. What is per trip is the evidence: the desk ticks each health requirement as seen for this
+trip (lane 7b), and the visa register sets whether this trip needs a visa (lane 7, D-39).
 
 ### 1.2 The tables
 
-Thirty-one, in the order the module uses them.
+Thirty-two, in the order the module uses them. (Travel also writes into one table it does not own:
+`StaffDailyAttendances`, whose `StaffTravelRequestId` marks the days an approved trip holds as *On duty* —
+lane 9a.)
 
 | # | Table | One line |
 |---|---|---|
@@ -353,9 +403,9 @@ Thirty-one, in the order the module uses them.
 | 15 | `StaffTravelExpenseClaims` | Reimbursement after it |
 | 16 | `StaffTravelExpenseClaimLines` | One expense, with a receipt reference and a per-diem link |
 | 17 | `StaffTravelPerDiemRates` | Daily allowance by country and city, split by meal |
-| 18 | `StaffTravelPolicies` | The caps. **Draft until approved** |
+| 18 | `StaffTravelPolicies` | The caps — **binding only once approved**; dated versions per scope, each in its own currency |
 | 19 | `StaffTravelPolicyRules` | The rule register — **read-only, enforced by nothing** |
-| 20 | `StaffTravelPolicyExceptions` | A recorded breach and its decision |
+| 20 | `StaffTravelPolicyExceptions` | The older register of a recorded breach and its decision (no screen — Rule 4). A *booking's* breach lives on the booking itself: its exception state, who asked, who authorised (D-8) |
 | 21 | `StaffTravelDocuments` | Passports, driving licences, permits — with expiry |
 | 22 | `StaffTravelVisaRequirements` | Passport country → destination country: what is needed |
 | 23 | `StaffTravelVisaApplications` | One application, for one trip |
@@ -364,13 +414,15 @@ Thirty-one, in the order the module uses them.
 | 26 | `StaffTravelAlertNotifications` | That alert, sent to one traveller, and their acknowledgement |
 | 27 | `StaffTravelInsurancePolicies` | Cover for one trip |
 | 28 | `StaffTravelHealthRequirements` | Vaccinations and clearances by destination |
-| 29 | `StaffTravelReminderRuns` | One sweep of the reminder engine |
-| 30 | `StaffTravelReminderDispatchLogs` | What that sweep sent, to whom |
-| 31 | *(shared)* `NumberSequences` | Where `TR-2026-00002` comes from |
+| 29 | `StaffTravelHealthClearances` | One requirement ticked as seen for one trip — who, when, a note (lane 7b, D-36) |
+| 30 | `StaffTravelReminderRuns` | One sweep of the reminder engine |
+| 31 | `StaffTravelReminderDispatchLogs` | What that sweep sent or moved, to whom — and, since lane 8c, each trip it moved |
+| 32 | *(shared)* `NumberSequences` | Where `TR-2026-00002` comes from |
 
 ### 1.3 The vocabularies
 
-Nine enum families. Three matter; the rest are look-ups.
+Nine enum families. Three matter; the rest are look-ups. Since closure lane 0, every list a screen offers
+is built from these enums, so no form offers a value the server refuses (the first edition's Rule 3).
 
 **Request status** — nine values, and the lifecycle is the module's spine:
 
@@ -390,17 +442,20 @@ Nine enum families. Three matter; the rest are look-ups.
 Rejected · **Paid** · Returned. *PartiallyApproved* is the one people ask about: it means some lines
 were approved and some rejected, and the claim is still payable.
 
-**Advance status** — seven: Requested → Approved → Disbursed → PartiallySettled → FullySettled,
-plus Overdue and WrittenOff.
+**Advance status** — nine: Requested → Approved → Disbursed → PartiallySettled → FullySettled, plus
+**Overdue** (past its settlement deadline with cash still out), **WrittenOff** (an administrator's, never the
+traveller's own), **Rejected** and **Cancelled** (closure lane 3 — an advance not yet paid out is withdrawn
+with its trip). An advance a leaver's final settlement recovered is fully settled when the settlement is
+released (lane 9c, D-58).
 
 The rest, for reference:
 
 | Family | Values |
 |---|---|
-| **Travel type** | Domestic · International · CrossBorder · Regional · OverseasAssignment · FieldVisit · Training · Conference · ClientVisit · GovernmentDuty · Emergency *(the form offers ten of the eleven — Emergency is missing)* |
-| **Purpose** | BusinessDevelopment · ClientMeeting · Conference · Training · Audit · Inspection · ProjectWork · SiteVisit · GovernmentEngagement · PersonalCombined · Emergency · Other — ⚠ **see Rule 3** |
+| **Travel type** | Domestic · International · CrossBorder · Regional · OverseasAssignment · FieldVisit · Training · Conference · ClientVisit · GovernmentDuty · Emergency *(all eleven on the form since lane 0)* |
+| **Purpose** | BusinessDevelopment · ClientMeeting · Conference · Training · Audit · Inspection · ProjectWork · SiteVisit · GovernmentEngagement · PersonalCombined · Emergency · Other |
 | **Priority** | Routine · Urgent · Emergency |
-| **Risk level** | Low · Medium · High · Critical · Prohibited — ⚠ **see Rule 3** |
+| **Risk level** | Low · Medium · High · Critical · Prohibited — a trip rated or assessed **Prohibited** is not submitted or approved (lane 4, C5); a **Critical** one's flight is not ticketed until it has a risk assessment the traveller has acknowledged on their portal (lane 7, D-18) |
 | **Initiator role** | Employee · Manager · HrAdmin · TravelDesk · System |
 | **Booking status** | Pending · Confirmed · Ticketed · Cancelled · Refunded · NoShow · Completed · OnHold |
 | **Cabin class** | Economy(1) · PremiumEconomy(2) · Business(3) · First(4) — ⚠ **the numbering is load-bearing**; the cap comparison is numeric |
@@ -414,14 +469,20 @@ Four figures get quoted and they are computed differently. Get these right and n
 **① The budget's committed, actual and variance.**
 
 ```
-    Committed = Σ confirmed bookings (flights + hotels + ground + car rentals)
-    Actual    = Σ PAID expense claims
+    Committed = Σ the trip's bookings (flights + hotels + ground + car rentals), Pending and OnHold included,
+                no-shows left out, a cancelled or refunded flight's or hotel's cancellation FEE kept,
+                + the company vehicle's cost from Fleet's own cost entries (lane 6)
+    Actual    = Σ PAID claims' net payable
+              + advances paid out, less cash handed back      (lane 3, B10 — T-22)
     Variance  = ApprovedTotal − Actual
 ```
 
-All three are **derived and recomputed on read**, onto the DTO rather than the tracked entity —
-because a write-only rollup is stale the moment the next booking is made, and a read that writes is
-a different kind of problem. Nothing types these numbers.
+All three are **derived and recomputed on read**, in the **budget's currency** — the trip's, set by the
+server — each figure converted at Finance's rate on its own date (a booking when made, a claim when paid, an
+advance when paid out). A claim against an advance pays only the balance, so nothing is counted twice. An
+overrun is **flagged, not refused** (whether it should refuse is TDC's question). A budget exists only once the
+trip is approved, its parts add up to its total, and its total cannot exceed the trip's approved budget.
+Nothing types these numbers.
 
 **② What a claim is worth.**
 
@@ -440,39 +501,38 @@ a different kind of problem. Nothing types these numbers.
     paid      = claim.TotalApproved − recovered
 ```
 
-And the advance moves `Disbursed → PartiallySettled` or `→ FullySettled` accordingly.
+And the advance moves `Disbursed → PartiallySettled` or `→ FullySettled` accordingly. An advance in another
+currency is valued at **Finance's rate on the payment day** (D-15), the deduction worked in the advance's own
+currency. **Void payment** puts all of it back (T-39).
 
-**④ The dashboard's cost totals — deliberately not one number.** Grouped by currency, never
-converted. See Rule 5.
+**④ The dashboard's cost totals — deliberately not one number.** Grouped by currency, never added across
+currencies (Rule 5's footnote).
 
 ### 1.5 What the travel policy decides, and what it does not
 
-This is the honest slide, and it is a *strong* one here because more is enforced than in most of HR.
+This is the honest slide, and since closure lane 4 it is a *strong* one: every setting on the form binds,
+and the two that could not were taken off the form (D-1). All of it applies only to an **approved** policy
+(Rule 1).
 
-| Setting on a policy | Stored | Shown | **Enforced when a booking is written** |
-|---|---|---|---|
-| **Max flight class, domestic** | ✅ | ✅ | ✅ — refuses above the cap, 422, unless a **travel administrator** authorises it |
-| **Max flight class, international** | ✅ | ✅ | ✅ — same |
-| **Max hotel rate, domestic** | ✅ | ✅ | ✅ — same |
-| **Max hotel rate, international** | ✅ | ✅ | ✅ — same |
-| *(which of the two applies)* | — | — | ✅ — from the **request's** `IsInternational`, not the booking's |
-| *(is the policy in force)* | — | ✅ | ✅ — **an unapproved policy caps nothing** (Rule 1) |
-| **Advance booking days, flight / hotel** | ✅ | ✅ | ❌ — read by nothing |
-| **Requires cheapest fare** | ✅ | ✅ | ❌ |
-| **Preferred vendor mandatory** | ✅ | ✅ | ❌ — and there is no vendor field on any booking form (T-8) |
-| **Max single trip budget** | ✅ | ✅ | ❌ |
-| **Max annual travel budget** | ✅ | ✅ | ❌ |
-| **Receipt required above** | ✅ | ✅ | ❌ — a claim line above it is accepted with no receipt |
-| **Expense submission days** | ✅ | ✅ | ❌ |
-| **Every rule in the rule register** | ✅ | ✅ *(read-only)* | ❌ — Rule 4 |
+| Setting on a policy | **Binds** | When, and what happens |
+|---|---|---|
+| **Max flight class**, domestic / international | ✅ | at booking. A cabin above the cap is refused — or, with an exception asked and a reason, saved **Pending** until a different travel administrator authorises it (D-8). Domestic or international is the **trip's** own, worked out by the server (lane 1) |
+| **Max hotel rate**, domestic / international | ✅ | at booking, the same way — compared **in the policy's currency**, a rate in another currency converted at Finance's rate (lane 4; T-9 fixed) |
+| **Advance booking days**, flight / hotel | ✅ | at booking — a booking made with less notice is a breach, excepted the same way (D-1, D-8) |
+| **Preferred vendor mandatory** | ✅ | at booking — the booking must name a supplier from Procurement's register; every booking form has the field (D-1; T-8 fixed) |
+| **Max single trip budget** | ✅ | at submission — the trip's estimated cost; and HR's approved budget cannot exceed it (D-1, lane 2) |
+| **Receipt required above** | ✅ | at claim submission — every line above it, per-diem lines aside, needs a receipt (D-1) |
+| **Expense submission days** | ✅ | at claim submission — the claim window after the trip ends; the nightly sweep also uses it to close a trip (D-1, D-51) |
+| *(which policy applies)* | ✅ | the traveller's own unit's, else the nearest unit above it, else the organisation's (O-5); among a scope's versions, the one in force on the departure date (O-4) |
+| *(is it in force)* | ✅ | only once approved — **by someone other than its author** (C3) |
+| ~~Requires cheapest fare~~ · ~~Max annual travel budget~~ | — | **dropped** from the form and the API: nothing could enforce them (D-1; the columns stay) |
+| **Every rule in the rule register** | ❌ | read-only, by decision — Rule 4 |
 
 Two footnotes that matter to an auditor:
 
-> **The hotel cap has no currency.** `MaxHotelRateDomestic/International` are bare decimals with no
-> currency alongside them, so the comparison is *numbers against numbers*. It is sound only while
-> policy caps and bookings are expressed in the same currency — which on this database they are
-> (everything is GHS). Recorded rather than silently assumed; giving the policy a currency is a
-> schema change. **T-9.**
+> **Claims follow the policy the trip recorded at submission**, not the one in force when the claim is filed.
+> A trip submitted under no approved policy is held to no receipt rule and no claim window, whatever is
+> approved later. That is why the demo pack approves its policy before it submits the trips (lane 10, D-60).
 
 > **No policy means no cap, and that is deliberate.** A tenant that has configured no travel policy
 > is not thereby forbidden from booking travel. Refusing every booking until someone writes a
@@ -513,6 +573,10 @@ Six things follow (since closure lane 2):
 5. **The approve dialog asks for the approved budget at the last stage only**, prefilled with the
    estimate (**T-10 fixed**). An earlier stage approves without one and is told who sets it.
 6. **Two states can be submitted from:** `Draft` and `ReturnedForRevision`.
+7. **Decide on the trip page or the Approvals queue, never the generic workflow inbox** (`/workflow/inbox`).
+   That inbox completes the engine's step without travel's service: the trip stays *Submitted*, skips the
+   line-authority and own-trip checks, and posts no attendance days or notices. Cross-module defect **#15** —
+   the platform's, not travel's.
 
 **The line manager's way in.** *Human Resources → Time & Leave → Staff Travel → Approvals* lists what waits for the
 signed-in person — every employee sees the entry, and it lists only their own work. A line manager
@@ -526,7 +590,9 @@ compliance) and its Edit, Cancel and Complete buttons are not drawn for them.
 
 **Time needed: 20 minutes the evening before, plus 5 on the morning.** Most of this module needs no
 preparation at all — the two demo scenarios build a genuinely complete travel office. What needs
-deciding is Rule 1: whether you want the policy cap to actually refuse something live.
+deciding is which database you are on, because **UAT and a rebuilt demo database differ** (closure lane 10, D-61):
+UAT was seeded before the closure and has not been re-run; a database the pack builds today has the policy in
+force and the money and approvals done the new way. Every walk in this book says where the two part.
 
 ### 2.1 What the demo database already holds
 
@@ -536,66 +602,73 @@ Two scenario modules build it: `080-travel.mjs` (the request and the money) and
 **Four travel requests, and exactly four** — the runbook reads the register out loud, so nothing
 may mint a fifth:
 
-| # | Trip | Who | State | What it is for |
-|---|---|---|---|---|
-| 1 | **Kumasi** — Ghana Institution of Engineers conference, presenting the Community 25 drainage design | `head.dev` | **Approved** | the **advance** story: GHS 2,500 requested → approved → **disbursed** |
-| 2 | **Lagos** — Free Zone housing scheme study tour | `gm.ops` | **Submitted** *(pending)* | the **depth** story: group travel, a 3-leg itinerary with activities, insurance, a medium-risk assessment, a live alert. *(Its flight and hotel left the pack in closure lane 5 — a submitted trip takes no booking, D-23)* |
-| 3 | **London** — CIPD Africa HR Summit | `hr.head` | **Approved** *(since closure lane 5, D-26; `hr.officer` gives HR's approval — hr.head travels)* | the **compliance** story: a visa application, a policy exception, an over-cap hotel, a car rental, a flight **refused its ticket until the visa is approved** (T-24), priority Emergency |
-| 4 | **Sebrepor** — site handover with the contractor | `staff` | **Approved** | the **claim** story: an expense claim with 3 lines and a real receipt, submitted and awaiting review |
+| # | Trip | Traveller | On UAT | On a rebuilt demo | What it is for |
+|---|---|---|---|---|---|
+| 1 | **Kumasi** — Ghana Institution of Engineers conference, presenting the Community 25 drainage design *(UAT: 19–20 Oct)* | `head.dev` | **Approved**, under no policy | **Approved**, under the policy | the **advance** story: GHS 2,500 requested → approved → **paid out** by another officer |
+| 2 | **Lagos** — Free Zone housing scheme study tour *(9–13 Nov)* | `gm.ops` | **Submitted**, on the one-step route (Rule 3); its flight and hotel booked before lane 5 | **Submitted**, two-stage; no bookings (D-23); yellow fever ticked | the **depth** story: group travel, a 3-leg itinerary with activities, insurance, a medium-risk assessment, a live alert |
+| 3 | **London** — CIPD Africa HR Summit *(14–18 Dec)* | `hr.head` | **Submitted**, one-step; BA flight **Ticketed** (before the visa rule); Hilton with no exception state | **Approved** — `hr.officer` gives HR's approval, since `hr.head` travels; BA **Confirmed**, its ticket refused until the visa; the Hilton through D-8 | the **compliance** story: a visa application, a policy exception, an over-cap hotel, a car rental, priority Emergency |
+| 4 | **Sebrepor** — site handover with the contractor *(17 Sep)* | `staff` | **Completed** by the sweep, under no policy | **Approved**, moved on by the sweep | the **claim** story: an expense claim with 3 lines and a real receipt, submitted and awaiting review |
 
-⚠ **Since closure lane 8 (slice 8c) the nightly sweep moves these by their dates.** A trip whose departure date has come
-goes **under way**; one that has ended is **completed** the day after, and its traveller is told the last day to claim.
-So on any database whose dates have passed — UAT's Sebrepor ran on 17 Sep — **Sebrepor reads Completed** from the
-first sweep after the deploy (11 minutes after the API starts), with its claim still Submitted; it closes only once that
-claim is paid or rejected and its claim window (30 days, no approved policy) has passed. Kumasi goes under way on its
-departure date. Say *"the sweep moved it"*, not *"the seed is wrong"*.
+*A rebuilt database's dates are set relative to the day it was built.*
+
+⚠ **The nightly sweep moves these by their dates** (Rule 7). A trip whose departure date has come goes **under way**;
+one that has ended is **completed** the day after, and its traveller is told the last day to claim. So **Sebrepor
+reads Completed** from the first sweep after the deploy (11 minutes after the API starts), with its claim still
+Submitted; it closes only once that claim is paid or rejected and its claim window has passed. Kumasi goes under way on
+its departure date. Say *"the sweep moved it"*, not *"the seed is wrong"*.
 
 **And around them:**
 
 | Table | What is there |
 |---|---|
-| `StaffTravelPolicies` | **1** — *TDC Staff Travel Policy 2026*, effective 1 Jan. Caps: Economy domestic, **Premium economy international**, GHS 900/night domestic, **GHS 2,400/night international**, 21 days ahead for flights, receipts above GHS 100, max single trip GHS 75,000. ⚠ **Draft — not approved** (Rule 1) |
+| `StaffTravelPolicies` | **1** — *TDC Staff Travel Policy 2026*, effective 1 Jan. Caps: Economy domestic, **Premium economy international**, GHS 900/night domestic, **GHS 2,400/night international**, 21 days ahead for flights (14 for a hotel), receipts above GHS 100, claims within 14 days, max single trip GHS 75,000. ⚠ **UAT: Draft — not enforcing. Rebuilt: in force**, approved by `hr.officer` before the trips were submitted (Rule 1) |
 | `StaffTravelPolicyRules` | **5** — hotel ceilings domestic and international, the international cabin-class ceiling, 21-day advance booking, receipt above GHS 100 |
-| `StaffTravelPolicyExceptions` | **1**, **Approved** — the London summit hotel at GHS 3,200 against the GHS 2,400 ceiling |
+| `StaffTravelPolicyExceptions` | **1**, **Approved** by `hr.officer` — the London summit hotel at GHS 3,200 against the 2,400 ceiling *(the older, trip-level register — no screen, D-29)* |
 | `StaffTravelPerDiemRates` | **3** — Ghana (GHS 450/day), Lagos (1,500), London (2,600), each split into breakfast / lunch / dinner |
-| `StaffTravelBudgets` | **4**, one per request, split across flight / hotel / per-diem / transport / misc |
-| `StaffTravelAdvances` | **1** — Kumasi, GHS 2,500, **Disbursed**, settlement deadline set |
+| `StaffTravelBudgets` | **UAT: 4**, one per trip, set before lane 3, **none approved**. **Rebuilt: 2** — only approved trips take one (D-16): Kumasi's, approved by `hr.officer`; Sebrepor's, **left awaiting approval** for chapter 5.4's live write |
+| `StaffTravelAdvances` | **1** — Kumasi, GHS 2,500, **Disbursed**, settle by a date after the trip |
 | `StaffTravelExpenseClaims` | **1** — Sebrepor, **Submitted**, 3 lines: per-diem GHS 250, transport GHS 60, fuel GHS 180 with a **receipt attached** |
 | `StaffTravelRequestComments` | **3** — two on Lagos (one **internal**, not visible to the traveller), one query on London |
 | `StaffTravelRequestAttachments` | **3** — the GhIE invitation, the CIPD programme, the Sebrepor receipts |
-| `StaffGroupTravels` | **1** — *Lagos Free Zone study tour*, max 5, the Lagos request linked to it |
-| `StaffTravelDocuments` | **4** — three passports (two **verified**), one driving licence. ⚠ `head.dev`'s passport is **deliberately short-dated** so the expiring-documents screen has something on it |
-| `StaffTravelVisaRequirements` | **2** — Ghana→Nigeria (**ECOWAS free movement**, no visa, 90 days) and Ghana→UK (Standard Visitor, 15 working days, VFS Accra) |
+| `StaffGroupTravels` | **1** — *Lagos Free Zone study tour*, max 5, **Planning**, the Lagos request linked to it |
+| `StaffTravelDocuments` | **4** — three passports (two **verified**), one driving licence. ⚠ `head.dev`'s passport is **deliberately short-dated** so the expiring view has something on it (chapter 10a) |
+| `StaffTravelVisaRequirements` | **2** — Ghana→Nigeria (**ECOWAS free movement**, no visa, 90 days) and Ghana→UK (Standard Visitor, embassy visa, 15 days, VFS Accra) |
 | `StaffTravelVisaApplications` | **1** — the London Standard Visitor, GHS 1,450 |
-| `StaffTravelHealthRequirements` | **3** — Nigeria yellow fever (**mandatory**), Nigeria health declaration, UK fitness-to-travel over 60 |
+| `StaffTravelHealthRequirements` · `…Clearances` | **3** — Nigeria yellow fever (**mandatory**), Nigeria health declaration, UK fitness-to-travel over 60. Cleared: **UAT none; rebuilt 1** — Lagos's yellow fever |
 | `StaffTravelInsurancePolicies` | **2** — Lagos GHS 250,000 cover, London GHS 500,000 |
 | `StaffTravelRiskAssessments` | **2** — Lagos **Medium** with real mitigation notes, London **Low**. Only the London one is acknowledged |
-| `StaffTravelAlerts` | **3** — Lagos road disruption (**Warning**), London Piccadilly line works (Info), Ashanti heavy rains (Info) |
-| `StaffTravelFlightBookings` | **1** since closure lane 5 — British Airways ACC↔LHR (**Premium economy, Confirmed** — its ticket is refused until the visa is approved, T-24) with 2 segments, terminals, seats and baggage. *(Before lane 5 also Air Peace ACC↔LOS for Lagos, and the BA flight Ticketed — what a UAT seeded earlier still shows)* |
-| `StaffTravelHotelBookings` | **1** since closure lane 5 — Hilton London Metropole at **GHS 3,200/night**, Confirmed. *(Before lane 5 also the Radisson Blu Anchorage, Lagos, at GHS 2,200/night)* |
-| `StaffTravelGroundTransports` | **3** — the VIP coach to Kumasi, a Kumasi taxi, private car hire to Sebrepor |
+| `StaffTravelAlerts` · `…AlertNotifications` | **3** — Lagos road disruption (**Warning**), London Piccadilly line works (Info), Ashanti heavy rains (Info). **Sent to nobody**: they were raised before an active alert went out on its own (chapter 11) |
+| `StaffTravelFlightBookings` | **UAT: 2** — Air Peace ACC↔LOS for Lagos, and British Airways ACC↔LHR **Ticketed**. **Rebuilt: 1** — the BA flight (**Premium economy, Confirmed** — its ticket refused until the visa is approved, T-24) with 2 segments, terminals, seats and baggage |
+| `StaffTravelHotelBookings` | **UAT: 2** — the Radisson Blu Anchorage, Lagos (GHS 2,200/night), and the Hilton London Metropole at **GHS 3,200/night**, both Confirmed with no exception state. **Rebuilt: 1** — the Hilton, saved Pending with its exception asked, **authorised by `hr.officer`**, then Confirmed (D-8) |
+| `StaffTravelGroundTransports` | **3** — the VIP coach to Kumasi, a Kumasi taxi, private car hire to Sebrepor *(completed)* |
 | `StaffTravelCarRentalBookings` | **1** — Avis at Heathrow T5, VW Golf automatic |
 | `StaffTravelItineraries` | **1** — the Lagos programme, version 1, 3 legs, **3 activities** with named contacts at LFZDC |
-| `StaffTravelReminderRuns` | **0** — nothing has swept yet |
+| `StaffDailyAttendances` | the approved trips' days, **on duty** (lane 9a) — on UAT Sebrepor's day and Kumasi's two |
+| `StaffTravelReminderRuns` | one per sweep — **UAT has hundreds** (most from the test harness); a rebuilt database **none until 11 minutes after the API starts** |
 
-> **The Lagos trip is the one to open.** It is the only request that has every tab populated —
-> itinerary, bookings, finance, compliance, comments, group. Chapter 5 spends most of its time
-> there. *(Since closure lane 5 the pack books only approved trips, so on a freshly built database
-> Lagos has no bookings and the **London** trip carries them — open London for the Bookings tab.)*
+> **Which trip to open.** On **UAT, Lagos** has every tab populated — itinerary, bookings, finance, compliance,
+> comments, group — and chapter 5 spends most of its time there. **On a rebuilt database** Lagos has no bookings
+> (a submitted trip takes none, D-23) and **London** carries them — open London for the Bookings tab.
 
 ### 2.2 Check the register reads four
 
-Open `/hr/travel` and count. If it is not four, something re-ran. Both scenarios are "ensure" steps
-and safe to re-run:
+Open `/hr/travel` and count. If it is not four, something re-ran or something was added. The two scenarios are
+"ensure" steps — each step is skipped when its row exists — and safe to re-run **on a database the pack built**:
 
 ```powershell
 cd "D:\Rhema\TDC ERPS\dev-harness\hr-demo-smoke"
+$env:DEMO_DB = '<the demo database>'; $env:DEMO_API = 'http://localhost:5000/api'
 node scenarios.mjs --only 080
 node scenarios.mjs --only 081
 ```
 
-⚠ **Never create a travel request through `groups/{id}/participants`** — that door mints one new
-**Draft** request per employee and the register stops reading four.
+> ⚠ **Not on UAT without deciding to.** Re-run there, 080 now **approves the travel policy** as `hr.officer`
+> (D-60) before anything else — which turns UAT from Rule 1's *Draft* into *In force*, for every trip booked after.
+> That is § 2.4's Option B by another door, and the closure left it undone on UAT on purpose (D-61). `DEMO_DB`
+> defaults to UAT, so set it.
+
+⚠ **Never press *Add a traveller* on the group** (chapter 7) — it mints a new **Draft** request and the register
+stops reading four.
 
 ### 2.3 Write down the figures you will quote
 
@@ -606,95 +679,99 @@ node scenarios.mjs --only 081
 | `/hr/travel` — *Departing soon* | ____ |
 | `/hr/travel/dashboard` | high-risk ____ · international ____ · estimated total GHS ____________ |
 | `/hr/travel/claims` — *Awaiting payment* | ____ claims, GHS ____________ |
+| `/hr/travel/advances` — *Cash out* | ____ advances, GHS ____________ |
+| `/hr/travel/breaches` — *All* | ____ |
 
-⚠ **"Awaiting payment" will read 0** on a fresh database: the Sebrepor claim is *Submitted*, not yet
-*Approved*. Chapter 9 reviews and approves it live, and *then* the queue has something in it — which
-is a much better demonstration than a pre-baked number.
+⚠ **"Awaiting payment" will read 0**: the Sebrepor claim is *Submitted*, not yet *Approved*. Chapter 9 reviews and
+approves it live, and *then* the queue has something in it — which is a much better demonstration than a pre-baked
+number.
 
 ### 2.4 Decide about Rule 1 — do you want the cap to bite?
 
-This is the only real decision in the prep, and it changes the best five minutes of the demo.
+**On a rebuilt demo database there is nothing to decide:** the policy is in force, London's Hilton has already gone
+through D-8, and chapter 13a shows who authorised it.
+
+**On UAT** this is the only real decision in the prep, and it changes the best five minutes of the demo.
 
 **Option A — leave the policy as a draft (no prep).** Chapter 13 shows the policy, its caps, its
-**Draft** state and the greyed **Approve** button, and you say the sentence about why an unapproved
+**Draft — not enforcing** state and the **Approve** button, and you say the sentence about why an unapproved
 policy binds nothing and who is allowed to sign it. That is a *good* governance story and it costs
 nothing. The Bookings tab will accept anything, and you simply do not offer to show a refusal.
 
-**Option B — approve the policy first, so the cap refuses live.** Then chapter 5.3 can try to book
-Business class on the London trip and be refused by name, which is the most convincing thirty
-seconds in the module.
+**Option B — approve the policy first, so the cap refuses live.** Then chapter 5.3 can add an over-cap hotel on the
+**Kumasi** trip and be refused by name, ask for the exception, and have `hr.officer` authorise it on Policy
+Breaches — the most convincing three minutes in the module.
 
-To do Option B you need a caller holding `HR.Travel.Admin` **and** linked to an employee. **Since
-closure lane 4 (D-3) that is any HR officer except the policy's author:** sign in as **`hr.officer`**,
-open Administration → HR → Travel → **Travel Policies** and press **Approve** on the 2026 policy.
-`hr.head` drafted it and is refused by name. That is the route. It needs no grant and no SQL, and the
-server checks the version's dates and steps down the version it replaces (lane 4, O-4).
+To do Option B, sign in as **`hr.officer`**, open Administration → HR → Travel → **Travel Policies** and press
+**Approve** on the 2026 policy. `hr.head` drafted it and is refused by name. Since closure lane 4 (D-3) that is the
+route: it needs no grant and no SQL, and the server checks the version's dates and steps down the version it replaces
+(O-4). *(The first edition's SQL shortcut is gone: it skipped every check the approval makes, including the author
+rule — the very control the chapter demonstrates.)*
 
-> *Retired routes, kept for a database from before lane 4:* granting `HR.Travel.Admin` to the HR role
-> by hand (since lane 4 the role map carries it — `seed-db` grants it, and UAT was granted it on 2026-10-02), or the
-> SQL below. ⚠ The SQL skips every check the
-> approval makes, including the author rule, the dates and the sibling version. Do not use it on a
-> database built since lane 4.
+> Tonight I chose: ☐ **A** — policy stays a draft  ☐ **B** — `hr.officer` approved it
 
-```sql
--- DEMO DATABASE ONLY. Puts the 2026 travel policy in force so its caps bind.
-UPDATE p
-   SET p.ApprovedById = e.Id,
-       p.ApprovedAt   = SYSUTCDATETIME()
-  FROM StaffTravelPolicies p
-  CROSS APPLY (SELECT TOP 1 Id FROM Employees
-                WHERE TenantId = p.TenantId AND IsDeleted = 0
-                ORDER BY EmployeeNumber) e
- WHERE p.IsDeleted = 0
-   AND p.PolicyName = N'TDC Staff Travel Policy 2026';
-```
+⚠ **If you choose B on UAT, two things stay as they were.** The trips already submitted were checked against no
+policy — Kumasi and Sebrepor record none, so their claims are held to none (Rule 1); Lagos and London were linked to it
+by hand before lane 1, so once it is approved their claims are held to it. And **London's Hilton** was
+booked at GHS 3,200 against the 2,400 cap *while the policy was inert*: the row still exists — the guard runs on
+write, not on read — and carries no exception. Say *"and here is one that went over before the policy was signed"*,
+not *"and here is one the system let through"*.
 
-> Tonight I chose: ☐ **A** — policy stays a draft  ☐ **B** — policy approved *(method: ______)*
+### 2.5 Know who does the second half
 
-⚠ **If you choose B, re-read § 2.1's hotel line.** The London Hilton was booked at GHS 3,200
-against a GHS 2,400 cap *while the policy was inert*. With the policy in force that row still
-exists — the guard runs on write, not on read — so nothing breaks. It just means the over-cap
-booking on screen was not itself authorised by the mechanism you are about to demonstrate. Say
-*"and here is one that went over"* rather than *"and here is one the system let through"*.
+Since lanes 3 and 4 nobody completes a money or authority act alone (Rules 2 and 5). The demo's second officer is
+**`hr.officer`**; keep a window open as them. The acts that need them:
 
-### 2.5 Rehearse the two dropdowns you must not touch
+| Chapter | `hr.head` does | `hr.officer` does |
+|---|---|---|
+| 13 | drafted the policy | **approves** it *(Option B)* |
+| 5 header | travels to London | gives London **HR's approval** *(done on a rebuilt demo)* |
+| 5.4 | sets a budget · approves an advance | **approves the budget** · **pays the advance out** |
+| 9 | reviews the claim and its expenses | **records the payment** |
+| 5.3, 13a | books over the cap and asks for the exception | **authorises the breach** |
+| 9 *(undo)* | **voids the payment** | — they paid it, so they may not void it |
 
-Open `/hr/travel/new` once, tonight. Look at **Purpose** and **Risk level** and fix in your mind
-that **Negotiation** and **Extreme** are the two that 400 (Rule 3). They are not last in their
-lists, which is exactly why they catch people.
+Each refusal is on screen with its reason — press the button as `hr.head` first when you want the room to see the
+control.
 
-### 2.6 One window, two personas
+### 2.6 Three windows, three personas
 
-Most of this book is **`hr.head`** in one window. Two exceptions:
+- **Window A — `hr.head`.** Most of this book.
+- **Window B — `hr.officer`.** The second half of every act in § 2.5.
+- **Window C — `staff`** for chapter 15 (the portal) — the Sebrepor traveller, whose claim you will have just
+  reviewed.
 
-- **Chapter 15 (the portal)** needs a second window as **`staff`** — the Sebrepor traveller, whose
-  claim you will have just reviewed.
-- **Chapter 13's approve step** needs Option B from § 2.4, or it is a read-only chapter.
+The line authorities who approve a trip's first stage are named on its stage banner (chapter 3a); sign in as one
+only if you walk an approval.
 
 ### 2.7 Pre-open every screen
 
-Eight tabs, left to right:
+In Window A, left to right:
 
 | Tab | Route | Used in |
 |---|---|---|
 | 1 | `/hr/travel` | ch. 3 |
-| 2 | `/hr/travel/[Lagos id]` | ch. 5 — **the deep one** |
+| 2 | the deep trip — **Lagos on UAT, London on a rebuilt demo** | ch. 5 |
 | 3 | `/hr/travel/claims` | ch. 8–9 |
-| 4 | `/hr/travel/visa-requirements` | ch. 10 |
-| 5 | `/hr/travel/alerts` | ch. 11 |
-| 6 | `/hr/travel/dashboard` | ch. 12 |
-| 7 | `/administration/hr/travel/policies` | ch. 13 |
-| 8 | `/me/travel` *(second window, as `staff`)* | ch. 15 |
+| 4 | `/hr/travel/advances` | ch. 8a |
+| 5 | `/hr/travel/visa-requirements` | ch. 10 |
+| 6 | `/hr/travel/documents` | ch. 10a |
+| 7 | `/hr/travel/alerts` | ch. 11 |
+| 8 | `/hr/travel/dashboard` | ch. 12 |
+| 9 | `/administration/hr/travel/policies` | ch. 13 |
+| 10 | `/hr/travel/breaches` | ch. 13a |
+
+Window B on the claims queue; Window C on `/me/travel`.
 
 ### 2.8 Prep checklist
 
+- [ ] You know **which database** you are on, and so which side of each walk's fork you read *(§ 2.1)*
 - [ ] `/hr/travel` reads **four** requests *(§ 2.2)*
-- [ ] The five figures from § 2.3 are written down
-- [ ] You have chosen **A** or **B** for the policy *(§ 2.4)* and done the prep if B
-- [ ] You know that **Negotiation** and **Extreme** 400 *(§ 2.5)*
-- [ ] Window B open as `staff` *(§ 2.6)*
-- [ ] Eight tabs open in the order above *(§ 2.7)*
-- [ ] You have read **Rules 1–6**
+- [ ] The figures from § 2.3 are written down
+- [ ] On UAT: you have chosen **A** or **B** for the policy *(§ 2.4)* and done it if B
+- [ ] Windows A, B and C are signed in *(§ 2.6)*
+- [ ] Ten tabs open in the order above *(§ 2.7)*
+- [ ] You have read **Rules 1–7**
 
 ---
 
@@ -708,7 +785,7 @@ as **hr.head** · **4 minutes**
 ### 📖 What it is
 
 > *"Every trip the corporation has been asked to pay for, and where each one has got to. Three
-> views, because a travel desk has three questions: what is there, what is waiting on me, and what
+> views, because a travel desk has three questions: what is there, what is waiting on an approver, and what
 > is leaving soon."*
 
 ### 👁 On the page
@@ -724,8 +801,11 @@ back-link to the HR hub, and a **Raise request** button.
 | **Pending approval** | submitted and waiting on an approver | *"Submitted and waiting on an approver"* |
 | **Departing soon** | approved trips leaving within 30 days | *"Approved trips leaving within 30 days"* |
 
-**A filter card** — the active view's hint on the left, and a **type** dropdown on the right:
-*All types* · Domestic · International · CrossBorder · Regional. It filters in the browser.
+**A filter card** — the active view's hint on the left, and a **type** dropdown on the right: *All types* and
+**all eleven travel types** (since closure lane 0, built from the enum; T-12 fixed). It filters in the browser.
+
+**One employee's trips.** Opened from an employee record's Travel tab, the register reads `?employeeId=…` and says
+so in a banner — *"Showing the trips of … only."* — with **Show every traveller** to clear it.
 
 **Six columns:**
 
@@ -739,8 +819,7 @@ back-link to the HR hub, and a **Raise request** button.
 | **Status** | a status badge |
 
 > **Money is rendered from each row's own currency code, never a hard-coded symbol.** Travel spans
-> currencies by nature, and the request carries the one it was costed in. That is a small thing you
-> can point at, and it is the visible end of Rule 5.
+> currencies by nature, and the request carries the one it was costed in — Rule 5's footnote.
 
 ### ▶ Walk it
 
@@ -752,8 +831,7 @@ back-link to the HR hub, and a **Raise request** button.
 **2 — Read the *Route* column across and point at the globe icons.**
 
 > *"Two of them cross a border, and the system knows that without being told: international is
-> derived from the two countries rather than being a box somebody ticks. It used to be a free
-> boolean on the record, which let a request claim a domestic trip between two countries."*
+> worked out by the server from the two countries rather than being a box somebody ticks."*
 
 **3 — Point at the *Estimated* column.**
 
@@ -761,43 +839,108 @@ back-link to the HR hub, and a **Raise request** button.
 > And the currency is on every row, because a travel register that assumes one currency is a
 > register that will be wrong the first time somebody goes abroad."*
 
-**4 — Switch to *Pending approval*.** Two rows: Lagos and London.
+**4 — Switch to *Pending approval*.**
 
-> *"Two waiting on somebody. And this is a purpose-built queue, not a status filter — 'what is
-> waiting on an approver' is the question the desk is actually measured on."*
+- **On UAT:** two rows, Lagos and London — both submitted before the two-stage route (Rule 3).
+- **On a rebuilt demo database:** one row, Lagos; London is approved (D-26).
+
+> *"Waiting on somebody. And this is a purpose-built queue, not a status filter — 'what is waiting on an
+> approver' is the question the desk is actually measured on. The approvers themselves have their own queue,
+> which I will show you next."*
 
 **5 — Switch to *Departing soon*.**
 
 > *"Approved and leaving within thirty days. Which is the other question a travel desk lives on,
 > because that is the list where a passport that expires next month becomes a problem."*
 
-**6 — Switch back to *All requests* and click `TR-2026-00002`, the Lagos trip.**
+**6 — Switch back to *All requests* and open a trip.**
 
-⚠ **Open Lagos, not London.** Lagos is the only request with all seven tabs populated. London is
-chapter 5.5's example for compliance and you will come back to it.
+- **On UAT**, open **`TR-2026-00002`, Lagos**: its flight and hotel were booked before closure lane 5, so all eight
+  tabs are populated.
+- **On a rebuilt demo database**, Lagos — still awaiting approval — carries no bookings (D-23); open **London**
+  for the Bookings tab and Lagos for the itinerary.
 
 ### ⚙ Behind the page
 
 | View | Endpoint |
 |---|---|
-| All requests | `GET api/staff-travel/requests/all` |
+| All requests | `GET api/staff-travel/requests/all` (or `…/employee/{id}` with the banner) |
 | Pending approval | `GET api/staff-travel/requests/pending-approval` |
 | Departing soon | `GET api/staff-travel/requests/upcoming?daysAhead=30` |
 
-All gated on `HR.Travel.Read` — the **whole controller** carries it at class level, with Write and
-Admin layered onto individual actions.
-
-Table: `StaffTravelRequests`. The API also offers paged, by employee, by status, by date range, by
-organisation unit and by parent — six reads this screen does not use.
+All gated on `HR.Travel.Read`. Table: `StaffTravelRequests`. The API also offers paged, by status, by date range,
+by organisation unit and by parent reads this screen does not use; every list read names its traveller and
+destination (asserted by the harness since lane 10).
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
 | **T-11 · Unpaged.** `requests/all` returns every request the tenant has ever had; `GET requests` is the paged one and the screen uses the unpaged variant | |
-| **T-12 · The type filter offers four of eleven travel types** — Domestic, International, CrossBorder and Regional. A `FieldVisit` or a `Conference` cannot be filtered for, though the create form can set them | |
-| **T-13 · No search, no date filter, no traveller filter.** The API has all three | |
+| **T-13 · No search, no date filter.** The API has both; the traveller filter arrives from the employee record only | |
 | **T-14 · No export** | |
+
+*Fixed since the first edition:* T-12 (all eleven travel types on the filter).
+
+---
+
+## 3a. `/hr/travel/approvals` — what is waiting for *you*
+
+### 📍 Where you are
+
+**Sidebar:** Human Resources → Time & Leave → Staff Travel → **Approvals** · `/hr/travel/approvals` · as
+**whoever a trip waits for** — a line manager, the travel desk, HR · **3 minutes**
+
+### 📖 What it is
+
+> *"Not the desk's queue — yours. Every trip that is waiting for your signature, and only those."*
+
+Since closure lane 2 (D-7) a trip is decided first by the traveller's line authority and then by HR (Rule 3). A
+line manager needs no travel permission for that: **every employee sees this entry**, and it lists only the trips
+waiting for them.
+
+### 👁 On the page
+
+**Header:** *Travel Approvals* — *"Travel requests waiting for your decision — as the traveller's line manager, for
+the travel desk, or as HR."*
+
+**Columns:** **Request** *(a link)* · **Traveller** · **Trip** · **Estimated** · **Stage** *(e.g. Line manager
+approval)* · **You decide as** *(the traveller's supervisor, a head of unit above them, HR …)* · **Waiting** *(Today,
+1 day, n days)*.
+
+Empty state: *"Nothing is waiting for you — When a trip needs your decision it appears here, and you are
+notified."*
+
+Opening a row takes you to the trip, where **Approve**, **Reject** and **Return for revision** are drawn for you
+(chapter 5). A line manager without travel permission sees the trip's overview, comments, attachments and the
+workflow — not the desk's itinerary, bookings, finance and compliance tabs, nor its Edit, Cancel or Complete.
+
+### ▶ Walk it
+
+**1 — Sign in as the person the trip waits for.** The trip's stage banner names them (*"Waiting for …"*).
+
+- **On UAT:** Lagos is on the old one-step route and waits for **HR** — as `hr.head`, one row, *You decide as HR*.
+  London is `hr.head`'s own trip, so it is not hers to decide (D-7): it waits for **`hr.officer`**.
+- **On a rebuilt demo database:** Lagos waits at the **line manager** stage for `gm.ops`'s line authority —
+  the trip's banner names who — and then for HR.
+
+> *"This is the approver's own list, not the travel desk's. A line manager who never opens the travel module
+> still has a queue — and a notification — the moment one of their people asks to travel."*
+
+**2 — Point at *You decide as* and *Waiting*.**
+
+> *"And it says in what capacity I am being asked, and how long the trip has been waiting on me."*
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| The queue | `GET api/staff-travel/requests/my-approvals` — the engine's tasks, then travel's line rule, request by request | signed in, internal |
+| Who may decide | `GET …/requests/{id}/viewer-actions` | the trip's read door |
+| Approve / Reject / Return | `POST …/requests/{id}/approve` · `…/reject` · `…/return` (`StaffTravelApprovalsController`) | signed in, internal — **the service decides who**, stage by stage |
+
+⚠ Decide here or on the trip page — **never in the generic workflow inbox**, which skips travel's service
+entirely (§ 1.6, defect #15).
 
 ---
 
@@ -812,15 +955,9 @@ organisation unit and by parent — six reads this screen does not use.
 > *"Everything that has to be settled before anybody asks for the money: who is going, where, when,
 > why, what it will cost, how risky it is and what they will need to be allowed in."*
 
-> ⚠ **Changed by closure lane 7, slice 7b (2026-10-03) — the visa switch is now the register's.** When the traveller's
-> primary passport is on file (Staff Travel → Travel Documents) and the visa register has their passport's country to
-> the destination, the server sets *Requires a visa* from the register on save and again at submission — an E-Visa or
-> embassy visa means yes, visa-free or on arrival no — whatever the switch said. To keep a different answer, fill
-> **If this differs from the visa register, why**; it stands, and is kept as an internal note. A destination the register
-> records as refusing that passport entry cannot be submitted. Submitting an international trip warns when no insurance
-> covers it yet and when the passport expires within six months of the return.
-
-### 🚫 **READ RULE 3 BEFORE THIS CHAPTER.** Do not choose *Negotiation* or *Extreme*.
+Since closure lane 0, every list on this form is built from the server's own enums, so no choice is refused
+(the first edition's Rule 3 is gone). Since lane 1 the server, not the form, decides the trip's unit, whether
+it is international, and the policy it is checked against.
 
 ### 👁 On the page
 
@@ -829,43 +966,55 @@ once the details are settled."**, back-link.
 
 **Card 1 — Who is travelling** *(create-only, and desk-only)*
 - **Traveller** *(searchable employee picker, required)*
-- **Raised as** — Employee · Manager · HrAdmin · TravelDesk
+- **Raised as** — the capacity: Employee · Manager · HR Admin · Travel Desk
 
-> ⚠ **There is no "raised by" field, only "raised as".** Who raised it is stamped from the token;
-> the **role** it was raised under is the only real input. And **traveller is create-only** — the
+> **There is no "raised by" field, only "raised as".** Who raised it is stamped from the token;
+> the **role** it was raised under is the only real input. And **the traveller is create-only** — the
 > update payload carries no employee id, so a trip cannot be reassigned. Cancel and raise a new one.
 
 **Card 2 — The trip**
-- **Travel type** *(required — ten of the eleven; Emergency is missing)* · **Purpose** *(required
-  — ⚠ **Negotiation 400s**)*
+- **Travel type** *(required — all eleven)* · **Purpose** *(required — all twelve)*
 - **Justification** *(textarea — "Why this trip is necessary, and what it should achieve.")*
-- **From (country)** *(required)* · **From (city)** *(required)*
-- **To (country)** *(required)* · **To (city)** *(required)*
-- A dashed callout appears the moment the two countries differ:
-  *"🌐 This is an international trip — it crosses a border, so compliance documents and visa checks
-  apply."*
-- **Departure** *(required)* · **Return** *(required — refused if before departure)*
+- **From (country)** · **From (city)** · **To (country)** · **To (city)** *(all required)*
+- A dashed callout appears the moment the two countries differ: *"🌐 This is an international trip — it crosses a
+  border, so compliance documents and visa checks apply."*
+- **Departure** · **Return** *(required; the return not before the departure)*
 
 **Card 3 — Cost, risk and requirements**
-- **Estimated cost** *(required, ≥ 0)* · **Currency** *(required — **Finance's currency list**, not
-  travel's own)*
-- **Priority** *(Routine · Urgent · Emergency)* · **Risk level** *(⚠ **Extreme 400s**)*
-- **Organisation unit** *(picker, desk only, clearable)*
-- **Requires a visa** switch — *"Turns on the visa tracking for this trip."*
-- **Requires health clearance** switch — *"Vaccination or fitness-to-travel evidence must be
-  recorded before departure."*
+- **Estimated cost** *(required, ≥ 0)* · **Currency** *(required — Finance's currencies, read through HR's own door,
+  `api/hr/currencies`: the form used to read Finance's own list, which HR and travellers are refused — O-19)*
+- **Priority** *(Routine · Urgent · Emergency)* · **Risk level** *(Low · Medium · High · Critical · Prohibited)*
+- **Requires a visa** — *"Set from the visa register when the traveller's passport is on file. The flight is
+  ticketed once a visa application is approved or recorded as not required."*
+- **If this differs from the visa register, why** — only when the answer above is deliberately not the register's
+  (a residence permit, say); kept on the trip as an internal note
+- **Requires health clearance** — *"The destination's health requirements are listed on the trip's Compliance tab,
+  where the travel desk ticks each one off. Nothing is blocked by an unticked one."*
 - **Reason for the change** *(edit only)*
+
+**Card 4 — Policy and limits** *(since closure lane 1, T-16)* — the organisation unit **from the traveller's own
+employee record** (the form no longer offers a unit), the **approved policy** that covers the trip on its departure
+date, and its limits; a warning when the estimate is above the single-trip limit, which is enforced at submission.
+With no approved policy: *"No approved travel policy covers this trip, so no limits apply to it."* — **what UAT
+shows** (Rule 1).
 
 **Footer:** **Cancel** · **Create request**.
 
-**Two behaviours worth knowing:**
+**What the server decides, not the form:**
 
-- **`isInternational` is derived, never asked.** The two country pickers decide it.
-- **Choosing two different countries turns *Requires a visa* on, once.** It is then left alone —
-  re-forcing it on every keystroke would fight the user.
-- **The currency list comes from Finance.** Travel keeps no currency table, and the server refuses a
-  code Finance does not hold — so a free-text box would produce a 422 the form could not attribute
-  to a field.
+- **International** is the two countries'. **The visa flag** is the visa register's, for the traveller's primary
+  passport into the destination, on save and again at submission — an E-Visa or embassy visa means yes, visa-free or
+  on arrival no — unless the override reason says otherwise (lane 7, D-39). A destination the register records as
+  refusing that passport cannot be submitted.
+- **The unit and the policy** are the traveller's (lane 1).
+- **A leaver is refused**, and so is a trip that starts after an approved separation's leaving day (lane 9c,
+  D-57).
+
+**At submission** (chapter 5) the server also refuses a departure already past (the desk submits it with a
+reason — *Submit after departure*), dates **overlapping another trip** of the traveller that is submitted, approved
+or under way, and an estimate **above the policy's single-trip limit**. It **warns** — the submission still goes
+— when the traveller has **approved leave** over the dates, when no insurance covers an international trip yet, and
+when the primary passport expires within six months of the return.
 
 ### ▶ Walk it
 
@@ -875,40 +1024,33 @@ once the details are settled."**, back-link.
 > to be approved are two acts, and the gap between them is where the travel desk gets the details
 > right."*
 
-**2 — Card 1 — pick a traveller, and leave *Raised as* on TravelDesk.**
+**2 — Card 1 — pick a traveller, and leave *Raised as* on Travel Desk.**
 
 > *"And note what is not on this form: who raised it. That is taken from whoever is signed in. What
 > you can say is the capacity you are raising it in — the desk, a manager, HR, or the employee
-> themselves. Those five actor fields used to be settable by the caller, which would have let
-> anybody file a trip under somebody else's name."*
+> themselves."*
 
 **3 — Card 2 — Travel type **Conference**, Purpose **Conference**.**
 
-⚠ **Do not open the Purpose list and scroll to Negotiation.** If you must show the list, say
-*"eight kinds of trip"* and close it.
-
 **4 — Set the route: from Ghana / Tema, to South Africa / Johannesburg.** Watch the callout appear.
 
-> *"And the moment the countries differ, the system says so and turns visa tracking on. It is not a
-> box somebody remembers to tick — it is derived from the two fields that already answer the
-> question."*
+> *"And the moment the countries differ, the system says so. It is not a box somebody remembers to tick — the
+> server works it out from the two fields that already answer the question, and the visa question from the
+> traveller's passport and the visa register."*
 
 **5 — Dates next quarter; a real justification.**
 
-**6 — Card 3 — cost 45,000, currency **GHS**, priority Routine, risk **Medium**.**
+**6 — Card 3 — cost 45,000, currency **GHS**, priority Routine, risk **Medium**.** Then read **Card 4**.
 
-⚠ **Leave Risk level on Low or set it to Medium or High. Not Extreme.**
-
-> *"And the currency comes from Finance's list, not from a box in travel. Travel does not keep its
-> own currencies and does not invent its own exchange rates — which is the discipline that stops
-> two parts of one system disagreeing about what a trip cost."*
+> *"And here, before anybody submits anything, the policy this trip will be held to and its limits — or, on this
+> database, the honest statement that no approved policy covers it yet."*
 
 **7 — 🔴 LIVE WRITE 1 — press *Create request*.** You land on the new request, at **Draft**, with
 its number.
 
 > *"TR-2026-00005. Draft. Nothing has been asked of anybody yet."*
 
-*Undo:* chapter 17 — **Cancel** it with a reason; `hr.head` cannot delete it.
+*Undo:* chapter 17 — a **Draft** is deleted (Admin, which `hr.head` holds), or cancelled with a reason.
 
 ### ⚙ Behind the page
 
@@ -916,25 +1058,20 @@ its number.
 |---|---|---|
 | Create *(desk)* | `POST api/staff-travel/requests` | `HR.Travel.Write` |
 | Create *(portal)* | `POST api/staff-travel/me/requests` | signed-in — no employee id anywhere |
+| The policy preview | `GET …/requests/policy-preview` *(desk)* · `GET …/me/policy-preview` *(portal)* | Read / signed-in |
 | Countries | `GET api/Country/active` | reference data |
-| Currencies | `GET api/finance/…/currencies?isActive=true` | Finance |
+| Currencies | `GET api/hr/currencies` | signed in, internal |
 
 Table: `StaffTravelRequests`. The number comes from the shared `NumberSequences` table as
 `TR-{year}-{00000}`. `InitiatedById` is the token's employee id; `Status` is set to `Draft`;
 `EstimatedDurationDays` is derived from the two dates.
 
-### ⚠ Known gaps
-
-| Gap | |
-|---|---|
-| **T-3 · Two dropdown values 400** — *Negotiation* and *Extreme* are not enum members, and five purposes plus two risk levels are unreachable. Rule 3 | |
-| **T-15 · `Emergency` is missing from the travel-type list** — ten of eleven | |
-| **T-16 · The policy is not chosen or shown on the form.** `PolicyId` is nullable and nothing on the create form sets it; the demo links it by a later amendment. So a request is raised with no policy attached and the caps are resolved at *booking* time from whatever policy covers the traveller — which is the right mechanism, but the form gives no hint that a policy exists | |
-| **T-17 · Nothing checks the estimate against `MaxSingleTripBudget`.** A GHS 500,000 trip is accepted under a policy that caps a single trip at 75,000 | |
+*Fixed since the first edition:* T-3 and T-15 (every enum value on the form), T-16 (the policy shown, and recorded
+at submission), T-17 (the single-trip limit enforced at submission).
 
 ---
 
-## 5. `/hr/travel/[id]` — the request, and its seven tabs
+## 5. `/hr/travel/[id]` — the request, and its eight tabs
 
 ### 📍 Where you are
 
@@ -949,50 +1086,67 @@ the longest chapter, and the module
 
 ### 👁 The header
 
-Title `TR-2026-00002`, subtitle `Kwabena Osei · Tema → Lagos, 18 Oct 2026`, back-link, and:
+Title `TR-2026-00002`, subtitle `Kwabena Osei · Tema → Lagos, 18 Oct 2026`, back-link, and the controls below.
+**Each one is drawn only when it can work** — for this status, and for you.
 
 | Control | Appears when |
 |---|---|
 | A **status badge** | always |
-| **Edit** | status is `Draft` or `ReturnedForRevision` |
-| **Workflow approval actions** *(Submit / Approve / Reject / Recall)* | driven by the engine — Submit on Draft or ReturnedForRevision, Approve/Reject on Submitted |
-| **Mark completed** | status is `Approved` or `InProgress` |
-| **Cancel** | status is **not** Cancelled, Rejected, Completed, Closed or InProgress |
-| **Did not travel** *(closure lane 8, D-48)* | status is `InProgress` and the trip has not ended |
+| **Edit** | `Draft` or `ReturnedForRevision`, for the desk |
+| **Submit** · **Recall** *(the workflow's own buttons)* | Submit on `Draft` or `ReturnedForRevision`; Recall while it is out for approval — the requester's |
+| **Submit after departure** | a draft whose departure date has passed — the desk only, with **the reason it is late**, kept as an internal note (lane 1) |
+| **Approve** · **Reject** · **Return for revision** | `Submitted`, **and you are the person this stage waits for** — the server's answer (*viewer actions*), not a permission (§ 1.6). Reject and Return need a reason |
+| **Request change** | `Approved` — sends the trip back for re-approval with what has changed; its bookings, advances and claims stay with it (D-9). Its attendance days come off until it is approved again (lane 9a) |
+| **Mark completed** | `Approved` or `InProgress` — **disabled until the trip has started** (*"A trip can be marked completed once it has started."*) |
+| **Close trip** | `Completed` — refused while a claim is unpaid or an advance unsettled (lane 1) |
+| **Cancel** | not Cancelled, Rejected, Completed, Closed or **InProgress**. A reason is required. The server refuses it while a booking is confirmed or ticketed (the desk cancels those first, D-24), while advance cash is still out, or while a company vehicle is approved or out in Fleet (lane 6) |
+| **Did not travel** *(lane 8, D-48)* | `InProgress` and the trip has not ended — see below |
 
-**Cancel's dialog:** *"A cancelled request cannot be revived. The reason is kept on the record."* —
-a **reason is required**. **Did not travel** opens it as *Cancel as not travelled*, for a trip the nightly sweep moved
-under way on its date that did not happen: the server refuses it once anything was spent on the trip — a claim filed,
-advance cash out, a booking confirmed, ticketed or used, a company vehicle dispatched or back — and says to mark it
-completed instead. The reason is kept as *"Did not travel: …"*, with an internal note. A company vehicle's driver kept away
-overnight travels on a request of their own, which goes with the trip — unless it too is under way: then the cancel is
-refused until the desk has cancelled the driver's request on its own page (as not travelled, if the driver did not go
-either) or marked it completed (closure lane 8, D-52).
+**Under the header**, when they apply:
 
-**Eight tabs:** Overview · Itinerary · Bookings · Finance · Compliance · Comments · Attachments ·
-**Workflow**.
+- **the stage banner**, on a submitted trip — *"Line manager approval stage — then HR approval"*, and either what
+  you decide as (and, at the last stage, *"You set the approved budget."*) or *"Waiting for … or …"*;
+- **destination alerts** in force for the trip — on a submitted trip framed for the approver, on an approved one for
+  the booker (lane 7, E6);
+- on a **driver's own trip**, a line naming the trip whose company vehicle they drive (lane 6, D-33).
+
+**Cancel's dialog:** *"A cancelled request cannot be revived. The reason is kept on the record."* Cancelling withdraws
+its approval in progress, its unconfirmed bookings (D-24), advances not yet paid out (lane 3), its plan (5b) and its
+attendance days (9a), and tells the traveller.
+
+**Did not travel** opens the same dialog as *Cancel as not travelled*, for a trip the nightly sweep moved under way on
+its date that did not happen. The server refuses it once anything was spent on the trip — a claim filed, advance
+cash out, a booking confirmed, ticketed or used, a company vehicle dispatched or back — and says to mark it completed
+instead. The reason is kept as *"Did not travel: …"*, with an internal note. A company vehicle's driver kept away
+overnight travels on a request of their own, which goes with the trip — unless it too is under way: then the cancel
+is refused until the desk has dealt with the driver's request on its own page (D-52).
+
+**Eight tabs:** Overview · Itinerary · Bookings · Finance · Compliance · Comments · Attachments · **Workflow**. A line
+manager deciding the trip, without travel permission, sees Overview, Comments, Attachments and Workflow only.
 
 ---
 
 ### 5.1 👁 Overview
 
-**Card 1 — The trip** — ten fields in a three-column grid: Traveller · **Raised by** *(name and the
-role in brackets)* · Type · Purpose · Priority · **Route** *(with the globe icon)* · Departs ·
-Returns · Duration · Organisation unit. Since closure lane 9 (slice 9a, D-54) also **On attendance** — how many of
-the trip's working days (Monday to Friday, not a public holiday) are on the traveller's attendance as *On duty*. They
-go on when the trip is approved, come off if it is cancelled or sent back for a change, and stop at an early return;
-a day already recorded otherwise — a clock-in, leave, a clerk's entry — is never overwritten. The monthly attendance
-summary counts *On duty* as present.
+**Card 1 — The trip** — Traveller · **Raised by** *(name and the role in brackets)* · Type · Purpose · Priority ·
+**Route** *(with the globe icon)* · Departs · Returns · Duration · **On attendance** · Organisation unit · **Travel
+policy**.
 
-**Card 2 — Cost and risk** — eight: Estimated · **Approved budget** · **Risk level** *(with a red
-shield icon at High or above)* · Visa required · Health clearance · Submitted · Approved ·
-Completed.
+- **On attendance** *(lane 9a, D-54)* — how many of the trip's working days (Monday to Friday, not a public holiday)
+  are on the traveller's attendance as *On duty*. They go on when the trip is approved, come off if it is cancelled or
+  sent back for a change, and stop at an early return; a day already recorded otherwise — a clock-in, leave, a clerk's
+  entry — is never overwritten. The monthly attendance summary counts *On duty* as present.
+- **Organisation unit** — the traveller's own, from their employee record (lane 1).
+- **Travel policy** — the approved policy the trip was checked against **when it was submitted**, which is the one
+  its claims follow (§ 1.5). On UAT's trips, *none*.
+
+**Card 2 — Cost and risk** — Estimated · **Approved budget** *(set by HR at the last approval stage)* · **Risk level**
+*(a red shield at High or above)* · Visa required · Health clearance · Submitted · Approved · Completed · **Closed**
+*(when, and by whom)*.
 
 **Card 3 — Justification** — rendered only when there is one.
 
-**Card 4 — Why it was cancelled / rejected** — rendered only when there is a cancellation reason,
-with the canceller's name and the timestamp. The title flips between *"Why it was rejected"* and
-*"Why it was cancelled"* on the status.
+**Card 4 — Why it was cancelled / rejected** — rendered only when there is a reason, with who and when.
 
 ### ▶ Walk the Overview
 
@@ -1004,59 +1158,65 @@ with the canceller's name and the timestamp. The title flips between *"Why it wa
 
 **2 — Card 2, and point at *Approved budget*.**
 
-> *"Thirty-eight thousand estimated. The approved budget is what the approver authorises, which is
+> *"Thirty-eight thousand estimated. The approved budget is what HR authorises at the last signature, which is
 > not necessarily what was asked for — and that is the number the trip is then measured against."*
 
-⚠ On this database **Approved budget reads an em dash** even on the approved trips, because the
-page does not send one and the workflow definition does not prompt for one (**T-10**). Say *"which
-the approver sets when they sign it off"* rather than pointing at a number.
+Lagos is still awaiting approval, so its approved budget reads an em dash; Kumasi's and, on a rebuilt demo,
+London's carry one (T-10 fixed).
 
 **3 — Point at *Risk level* — Medium, and the shield that is not there.**
 
-> *"Medium risk, so no red flag. The London one is Low; if either were High or above there would be
-> a shield here and the compliance tab would be insisting on a briefing."*
+> *"Medium risk, so no red flag. The London one is Low. At Critical, the flight would not be ticketed until the
+> traveller had read and acknowledged the risk assessment; at Prohibited, the trip could not even be submitted."*
+
+**4 — On the Kumasi trip, point at *On attendance*.**
+
+> *"And it is already on the traveller's attendance: the working days of an approved trip are recorded as on duty,
+> so nobody marks him absent while he is in Kumasi."*
 
 ---
 
 ### 5.2 👁 Itinerary tab
 
-> ⚠ **Changed by closure lane 5, slice 5b (2026-10-02) — the walk below predates it; lane 10 rewrites it.**
-> - **The status is the server's.** A version starts a **Draft**; **Finalise** (the version in force, once it has a
->   leg) marks it **Finalised** and stamps it — then it, its legs and its activities are the record, not changed;
->   making another version current marks the old one **Superseded**; cancelling the trip marks the plan
->   **Cancelled**. The version in force is never deleted.
-> - **The days are the trip's** — travel, working and weekend days are worked out from its dates, read-only.
-> - **Each leg can link a booking of this trip** (*Linked booking*), shows it with its dates, and is **flagged when
->   the leg's date disagrees with the booking's** — a flight flying another day, a night outside the hotel stay.
-> - Legs and activities have **Edit** and **Remove**; a plan is made while the trip is open, from its draft until it
->   is under way. On the demo, Lagos's programme is a Draft: **Finalise** is a live, safe write to show.
-
 **What it is:** the programme — where they are, day by day, and what happens.
 
-**Versioned.** An itinerary carries a version number and one is current. **New version** creates the
-next one; the old versions stay.
+**Versioned, and its status is the server's** (closure lane 5, slice 5b, D-25):
 
-**Empty state:** *"No itinerary yet"* with a **Build the itinerary** button.
+| Status | How a version gets there |
+|---|---|
+| **Draft** | created; legs and activities are added and changed |
+| **Finalised** | **Finalise**, on the version in force, once it has a leg — it is stamped, and then it, its legs and its activities are the record: no leg, edit or removal |
+| **Superseded** | another version is made current |
+| **Cancelled** | the trip is cancelled |
 
-**When there is one:** a card headed with the itinerary's title and version, a summary strip
-(total travel days / working days / weekend days), and then the **legs in sequence**. Each leg
-shows: order · **leg type** (Travel · Stay · Transit · Work · Leisure · Return) · date · origin →
-destination · transport mode · departure and arrival times · notes — and, nested underneath, its
-**activities**: type, title, where, the address, start and end, a named contact with email and
-phone, and whether it is **mandatory**.
+The version **in force** carries a ★ and is never deleted; a superseded one can be removed.
 
-Three dialogs: **New itinerary** *(title, total days, summary notes — version number is shown, not
-asked)*, **Add a leg**, **Add an activity**.
+**Empty state:** *"No itinerary yet"* with **Create an itinerary**.
+
+**When there is one:** a version picker, the version's title and status, a summary strip (travel, working and
+weekend days — **worked out from the trip's dates**, read-only), and buttons as they apply: **Make this the current
+version** *(on a version not in force)* · **Finalise** *(the version in force, a draft; disabled until it has a
+leg)* · **Edit** · **Delete** *(Admin; never the version in force)* · **New version**.
+
+**The legs, in sequence.** Each shows: order · **leg type** (Departure · Transit · Arrival · Stay · DayTrip · Return) ·
+date · origin → destination · transport mode (Flight · Train · Bus · Car · Ferry · Helicopter · Motorcycle · Walk) ·
+times · notes · **Linked booking** — one of **this trip's** bookings, shown with its dates — and a **flag when the
+leg's date disagrees with the booking's** (a flight flying another day, a night outside the hotel stay; a warning,
+not a refusal — T-19). Nested underneath, its **activities**: type, title, where, the address, start and end, a named
+contact with email and phone, and whether it is **mandatory**. Legs and activities have **Edit** and **Remove**
+(Admin) while the version is a draft.
+
+A plan is made while the trip is open — from its draft until it is under way.
 
 ### ▶ Walk the Itinerary
 
-**1 — Open the tab.** *Lagos Free Zone study tour — programme*, version 1, three legs.
+**1 — Open the tab on the Lagos trip.** *Lagos Free Zone study tour — programme*, version 1, **Draft**, three legs.
 
 **2 — Read the three legs.**
 
-> *"Leg one: the eighteenth, Tema to Lagos, Air Peace out of Kotoka Terminal 3 at 08:40, met on
-> arrival by the host organisation. Leg two: three programme days on Victoria Island and at
-> Ibeju-Lekki. Leg three: the twenty-third, back into Accra and a road transfer to Tema."*
+> *"Leg one: departure, Tema to Lagos, Air Peace out of Kotoka Terminal 3 at 08:40, met on arrival by the host
+> organisation. Leg two: the stay — three programme days on Victoria Island and at Ibeju-Lekki. Leg three: the
+> return, back into Accra and a road transfer to Tema."*
 
 **3 — Expand leg two's activities.** This is the moment the room understands the depth.
 
@@ -1073,22 +1233,30 @@ asked)*, **Add a leg**, **Add an activity**.
 > it always changes — you build version two and version one stays, because 'what were we supposed
 > to be doing on the Tuesday' is a question somebody eventually asks."*
 
-**5 — 🔴 LIVE WRITE 2 *(optional)* — Add an activity** to leg two. Title *"Courtesy call on the
-Ghana High Commission, Lagos"*, type Meeting, a time, not mandatory.
+**5 — 🔴 LIVE WRITE 2 *(optional)* — Add an activity** to leg two. Title *"Courtesy call on the Ghana High
+Commission, Lagos"*, type Meeting, a time, not mandatory.
 
-*Undo:* chapter 17 — removing it is Admin, so prefer to leave it or plan the SQL.
+⚠ **Do this before step 6.** Once the version is finalised, the add is refused.
+
+**6 — 🔴 *(optional)* Finalise the version.** It becomes **Finalised**, stamped with the date.
+
+> *"And now it is the programme, not a draft of it: nothing on it changes. A change from here is a new version —
+> and this one stays as it was, superseded, with the date it was agreed."*
+
+*Undo:* chapter 17 — an added activity is removed (Admin) while the version is a draft; a finalised version stays
+finalised, so finalise only if you are content to leave it so.
 
 ### ⚙ Behind the Itinerary
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| The itineraries | `GET api/staff-travel/itineraries/request/{requestId}` | Read |
-| The current one | `GET …/itineraries/request/{requestId}/current` | Read |
-| Create / update | `POST` / `PUT …/itineraries[/{id}]` | Write |
-| **Set current version** | `POST …/itineraries/{id}/set-current` | Write |
+| The itineraries | `GET api/staff-travel/itineraries/request/{requestId}` · `…/current` | Read |
+| Create / update | `POST` / `PUT …/itineraries[/{id}]` — the version number and status are the server's | Write |
+| **Make current** | `POST …/itineraries/{id}/set-current` | Write |
+| **Finalise** | `POST …/itineraries/{id}/finalise` | Write |
 | Legs | `GET`/`POST …/{itineraryId}/legs` · `PUT …/legs/{legId}` | Read / Write |
 | Activities | `GET`/`POST …/legs/{legId}/activities` · `PUT …/activities/{id}` | Read / Write |
-| Every delete | `DELETE …` | **Admin** |
+| Every delete | `DELETE …` — never the version in force | **Admin** |
 
 Tables: `StaffTravelItineraries`, `StaffTravelItineraryLegs`, `StaffTravelItineraryActivities`.
 
@@ -1100,390 +1268,379 @@ Tables: `StaffTravelItineraries`, `StaffTravelItineraryLegs`, `StaffTravelItiner
 
 ### 5.3 👁 Bookings tab
 
-> ⚠ **Changed by closure lanes 4, 5 and 6 (2026-10-02) — read this before the walk below, which lane 10
-> rewrites.**
-> - **A company vehicle is reserved in Fleet (lane 6, slice 6a).** Ground transport of type *Company vehicle*
->   offers Fleet's vehicles — each with its plate and, when it is not free, why (another planned trip, or an
->   insurance or other critical item running out before the return) — and the licensed drivers, flagged when
->   on leave or driving another trip; the traveller's own official car comes preselected. Pick-up and drop-off
->   times are required, and there are no cost fields: the leg costs what Fleet books against its trip. A
->   vehicle or driver already planned over the same hours is refused. The leg's status is Fleet's: its ⋯ menu
->   offers only *Cancel booking…* (which cancels the fleet trip) — the transport office approves, dispatches and
->   completes it in Fleet. **While Fleet publishes no approval route (UAT today, D-27) the reservation stays a
->   draft and the leg says the vehicle is not held.** UAT has no fleet at all, so the demo cannot show this.
-> - **The driver travels on a request of their own (lane 6, slice 6c).** A leg that keeps a driver other than the
->   traveller away overnight says so and offers **Raise the driver's request**: a Draft for the driver with the trip's
->   dates, destination and purpose, which the desk costs and submits like any trip. The leg shows it, and the driver's
->   request says whose vehicle it drives. It goes with the leg — cancelling or deleting the leg, changing the driver,
->   cancelling the trip or *Request change* cancel it — and a driver's request that cannot be cancelled (under way, cash
->   out) holds the leg's or the trip's cancel back, naming it.
-> - **Bookings live on an approved trip (lane 5, D-23).** The Add buttons show only while the trip is
->   Approved or under way; on any other trip a note says why. On a database built by the demo pack since
->   lane 5, **London is approved and Lagos carries no flight or hotel** (D-26). UAT built before that still
->   shows the older shape until the pack runs again.
-> - **The status is no longer on the dialogs.** A booking is saved **Pending**, and the row's **⋯ menu** moves
->   it: *Put on hold*, *Confirm*, *Ticket…* (flights, with the ticket number), *Mark completed* and *Record a
->   no-show* (once the trip has started), *Cancel booking…* (a reason, kept as an internal note, and on a
->   flight or hotel the supplier's fee), *Delete* (a pending booking only; administrators), and *Edit*.
-> - **A flight on a trip that needs a visa is not ticketed** until a visa application on it is approved or
->   recorded as not required (T-24). On the demo, London's BA flight is Confirmed and *Ticket…* is refused,
->   naming the visa: say it out loud.
-> - **The exception switches ask, they do not grant** (lane 4, D-8): a breaching booking waits on *Staff
->   Travel → Policy Breaches* for another travel administrator and cannot be confirmed until then.
-> - A flight's **Segments** dialog lists, adds and removes its segments; a hotel has a star rating and ground
->   transport an actual cost. Every booking falls inside the trip's dates, a day either side.
+**What it is:** what has actually been reserved. **Four sections, each with its own Add button:** **Flights** ·
+**Hotels** · **Ground transport** · **Car rentals**.
 
-**What it is:** what has actually been reserved. **Four sections, each with its own Add button:**
-**Flights** · **Hotels** · **Ground transport** · **Car rentals**.
+**Bookings live on an approved trip** (closure lane 5, D-23): the Add buttons show only while the trip is Approved or
+under way; on any other trip a note says why. Every booking falls inside the trip's dates, a day either side.
 
-**Flights** — Airline · Reference *(PNR)* · Class · Fare *(right-aligned)* · Segments *(a count)* ·
-Status. Expanding a flight shows its **segments**: order, flight number, origin → destination
-airport, departure and arrival with **terminals**, duration, aircraft, seat, baggage allowance.
+**The status is the verbs', not the dialog's.** A booking is saved **Pending**, and the row's **⋯ menu** moves it:
+*Put on hold* · *Confirm* · *Ticket…* (a flight, with the ticket number) · *Mark completed* and *Record a no-show*
+(once the trip has started) · *Cancel booking…* (a reason, kept as an internal note, and on a flight or hotel the
+supplier's fee) · *Edit* · *Delete* (a **pending** booking only, administrators — never one carrying a policy
+exception, D-20). A flight also has **Segments**.
 
-Dialog: **Booking reference** · **Airline code** *(2 chars)* · **Airline name** · **Booking class**
-*(Economy · Premium economy · Business · First)* · **Class exception approved** switch +
-**reason** · **Booked by** *(Self service · Travel desk · Travel agency · Direct airline · Direct
-hotel · Online portal)* · **Total fare** · **Taxes and fees** · **Currency** · **Ticket number** ·
-**Status**.
+**Flights** — Airline · Reference *(PNR)* · Class · Fare · Segments *(a count)* · Status. Dialog: **Airline** ·
+**Airline code** · **Booking reference** · **Ticket number** *(on edit)* · **Cabin class** *(Economy · Premium economy ·
+Business · First)* · **Booked through** *(the channel)* · **Fare** · **Taxes and fees** · **Currency** · **Supplier** ·
+**Ask for an exception to the policy** + **Why the exception is needed**. The **Segments** dialog lists, adds and
+removes them: order, carrier, flight number, from and to airports, seat, departs and arrives (local times), and
+whether it is a connection — **the duration is the server's**, from the two times.
 
-**Hotels** — Hotel · City · Dates · Nights · Total · Status. Dialog adds hotel chain, address, star
-rating, room type, **rate per night**, **rate exception approved** + reason, and the cancellation
-policy.
+**Hotels** — Hotel · City · Dates · Nights · Total · Status. Dialog: hotel, chain, address, city, country, check in
+and out, **rate per night** and currency, room type, star rating, booking reference, booked through, cancellation
+policy, supplier, and the exception request. **Nights and total are the server's.**
 
-**Ground transport** — Type · Route · Cost · Status. Ten types: Taxi · Rideshare · Bus · Train ·
-Metro · CompanyVehicle · PrivateCarHire · Shuttle · Motorcycle · Ferry.
+**Ground transport** — Type · Route · Cost · Status. Ten types: Taxi · Rideshare · Bus · Train · Metro ·
+**CompanyVehicle** · PrivateCarHire · Shuttle · Motorcycle · Ferry; estimated and actual cost.
 
-**Car rentals** — Category · Route · Dates · Total · Status. Eight vehicle categories, plus daily
-rate, insurance included, fuel policy and whether a licence is required.
+**Car rentals** — Category · Route · Dates · Total · Status: category and model, pick-up and drop-off, **daily rate**
+(the total is the server's), fuel policy, insurance included, licence required.
 
-> ⛔ **This is where the policy bites.** A cabin class or a nightly rate above the cap, a booking made
-> with less notice than the policy asks, or (under a preferred-vendors policy) one with no supplier
-> is **refused**, unless the exception is asked for with a reason. Since closure lane 4 (slice 4b,
-> D-8) ticking the exception **asks**; it no longer grants. The booking is saved *Pending*, never
-> *Confirmed*, until a travel administrator who neither booked it nor asked authorises it on
-> **Staff Travel → Policy Breaches**. The refusal explains itself —
-> the toast is titled *"The booking was refused"* and carries the server's own sentence, because the
-> cap is not the form's to predict.
+> ⛔ **This is where the policy bites** — when one is in force (Rule 1). A cabin class or a nightly rate above the cap,
+> a booking made with less notice than the policy asks, or (under a preferred-vendors policy) one with no supplier is
+> **refused**, unless the exception is asked for with a reason. Then the booking is saved **Pending** and **cannot be
+> confirmed or ticketed** until a travel administrator **who neither booked it, asked for it, nor travels on it**
+> authorises it on **Staff Travel → Policy Breaches** (chapter 13a; D-8). The refusal explains itself — the toast
+> carries the server's own sentence.
+
+**A company vehicle is reserved in Fleet** (closure lane 6). Ground transport of type *Company vehicle* offers Fleet's
+vehicles — each with its plate and, when it is not free, why (another planned trip, or an insurance or other critical
+item running out before the return) — and the licensed drivers, flagged when on leave or driving another trip; the
+traveller's own official car comes preselected. Pick-up and drop-off times are required, and there are no cost fields:
+the leg costs what Fleet books against its trip. The leg's status is Fleet's, and its ⋯ menu offers only *Cancel
+booking…*. **While Fleet publishes no approval route (UAT today, D-27) the reservation stays a draft** and the leg says
+the vehicle is not held. **UAT has no fleet, so none of this can be shown there.** A leg that keeps a driver other than
+the traveller away overnight offers **Raise the driver's request** — a Draft trip of their own, which goes with the leg.
+
+**A flight on a trip that needs a visa is not ticketed** until a visa application on it is approved or recorded as not
+required (T-24) — and, in order after that, until insurance covers every day of an international trip, and on a
+Critical trip until the traveller has acknowledged the risk assessment (lane 7).
 
 ### ▶ Walk the Bookings
 
-**1 — Open the tab.** Flights: Air Peace, `QK7T2M`, Economy, GHS 14,200, **2 segments**, Confirmed.
+**On UAT, use London for the tour and Kumasi for anything live; on a rebuilt demo database, London for both.** UAT's
+London is still awaiting approval, so it shows the bookings it was given before lane 5 but takes no new one.
 
-**2 — Expand the segments.**
+**1 — Open London's Bookings tab.** British Airways, `H4RB9L`, Premium economy, **2 segments** — **Ticketed** on UAT
+(booked before the visa rule existed), **Confirmed** on a rebuilt demo database.
 
-> *"P4 106 out of Accra Terminal 3 at 08:40, into Lagos Terminal I at 10:05 — eighty-five minutes,
-> a 737-500, seat 14A, thirty kilos of baggage. And the return. That is what a travel desk hands to
-> a traveller, and it is on the trip rather than in an email."*
+**2 — Open the segments.**
 
-**3 — Hotels: Radisson Blu Anchorage, five nights at GHS 2,200 a night.**
+> *"BA 078 out of Accra Terminal 3 at 22:55, into Heathrow Terminal 5 at 05:40 — the duration worked out from the
+> two times, the aircraft, the seat, the baggage. And the return. That is what a travel desk hands to a traveller,
+> and it is on the trip rather than in an email."*
 
-> *"Two thousand two hundred a night on Victoria Island — and the international ceiling in the
-> policy is two thousand four hundred. So this one is inside the rule."*
+**3 — The visa rule.**
 
-**4 — Now the story. Open the London trip in a second tab and look at its hotel.** Hilton London
-Metropole, **GHS 3,200 a night**, with a **rate exception approved** and the reason recorded.
+- **On a rebuilt demo database:** open the flight's ⋯ menu and press **Ticket…**, with any number.
 
-> *"And here is one that is not. Three thousand two hundred a night at the summit venue, against a
-> ceiling of two thousand four hundred — with the exception recorded, and the reason: it is the
-> only hotel within walking distance and that is the delegate rate."*
+> *"Refused — and it says why: this trip needs a visa and no visa application on it is approved yet. A ticket is
+> money the airline keeps; it is not bought until the traveller can actually get in."*
 
-**5 — Now say what happens when you try that without authority.**
+  Nothing is written. *(T-24, live.)*
 
-*If you chose Option A in § 2.4 (policy is a draft):*
+- **On UAT:** the flight was ticketed before the rule existed, so say it instead: *"Today this would not be
+  ticketed until the visa application is approved — the ticket waits for the visa, then the insurance."*
 
-> *"And what the system does about it depends on one thing I will show you in a moment: whether the
-> policy has been signed. The mechanism is real — a cabin class or a nightly rate over the cap is
-> refused outright, and only a travel **administrator** can authorise the breach, so a travel clerk
-> cannot approve their own. On this database the policy is still a draft, which is exactly the
-> state a corporation is in before somebody signs it, and I will show you that screen shortly."*
+**4 — The hotel: Hilton London Metropole, GHS 3,200 a night.**
 
-*If you chose Option B (policy approved) — and this is the best thirty seconds in the module:* open **Add flight** on the London trip, set **Booking class** to **Business**, leave
-the exception switch **off**, and save.
+- **On a rebuilt demo database** — the D-8 story, already on the record:
 
-> *"Refused — and it tells me why: Business exceeds the TDC Staff Travel Policy 2026 cap of Premium
-> economy for this trip, and an approved policy exception is required."*
+> *"Three thousand two hundred a night at the summit venue, against a ceiling of two thousand four hundred. The
+> booking was not refused — it was saved pending, with the reason, and it could not be confirmed until another
+> officer authorised the breach. Booked by the head of HR, authorised by a second HR officer, confirmed only then.
+> The person who books over the limit is never the person who waves it through."*
 
-Now tick **Class exception approved** and save again.
+  Show it on **Staff Travel → Policy Breaches** (chapter 13a).
 
-> *"And refused a second time, differently: approving a booking above the cap requires travel
-> administrator rights. Which is the control that matters. A clerk cannot tick their own exception
-> — the exception is not a field on the form, it is an act of authority, and the server decides who
-> holds it rather than trusting the box."*
+- **On UAT** — the hotel was booked before the policy and its exception rules existed, so it carries no exception
+  state. Say what would happen now, then, if you prepared § 2.4 Option B (the policy approved), show it live on
+  **Kumasi**, which is approved:
 
-*Undo:* nothing was written on either attempt.
+**5 — 🔴 *(Option B only)* Add a hotel on Kumasi at GHS 1,500 a night** — above the 900 domestic ceiling — with the
+exception **not** asked.
 
-**6 — Point at *Booked by* on a row.**
+> *"Refused — and it tells me why: fifteen hundred exceeds the policy's domestic ceiling of nine hundred."*
 
-> *"And every booking records the channel — desk, agency, direct with the airline, self-service.
-> Which is how a travel manager answers 'are we still getting value out of the agency'."*
+(Kumasi departs on 19 October, so from 5 October the refusal also names the policy's fourteen days' notice for a
+hotel — the same exception covers both.)
+
+Ask for the exception, give the reason, save again. **It is saved — Pending.** Open its ⋯ menu: *Confirm* is refused,
+naming the exception. Then, as **`hr.officer`**, authorise it on Policy Breaches, and confirm it.
+
+> *"And that is the control. The booking was not blocked — sometimes the summit hotel really is the only hotel — but
+> it waited for a second officer. A clerk cannot tick their own exception: the box asks; another person decides."*
+
+*Undo:* chapter 17 — cancel the hotel (a booking that carried an exception is cancelled, never deleted).
+
+**6 — Point at *Booked through* on a row.**
+
+> *"And every booking records the channel — desk, agency, direct with the airline, self-service. Which is how a
+> travel manager answers 'are we still getting value out of the agency'."*
 
 ### ⚙ Behind the Bookings
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | Per request | `GET api/staff-travel/bookings/{kind}/request/{requestId}` | Read |
-| Create / update | `POST` / `PUT …/bookings/{kind}[/{id}]` | Write **+ the policy guard** |
-| Segments | `GET`/`POST …/flights/{id}/segments` · `PUT …/segments/{id}` | Read / Write |
-| Every delete | `DELETE …` | **Admin** |
+| Create / update | `POST` / `PUT …/bookings/{kind}[/{id}]` — saved Pending; the policy decides refuse or Pending | Write |
+| The verbs | `POST …/{kind}/{id}/hold` · `…/confirm` · `…/ticket` *(flights)* · `…/complete` · `…/no-show` · `…/cancel` | Write |
+| **Authorise / refuse a breach** | `POST …/flights/{id}/exception/authorise` · `…/refuse` (and hotels) | **Admin** — never the booker, the asker or the traveller |
+| Segments | `GET`/`POST …/flights/{id}/segments` · `DELETE …/segments/{id}` | Read / Write |
+| Fleet's vehicles and drivers | `GET …/bookings/fleet/options?requestId=&from=&to=` | Read |
+| The driver's request | `POST …/ground-transport/{id}/driver-request` | Write |
+| Delete | `DELETE …` — a pending booking without an exception only | **Admin** |
 
 Tables: `StaffTravelFlightBookings`, `StaffTravelFlightSegments`, `StaffTravelHotelBookings`,
 `StaffTravelGroundTransports`, `StaffTravelCarRentalBookings`.
 
-**What the guard does**, in order: resolves the traveller's **staff level from their position** and
-their organisation unit; asks for the policies applicable on the **departure date**; keeps only
-those in **this tenant** and **approved**; picks the most specific; then takes the domestic or
-international cap **from the request**, not the booking. Cabin class is a numeric comparison on the
-enum's ordering — `Economy(1) → PremiumEconomy(2) → Business(3) → First(4)` — **which is
-load-bearing and must not be renumbered**.
+**What the guard does**, in order: resolves the trip's own unit and staff level; finds the **approved** policy for
+that unit (or the nearest above it, or the organisation's) in force on the **departure date**; takes the domestic or
+international cap from **the trip**, in the policy's currency; and compares. Cabin class is a numeric comparison on
+the enum's ordering — `Economy(1) → PremiumEconomy(2) → Business(3) → First(4)` — **which is load-bearing and must not
+be renumbered**.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-1 · An unapproved policy caps nothing** — Rule 1 | |
-| **T-8 · There is no vendor field on any booking form.** `VendorId` exists on the entities and Procurement's `SuppliersController` answers 400, so there are no selectable vendors. *Preferred vendor mandatory* on the policy therefore has nothing to check | |
-| **T-9 · The hotel cap has no currency** — see § 1.5 | |
-| **T-18 · Only flights and hotels are capped.** Ground transport and car rentals have no policy check at all, though a GHS 620-a-day car hire for five days is real money | |
-| **T-19 · Nothing reconciles a booking against the itinerary.** A flight arriving the day after the itinerary says the traveller is in a meeting is accepted | *Fixed in closure lane 5: a leg links only this trip's bookings and is flagged when its date is not the booking's (a warning, not a refusal)* |
+| **T-1 · UAT's policy is a draft**, so nothing there is capped — Rule 1 (by D-61) | |
+| **T-18 · Only flights and hotels are capped.** Ground transport and car rentals have no policy check, though a GHS 620-a-day car hire for five days is real money | |
+
+*Fixed since the first edition:* T-8 (a supplier on every booking form — Procurement's register works since
+2026-09-22), T-9 (the cap in the policy's currency), T-19 (a leg linked to its booking, flagged when the dates
+disagree), and the self-granted exception (D-8).
 
 ---
 
 ### 5.4 👁 Finance tab
 
-**Three sections: Budget · Advances · Expense claims.**
+**Three sections: Budget · Advances · Expense claims.** Money on this tab follows Rule 5: two people, never one's own.
 
-**Budget** — one card. Set once per request. Shows **Approved total** and the split across
-**flight / accommodation / per-diem / transport / miscellaneous**, then the three derived figures:
+**Budget** — one per trip, and only once the trip is **approved** (D-16). **In the trip's currency** (set by the
+server). Its **total** defaults to the trip's approved budget and cannot exceed it; its five parts — flights,
+accommodation, per diem, transport, miscellaneous — are all zero or add up to the total exactly. Then the derived
+figures (§ 1.4):
 
 | Figure | Derived from |
 |---|---|
-| **Committed** | the sum of confirmed bookings |
-| **Actual** | the sum of **paid** expense claims |
+| **Committed** | the trip's bookings — Pending and OnHold included, no-shows left out, a cancellation fee kept — plus Fleet's costs for a company vehicle |
+| **Actual** | paid claims' net, plus advances paid out less cash handed back |
 | **Variance** | approved total − actual |
 
-Empty state offers **Set a budget**; when there is one, **Edit the budget**.
+An overrun turns its figure red and says so — **flagged, not refused**. **Approve the budget** *(Admin; never the
+traveller's own trip, nor whoever set or last changed it — D-19)* stamps who and when; **changing an approved budget
+withdraws its approval**. Empty state: **Set a budget**; then **Edit budget**.
 
-**Advances** — Number · Type · Requested · Approved · **Outstanding** · Settle by · Status.
-Two dialogs: **Request a travel advance** *(amount, currency, type, settlement deadline)* and
-**Approve this advance** *(the approved amount — which may differ from the requested one)*. A third
-action, **Disburse**, appears on an approved advance.
+**Advances** — Number · Type · Requested · Approved · **Outstanding** · Settle by · Status · **Finance** *(the posting's
+state in HR's Finance register — on UAT, *Unposted*: no travel rule is switched on)*. On an approved or under-way trip
+only (D-16). Row actions by status:
 
-**Expense claims** — Number · Type · Claimed · **Payable** · Submitted · Status, each a link into
-the claim.
+| Status | Actions |
+|---|---|
+| Requested | **Approve** — *"the amount requested or less — never more, and never your own advance"*; and within the trip's approved budget · **Reject** *(a reason)* · **Cancel** |
+| Approved | **Pay out** *(not by whoever approved it — D-2)* · **Cancel** |
+| Cash out *(Disbursed, PartiallySettled, Overdue)* | **Cash back** — record cash the traveller handed back, once · **Write off** *(Admin; never the traveller's own)* |
+
+A trip's cancel withdraws its advances not yet paid out; cash still out holds the cancel back. An advance a leaver's
+final settlement recovered is settled when the settlement is released (9c, D-58).
+
+**Expense claims** — Number · Type · Claimed · **Payable** · Submitted · Status, each a link into the claim; **File a
+claim** opens chapter 9b for this trip.
 
 ### ▶ Walk the Finance
 
-**1 — Open the tab on the Lagos trip.** The budget: GHS 38,000, split 16,000 flight / 12,000 hotel /
-7,500 per-diem / 1,800 transport / 700 misc.
+**1 — Open the tab on the Kumasi trip** — approved, with its budget and its advance.
 
-> *"The approved envelope, and how it is meant to be spent. Which matters because 'thirty-eight
-> thousand for Lagos' is not a number anybody can check — the split is."*
+> *"The approved envelope, and how it is meant to be spent — and on this trip, approved by a second officer, because
+> the officer who sets a budget does not also sign it."*
+
+*(On UAT Kumasi's budget is set but not yet approved; on a rebuilt demo `hr.officer` has approved it.)*
 
 **2 — Point at *Committed* and *Actual*.**
 
-> *"Committed is what has actually been booked: the flight and the hotel. Actual is what has been
-> paid out in claims — nothing yet, because the trip has not happened. And the variance between the
-> envelope and the spend is computed every time this page is read, not stored. A stored rollup is
-> out of date the moment the next booking is made."*
+> *"Committed is what has been booked. Actual is what has gone out — the claims paid and the advance in hand. And
+> both are worked out every time this page is read, not stored: a stored rollup is out of date the moment the next
+> booking is made."*
 
-**3 — Now switch to the *Kumasi* trip's Finance tab** — that is where the advance is.
+**3 — The advance.**
 
-> *"Two and a half thousand cedis, requested, approved and disbursed. Cash in his hand before he
-> gets on the coach, because a man presenting a paper in Kumasi should not be funding the
-> corporation's travel out of his own pocket for three weeks."*
+> *"Two and a half thousand cedis, requested, approved and paid out — by two different officers. Cash in hand
+> before the coach leaves, because somebody presenting a paper in Kumasi should not be funding the corporation's
+> travel out of their own pocket."*
 
 **4 — Point at *Outstanding* and *Settle by*.**
 
-> *"And the outstanding balance, with a settlement deadline. Which is the half of an advance that
-> organisations lose — and I will show you exactly where it gets recovered in a moment."*
+> *"And the outstanding balance, with a settlement deadline. Which is the half of an advance that organisations lose —
+> recovered from the traveller's claim when it is paid, handed back as cash, or written off by an administrator who
+> is not the traveller."*
 
-**5 — 🔴 LIVE WRITE 3 *(optional)* — Set a budget** on the request you created in chapter 4.
+**5 — 🔴 LIVE WRITE 3 *(optional)* — approve a budget as the second officer.** As `hr.head`, press **Approve the
+budget**: refused — *you set it*. In a second window as **`hr.officer`**, approve it: *"Approved by … on …"*.
 
-*Undo:* chapter 17 — or leave it; a budget on a draft trip is harmless.
+- **On UAT:** Kumasi's (all four demo trips carry budgets set before lane 3, none approved).
+- **On a rebuilt demo database:** Sebrepor's, left awaiting approval for this step (Kumasi's is already approved).
+
+> *"The officer who draws up the envelope does not also sign it."*
+
+⚠ A budget can no longer be **set** on a draft trip (D-16) — the first edition's *Set a budget* on the chapter-4 draft
+is refused.
+
+*Undo:* chapter 17 — editing the budget withdraws its approval.
 
 ### ⚙ Behind the Finance
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | Budget | `GET api/staff-travel/finance/budgets/request/{id}` · `POST`/`PUT …/budgets` | Read / Write |
+| **Approve the budget** | `POST …/budgets/{id}/approve` | **Admin** + employee-linked |
 | Advances | `GET …/advances/request/{id}` · `POST`/`PUT …/advances` | Read / Write |
-| **Approve an advance** | `POST …/advances/{id}/approve` | Write |
-| **Disburse** | `POST …/advances/{id}/disburse` | Write |
+| **Approve** · **Reject** · **Cancel** an advance | `POST …/advances/{id}/approve` · `…/reject` · `…/cancel` | Write |
+| **Pay out** · **Cash back** | `POST …/advances/{id}/disburse` · `…/refund` | Write |
+| **Write off** | `POST …/advances/{id}/write-off` | **Admin** |
 | Claims | `GET …/claims/request/{id}` | Read |
-| Deletes | `DELETE …` | **Admin** |
 
-Tables: `StaffTravelBudgets`, `StaffTravelAdvances`, `StaffTravelExpenseClaims`.
-
-> ⚠ **`approveAdvance` is the only way to set `approvedAmount`** — the plain update cannot, because
-> approving is an act with an author and updating is not. Same shape as the claim review.
+Tables: `StaffTravelBudgets`, `StaffTravelAdvances`, `StaffTravelExpenseClaims`. Paying out, cash back and a write-off
+each record a row in HR's Finance posting register (§ 16).
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-20 · The budget lines are not enforced.** A GHS 20,000 flight against a 16,000 flight budget is accepted; only the derived Committed figure moves | |
-| **T-21 · `Overdue` and `WrittenOff` advance statuses are set by nothing** — though `advances/overdue-settlements` exists as a read and the reminder sweep chases them | |
-| **T-22 · A budget has no currency of its own** — it inherits the request's, which is right, but the DTO carries `currencyCode` and the form does not offer it | |
+| **T-20 · The budget's parts do not bind.** A GHS 20,000 flight against a 16,000 flight line is accepted; only the derived figures move, flagged red. Whether an overrun should refuse is TDC's question | |
+
+*Fixed since the first edition:* T-21 (Overdue set by the sweep, WrittenOff by an administrator), T-22 (the budget is
+the trip's currency, set by the server).
 
 ---
 
 ### 5.5 👁 Compliance tab
 
-> ⚠ **Added by closure lane 6, slice 6c (2026-10-02):** when Fleet records an incident against one of the trip's company
-> vehicles on its fleet trip, a read-only **Company vehicle incidents (from Fleet)** card shows it — when, the vehicle
-> and driver, type, severity, status, where and what happened. Fleet records and closes incidents; telling the desk or
-> the traveller's line authority of a new one is lane 8's. UAT has no fleet, so the demo shows no such card.
->
-> ⚠ **Added by closure lane 7, slice 7b (2026-10-03):**
-> - a **Health requirements** card — the destination's requirements over the trip, mandatory first; the desk **Clears**
->   each with a note of what it saw (recorded in its name, today) or takes the tick off. Nothing is blocked by an
->   unticked one (D-36, T-25);
-> - **the flight's ticket now waits**, in order, for the visa (lane 5), for insurance whose cover spans every day of an
->   international trip, and — on a Critical trip — for the traveller's acknowledgement of the current risk assessment
->   (D-37); the insurance and risk cards say so until each is met. The demo's London flight is still refused naming its
->   visa first;
-> - the visa lookup flags an entry not checked for over a year (T-40).
+**The richest tab in HR, and the one that justifies the module.** Up to six cards:
 
-**The richest tab in HR, and the one that justifies the module.** Six sections:
+**① Company vehicle incidents (from Fleet)** — only when Fleet has recorded one against a company vehicle on this trip
+(lane 6, 6c): when, the vehicle and driver, type, severity, status, where and what happened. Fleet records and closes
+incidents; the nightly sweep tells the desk and the traveller's line authority (lane 8). UAT has no fleet.
 
-**① What this traveller's passport needs** — resolved live from the **visa requirement** for their
-passport country into this destination. Shows the requirement type, the category, the maximum stay
-and the **processing days** — which is the number that decides whether the trip is even possible.
+**② Active alerts for the destination** — every alert in force for the country (and city), with its severity, title
+and **body**. A new alert raised active goes at once to the travellers of approved trips there (lane 7, E6).
 
-**② Destination alerts in force** — any active alert for the destination country, with its
-severity, its title and **its body**. A trip to a country with no alert shows nothing.
+**③ Risk assessment** — the risk level and category, the source, the summary, whether mitigation is required and the
+**mitigation notes**, whether a duty-of-care briefing was sent, and the traveller's **acknowledgement**. Dialog:
+**Assess the destination**. Nobody on the desk can record the acknowledgement: the card says *"Not yet acknowledged.
+Only … can acknowledge their own assessment, on their My travel page."* (E1). On a **Critical** trip the flight is not
+ticketed until it is acknowledged.
 
-**③ Travel documents** — the traveller's passports, licences and permits with expiry dates and a
-**verified** flag, plus a **Verify** action.
+**④ Visas** — first, **what this traveller's passport needs**: the register's answer for the country that issued their
+**primary passport** (read from the *Travel Documents* register, chapter 10a — the tab no longer lists documents) into
+this destination — the requirement, category, maximum stay and **processing days**, flagged when the entry has not been
+checked for over a year (T-40). With no passport on file it says so and links to the register. Then the trip's **visa
+applications** — type, number *(masked)*, submitted, expires, fee, status — with **Record a visa** and, per row,
+**Change**.
 
-**④ Visa applications** — Type · Number · Submitted · Expires · Fee · Status, with a **Record a
-visa application** dialog.
+**⑤ Health requirements for the destination** — the requirements in force over the trip, mandatory first; the desk
+**Clears** each with a note of what it saw (recorded in its name, today), or takes the tick off. Nothing is blocked by an
+unticked one (lane 7, D-36).
 
-**⑤ Risk assessment** — the destination's risk level and category, the assessment source, the
-summary, whether mitigation is required and the **mitigation notes**, plus whether a duty-of-care
-briefing was sent and whether the traveller has **acknowledged** it. Dialog: **Assess the
-destination**.
-
-**⑥ Insurance** — Policy · Type · Cover · Period · Sum insured · Premium. Dialog: **Record travel
-insurance**.
+**⑥ Insurance** — policy, type, cover, period, sum insured, premium. Dialog: **Record travel insurance**. An
+international trip's flight is not ticketed until cover spans every day of it.
 
 ### ▶ Walk the Compliance
 
-**Do this one on the London trip** — it is the one with a visa application.
+**Do this one on the London trip** — the one with a visa application — then Lagos.
 
-**1 — Open the London request's Compliance tab.**
+**1 — Open London's Compliance tab and read the Visas card.**
 
-**2 — Read section ① aloud.**
+> *"A Ghanaian passport into the United Kingdom: a Standard Visitor visa, up to a hundred and eighty days, **fifteen
+> working days to process**. That last number decides whether a summit in three weeks is possible at all — and it is on
+> the screen before anybody books a flight. And the visa application lodged at VFS Global, with its fee."*
 
-> *"A Ghanaian passport into the United Kingdom: a Standard Visitor visa, up to a hundred and
-> eighty days, **fifteen working days to process**. That last number is the one that decides
-> whether a summit in three weeks is possible at all — and it is on the screen before anybody
-> books a flight."*
+**2 — Now Lagos's Visas card.**
 
-**3 — Now open the Lagos trip's Compliance tab and read the same section.**
+> *"And into Nigeria: no visa. ECOWAS free movement, ninety days, zero processing days. Same screen, a different answer
+> — because the answer is a property of the passport and the destination, recorded once and reused by every trip. And
+> the register sets the trip's own visa flag: nobody has to remember to tick it."*
 
-> *"And into Nigeria: no visa. ECOWAS free movement, ninety days, zero processing days. Same screen,
-> completely different answer — because the answer is a property of the passport and the
-> destination, recorded once and reused by every trip."*
+**3 — Lagos's active alert.**
 
-**4 — Section ② on the Lagos trip — the live alert.**
+> *"And what he is being told before he goes: fuel-supply protests causing road closures between Mile 2 and Badagry,
+> use the Lekki–Epe corridor, allow two extra hours for airport transfers. In force until after he gets back — and it
+> reached him the moment it was raised."*
 
-> *"And what he is being told before he goes: fuel-supply protests causing road closures between
-> Mile 2 and Badagry, use the Lekki–Epe corridor, allow two extra hours for airport transfers.
-> Warning severity, from the Ghana Mission in Lagos, in force until after he gets back."*
+**4 — The risk assessment.** This is the duty-of-care story.
 
-**5 — Section ⑤ — the risk assessment.** This is the duty-of-care story.
+> *"Medium risk. And the mitigation is not a tick-box: airport pickup by the host organisation only, no road movement
+> after seven in the evening, the party travels together, hotel on Victoria Island, emergency numbers circulated before
+> departure. A duty-of-care briefing was sent."*
 
-> *"Medium risk. And the mitigation is not a tick-box: airport pickup by the host organisation
-> only, no road movement after seven in the evening, the party travels together, hotel on Victoria
-> Island, emergency numbers circulated before departure. A duty-of-care briefing was sent. That is
-> what an employer owes somebody it sends to a medium-risk destination, and it is on the record
-> with a date."*
+**5 — Point at the acknowledgement.**
 
-**6 — Point at the acknowledgement, and be honest about it.**
+> *"And whether the traveller has confirmed they read it — which only the traveller can do, on their own page. Nobody
+> can acknowledge a security briefing on your behalf, because an acknowledgement anyone can record for you records
+> nothing."*
 
-> *"And whether the traveller has confirmed they read it. That is deliberately the traveller's own
-> act — nobody can acknowledge a security briefing on your behalf, because an acknowledgement
-> anyone can record for you records nothing."*
+The Lagos assessment is not acknowledged — deliberately, for the portal walk (chapter 15).
 
-⚠ On this database **the Lagos assessment is not acknowledged** — and until closure lane 7 it could
-not be: the desk route sits on `HR.Travel.Write`, which the `Employee` role never holds, while the
-service refuses anyone but the traveller (finding **T-23**). Since slice 7c1 the traveller records it
-on **My travel → the trip → Before you go** (chapter 15), and this card only reports it: *"Not yet
-acknowledged. Only … can acknowledge their own assessment, on their My travel page."* Nobody on the
-desk can record it — that is the point.
+**6 — Lagos's health requirements.**
 
-**7 — Section ③, and the passport that is about to expire.** Switch to the Kumasi trip or look at
-the documents list.
+> *"The yellow-fever certificate is mandatory for Nigeria. The desk has seen it, and ticked it — with who, when and a
+> note of what was seen. The online declaration is not ticked yet. Neither stops the trip; the record says what has been
+> checked."*
 
-> *"And what they actually hold. Three passports, two verified against the physical document. One
-> of them expires in ten weeks — which is the sort of thing that is discovered at the airport
-> unless something is watching it. Something is: the reminder sweep, and I will show you that at
-> the end."*
+*(On UAT, nothing is ticked yet — the tick came with lane 7; a rebuilt demo has the yellow fever ticked.)*
 
-**8 — 🔴 LIVE WRITE 4 *(optional)* — *Record travel insurance*** on the request you created in
-chapter 4.
+**7 — 🔴 LIVE WRITE 4 *(optional)* — *Record travel insurance*** on the request you created in chapter 4.
 
 ### ⚙ Behind the Compliance
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Visa requirement resolution | `GET api/staff-travel/compliance/visa-requirements/destination/{countryId}` | Read |
-| Active alerts for a country | `GET …/alerts/country/{countryId}/current` | Read |
-| Documents | `GET …/documents/employee/{employeeId}` · `POST`/`PUT …/documents` | Read / Write |
-| **Verify a document** | `POST …/documents/{id}/verify` | Write |
-| Visa applications | `GET`/`POST …/visa-applications…` | Read / Write |
+| What the passport needs | `GET api/staff-travel/compliance/visa-requirements?passportCountryId=&destinationCountryId=` | Read |
+| Alerts in force | `GET …/alerts/country/{countryId}/current` · `GET …/requests/{id}/destination-alerts` | Read |
+| The traveller's passport | `GET …/documents/employee/{employeeId}` *(masked)* | Read |
+| Visa applications | `GET`/`POST`/`PUT …/visa-applications…` | Read / Write |
 | Risk assessments | `GET`/`POST`/`PUT …/risk-assessments…` | Read / Write |
-| **Acknowledge a risk assessment** | `POST …/risk-assessments/{id}/acknowledge` — no button on this tab since 7c1; the traveller uses `POST …/me/risk-assessments/{id}/acknowledge` (chapter 15) | Write, and the traveller only — see T-23 |
+| **Acknowledge** | the traveller only: `POST …/me/risk-assessments/{id}/acknowledge` (chapter 15) | signed in, own trip |
+| Health requirements | `GET …/requests/{id}/health-requirements` · `POST`/`DELETE …/requests/{id}/health-requirements/{reqId}/clear` | Read / Write |
 | Insurance | `GET`/`POST`/`PUT …/insurance…` | Read / Write |
-| Health requirements | `GET …/health-requirements/country/{id}` | Read |
-| Every delete | `DELETE …` | **Admin** |
+| Fleet incidents | `GET …/compliance/requests/{id}/fleet-incidents` | Read |
+| Every delete | `DELETE …` — never an acknowledged assessment or a sent alert | **Admin** |
 
-Tables: `StaffTravelDocuments`, `StaffTravelVisaRequirements`, `StaffTravelVisaApplications`,
-`StaffTravelRiskAssessments`, `StaffTravelAlerts`, `StaffTravelInsurancePolicies`,
-`StaffTravelHealthRequirements`.
+Tables: `StaffTravelVisaRequirements`, `StaffTravelVisaApplications`, `StaffTravelRiskAssessments`,
+`StaffTravelAlerts`, `StaffTravelAlertNotifications`, `StaffTravelInsurancePolicies`, `StaffTravelHealthRequirements`,
+`StaffTravelHealthClearances`; the traveller's documents from `StaffTravelDocuments`.
 
-### ⚠ Known gaps
-
-| Gap | |
-|---|---|
-| **T-23 · The risk-assessment acknowledgement is unreachable by the people it is for** — the gate and the service check do not overlap. The alert acknowledgement had the same shape and was fixed with `/me` routes; this one was not | *Fixed in closure lane 7 (7c1, E1): the traveller records it on My travel, under Before you go; the desk's button became a read-only state* |
-| **T-24 · `RequiresVisa` and `RequiresHealthClearance` gate nothing.** A trip flagged as needing a visa can be approved, booked and completed with no visa application on it | *Ticketing half fixed in closure lane 5: a flight is not ticketed until a visa application is approved or not required. the flag derived from the requirements table and health clearance ticked per trip in lane 7 (7b, D-39, D-36)* |
-| **T-25 · Health requirements are shown per country but never checked against the traveller.** Nigeria's mandatory yellow-fever certificate is displayed; nothing verifies the traveller holds one | *Fixed in closure lane 7 (7b, D-36): the trip lists the destination's requirements and the desk ticks each off with a note; nothing is blocked by an unticked one* |
-| **T-26 · An expiring passport does not block anything** — the reminder sweep chases it and no other path reads the expiry | *Warned in closure lane 7 (7b, O-16): submitting an international trip warns when the primary passport expires within six months of the return (TDC to confirm the window)* |
+*Fixed since the first edition:* T-23 (the traveller acknowledges on the portal), T-24 (the visa flag from the register;
+the ticket waits for the visa), T-25 (health requirements ticked per trip), T-26 (warned at submission when the passport
+expires within six months of the return).
 
 ---
 
 ### 5.6 👁 Comments tab
 
-A textarea, a **note that the comment is posted in your name and visible to the traveller**, and an
-**Add comment** button. Below it, the thread: author, timestamp, body, and *"Internal — not shown to
-the traveller"* on the ones marked private.
+A textarea, an **internal note** switch, and **Add comment**. Below it, the thread: author, timestamp, body, and
+*"Internal — not shown to the traveller"* on the private ones. The traveller writes here too, from My travel (chapter
+15): their questions arrive labelled **Query** and their replies **Response**, under their own name, and since lane 8a
+the desk is told. A reply — the desk's or theirs — answers a comment on the same trip, or it is refused.
 
-> *Fixed in closure lane 0 (T-27):* the composer **always posted `isVisibleToTraveller: true`**, so no
-> internal note could be written from this screen. It now has an **internal note** switch — a note for
-> the travel desk only, which never reaches the traveller's read.
-
-> *Since closure lane 7 (7c2)* the traveller writes here too, from My travel (chapter 15): their
-> questions arrive labelled **Query** and their replies **Response**, under their own name. A reply —
-> the desk's or theirs — answers a comment on the same trip, or it is refused (P4). Nothing tells the
-> desk a traveller has written yet (lane 8).
+A comment is **edited by its author only** (D-21); deleting one is its author's or an administrator's. Neither control is
+on this screen.
 
 ### ▶ Walk the Comments
 
 **1 — Open the tab on the Lagos trip.** Two comments.
 
-> *"'Estates has confirmed four places on the study tour. Passport copies are with the travel desk.'
-> Visible to the traveller. And underneath — 'Internal: the ECOWAS travel certificate is enough for
-> Nigeria, no visa fee to budget for.' Marked internal, and the traveller does not see it."*
+> *"'Estates has confirmed four places on the study tour. Passport copies are with the travel desk.' Visible to the
+> traveller. And underneath — 'Internal: the ECOWAS travel certificate is enough for Nigeria, no visa fee to budget for.'
+> Marked internal, and the traveller does not see it."*
 
 **2 — Say why that distinction matters.**
 
-> *"Which is the difference between a comment thread and a conversation you can actually have. The
-> desk needs somewhere to say 'we do not need to budget for this' without it reading as a promise
-> to the traveller."*
+> *"Which is the difference between a comment thread and a conversation you can actually have. The desk needs somewhere
+> to say 'we do not need to budget for this' without it reading as a promise to the traveller."*
 
-**3 — 🔴 LIVE WRITE 5 — type a comment and press *Add comment*.**
+**3 — 🔴 LIVE WRITE 5 — type a comment and press *Add comment*.** It tells the traveller (it is visible to them).
 
 > *"And posted in my name — there is no author field, because there should not be."*
 
@@ -1491,25 +1648,25 @@ the traveller"* on the ones marked private.
 
 ### 5.7 👁 Attachments tab
 
-A table of what is attached: type, description, file name, size, who uploaded it and when, with a
-**Download** link and a **Remove** action.
+A table of what is attached: type, description, file name, size, who uploaded it and when, with **Download** and
+**Remove**.
 
-**Upload** takes an **attachment type** (Invitation letter · Conference brochure · Receipt ·
-Passport copy · Visa · Ticket · Itinerary · Other), a description and a file.
+**Upload** takes an **attachment type** — Invitation Letter · Conference Brochure · Receipt · Visa Document · Insurance
+Certificate · Medical Certificate · Other — a description and a file. The traveller's own files from the portal land here
+too (lane 7, 7c2).
 
-> This goes through the product's **controlled upload gate** — virus scanning, type and size
-> checks, and a DMS record — unlike the company schedule's event attachments, which are references.
+> This goes through the product's **controlled upload gate** — virus scanning, type and size checks, and a DMS
+> record — unlike the company schedule's event attachments, which are references.
 
-**Remove is `HR.Travel.Admin`**, which the HR role holds since closure lane 4 (D-3), so `hr.head`
-can remove an attachment. 🔴 It is a live write, so do not press it on the demo's two documents.
+**Remove is `HR.Travel.Admin`** (the traveller removes their own from the portal). 🔴 It is a live write, so do not
+press it on the demo's documents.
 
 ### ▶ Walk the Attachments
 
-**1 — Open the tab on the Lagos trip, then the London one.**
+**1 — Open the tab on the Kumasi trip, then London, then Sebrepor.**
 
-> *"The invitation to present at the Ghana Institution of Engineers on one; the CIPD summit
-> programme on another; and on the Sebrepor trip, the actual fuel and taxi receipts — which are
-> what the expense claim points at."*
+> *"The invitation to present at the Ghana Institution of Engineers on one; the CIPD summit programme on another; and on
+> the Sebrepor trip, the actual fuel and taxi receipts — which are what the expense claim points at."*
 
 **2 — 🚫 Do not press Remove.**
 
@@ -1517,56 +1674,59 @@ can remove an attachment. 🔴 It is a live write, so do not press it on the dem
 
 ### 5.8 👁 Workflow tab
 
-The shared workflow tab: the definition, the steps, who is assigned to each, the decision history
-and any comments. **This is authoritative** — the request's `status` says only which phase it is in.
+The shared workflow tab: the definition, the stages, who each is addressed to, the decision history and its comments.
+**This is authoritative** — the request's `status` says only which phase it is in (§ 1.6).
 
 ### ▶ Walk it, and then move the request
 
 **1 — Open the tab on the Lagos trip.**
 
-> *"And this is not a status field somebody typed. Travel had its own approval chain and it was
-> retired — this runs on the corporation's engine, the same one that approves leave, a
-> requisition or a purchase order. The definition, the step, who it is assigned to, and every
+> *"And this is not a status field somebody typed. It runs on the corporation's approval engine — the same one that
+> approves leave, a requisition or a purchase order. The definition, the stage, who it is addressed to, and every
 > decision with a timestamp."*
 
-**2 — 🔴 LIVE WRITE 6 — press *Approve*** in the header, add a comment, confirm. The status moves
-to **Approved** and *Approved* fills on the Overview.
+**2 — 🔴 LIVE WRITE 6 — approve the Lagos trip.** Rule 3 decides how:
 
-> *"Approved. And note that nothing on this page wrote that status — the page relayed the decision
-> and refetched. Which is why a two-step definition would leave it Submitted until the second
-> signature, without a line of travel code changing."*
+- **On UAT** (the old one-step route): as `hr.head`, press **Approve** in the header; the dialog asks for the **approved
+  budget**, prefilled with the estimate. The status becomes **Approved**.
+- **On a rebuilt demo database** (two stages): the banner reads *"Line manager approval stage — then HR approval"* and
+  *"Waiting for …"*. Sign in as the person it names and approve; then, as `hr.head`, approve the HR stage with the
+  budget.
 
-⚠ **The definition does not prevent initiator approval** — `hr.head` can approve what `hr.head`
-raised. Say it rather than hoping nobody notices.
+> *"Approved. And nothing on this page wrote that status — the page relayed the decision and refetched. With two
+> stages, it stays out for approval until the second signature, without a line of travel code changing."*
 
-**3 — 🔴 LIVE WRITE 7 *(optional)* — press *Mark completed*** on the Kumasi trip once it is under way. *(Sebrepor,
-whose date has passed, the nightly sweep completes on its own since closure lane 8 — § 2.1.)*
+Approval also puts the trip's working days on the traveller's attendance as *On duty* and tells the traveller and
+the desk.
 
-> *"And when the trip has happened, it is closed off — which is what opens the door to the expense
-> claim being the last word on it."*
+> *"And nobody decides their own trip — not the traveller, at either stage. That is the service's rule, not the
+> engine's, so it holds whoever the stage is addressed to."*
+
+**3 — 🔴 LIVE WRITE 7 *(optional)* — *Mark completed*** on the Kumasi trip, once it is under way (the button is
+disabled until it has started). The nightly sweep completes it on its own the day after it ends (Rule 7).
+
+> *"And when the trip has happened, it is completed — which opens the window for the expense claim — and closed once
+> every claim is paid and every advance settled."*
 
 ### ⚙ Behind the request
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| The request | `GET api/staff-travel/requests/{id}` | Read |
-| **Submit** | `POST …/{id}/submit` | Write, via the engine |
-| **Approve** | `POST …/{id}/approve` | Write, via the engine |
-| **Reject** | `POST …/{id}/reject?reason=` | Write, via the engine |
-| **Cancel** | `POST …/{id}/cancel` | Write |
-| **Mark completed** | `POST …/{id}/complete` | Write |
-| Comments | `GET`/`POST …/{id}/comments` · `PUT …/comments/{id}` | Read / Write |
+| The request | `GET api/staff-travel/requests/{id}` | Read, or the person it waits for |
+| Who may decide, now | `GET …/{id}/viewer-actions` | the same |
+| **Submit** | `POST …/{id}/submit` *(a late departure needs `lateSubmissionReason`)* | Write, via the engine |
+| **Recall** | `POST …/{id}/recall` | the requester |
+| **Approve** · **Reject** · **Return** | `POST …/{id}/approve` · `…/reject` · `…/return` | signed in — the service decides who (Rule 3) |
+| **Request change** | `POST …/{id}/request-change` | Write |
+| **Cancel** / **Did not travel** | `POST …/{id}/cancel` | Write |
+| **Mark completed** · **Close** | `POST …/{id}/complete` · `…/close` | Write |
+| Comments | `GET`/`POST …/{id}/comments` | Read / Write |
 | Attachments | `GET`/`POST …/{id}/attachments` · `GET …/attachments/{id}/download` | Read / Write |
-| Delete anything | `DELETE …` | **Admin** |
+| Delete | `DELETE …/{id}` — a **Draft** only | **Admin** |
 
-### ⚠ Known gaps
-
-| Gap | |
-|---|---|
-| **T-7 · `InProgress` and `Closed` are unreachable.** Nothing moves a trip into progress when it departs, and nothing closes it after the claim is paid — so the lifecycle's last two states never occur | *Fixed: Close trip since closure lane 1; the nightly sweep moves trips under way, completed and closed since lane 8 (slice 8c) — chapter 14* |
-| **T-10 · `approvedBudget` is never sent on approval** — see § 1.6 | |
-| **T-27 · An internal comment cannot be posted from the screen** | *Fixed in closure lane 0: the composer's internal-note switch* |
-| **T-28 · Cancelling has no status guard on the server** — a completed trip can be cancelled, and the screen's own `isLive` check is the only thing stopping it | |
+*Fixed since the first edition:* T-7 (Close trip; the sweep moves trips — chapter 14), T-10 (the approved budget asked
+at the last stage), T-27 (internal notes). **T-28 was wrong**: the server always refused to cancel a cancelled,
+completed or closed trip; since lane 1 it also refuses an under-way one except as *did not travel*.
 
 ---
 
@@ -1578,18 +1738,23 @@ whose date has passed, the nightly sweep completes on its own since closure lane
 
 ### 📖 What it is
 
-> *"The same form, with two differences: you cannot change who is travelling, and you have to say
-> why you changed anything."*
+> *"The same form, with two differences: you cannot change who is travelling, and you have to say why you changed
+> anything."*
 
 ### 👁 On the page
 
-Chapter 4's form, minus **Card 1** *(traveller and raised-as are create-only)* and plus one field
-at the bottom of Card 3:
+Chapter 4's form, minus **Card 1** *(traveller and raised-as are create-only)* and plus one field at the bottom of
+Card 3:
 
 - **Reason for the change** — *"Kept on the record — say what changed and why."*
 
-**The Edit button only appears on `Draft` and `ReturnedForRevision`.** Everything else is read-only,
-which is correct: a trip somebody has approved is not a trip you retype.
+**Only a `Draft` or `ReturnedForRevision` trip opens the form.** Any other status opens a page that says why and what to
+do instead:
+
+- **Submitted** — *"It is out for approval. Recall it, or ask the approver to return it for revision, and then edit it."*
+- **Approved** — *"An approved trip is changed by sending it back for revision; it is then approved again. Its bookings,
+  advances and claims stay with it."* — with a **Request change** button (D-9).
+- anything later — *"A request that is … cannot be changed."*
 
 ### ▶ Walk it
 
@@ -1597,27 +1762,30 @@ which is correct: a trip somebody has approved is not a trip you retype.
 
 **2 — Point at what has gone.**
 
-> *"The traveller is not here. A request is raised for one person and stays with them — if the wrong
-> name went on it, you cancel and raise a new one rather than quietly moving an approved trip onto
-> somebody else."*
+> *"The traveller is not here. A request is raised for one person and stays with them — if the wrong name went on it,
+> you cancel and raise a new one rather than quietly moving an approved trip onto somebody else."*
 
 **3 — Point at *Reason for the change*.**
 
-> *"And an amendment needs a reason, kept on the record. Which is the difference between a system
-> you can audit and a system where the numbers move."*
+> *"And an amendment needs a reason, kept on the record. Which is the difference between a system you can audit and a
+> system where the numbers move."*
 
-**4 — Press *Cancel*.** The live writes all live on the detail page.
+**4 — Press *Cancel*.** Then open the **Kumasi** trip's edit address (`/hr/travel/<id>/edit`) to show the approved
+trip's page and its **Request change**.
 
-⚠ **The demo scenario's own amendments used a full-replace payload.** `UpdateStaffTravelRequestDto`
-is a **replace, not a patch** — every field omitted is written back as its default. The form always
-sends the complete shape, so this only matters if somebody is driving the API. **T-29.**
+> *"And an approved trip is not retyped: it goes back for approval with what changed, and keeps everything that hangs
+> off it."*
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Update *(desk)* | `PUT api/staff-travel/requests/{id}` | `HR.Travel.Write` |
+| Update *(desk)* | `PUT api/staff-travel/requests/{id}` — a Draft or returned trip only; the unit, the international flag, the policy and the approved budget are the server's | `HR.Travel.Write` |
 | Update *(portal)* | `PUT api/staff-travel/me/requests/{id}` | signed-in, own request only |
+| Request change | `POST …/requests/{id}/request-change` | Write |
+
+*Fixed since the first edition:* T-29 (the update is a full replace, and the server keeps what the form does not send —
+the group link, the facts it decides).
 
 ---
 
@@ -1636,32 +1804,62 @@ as **hr.head** · **4 minutes**
 ### 👁 Screen 1 — the register
 
 **Header:** *Group travel* — *"Several people travelling to one place for one thing."*, back-link,
-and a **New group trip** button.
+and a **New group trip** button *(Write)*.
 
-**Six columns:** **Group** · **Lead** · **Destination** · **Dates** · **Travellers** *(a count,
-right-aligned)* · **Status**. Rows link into the group.
+**Six columns:** **Group** *(a link, the event underneath)* · **Lead** · **Destination** · **Dates** ·
+**Travellers** *(places taken, out of the limit — `1 / 5`)* · **Status**.
 
 **Empty state** says the design out loud: *"A group trip raises one travel request per traveller, so
 everyone's is tracked individually while the trip is organised as one."*
 
-**New-group dialog:** group name, **lead traveller**, event name, destination country and city,
-travel dates, max participants.
+**New-group dialog:** group name, event, **lead traveller** *(an active employee)*, destination country and
+city, travel dates *(in order)*, max travellers. A new group starts in **Planning**.
 
 ### 👁 Screen 2 — the group (`…/groups/[id]`)
 
-The group's details, its status, and the **participants** — each a travel request, with its own
-number, traveller and status, linking into the request.
+**Details:** Status · Lead · Destination · Dates · **Places taken** — *"A cancelled or rejected trip holds no
+place."*
 
-An **Add participants** action takes a list of employees.
+**The group's status moves by its own buttons** *(Write)* — an edit no longer writes one:
 
-> 🚫 ⚠ **Do not press *Add participants* on the demo database.** That endpoint **creates one new
-> Draft travel request per employee**, and the register then stops reading four — which the runbook
-> reads out loud. The demo's own Lagos request was linked to the group by an *amendment* to the
-> existing request, deliberately, for exactly this reason.
+| Status | Buttons | Then |
+|---|---|---|
+| **Planning** | **Open to travellers** · **Close to new travellers** · **Cancel group** | |
+| **Open** | **Close to new travellers** · **Cancel group** | |
+| **Closed** | **Reopen** · **Cancel group** | adding is refused: *"…closed to new travellers. Reopen it to add someone."* |
+| **In Progress** · **Completed** | *(set by the nightly sweep, chapter 14)* | Completed takes no edit and no cancel |
+| **Cancelled** | — | only once **none of its travellers has a trip still going ahead** — cancel those, or take them off, first |
+
+The sweep reads the group off its travellers' trips (Rule 7): **In Progress** once any of them is under way or
+back, **Completed** once all of them are back. A group only moves forward.
+
+**Edit** *(Write; not on a cancelled or completed group)* — name, event, lead, destination, dates, max
+travellers *(never below the places already taken)*. ⚠ **A new destination or new dates are given to every
+traveller whose trip is still a draft or returned for revision.** A submitted or approved trip keeps its own.
+
+**Travellers** — Traveller · Request *(a link to the trip)* · Status · **Where and when**: *As the group*, or a
+**Differs from the group** badge whose tooltip gives the trip's own city and dates. A cancelled or rejected
+trip is greyed. Two buttons, both off once the group is closed or full *(the tooltip says why)*:
+
+- **Add a traveller** *(Write)* — ⚠ **raises a new Draft travel request for them**: the group's destination and
+  dates, plus *travelling from*, purpose, risk, justification, estimated cost and currency, visa and health
+  clearance from the dialog. Whether it is international is worked out from the two countries. Someone already
+  holding a place is skipped, not added twice; past the limit is refused.
+- **Link an existing request** *(Write)* — pick the traveller, then one of their **draft or returned**
+  requests. It joins the group and **takes the group's destination and dates**. A submitted or approved trip
+  is refused — *"recall it first"* — and so is one already on another group.
+
+**Remove** *(Admin, on each row)* — *"Take them off this group?"* ⚠ **Their trip is NOT cancelled**: it carries on
+as an ordinary trip. **Delete** *(Admin)* takes everyone off the group first, then removes it; their trips carry
+on.
+
+> 🚫 ⚠ **Do not press *Add a traveller* or *Link an existing request* on the demo database.** Adding raises a
+> new Draft request, and the register (chapter 3) then stops reading four — which the runbook reads out loud.
 
 ### ▶ Walk it
 
-**1 — Open the register.** One row: *Lagos Free Zone study tour*, lead `gm.ops`, Lagos, max 5.
+**1 — Open the register.** One row: *Lagos Free Zone study tour*, lead **Kojo Fiadzo** (`gm.ops`), Lagos,
+**1 / 5**, **Planning**.
 
 **2 — Read the empty-state sentence even though the list is not empty** — it is the best
 explanation of the feature:
@@ -1670,16 +1868,27 @@ explanation of the feature:
 > while the trip is organised as one. Which is exactly right: the coach is booked once, but the
 > approval, the advance and the expense claim belong to each person."*
 
-**3 — Open the group** and show the participant linking through to `TR-2026-00002`.
+**3 — Open the group.** One traveller, `TR-2026-00002`, **Submitted**, *As the group*.
 
-> *"One participant so far, and clicking through lands on his own travel request — with his own
-> approval, his own budget and his own claim."*
+> *"One traveller so far, and clicking through lands on their own travel request — with its own approval, its
+> own budget and its own claim. It was linked to the group while it was still a draft, so it took the group's
+> dates; once submitted, a trip keeps its own, and this column would say so."*
 
-**4 — 🚫 Do not press *Add participants*.** If asked:
+**4 — Point at *Places taken* and the limit.**
 
-> *"Adding somebody to the group raises their travel request for them, pre-filled from the group's
-> destination and dates — which is the point, and it is also why I am not going to do it on a
-> database whose register I have just read out to you."*
+> *"Five places. The sixth is refused, and a traveller whose trip is cancelled gives the place back."*
+
+**5 — Point at the status buttons — do not press them.** If asked:
+
+> *"Planning, then open to travellers, then closed. Under way and completed are not buttons — they follow the
+> travellers' own trips, overnight. And a group cannot be cancelled while anybody on it is still going."*
+
+**6 — 🚫 Do not press *Add a traveller*.** If asked:
+
+> *"Adding somebody raises their travel request for them, with the group's destination and dates — which is
+> the point, and it is also why I am not going to do it on a database whose register I have just read out to
+> you. Removing somebody does not cancel their trip: no longer travelling with the group is not the same as
+> not travelling."*
 
 ### ⚙ Behind the page
 
@@ -1688,20 +1897,21 @@ explanation of the feature:
 | Register | `GET api/staff-travel/requests/groups` | Read |
 | By status | `GET …/groups/status/{status}` | Read |
 | The group | `GET …/groups/{id}` | Read |
-| Create / update | `POST` / `PUT …/groups[/{id}]` | Write |
-| **Add participants** | `POST …/groups/{id}/participants` | Write ⚠ creates a request each |
-| Remove a participant | `DELETE …/groups/{groupId}/participants/{requestId}` | **Admin** |
-| Delete the group | `DELETE …/groups/{id}` | **Admin** |
+| Create · Edit | `POST …/groups` · `PUT …/groups/{id}` | Write |
+| **Open** / **Reopen** · **Close** · **Cancel** | `POST …/groups/{id}/open` · `…/close` · `…/cancel` | Write |
+| **Add a traveller** | `POST …/groups/{id}/participants` | Write ⚠ creates a Draft request each |
+| **Link an existing request** | `POST …/groups/{groupId}/requests/{requestId}` | Write |
+| **Remove** | `DELETE …/groups/{groupId}/participants/{requestId}` | **Admin** |
+| **Delete** | `DELETE …/groups/{id}` | **Admin** |
 
 Table: `StaffGroupTravels`, with `StaffTravelRequests.GroupTravelId` pointing at it.
 
 ### ⚠ Known gaps
 
-| Gap | |
-|---|---|
-| **T-30 · There is no way to link an *existing* request to a group from any screen.** The only door creates new ones. The demo had to do it by amendment | |
-| **T-31 · `maxParticipants` is not enforced** — a sixth participant is accepted on a group of five | |
-| **T-32 · The group's dates and destination are not pushed onto its participants**, and nothing checks that they agree | |
+None open. *Fixed since the first edition (lane 1):* **T-30** (an existing draft can be linked), **T-31** (the
+limit binds; a cancelled or rejected trip holds no place), **T-32** (the group's destination and dates reach
+its draft and returned trips; the others are marked), and the group's status — In Progress and Completed had
+no writer, and an edit wrote whatever status it was given.
 
 ---
 
@@ -1722,23 +1932,26 @@ as **hr.head** · **3 minutes**
 **Header:** *Travel expense claims* — *"What travellers have claimed back, and what is waiting to be
 paid."*, back-link.
 
-**Two view buttons:** **All claims** and **Awaiting payment**.
+**Two view buttons:** **All claims** and **Awaiting payment** — every claim pay accepts and has not paid:
+**Approved**, and **Partially approved** too *(lane 3 — it was left out while pay accepted it)*. Oldest
+submitted first. A claim a traveller files from the portal (chapter 15) lands here like any other.
 
 When *Awaiting payment* has rows and they share one currency, a summary card appears:
 *"**2** claims approved and unpaid, totalling **GHS 4,120.00**."*
 
 > ⚠ **The total is only shown when every row is in the same currency.** Mixed currencies say
 > nothing rather than adding up numbers that do not add up — the same discipline as the dashboard
-> (Rule 5).
+> (chapter 12).
 
 **Seven columns:** **Number** *(a link)* · **Traveller** · **Type** · **Claimed** · **Payable** ·
 **Submitted** · **Status**.
 
 ### ▶ Walk it
 
-**1 — Open on *All claims*.** One row: the Sebrepor claim, **Submitted**.
+**1 — Open on *All claims*.** One row: `EXP-2026-00001`, **Efua Seidu**, *Post Travel*, GHS 490.00 claimed,
+GHS 490.00 payable, **Submitted**.
 
-**2 — Switch to *Awaiting payment*.** Empty.
+**2 — Switch to *Awaiting payment*.** Empty — *"Nothing is waiting to be paid."*
 
 > *"Nothing waiting to be paid — because the one claim we have has been submitted and not yet
 > reviewed. Which is the right state: 'approved and unpaid' is the finance desk's actual worklist
@@ -1764,88 +1977,194 @@ Both `HR.Travel.Read`. Table: `StaffTravelExpenseClaims`.
 
 ---
 
+## 8a. `/hr/travel/advances` — the cash still out
+
+### 📍 Where you are
+
+**Sidebar:** … → Staff Travel → **Advances** · `/hr/travel/advances` ·
+as **hr.head** · **2 minutes** *(new in lane 3, D-5)*
+
+### 📖 What it is
+
+> *"Cash paid out ahead of trips — who is still holding it, and whose deadline has passed. The half of an
+> advance organisations lose is the settling of it, so the chase list has its own screen."*
+
+### 👁 On the page
+
+**Header:** *Travel advances* — *"Cash paid out ahead of trips — what travellers still hold, and what is past its
+deadline."*, back-link.
+
+**Three view buttons:**
+
+| View | Shows |
+|---|---|
+| **Overdue settlements** *(opens here)* | cash still out **past its settlement deadline** — read by the server there and then, whether or not the nightly sweep has marked the advance *Overdue* yet |
+| **Cash out** | every advance paid out and not yet settled — *Disbursed*, *Partially settled* or *Overdue*, with something outstanding |
+| **All advances** | every advance, whatever its state |
+
+On the first two, when every row shares a currency, a card: *"**1** advance with cash out, travellers holding
+**GHS 2,500.00**."* — and, as on chapter 8, nothing at all when the currencies are mixed.
+
+**Seven columns:** **Number** · **Traveller** · **Trip** *(a link to the trip)* · **Approved** ·
+**Outstanding** · **Settle by** *(and "N days late" in red)* · **Status** *(an extra **Overdue** badge when the
+deadline has passed before the sweep has run)*.
+
+**Read-only.** The footnote says where the work is done:
+
+> *"An advance is settled from its trip's Finance tab: a claim that names it recovers it when the claim is paid,
+> cash handed back is recorded there, and a travel administrator can write off what is left. A traveller with an
+> overdue advance can take no new one."*
+
+### ▶ Walk it
+
+**1 — Open the page.** *Overdue settlements* — empty: *"Every advance with cash out is within its settlement
+deadline."*
+
+**2 — Switch to *Cash out*.** One row: `ADV-2026-00001`, **Kwasi Danquah**, `TR-2026-00001`, GHS 2,500.00
+approved, **GHS 2,500.00 outstanding**, settle by **3 Nov 2026**, **Disbursed**.
+
+> *"Two and a half thousand cedis in one traveller's hand, and the date by which it comes back — as a receipt
+> against a claim, as cash, or as a write-off signed by somebody who is not the traveller. The day after that
+> date it moves to the first view on its own, and no new advance can be taken until it is settled."*
+
+**3 — Click the trip number** — it opens the Kumasi trip; its **Finance** tab (chapter 5.4) shows the same
+advance and its actions.
+
+### ⚙ Behind the page
+
+| View | Endpoint |
+|---|---|
+| Overdue settlements | `GET api/staff-travel/finance/advances/overdue-settlements` |
+| Cash out · All advances | `GET …/advances` *(Cash out is filtered on the page)* |
+
+Both `HR.Travel.Read`. Table: `StaffTravelAdvances`. The actions — approve, reject, cancel, pay out, cash back,
+write off — are on the trip's Finance tab (chapter 5.4).
+
+### ⚠ Known gaps
+
+| Gap | |
+|---|---|
+| **As T-33 and T-34** — unpaged, no traveller or date filter, no export | |
+
+---
+
 ## 9. `/hr/travel/claims/[id]` — the claim, and the money leaving
 
 ### 📍 Where you are
 
-**From:** the claims register, or a trip's Finance tab · `/hr/travel/claims/[id]` ·
-as **hr.head** · **8 minutes** — the second-best chapter in the module
+**From:** the claims queue, or a trip's Finance tab · `/hr/travel/claims/[id]` ·
+as **hr.head**, then **hr.officer** for the payment · **8 minutes** — the second-best chapter in the module
 
 ### 📖 What it is
 
 > *"What somebody spent, line by line, what the organisation agreed to, and what actually went into
 > their account — with the advance they were already given taken off automatically."*
 
-### 🚫 **READ RULE 6 BEFORE THIS CHAPTER.**
+### 🚫 **READ RULES 5 AND 6 BEFORE THIS CHAPTER.**
 
-> ⚠ **Changed by closure lane 6, slice 6b (2026-10-02) — fuel for a company vehicle.** On a trip that travels by
-> company vehicle, a **Fuel** expense names the vehicle's trip and the **litres** — required when no car was hired on the
-> trip (D-30). The fill must fall within the vehicle's trip, a day either side. When Fleet already logs fuel for that
-> trip on that day (the driver may have logged the same fill), the dialog lists Fleet's fills and the expense is refused
-> without a **reason it is claimed too**, which is kept as an internal note on the trip (D-32). When the claim is
-> **paid**, each fuel expense approved above zero goes into Fleet's fuel log — the litres claimed, the amount paid — and
-> its row reads "in Fleet's fuel log"; a rejected one writes nothing, and **voiding the payment removes it** (D-31).
-> The trip's budget counts that fuel once, as the paid claim. UAT has no fleet, so the demo cannot show this.
+Two people, never one's own (Rule 5); the advance comes back when the claim is **paid** (Rule 6).
 
 ### 👁 On the page
 
-**Header:** the claim number, the traveller and the trip, a status badge, and up to four actions:
+**Header:** the claim number, *"{traveller} · {type} · trip {number}"*, a status badge, and the actions — all
+for the travel desk only (lane 3, N8):
 
-| Button | Appears when |
+| Button | Appears when | Who |
+|---|---|---|
+| **Add an expense** · **Submit** | `Draft` or `Returned` | Write |
+| **Review** | `Submitted` or `UnderReview` | Write — never the claimant |
+| **Record payment** | `Approved` or `PartiallyApproved` | Write — never the claimant, nor anyone who reviewed the claim or one of its expenses |
+| **Void payment** | `Paid` | **Admin** — never the claimant, nor whoever paid it |
+
+**The reviewer's words**, when there are any — a card headed *Reviewer's notes*, or *Returned to the claimant* /
+*Rejected* with an amber edge, and who wrote them.
+
+**The claim card:** **Claimed** · **Approved** · **Rejected** · **Advance recovered** · **Net payable** ·
+**Against advance** *(its number, or None)* · **Submitted** · **Reviewed** *(who, when)* · then, once paid,
+**Paid** *(when, by whom)* and **Payment** *(method, reference)* · **Trip** *(a link)*. Under it, one line says
+what the advance did — *"…was recovered from the linked advance when this claim was paid"*, or *"…has not been
+recovered yet — that happens when the claim is paid"* — and a waiver, or a voided payment, is shown with its
+reason.
+
+**Finance** *(a card, only once something has happened to post)* — what HR's posting register holds for this
+claim: the approval's recognition and the payment's settlement, each **Posted** with its journal, or
+**Unposted**, **Failed**, **Skipped** or **Reversed** with the reason (§ 16). On UAT no travel rule is switched
+on, so the rows read *Unposted*.
+
+**The expenses table — eight columns:** **Date** · **Category** · **Description** *(merchant, "per diem", and a
+company vehicle's fuel)* · **Spent** *(the amount and currency spent in)* · **In {claim currency}** *(with the
+rate, when it was converted)* · **Approved** · **Receipt** *(the attachment's name)* · **Status** *(and the
+reason for anything cut)*. On a draft a pencil changes an expense; on a submitted claim each expense has a
+**Review** button.
+
+**Four dialogs:**
+
+**① Add an expense** — category *(17: Airfare · Accommodation · Meals · Local transport · Taxi/rideshare · Car
+rental · Fuel · Visa fees · Insurance · Communication · Conference fees · Gifts/entertainment · Tips/gratuity ·
+Laundry · Medical · Baggage fees · Miscellaneous)*, date, description, merchant, **amount spent and the currency
+spent in** — converted at **Finance's rate for that date**, and refused, with the reason, when Finance holds no
+rate for it — a **receipt** picked from the trip's attachments, and **This is a per-diem claim**. Changing an
+expense that was reviewed sends it back to be reviewed again.
+
+> ⚠ **Fuel for a company vehicle** *(lane 6, D-30–D-32).* On a trip travelling by company vehicle, a Fuel expense
+> names the vehicle's trip and the **litres** — required when no car was hired. When Fleet already logs fuel for that
+> trip on that day, the dialog lists it and asks **why it is claimed too** (kept as an internal note on the trip).
+> When the claim is paid, the fuel goes into Fleet's fuel log, and voiding the payment removes it. UAT has no fleet,
+> so the demo cannot show this.
+
+**② Review this expense** — *"You are recorded as the reviewer, so you will not be the one who pays this
+claim."* **Approve** — the whole expense, or less: *"whatever is not approved is rejected, with the reason
+below"* — or **Reject**, with the reason. The claimant sees it.
+
+**③ Review this claim** — *"…Decide each expense first — approving the claim approves what its expenses' reviews
+approved."* Four outcomes:
+
+| Outcome | Then |
 |---|---|
-| **Add an expense** | status is `Draft` |
-| **Submit** | status is `Draft` |
-| **Review** | status is `Submitted` or `UnderReview` |
-| **Record payment** | status is `Approved` or `PartiallyApproved` |
+| **Approve** | **Approved** when every expense was approved in full, **Partially approved** when something was cut. Refused while any expense is undecided, or when nothing was approved |
+| **Reject** | nothing payable — the reason is required, and the claimant is told |
+| **Return to the claimant** | back to them for detail or receipts — the reason is required; it can be changed and **submitted again** |
+| **Mark under review** | still being looked at *(offered only on a Submitted claim)* |
 
-**The claim card** — the trip it belongs to, the claim type, the currency, total claimed, total
-approved, **net payable**, the linked **advance number** and its outstanding balance, submitted /
-reviewed / paid dates and who did each.
-
-**The expenses table** — seven columns: **Date** · **Category** · **Description** · **Spent**
-*(the original amount and currency)* · **In {claim currency}** · **Approved** · **Status**. Each
-pending line carries two buttons: **✓ Approve** and **✗ Reject**.
-
-**Three dialogs:**
-
-**① Add an expense** — category *(17 of them: Airfare · Accommodation · Meals · Local transport ·
-Taxi/rideshare · Car rental · Fuel · Visa fees · Insurance · Communication · Conference fees ·
-Gifts/entertainment · Tips · Laundry · Medical · Baggage · Miscellaneous)*, date, description,
-merchant, amount and currency, **policy limit**, **is per-diem** + the per-diem rate, and a
-**receipt** picked from the trip's attachments.
-
-**② Review this claim** — *"You are recorded as the reviewer. Reviewing the individual expenses does
-not by itself settle the claim — this does."* Three radio outcomes — **Approved** ·
-**Partially approved** · **Rejected** — each with a one-line hint, plus **Notes**.
-
-**③ Record payment** — *"To {traveller}. The payment date is taken from the clock."* Shows:
+**④ Record payment** — *"To {traveller}. The payment date is taken from the clock, and you are recorded as the
+officer who paid — it cannot be the claimant or anyone who reviewed the claim or its expenses."* Then:
 
 ```
     Approved                      GHS 490.00
-    Less advance TA-2026-00001   − GHS 490.00
+    Less advance ADV-2026-00001  − GHS 490.00
     ─────────────────────────────────────────
     To pay                          GHS 0.00
     The advance is recovered as part of this payment;
     the figures are confirmed once it is recorded.
 ```
 
-then **Method** *(bank transfer, cash, cheque, corporate card)* and **Reference**. *Payroll offset* is not offered and the
-server refuses it (closure lane 3, D-10): payroll cannot receive a travel claim yet, so it would reach nobody — the
-question is with the payroll owner (`docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`).
+then **Method** *(bank transfer, cash, cheque, corporate card)* and **Reference**. *Payroll offset* is not offered
+and the server refuses it (D-10): payroll cannot receive a travel claim yet, so it would reach nobody
+(`docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`).
 
-> ⚠ **The dialog deliberately does not show `netPayable`.** The advance is recovered *inside* the
-> pay call, so until it completes `netPayable` still reads as the full approved amount — showing it
-> would promise the payer a figure the act itself is about to change. The split above is computed
-> with the server's own `min(outstanding, approved)` rule and **labelled anticipated**. Rule 6.
+> ⚠ **The dialog deliberately does not show `netPayable`.** The advance is recovered *inside* the pay call, so
+> until it completes `netPayable` still reads as the full approved amount. The split above uses the server's own
+> `min(outstanding, approved)` rule and is **labelled anticipated** (Rule 6). An advance in another currency is
+> valued at Finance's rate on the day of payment (D-15), so the dialog names it rather than subtracting it.
+
+> ⚠ **The waiver** *(O-2, T-57).* When the traveller still holds advance cash on this trip that the claim does
+> **not** name, an amber box says so — *"paid as it stands, the claim pays in full and the advance stays owed"* —
+> and **Record payment** stays off until a reason is written. Better: link the advance to the claim.
+
+**Void payment** *(Admin)* — a reason of five characters or more. The payment's Finance journal is reversed (or
+its unposted row marked Skipped), the amount it recovered goes back onto the advance, its fuel leaves Fleet's
+log, and the claim returns to **Approved**, *"to be paid again or not"*. An internal note on the trip records it.
+Not on a closed trip, and not once the advance it recovered from has been written off.
 
 ### ▶ Walk it
 
-**1 — Open the Sebrepor claim.** Three lines: per-diem GHS 250, transport GHS 60, fuel GHS 180.
+**1 — Open the Sebrepor claim** (`EXP-2026-00001`, **Submitted**). Three expenses: per diem GHS 250, local
+transport GHS 60, fuel GHS 180.
 
 **2 — Read the lines.**
 
 > *"A day at Sebrepor. Two hundred and fifty cedis of subsistence at the Ghana domestic rate — and
-> note it is marked as per-diem and linked to the rate it came from, so it is not a number he
+> note it is marked as per-diem and linked to the rate it came from, so it is not a number anybody
 > invented. Sixty cedis of trotro and taxi. And a hundred and eighty of fuel for the pool vehicle,
 > with the receipt attached."*
 
@@ -1854,73 +2173,89 @@ question is with the payroll owner (`docs/HR/integration/handoffs/HANDOFF-PAYROL
 > *"And the receipt is not an attachment floating next to the claim — the line points at it. Which
 > is what an auditor asks for: not 'were there receipts', but 'which receipt is this line'."*
 
-**4 — Say the policy sentence, honestly.**
+**4 — Say the policy sentence — and check the database first.**
 
-> *"The policy says a receipt is required above a hundred cedis. The fuel line has one and the
-> per-diem does not need one. What the system does not yet do is refuse a line over the limit with
-> no receipt — that rule is captured on the policy and not yet enforced at this door."*
+- **On a rebuilt demo database** the trip was submitted under the approved policy, so its claim was held to it:
 
-**5 — 🔴 LIVE WRITE 8 — approve the lines.** Press **✓** on each of the three.
+  > *"The policy asks for a receipt above a hundred cedis, and within fourteen days of the trip ending. The fuel
+  > has one; the sixty cedis of trotro is under the line; and a per diem is a flat daily allowance — there is no
+  > receipt behind it to ask for. A claim missing one is refused at submission, and the refusal names the line."*
 
-> *"Line by line, because a claim is rarely all-or-nothing. In practice this is where a finance
-> officer queries the one that looks wrong and lets the rest through."*
+- **On UAT** the Sebrepor trip was submitted under no policy (Rule 1), so its claim is held to none:
 
-**6 — 🔴 LIVE WRITE 9 — press *Review*.** Read the dialog description aloud, choose
-**Approved**, add a note, record it.
+  > *"This trip went ahead before the policy was approved, so its claim is held to no receipt rule. Under an
+  > approved policy, a line above the threshold without a receipt is refused at submission — by name."*
 
-> *"'Reviewing the individual expenses does not by itself settle the claim — this does.' Which is
-> the distinction people get wrong: ticking the lines is arithmetic, and the review is the
-> decision."*
+**5 — 🔴 LIVE WRITE 8 — review the lines.** On each of the three, press **Review → Approve** *(the whole
+amount)* **→ Record**.
+
+> *"Line by line, because a claim is rarely all-or-nothing. In practice this is where a finance officer cuts the
+> one that looks wrong — and has to say why, because the claimant is told."*
+
+**6 — 🔴 LIVE WRITE 9 — press *Review*.** Read the dialog description aloud, choose **Approve**, add a note,
+**Record the review**.
+
+> *"'Decide each expense first — approving the claim approves what its expenses' reviews approved.' Ticking the
+> lines is arithmetic, and the review is the decision. And it records me as the reviewer — which means I am the
+> one person who may not now pay it."*
 
 The status moves to **Approved** and **Record payment** appears.
 
-**7 — Go back to `/hr/travel/claims` and switch to *Awaiting payment*.** It now has a row and a
-total.
+**7 — Go back to `/hr/travel/claims` and switch to *Awaiting payment*.** One row, and the card: *"1 claim
+approved and unpaid, totalling GHS 490.00."*
 
 > *"And there is the finance desk's queue, with a real number in it."*
 
-**8 — Come back, and press *Record payment*.** **Stop and read the dialog before pressing
-anything** — this is the module's punchline.
+**8 — Come back and press *Record payment* as `hr.head`, choose a method, press it.** Refused: *"You reviewed
+claim EXP-2026-00001, so another officer must pay it — the person who decides an amount does not also pay it
+out."*
 
-⚠ **On the Sebrepor claim there is no advance**, so the dialog will show a plain *To pay*. To show
-the recovery, you need a claim against the **Kumasi** trip, which has the GHS 2,500 disbursed
-advance. If you want that beat, create one: from the Kumasi trip's Finance tab → the claims
-section → a claim with one line, then review and approve it. That is four extra minutes and it is
-the single most valuable thing in this module.
+> *"Which is the control. The person who decided how much is not the person who sends it."*
 
-> *"Four hundred and ninety approved. Less the advance he was already given. To pay: nothing —
-> because he took two and a half thousand cedis in cash before he got on the coach, and this claim
-> is how the corporation gets it back. Before this was wired, both halves were paid: the advance
-> went out, the claim was reimbursed in full, and the two records never met. The fields existed;
-> nothing wrote them."*
+**9 — 🔴 LIVE WRITE 10 — in a second window as `hr.officer`, open the claim and press *Record payment*.**
+**Read the dialog before pressing anything.** The Sebrepor trip has no advance, so it shows a plain *Approved*.
+Choose a method, add a reference, record it — **Paid**, by `hr.officer`.
 
-**9 — 🔴 LIVE WRITE 10 — choose a method, add a reference, press *Record payment*.**
+**The recovery beat *(optional, four extra minutes — the single most valuable thing in this module)*.** The
+Sebrepor claim has no advance; the **Kumasi** trip has the GHS 2,500 one. From the Kumasi trip's **Finance** tab
+press **File a claim** — the advance is already chosen (chapter 9b) — add one expense of GHS 490 and **Submit**;
+review the expense and the claim as `hr.head`; then open **Record payment** as `hr.officer`:
 
-> *"Paid. And the advance moves from Disbursed to Partially settled or Fully settled depending on
-> what was left — which is the moment the money chain actually closes."*
+> *"Four hundred and ninety approved. Less the advance the traveller was already given. To pay: nothing — because
+> two and a half thousand cedis went out in cash before the coach left, and this claim is how the corporation gets it
+> back. Before this was wired, both halves were paid: the advance went out, the claim was reimbursed in full, and
+> the two records never met."*
 
-*Undo:* chapter 17 — this one is SQL, and it is the hardest to reverse in the module. Consider
-doing steps 8–9 only if you are rebuilding afterwards, or on a claim you created yourself.
+Record it: the advance moves from **Disbursed** to **Partially settled**, GHS 2,010 still outstanding — chapter 8a
+shows it.
+
+*Undo:* **Void payment**, as `hr.head` — an administrator who neither claimed nor paid — with a reason: the claim
+returns to **Approved** and the advance gets back what the payment recovered. Putting the claim back to
+*Submitted*, and removing a Kumasi claim, is chapter 17.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | The claim | `GET api/staff-travel/finance/claims/{id}` | Read |
-| Lines | `GET`/`POST …/claims/{id}/lines` · `PUT …/lines/{id}` | Read / Write |
-| **Review a line** | `POST …/lines/{lineId}/review` | Write |
+| Expenses | `GET`/`POST …/claims/{id}/lines` · `PUT …/lines/{id}` | Read / Write |
+| A company vehicle's trips and fuel | `GET …/claims/{id}/fleet-fuel` | Read |
+| **Review an expense** | `POST …/lines/{lineId}/review` | Write |
 | **Submit** | `POST …/claims/{id}/submit` | Write |
 | **Review the claim** | `POST …/claims/{id}/review` | Write |
-| **Pay** | `POST …/claims/{id}/pay` | Write |
-| Delete a claim or line | `DELETE …` | **Admin** |
+| **Record payment** | `POST …/claims/{id}/pay` | Write |
+| **Void payment** | `POST …/claims/{id}/void-payment` | **Admin** |
+| Delete a draft claim, or an expense | `DELETE …/claims/{id}` · `…/lines/{id}` | **Admin** |
+| Finance card | `GET api/hr/finance-posting/records/source/{id}` | `HR.Company.Read` |
 
-Tables: `StaffTravelExpenseClaims`, `StaffTravelExpenseClaimLines`, `StaffTravelAdvances`.
+Tables: `StaffTravelExpenseClaims`, `StaffTravelExpenseClaimLines`, `StaffTravelAdvances`, and
+`HrFinancePostingRecords` for the Finance card.
 
-> ⚠ **Reviewing is not updating.** `reviewClaim`, `reviewClaimLine` and `approveAdvance` each stamp
-> **who decided and when** from the token; the plain update endpoints cannot set those fields. The
-> review DTO takes a `NewStatus`, not a boolean — a client typed as `approve: boolean` would leave
-> every claim stuck in *UnderReview* and unpayable, which is precisely the mistake a type written
-> from an endpoint's *name* rather than its DTO produces.
+> ⚠ **Reviewing is not updating.** `reviewClaim`, `reviewClaimLine` and `approveAdvance` each stamp **who decided
+> and when** from the token; the plain update endpoints cannot set those fields. The review DTO takes a
+> `NewStatus`, not a boolean — a client typed as `approve: boolean` would leave every claim stuck in
+> *UnderReview* and unpayable, which is precisely the mistake a type written from an endpoint's *name* rather
+> than its DTO produces.
 
 ---
 
@@ -1928,40 +2263,44 @@ Tables: `StaffTravelExpenseClaims`, `StaffTravelExpenseClaimLines`, `StaffTravel
 
 **From:** a trip's Finance tab · `/hr/travel/claims/new?requestId=…` · **1 minute**
 
-A small form, and its **empty state is the interesting part**. Opened without a trip it says:
+A small form, and its **empty states are the interesting part**:
 
-> *"No trip chosen — open a travel request and file the claim from its Finance tab."*
+| Opened… | It says |
+|---|---|
+| without a trip | *"No trip chosen — Open a travel request and file the claim from its Finance tab."* |
+| on a trip not yet approved | *"This trip takes no claims yet — An expense claim is filed once the trip is approved…"* — the server takes a claim only on a trip that is **approved, under way or completed** |
+| without travel desk access | *"Not available — Filing an expense claim needs travel desk access."* |
 
-Which is the design: **a claim belongs to a trip and cannot exist without one**, so the screen
-refuses to start rather than offering a trip picker that would let somebody file against the
-wrong one.
+Which is the design: **a claim belongs to a trip and cannot exist without one**, so the screen refuses to start
+rather than offering a trip picker that would let somebody file against the wrong one.
 
-With a trip, one card — **The claim**:
+With a trip — header *File an expense claim*, *"{traveller} · {trip} · {from} → {to}"* — one card, **The claim**:
 
-- **Type** *(Reimbursement · Advance settlement · Mixed)*
-- **Claim currency** *(Finance's list again)*
-- **Settle against an advance** — a picker of the trip's outstanding advances
+- **Type** *(Post Travel · Advance Settlement · Partial Claim · Amendment)*
+- **Settle against an advance** — the trip's advances **with cash still out**, *"ADV-… — GHS 2,500.00 still with
+  the traveller"*; **the first is chosen for you** (O-2)
 
-Then **Cancel** and **File the claim**, landing on the new claim at `Draft` with no lines.
+**No currency to choose** *(lane 3, B11)*: the claim is kept in the organisation's base currency, and each expense
+is converted from the currency it was spent in. Then **Cancel** and **File the claim**, landing on the new claim at
+`Draft` with no expenses.
 
-> ⚠ **Choosing the advance here is what links the recovery.** A claim filed without it is paid
-> in full and the advance stays outstanding — the recovery is not inferred from the trip. **T-57.**
+> ⚠ **Choosing the advance here is what links the recovery.** A claim filed with *No advance* while the traveller
+> holds cash on the trip can still be filed, but **paying it in full needs a recorded reason** (chapter 9's
+> waiver) — the leak T-57 described is closed.
 
 > *Since closure lane 7 (7d, D-38)* the traveller files their own claim from **My travel** (chapter 15) and
-> submits it; it arrives in this queue as any other, under their name. The desk's path here is unchanged — it
+> submits it; it arrives in the queue as any other, under their name. The desk's path here is unchanged — it
 > still files for a traveller who cannot.
 
 ---
 
 ### ⚠ Known gaps
 
-| Gap | |
-|---|---|
-| **T-35 · `ReceiptRequiredAbove` is not enforced** — a GHS 5,000 line with no receipt is accepted | |
-| **T-36 · `ExpenseSubmissionDays` is not enforced** — a claim submitted a year after the trip is accepted | |
-| **T-37 · The claim currency and the line currency can differ and the conversion is Finance's**, which is inverted (Rule 5). On this database everything is GHS so it does not bite | |
-| **T-38 · `Returned` claim status is set by nothing** — a claim cannot be sent back to the traveller for more information, only approved, partially approved or rejected | |
-| **T-39 · There is no payment reversal.** A claim paid in error needs SQL | |
+None open. *Fixed since the first edition (lane 3):* **T-35** (a receipt above the policy's threshold is
+required at submission, a per diem excepted), **T-36** (the claim window binds a first submission), **T-37**
+(no claim currency to choose; each expense at Finance's rate for its date), **T-38** (*Return to the claimant*),
+**T-39** (*Void payment*), **T-57** (the waiver). The policy rules bind only under an **approved** policy the trip
+recorded at submission (Rule 1).
 
 ---
 
@@ -1978,32 +2317,45 @@ as **hr.head** · **4 minutes**
 > once, read by every trip — which is why the page says an entry that is wrong is worse than one
 > that is missing."*
 
-> ⚠ **Added by closure lane 7, slice 7a (2026-10-03): the passports it is keyed on now have a screen** —
-> *Staff Travel → **Travel Documents*** (`/hr/travel/documents`). The desk records, changes, verifies and removes a
-> traveller's documents; a change takes the verification off; one primary document per type (a new primary stands the
-> old one down); a verified document is not deleted. Numbers show to their last four in every list and in full only
-> when a document is opened. The trip's Compliance tab reads the primary passport to look up its requirement here; its
-> visa list now has a change button.
+Since lane 7 (7b, D-39) it is no longer only a reference: **it decides a trip's *requires a visa***. When the
+traveller's primary passport is on file (chapter 10a) and the register has an entry for that passport into the
+destination, the register's answer is the trip's:
+
+| Requirement | The trip |
+|---|---|
+| **e-Visa** · **Embassy visa** | needs a visa — and its flight cannot be ticketed until one is approved (chapter 5.3) |
+| **No visa needed** · **Visa on arrival** · **Conditional** | does not — read a *Conditional* entry's notes before saying so |
+| **Travel prohibited** | the passport is refused entry: the trip **cannot be submitted** |
+
+A different answer on the request stands only with a reason (*"If this differs from the visa register, why"*),
+kept on the trip. Without a passport on file, or an entry for the pair, the requester's own answer stands.
 
 ### 👁 On the page
 
 **Header:** *Visa requirements* — **"What each passport needs to enter a destination. The travel
-desk answers from this, so an entry that is wrong is worse than one that is missing."**
+desk answers from this, so an entry that is wrong is worse than one that is missing."** — and, once a
+destination is chosen, **Add a passport** *(Write)*.
 
-**A destination card** — one country picker. **Nothing else renders until you choose one**:
-*"Choose a destination — pick the country being travelled to, and every passport recorded against
-it appears here."*
+**A destination card** — one country picker: *"The register is read one destination at a time — the API answers
+by destination, and so does the travel desk."* **Nothing else renders until you choose one**: *"Choose a
+destination — Pick the country being travelled to, and every passport recorded against it appears here."*
 
-**The requirements table** — six columns: **Passport** *(the country the traveller's passport is
-from)* · **Requirement** *(Visa-free · Visa on arrival · eVisa · Visa required · Transit visa)* ·
-**Category** *(free text — "ECOWAS free movement", "Standard Visitor")* · **Max stay** ·
-**Processing** *(days)* · **Last checked**.
+**The requirements table** — *Travelling to {country}*, six columns: **Passport** *(the country the passport is
+from, the notes underneath)* · **Requirement** *(No visa needed · Visa on arrival · e-Visa · Embassy visa ·
+Travel prohibited · Conditional)* · **Category** *(free text — "ECOWAS free movement", "Standard Visitor")* ·
+**Max stay** · **Processing** *(days)* · **Last checked** *(the date, and a **source** link)*.
 
-Empty state for a chosen country: *"Nothing recorded for this destination — no passport has a
-requirement here yet. Until one is added, the travel desk has no answer to give."*
+⚠ **Stale entries are flagged** *(lane 7, T-40)*: never checked reads **Never**, and one not checked for a year
+reads **"· over a year ago"**, both in amber — here and on the trip's Compliance tab.
 
-**Dialog:** passport country · destination country · requirement type · category · max stay days ·
-processing days · **official source URL** · **last verified** · notes.
+Empty state for a chosen country: *"Nothing recorded for this destination — No passport has a requirement here
+yet. Until one is added, the travel desk has no answer to give."*
+
+**Dialog** — *Add a passport for {country}*: passport country *(one already recorded for this destination is not
+offered)* · **What is required** · category · maximum stay · processing days · **official source** *("Where this
+was read from. Visa rules change without notice, so the next person to check needs to know what you checked.")* ·
+**last checked against that source** · notes. Editing cannot move an entry to another pair: *"The country pair
+cannot be changed. To correct it, remove this entry and add the right one."* Remove is **Admin**.
 
 ### ▶ Walk it
 
@@ -2011,50 +2363,134 @@ processing days · **official source URL** · **last verified** · notes.
 
 > *"'The travel desk answers from this, so an entry that is wrong is worse than one that is
 > missing.' Which is why every row carries the official source it came from and the date somebody
-> last checked it."*
+> last checked it — and a row nobody has checked for a year turns amber."*
 
 **2 — Choose **Nigeria**.**
 
-> *"A Ghanaian passport into Nigeria: visa-free, ECOWAS free movement, ninety days, zero processing
-> days — sourced from the ECOWAS protocol, checked a month ago."*
+> *"A Ghanaian passport into Nigeria: no visa needed, ECOWAS free movement, ninety days, zero processing
+> days — sourced from the ECOWAS protocol, checked at the end of August."*
 
 **3 — Choose **United Kingdom**.**
 
-> *"And into the United Kingdom: a Standard Visitor visa, a hundred and eighty days, **fifteen
-> working days to process**, applied for at VFS Global in Accra, biometrics in person, allow three
-> working weeks in peak season. That is the answer a travel desk gives on the phone, and it is the
-> number that decides whether a summit in a fortnight is possible."*
+> *"And into the United Kingdom: an embassy visa, Standard Visitor, a hundred and eighty days, **fifteen
+> days to process**, applied for at VFS Global in Accra, biometrics in person, allow three working weeks in
+> peak season. That is the answer a travel desk gives on the phone, and it is the number that decides
+> whether a summit in a fortnight is possible."*
 
 **4 — Tie it back to the trip.**
 
-> *"And this is what the compliance tab on the London trip was showing you — it does not store the
-> answer on the trip, it resolves it from here. Record it once; every future trip to the UK
-> inherits it, and when the rules change you fix one row."*
+> *"And this row is not just advice. The London traveller's passport is on file, so this row is what set
+> *requires a visa* on the London trip — and why its flight is held from ticketing until the visa is
+> approved. Record it once; every future trip to the UK inherits it, and when the rules change you fix one
+> row."*
 
-**5 — 🔴 LIVE WRITE 11 *(optional)* — add a requirement.** Ghana → South Africa, *Visa required*,
-category *"Visitor's visa (Port of entry)"*, 90 days max stay, 10 processing days, with a source URL
-and today's verification date.
+**5 — 🔴 LIVE WRITE 11 *(optional)* — add a requirement.** Choose **South Africa**, **Add a passport**: Ghana,
+*Embassy visa*, category *"Visitor's visa"*, 90 days max stay, 10 processing days, with a source URL and today's
+date.
 
-*Undo:* chapter 17 — removal is Admin.
+*Undo:* the bin icon on the row — Remove is **Admin**, which `hr.head` holds (Rule 2).
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | For a destination | `GET api/staff-travel/compliance/visa-requirements/destination/{countryId}` | Read |
-| All | `GET …/visa-requirements` | Read |
-| Create / update | `POST` / `PUT …/visa-requirements[/{id}]` | Write |
-| Delete | `DELETE …/visa-requirements/{id}` | **Admin** |
+| One pair | `GET …/visa-requirements?passportCountryId=…&destinationCountryId=…` | Read |
+| Add · Edit | `POST …/visa-requirements` · `PUT …/visa-requirements/{id}` | Write |
+| Remove | `DELETE …/visa-requirements/{id}` | **Admin** |
 
-Table: `StaffTravelVisaRequirements`.
+Table: `StaffTravelVisaRequirements`. The trip reads it through `StaffTravelComplianceRules` — at create, edit,
+a group's *Add a traveller*, submission and ticketing.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **T-40 · Nothing expires a requirement.** `lastVerifiedAt` is recorded and no screen or sweep flags a row nobody has checked for a year — on a page whose own subtitle says a wrong entry is worse than a missing one | *Fixed in closure lane 7 (7b): an entry never verified, or not in 365 days, is flagged on this page and on the trip's Compliance tab* |
 | **T-41 · There is no reverse view.** You cannot ask "which destinations does a Ghanaian passport enter freely" — only "what does this destination require" | |
-| **T-42 · The requirement is not checked against the trip.** A trip flagged `RequiresVisa = false` into a visa-required country is accepted (and see T-24) | *Fixed in closure lane 7 (7b, D-39): with the traveller's passport on file the register sets the trip's visa flag; a different answer needs a reason; a passport refused entry is not submitted* |
+
+*Fixed since the first edition (lane 7):* **T-40** (stale entries flagged), **T-42** (the register sets the trip's
+visa flag; a different answer needs a reason; a passport refused entry is not submitted — D-39).
+
+---
+
+## 10a. `/hr/travel/documents` — the passports it is keyed on
+
+### 📍 Where you are
+
+**Sidebar:** … → Staff Travel → **Travel Documents** · `/hr/travel/documents` ·
+as **hr.head** · **3 minutes** *(new in lane 7, slice 7a)*
+
+### 📖 What it is
+
+> *"Whose passport, issued where, expiring when — and whether anyone has looked at it. The visa register is keyed
+> on the passport; without this page there was nothing for it to read."*
+
+Before lane 7 there was no screen: nothing a person typed reached the visa lookup or the passport-expiry
+reminders (E2), while the Compliance tab told users to *"record their passport under travel documents first"*.
+
+### 👁 On the page
+
+**Header:** *Travel documents* — *"Travellers' passports and other travel documents. The visa lookup and the
+passport checks read the primary passport; numbers show in full only when a document is opened."* — and **Add a
+document** *(Write)*.
+
+**Filters:** **Traveller** *(Every traveller, or one)* and **Show** *(Every document · Expiring within 90 days)*.
+
+**Seven columns:** **Traveller** · **Document** *(its type, and a **primary** badge)* · **Number** *(masked to its
+last four — O-7)* · **Issued by** · **Expires** *(an **expired** or **within 6 months** badge)* · **Verified** *(who,
+or "Not yet")* · actions: **Verify** *(Write, on an unverified one)*, a pencil, and a bin *(Admin, on an unverified
+one)*.
+
+**Dialog** — *Record a travel document*: traveller, **type** *(Passport · National ID · Visa · Resident permit ·
+Work permit · Frequent flyer card · Hotel loyalty card · Driving licence · Vaccine certificate)*, number, issuing
+country, issued, expires *(after it was issued)*, and **The traveller's primary document of this type**. The rules
+are the server's:
+
+- **one primary document per type** — *"marking this one primary stands the traveller's other one down"*;
+- **a change takes the verification off** — *"Saving a change takes the verification off — another look confirms
+  it again"*; the dialog opens the document in full, the only place the whole number shows;
+- **a verified document is not deleted** (O-15).
+
+### ▶ Walk it
+
+**1 — Open the page.** Four documents: three Ghanaian passports — **Akpene Amoah** and **Kojo Fiadzo**, both
+verified; **Kwasi Danquah**, not yet — and Kwasi Danquah's driving licence.
+
+> *"Every number cut to its last four. The whole number shows only to somebody who opens the document — which is
+> the difference between a register and a list of passport numbers on a screen."*
+
+**2 — Point at Kwasi Danquah's passport** — expires **8 Dec 2026**, *within 6 months*.
+
+**3 — Switch *Show* to *Expiring within 90 days*.** That passport is the one row.
+
+> *"Two months left. The Kumasi trip does not need it — it is domestic — but the next trip abroad would. The
+> nightly sweep tells the traveller at ninety, thirty and seven days, and once it lapses (chapter 14). And when an
+> international trip is submitted, a passport expiring less than six months after the return comes back as a
+> warning."*
+
+**4 — Tie it to chapter 10.** The London traveller's verified passport is what the visa register read to set
+*requires a visa* on the London trip.
+
+*(No live write: verifying or changing a document moves the London and Lagos trips' answers.)*
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| Every document · one traveller's | `GET api/staff-travel/compliance/documents` · `…/documents/employee/{employeeId}` | Read |
+| Expiring | `GET …/documents/expiring?daysAhead=90` | Read |
+| One, in full | `GET …/documents/{id}` | Read |
+| Record · Change | `POST …/documents` · `PUT …/documents/{id}` | Write |
+| **Verify** | `POST …/documents/{id}/verify` | Write — the caller is recorded |
+| Remove | `DELETE …/documents/{id}` | **Admin** — never a verified one |
+
+Table: `StaffTravelDocuments`. The traveller manages their own from **My travel → Documents** (chapter 15).
+
+### ⚠ Known gaps
+
+| Gap | |
+|---|---|
+| **Verifying one's own document is not refused** *(seen while writing lane 10)*. A travel officer can verify their own passport; the two-person rule (Rule 2) does not reach verification. TDC's call whether it should | |
 
 ---
 
@@ -2068,48 +2504,59 @@ as **hr.head** · **4 minutes**
 ### 📖 What it is
 
 > *"Security, health and disruption advisories against a destination, time-boxed so they expire on
-> their own. A trip to a country with a live alert shows it on the compliance tab; a trip to one
-> without shows nothing."*
+> their own — and sent to the people already going."*
 
-> ⚠ **Changed by closure lane 7, slice 7a (2026-10-03).** An alert raised **active** goes at once to the traveller of
-> every approved or under-way trip to the country (to the city, when it names one) whose dates meet the alert's — each
-> recorded on the trip and shown on the traveller's portal, the HR role told in the app, the traveller by email (the
-> traveller's bell is lane 8's). Raised inactive, it goes to nobody until the desk sends it from a trip. **Once it has
-> reached a trip it is not deleted** — untick *Active* to stand it down. ⚠ On the demo database this means a
-> country-wide alert for Ghana reaches the demo's own Kumasi trip: raise demo alerts for a city no demo trip visits,
-> or raise them inactive.
+**Since lane 7 (7a, E6) an alert raised *active* goes out at once** to the traveller of every **approved or
+under-way** trip to its country — to its city, when it names one — whose dates meet the alert's window. Each is
+recorded on the trip, reaches the traveller in the app and by email (lane 8), and waits on their portal for them
+to confirm they have read it; the HR desk is told in the app, but not whoever raised it. A trip approved later is
+sent it from its **Compliance** tab (chapter 5.5). **Raised inactive, it goes to nobody** — and ticking *Active*
+later sends nothing either: send it from each trip.
+
+> ⚠ **On the demo database this reaches the demo's own trips.** A new active alert for **Ghana** or **Kumasi**
+> dated over 19–20 October reaches the Kumasi trip and its traveller. Raise demo alerts for a city no demo trip
+> visits, or raise them inactive.
 
 ### 👁 On the page
 
 **Header:** *Destination alerts* — *"What travellers are told about security, health and disruption
-where they are going."*, with a **Raise an alert** button.
+where they are going."*, with a **Raise an alert** button *(Write)*.
 
-**Five columns:** **Alert** *(the title)* · **Where** *(country and city)* · **Severity** *(Info ·
-Warning · Critical · Emergency)* · **In force from** · **Actions** *(edit and remove)*.
+**Five columns** — every alert marked **active**, whatever its dates: **Alert** *(the title, its type underneath)* ·
+**Where** *(country · city)* · **Severity** *(Info · Warning · Critical · Emergency)* · **In force from** ·
+**Actions** *(edit — Write; remove — **Admin**)*.
 
-Empty state: *"No active alerts — nothing is in force for any destination. A trip to a country with
+Empty state: *"No active alerts — Nothing is in force for any destination. A trip to a country with
 no alert shows nothing on its compliance tab."*
 
-**Dialog:** **alert type** *(Security · Health outbreak · Weather · Political unrest · Transport
-disruption · Natural disaster)* · **severity** · **country** · **city** · **title** · **body** ·
-**source** · **in force from** and **to** · **active** switch.
+**Dialog** — *Raise a destination alert*: **title** · **type** *(Security · Health outbreak · Weather · Political
+unrest · Transport disruption · Natural disaster)* · **severity** · **country** · **city** *("the whole country if
+left blank")* · **What travellers need to know** — *"This is the alert. A title and a severity with no text tells
+a traveller nothing they can act on."* · **source** · **in force from** and **until** *(blank while open-ended)* ·
+**Active**. Its description says where it will go.
+
+**Remove** *(Admin)* — refused once the alert has reached a trip: *"…has reached N trip(s), so it is not deleted —
+deactivate it instead (untick Active)."*
 
 ### ▶ Walk it
 
-**1 — Open the screen.** Three alerts.
+**1 — Open the screen.** Three alerts: **Lagos** *(Security, Warning)*, **Kumasi** *(Weather, Info)*, **London**
+*(Transport disruption, Info)*.
 
-**2 — Read the Lagos one in full.** The body is the point:
+**2 — Open the Lagos one** *(the pencil — the list carries no body)* and read it in full. The body is the point:
 
 > *"Lagos — road disruption and protests on the Badagry expressway. Warning. 'Fuel-supply protests
 > are causing long queues and intermittent road closures between Mile 2 and Badagry. Travellers
 > should use the Lekki–Epe corridor and allow two extra hours for airport transfers.' Source: the
 > Ghana Mission in Lagos."*
 
+Close it with **Cancel**.
+
 **3 — Say why the body matters.**
 
 > *"And that paragraph is the whole feature. An alert that says 'Civil unrest · High' and nothing
 > else tells a traveller nothing — it has to say what, where, and what to do instead. That is what
-> lands on his compliance tab and what goes out to him."*
+> lands on the traveller's own travel page, and what they confirm they have read."*
 
 ⚠ That is not rhetorical. **A shipped screen showed alerts with no text for months**, because the
 "current alert for a country" read returned a summary DTO with no `body` and the compliance strip
@@ -2118,30 +2565,31 @@ worth knowing the shape of. **T-43**, closed.
 
 **4 — Point at the two dates.**
 
-> *"In force from and to. An advisory that never expires is an advisory nobody reads, so these are
+> *"In force from and until. An advisory that never expires is an advisory nobody reads, so these are
 > time-boxed and drop off on their own."*
 
-**5 — 🔴 LIVE WRITE 12 *(optional)* — raise one.** Type **Health outbreak**, severity **Warning**,
-a country, a title and a real body, a source, and a two-month window.
+**5 — 🔴 LIVE WRITE 12 *(optional)* — raise one.** Type **Health outbreak**, severity **Warning**, a country **no
+demo trip visits**, a title and a real body, a source, and a two-month window.
 
 **6 — Then say where it goes.**
 
-> *"And an alert becomes a notification to a named traveller — which they, and only they, can
-> acknowledge. Nobody can confirm on your behalf that you read a security briefing about where you
-> are going. I will show you that side of it in the portal."*
+> *"Raised active, it goes at once to everyone already approved to travel there in those dates — in the app and by
+> email — and each of them, and only they, confirms they have read it. Nobody can confirm on your behalf that you
+> read a security briefing about where you are going. I will show you that side of it in the portal."*
 
-*Undo:* chapter 17 — removal is Admin; **deactivating** it from the edit dialog works for `hr.head`.
+*Undo:* untick **Active** in its edit dialog; or remove it — **Admin**, and only while it has reached no trip.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | Active alerts | `GET api/staff-travel/compliance/alerts/active` | Read |
+| One alert, in full | `GET …/alerts/{id}` | Read |
 | For a country | `GET …/alerts/country/{id}` · `…/country/{id}/current` | Read |
-| Create / update | `POST` / `PUT …/alerts[/{id}]` | Write |
-| Delete | `DELETE …/alerts/{id}` | **Admin** |
-| Notify a traveller | `POST …/alert-notifications` | Write |
-| *(the traveller's own)* | `GET`/`POST api/staff-travel/me/alert-notifications…` | signed-in |
+| **Raise** · Edit | `POST …/alerts` *(sends an active one to the trips it meets)* · `PUT …/alerts/{id}` | Write |
+| Remove | `DELETE …/alerts/{id}` | **Admin** — never once sent |
+| Send it to one trip's traveller | `POST …/alert-notifications` *(the trip's Compliance tab)* | Write |
+| *(the traveller's own, and their acknowledgement)* | `GET`/`POST api/staff-travel/me/alert-notifications…` | signed-in, the traveller only |
 
 Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
@@ -2149,9 +2597,11 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
 | Gap | |
 |---|---|
-| **T-44 · Nothing sends an alert to anybody automatically.** Raising an alert for Nigeria does not notify the people with approved trips to Nigeria — a notification is created one at a time through a separate endpoint that no screen calls | *Fixed in closure lane 7 (7a, E6): an alert raised active goes at once to the traveller of every approved or under-way trip to its country (and city) in its window; raised inactive, it goes to nobody. Since lane 8 (8a) the traveller is told in the app as well as by email, on the trip's* Before you go *tab, and the desk in the app but whoever sent it* |
-| **T-45 · An alert does not block or flag a booking** to the destination it warns about, at any severity — including `Emergency` | *Flagged since closure lane 5: a Critical or Emergency alert in force over the trip shows as a warning on the request page — for the approver and the desk. Blocking is TDC's question* |
-| **T-46 · `TravelRiskLevel.Prohibited` exists and prohibits nothing** | |
+| **T-45 · An alert does not block a booking** to the destination it warns about, at any severity — including `Emergency` | *Flagged since lane 5: a Critical or Emergency alert in force over the trip shows as a warning on the request page — for the approver and the desk. Blocking is TDC's question* |
+
+*Fixed since the first edition:* **T-44** (lane 7 — an active alert goes to the trips it meets; lane 8 — in the
+app as well as by email), **T-46** (lane 4 — a trip at risk level *Prohibited* is refused at submission and at
+every approval stage).
 
 ---
 
@@ -2169,30 +2619,33 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
 ### 👁 On the page
 
-**A row of stat tiles:** total requests · pending approval · approved · **high risk** *(with
-"N international" as a hint)*.
+**Header:** *Staff travel dashboard* — *"Where the organisation's travel stands."*
 
-**Estimated cost card** — and this is Rule 5 made visible:
+**Four tiles:** **Requests** · **Awaiting approval** *(submitted; "N still in draft" when there are drafts)* ·
+**Departing in 30 days** *(approved or under way, leaving within thirty days)* · **High risk or above** *(High, Critical or
+Prohibited; "N international" underneath)*.
 
-- **When every request shares one currency** *(which it does on this database)*: three big figures
-  — **Estimated**, **Approved budget**, and **Across N requests**.
+**Estimated cost card** — cancelled and rejected requests left out:
+
+- **When every request shares one currency** *(as on this database)*: three big figures —
+  **Estimated**, **Approved budget**, and **Across N requests**.
 - **When they do not**: a table with a row per currency — Currency · Estimated · Approved budget ·
   Requests — followed by the sentence:
   > *"Travel is costed in N currencies. These are not added together — doing so would need an
   > exchange rate, and travel takes rates from Finance rather than inventing one. Cancelled and
   > rejected requests are excluded throughout."*
 
-**By status** — a breakdown.
-**Top destinations** — where people are going.
-**Requests raised, last six months** — a trend.
-**Three lists:** **Awaiting approval** · **Departing soon** · **Recently raised**, each five columns
-— Number · Traveller · Route · Departs · Status.
+**By status** — a breakdown. **Top destinations** — where people are going. **Requests raised, last six
+months** — a trend. **Three lists:** **Awaiting approval** · **Departing soon** · **Recently raised**, each five
+columns — Number *(a link)* · Traveller · Route · Departs · Status.
 
 ### ▶ Walk it
 
-**1 — Open the dashboard.** Read the tiles.
+**1 — Open the dashboard.** Read the tiles. On UAT, as written *(4 October 2026)*: **4** requests, **2** awaiting
+approval *(Lagos and London)*, **1** departing in 30 days *(Kumasi, 19 October)*, **0** high risk — *2
+international*.
 
-**2 — Point at *High risk* and its hint.**
+**2 — Point at *High risk or above* and its hint.**
 
 > *"High risk, and how many are international — which are not the same question. A field visit to a
 > site with no road access is domestic and high risk; a conference in Copenhagen is international
@@ -2200,8 +2653,9 @@ Tables: `StaffTravelAlerts`, `StaffTravelAlertNotifications`.
 
 **3 — Read the *Estimated cost* card.**
 
-> *"A hundred and four thousand five hundred and fifty cedis in flight across four requests, against
-> the approved budgets."*
+> *"A hundred and four thousand five hundred and fifty cedis in flight across four requests — and four thousand
+> five hundred and fifty of it approved: the two domestic trips. The two international ones are still waiting for
+> their approvals."*
 
 **4 — Now say the currency sentence even though you cannot see it**, because it is the best piece of
 engineering judgement on the screen:
@@ -2231,7 +2685,7 @@ render `undefined` on a screen that type-checks cleanly, which is exactly what h
 | Gap | |
 |---|---|
 | **T-47 · No date range.** The dashboard is always "now"; there is no way to ask about last quarter | |
-| **T-48 · Actual spend is not on it.** Estimated and approved budget are; the sum of paid claims — the number a finance director actually wants — is not, though it is derived per request on the budget | |
+| **T-48 · Actual spend is not on it.** Estimated and approved budget are; the sum of paid claims and advances — the number a finance director actually wants — is not, though each trip's budget derives it (chapter 5.4) | |
 
 ---
 
@@ -2240,7 +2694,8 @@ render `undefined` on a screen that type-checks cleanly, which is exactly what h
 ### 📍 Where you are
 
 **Sidebar:** Administration → HR → **Travel** → **Travel Policies** ·
-`/administration/hr/travel/policies` (+ `new`, `[id]`) · as **hr.head** · **6 minutes**
+`/administration/hr/travel/policies` (+ `new`, `[id]`) · as **hr.head**, with **hr.officer** in a second window ·
+**6 minutes**
 
 ### 📖 What it is
 
@@ -2250,105 +2705,113 @@ render `undefined` on a screen that type-checks cleanly, which is exactly what h
 
 ### 👁 Screen 1 — the register
 
-**Header:** *Travel policies* — **"What staff may spend on travel, and what the caps refuse."**,
-with a **New policy** button.
+**Header:** *Travel policies* — **"What staff may spend on travel, and what the caps refuse."**, with a **Draft a
+policy** button.
 
-**Six columns:** **Policy** · **Version** · **Effective** · **Rules** *(a count)* · **State**
-*(**Draft** / **In force**)* · **Approved by**.
+**Columns:** **Policy** · **Version** · **Effective** · **Rules** *(a count)* · **State** · **Approved by**.
+**State** is one of *Draft — not enforcing*, *Approved — in force from …* (a version approved to start
+later), *In force*, *Not in force* (superseded) or *Expired* (Rule 1's table).
 
-Row actions: **Approve** *(on a draft)* and **Withdraw** *(on one in force)*, both
-`HR.Travel.Admin`. The HR role holds it since closure lane 4 (D-3). But `hr.head` drafted the demo's
-policy, so **Approve refuses `hr.head` by name** (*"…drafted or last changed…"*); `hr.officer` signs it.
+**Row actions** (`HR.Travel.Admin`, which the HR role holds since closure lane 4):
+
+- **Approve**, on a draft. It is **refused to whoever drafted or last changed the policy** (C3), with the
+  reason on screen: *"You drafted or last changed … so another travel administrator must approve it"*. So
+  `hr.officer` signs what `hr.head` wrote.
+- **Withdraw**, on an approved one — the way to stop it binding.
+
+Approving a version makes room among its scope's versions **by date** (O-4): one approved to start later stays
+*Approved — in force from …* until its day, and the version it replaces stays in force until the day before.
 
 Empty state: *"No travel policies — without one, travel bookings are not capped at all."*
 
 ### 👁 Screen 2 — the policy (`…/policies/[id]`)
 
-**Header:** the policy name and version, its state, and — on a **draft only** — **Edit** and
-**Delete**. The edit page's own subtitle says why: *"Only a draft can be corrected — an approved
-policy needs a new version."*
+**Header:** the policy name and version, its state, and — **on a draft only** — **Edit** and **Delete**. The edit
+page's subtitle says why: *"Only a draft can be corrected — an approved policy needs a new version."*
 
-**Card 1 — who it applies to** — staff level from / to, organisation unit, effective from / to.
+**On an approved policy**, a card above the rest: *"Approved by … on …. An approved policy cannot be edited or
+deleted — raise a new version to change what it allows, or withdraw it from the register to stop it capping
+bookings. A new version approved for the same scope takes over from its own start date; this one stays in
+force until the day before."*
 
-**Card 2 — "The caps that refuse a booking"** — the four that are enforced, in bold, then the eight
-that are recorded:
+**Card 1 — Scope:** organisation unit (*The whole organisation* when none) and the staff-level band. A unit's
+policy covers the units **under** it; the nearest unit's wins (O-5).
 
-| Enforced | Recorded only |
-|---|---|
-| Max flight class, domestic | Advance booking days, flight and hotel |
-| Max flight class, international | Requires cheapest fare |
-| Max hotel rate, domestic | Preferred vendor mandatory |
-| Max hotel rate, international | Max single trip budget |
-| | Max annual travel budget |
-| | Receipt required above |
-| | Expense submission days |
+**Card 2 — "The caps that refuse a booking":** max cabin domestic / international, hotel domestic /
+international per night, **the currency of the limits**, max per trip, receipt required above, days to submit
+expenses, book flights ahead, book hotels ahead, preferred vendors. **All of them bind** once the policy is
+approved (§ 1.5). *Requires cheapest fare* and *max annual budget* are gone from the form — nothing could
+enforce them (D-1).
 
-**Card 3 — the rule register** — **read-only**, with an explanatory note. Six columns: rule code ·
-rule name · **type** *(Hard limit · Soft limit · Warning · Mandatory · Preferred · Prohibited)* ·
-expense category · **limit** and unit · **violation action**.
+**Card 3 — the rule register:** **read-only**, with an explanatory note. Columns: rule code · rule name · **type**
+*(Hard limit · Soft limit · Warning · Mandatory · Preferred · Prohibited)* · expense category · **limit** and unit
+· **violation action**.
 
 ### ▶ Walk it
 
-This is the governance chapter. Take the six minutes.
+This is the governance chapter. Take the six minutes. **First look at the State column** — the walk forks on it.
 
-**1 — Open the register.** One row: *TDC Staff Travel Policy 2026*, version 1, 5 rules, **Draft**,
-Approved by — an em dash.
+**1 — Open the register.** One row: *TDC Staff Travel Policy 2026*, version 1, five rules.
 
-**2 — Say the headline before opening it.**
+- **On UAT:** *Draft — not enforcing*; Approved by an em dash.
+- **On a demo database built since 2026-10-04:** *In force*, approved by `hr.officer` (D-60).
 
-> *"One policy, and look at the State column: **Draft**. Which is the most important word on this
-> screen, and I want to explain why rather than skip past it."*
+**2 — Open the policy and read Card 2.**
 
-**3 — Open the policy and read Card 2's four enforced caps.**
+> *"Economy on domestic flights, premium economy on international. Nine hundred cedis a night at home, two
+> thousand four hundred abroad. Flights booked three weeks ahead, hotels two. Seventy-five thousand cedis a trip at
+> most. A receipt for anything over a hundred cedis, and fourteen days after the trip to claim. Every one of
+> those binds: a booking, a submission or a claim that breaks one is refused — or, if the desk asks for an
+> exception and gives a reason, it waits for a second officer to authorise it."*
 
-> *"Economy on domestic flights. Premium economy on international. Nine hundred cedis a night
-> domestically, two thousand four hundred internationally. Those four are not descriptions — they
-> are enforced. A booking above any of them is refused outright at the point somebody tries to save
-> it, and only a travel **administrator** can authorise the breach, so a travel clerk cannot tick
-> their own exception."*
+**3a — On UAT (a draft): the Draft sentence. This is the thirty seconds.**
 
-**4 — Now the Draft sentence. This is the thirty seconds.**
+> *"And none of that is in force yet, because nobody has signed this policy. That is deliberate. Before this rule
+> existed, anybody who could edit a travel policy could write the rule constraining everybody's travel spending
+> and have it bind immediately — the person spending the money could set their own limit. So a policy is a
+> **draft** until an administrator approves it, and until then it caps nothing."*
 
-> *"And none of that is in force yet, because nobody has signed this policy. That is deliberate, and
-> it is the part I would want to hear if I were sitting where you are. Before this rule existed,
-> anybody who could edit a travel policy could write the rule constraining everybody's travel
-> spending and have it bind immediately — which means the person spending the money could set their
-> own limit. So a policy is a **draft** until an administrator approves it, and until then it caps
-> nothing. What you are looking at is the state every corporation is in on the day before somebody
-> signs."*
+Point at **Approve** as `hr.head`. It is refused by name, which is safe to show:
 
-**5 — Point at the *Approve* button.** *(Since closure lane 4 it is live for HR. As `hr.head`,
-pressing it is refused by name, which is safe to show.)*
-
-> *"And I cannot sign it — I wrote it. Approving a travel policy is a travel administrator's act,
-> the same tier that authorises a breach of it, and it is never the author's. A second officer
-> signs. Writing the rules and putting them in force are two different acts, and the system holds
+> *"And I cannot sign it — I wrote it. Approving is a travel administrator's act, and never the author's. A
+> second officer signs. Writing the rules and putting them in force are two different acts, and the system holds
 > them apart by who did what."*
 
-**6 — 🔴 LIVE WRITE 13 *(only if you chose § 2.4 Option B and kept it for the room)*:** in a second
-window signed in as **`hr.officer`**, **approve it**. The State flips to **In force**, with that
-officer in *Approved by*. Then, if you have not already, go back to chapter 5.3's refusal.
+**🔴 LIVE WRITE 13** *(only if you chose § 2.4 Option B and kept it for the room)*: in the second window, as
+**`hr.officer`**, **approve it**. The State becomes *In force*, with that officer in *Approved by*.
 
-**7 — Scroll to Card 3, the rule register**, and read the five rules.
+⚠ **CAREFUL:** from that moment it binds **every** trip submitted afterwards, on the whole tenant. Trips already
+submitted keep the policy they recorded — on UAT, Kumasi and Sebrepor none, so their claims are held to nothing;
+Lagos and London carry it from a hand link made before lane 1, so their claims are held to it from then on.
 
-> *"And underneath, the rule register: the hotel ceilings, the cabin-class ceiling, twenty-one days'
-> advance booking, a receipt above a hundred cedis — each with a violation action saying whether it
-> warns, requires approval, or blocks."*
+**3b — On a rebuilt demo database (in force): say who signed it, then show it working.**
 
-**8 — Now say the Rule 4 sentence, which is the second-best governance moment in the module.**
+> *"Signed — by the second officer, not by me: I drafted it, and the system will not let the author put their own
+> rules in force. And it is working right now."*
 
-> *"And this table is read-only — deliberately. These rules are not yet evaluated by anything: the
-> caps that refuse a booking are the four scalar ones you just saw, and this register describes a
-> mechanism that is built but not yet running. So rather than give you an editor for rules that do
-> nothing, we left it read-only. An editable control that does nothing is worse than no control — a
-> rule set to 'Block' is a promise to whoever configured it, and a warning banner is a weak defence
-> to an auditor looking at a screenshot. The write endpoints exist and are tested; the affordances
-> come back on the day evaluation lands, not before."*
+Open **Staff Travel → Policy Breaches** (chapter 13a): London's Hilton, 3,200 a night against the 2,400 ceiling,
+**booked by `hr.head`, authorised by `hr.officer`**.
+
+> *"The booking was not refused — the summit hotel was genuinely needed — but it could not be confirmed until an
+> officer who neither booked it nor travels on it authorised the breach. Here is who, and when."*
+
+**4 — Scroll to Card 3, the rule register**, and read the five rules.
+
+> *"And underneath, the rule register: the hotel ceilings, the cabin-class ceiling, twenty-one days' advance
+> booking, a receipt above a hundred cedis — each with a violation action saying whether it warns, requires
+> approval, or blocks."*
+
+**5 — Now say the Rule 4 sentence, the second-best governance moment in the module.**
+
+> *"And this table is read-only — deliberately. What binds is the policy's own settings you just read; this
+> register describes a finer mechanism that is not evaluated by anything yet. So rather than give you an editor
+> for rules that do nothing, we left it read-only. An editable control that does nothing is worse than no
+> control — a rule set to 'Block' is a promise to whoever configured it. The write endpoints exist and are
+> tested; the editor comes back on the day evaluation lands, not before."*
 
 That answer is better than the feature would have been.
 
-**9 — 🚫 Do not press *Delete* on the policy** *(Admin)* — and note the screen only offers it on a
-draft anyway.
+**6 — 🚫 Do not press *Delete* on the policy** *(Admin)* — the screen offers it on a draft only anyway.
 
 ### ⚙ Behind the page
 
@@ -2356,13 +2819,14 @@ draft anyway.
 |---|---|---|
 | Register | `GET api/staff-travel/policies` | Read |
 | Current / applicable | `GET …/policies/current` · `…/applicable` | Read |
-| Create / update | `POST` / `PUT …/policies[/{id}]` | Write — **update is refused once approved** |
-| **Approve** | `POST …/policies/{id}/approve` | **Admin** + employee-linked |
+| Create / update | `POST` / `PUT …/policies[/{id}]` | Write — **update is refused once approved**; the version is the server's (T-50) |
+| **Approve** | `POST …/policies/{id}/approve` | **Admin** + employee-linked; **never the author** (C3) |
 | **Withdraw** | `POST …/policies/{id}/withdraw` | **Admin** |
-| Delete | `DELETE …/policies/{id}` | **Admin** |
+| Delete | `DELETE …/policies/{id}` | **Admin**; a draft only |
 | Rules | `GET …/policies/{id}/rules` · `…/rules/active` | Read |
-| Rule writes | `POST`/`PUT …/rules…` | Write — **no screen calls them** |
-| Exceptions | `GET …/exceptions/request/{id}` · `…/exceptions/pending` · `POST …/exceptions` · `…/{id}/decide` | Read / Write — **no screen calls the write half** |
+| Rule writes | `POST`/`PUT`/`DELETE …/rules…` | Write / Admin — **no screen calls them** (Rule 4) |
+| Policy exceptions | `GET …/exceptions/request/{id}` · `…/exceptions/pending` · `POST …/exceptions` · `…/{id}/decide` | Read / Write / Admin — **no screen**; decided by an administrator who did not raise it (C4, T-49) |
+| Booking breaches | *Staff Travel → Policy Breaches* — chapter 13a | Read; authorise / refuse **Admin**, never the booker, the asker or the traveller (D-8) |
 
 Tables: `StaffTravelPolicies`, `StaffTravelPolicyRules`, `StaffTravelPolicyExceptions`.
 
@@ -2370,11 +2834,86 @@ Tables: `StaffTravelPolicies`, `StaffTravelPolicyRules`, `StaffTravelPolicyExcep
 
 | Gap | |
 |---|---|
-| **T-1 · Every policy in every tenant is currently unapproved**, so travel caps do not bind anywhere until each is signed. **This is a real behaviour change on the day somebody signs one** — Rule 1 | |
-| **T-4 · The rule register is enforced by nothing and ships read-only** — a decision, not a defect, and the reasoning is in the say-line | |
-| **T-49 · The policy-exception flow has no screen at all.** Create and decide are implemented and harness-covered; the demo's one exception was made through the API. Withheld for the same reason as the rules — nothing raises an exception, because its producer (rule evaluation) was never built | |
-| **T-50 · Version uniqueness is caller-declared.** `versionNumber` and `isCurrentVersion` come from the client; nothing stops two version 1s or two current versions | |
-| **T-51 · `AppliesToLevelFromId` targets `StaffLevel`, not a salary level** — an FK's name is not its target, and a salary-level id would fail on a constraint naming neither | |
+| **T-1 · UAT's policy is a draft**, so no cap binds there. Kept so by D-61 until the next demo is prepared; a demo database built by the pack since 2026-10-04 has it approved (D-60). **Approving it on UAT changes every later trip** — Rule 1 | |
+| **T-4 · The rule register is enforced by nothing and ships read-only** — a decision, not a defect (finish plan D-29) | |
+| **T-49 · The policy-exception register has no screen.** Create and decide are implemented and tested, decided by an administrator who did not raise it. A *booking's* breach — the one that matters day to day — has its screen: Policy Breaches (D-8) | |
+| **T-51 · `AppliesToLevelFromId` targets `StaffLevel`**, not a salary level — informational: an FK's name is not its target | |
+
+*Fixed since the first edition:* T-2 (HR holds Admin, narrowed by the act — D-3), T-9 (the limits have a
+currency), T-50 (versions numbered by the server, dated by approval — O-4).
+
+---
+
+## 13a. `/hr/travel/breaches` — the bookings over the policy, and who let them through
+
+### 📍 Where you are
+
+**Sidebar:** … → Staff Travel → **Policy Breaches** · `/hr/travel/breaches` ·
+as **hr.head**, then **hr.officer** to decide · **2 minutes** *(new in lane 4, D-8)*
+
+### 📖 What it is
+
+> *"Every booking above the policy's caps, or booked later than it asks — and who let it through. The booking is
+> not refused; it waits, and the person who decides it is never the person who made it."*
+
+A flight or hotel booking that breaches its trip's policy (a cabin class or nightly rate above the cap, or less
+notice than the policy asks) is refused at booking — **unless the desk asks for an exception, with a reason**
+(chapter 5.3). Then it is saved **Pending** and **cannot be confirmed or ticketed** until a travel administrator
+decides it here. Only an **approved** policy binds (Rule 1), so on UAT, where the policy is a draft, nothing breaches.
+
+### 👁 On the page
+
+**Header:** *Policy breaches* — *"Bookings above the travel policy's caps, or booked later than it asks, and who
+decided them."* — and two view buttons: **Awaiting authorisation** *(opens here)* and **All**.
+
+**Five columns:** **Trip** *(its number, a link; the traveller and departure underneath)* · **Booking** *(what it is,
+and its status)* · **Policy cap** · **Why** *(the reason given, and "asked by …")* · **Exception** *(Awaiting
+authorisation · Authorised · Refused, with who decided and when)* — and, for a travel administrator, on a pending
+row: **Authorise** and **Refuse**.
+
+**Refuse** asks for a reason *(five characters or more)*: *"the booking stays as it is and cannot be confirmed or
+ticketed; the desk changes or cancels it. The reason is kept on the trip as an internal note."*
+
+The footnote is the rule: *"A travel administrator decides an exception — never the one who booked it or asked for
+it, and never the traveller. Until it is authorised the booking stays Pending and cannot be confirmed or
+ticketed."* The buttons are shown to every administrator; the server refuses the three people it names, with the
+reason.
+
+Empty state: *"Nothing awaiting authorisation — A booking that breaches its trip's policy appears here once the
+desk asks for an exception."*
+
+### ▶ Walk it
+
+- **On a rebuilt demo database:** switch to **All**. One row — London's trip; *Hilton London Metropole · GHS 3,200.00 a
+  night*, **Confirmed**; cap *2,400.00 a night*; the reason, *asked by* the head of HR; **Authorised**, by
+  `hr.officer`.
+
+  > *"Three thousand two hundred a night at the summit venue, against a ceiling of two thousand four hundred. Asked
+  > for by the person who booked it, authorised by an officer who neither booked it nor travels on it — and only
+  > then confirmed. Here is who, and when."*
+
+- **On UAT:** both views are empty — the policy is a draft, so no booking breaches it (Rule 1). If you prepared
+  § 2.4 Option B, chapter 5.3's Kumasi hotel lands here; authorise it as `hr.officer`.
+
+  > *"Empty — because the policy on this database has not been signed. Once it is, a booking over its caps waits
+  > here, and the person who booked it cannot wave it through."*
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| The register | `GET api/staff-travel/bookings/exceptions[?state=Pending]` | Read |
+| **Authorise** | `POST …/flights/{id}/exception/authorise` · `…/hotels/{id}/exception/authorise` | **Admin** + employee-linked |
+| **Refuse** | `POST …/flights/{id}/exception/refuse` · `…/hotels/{id}/exception/refuse` *(a reason)* | **Admin** + employee-linked |
+
+The exception lives on the booking — `StaffTravelFlightBookings`, `StaffTravelHotelBookings`. The older
+`StaffTravelPolicyExceptions` register (a trip-level exception) is a different thing and still has no screen — T-49,
+kept by decision (D-29).
+
+### ⚠ Known gaps
+
+None open. This screen is lane 4's answer to D-8: before it, a booker holding `HR.Travel.Admin` authorised their own
+breach.
 
 ---
 
@@ -2436,8 +2975,8 @@ decided (chapter 5.1). The run's toast says how many days it added and removed.
 
 ### **This whole screen is Admin-gated, reads included.** Before closure lane 4, `hr.head` got a 403
 on the page itself. Since D-3 the HR desk opens it, because the desk that renews an expiring
-passport is the one that needs the queue (T-52). ⚠ **Run the sweep now** sends real reminders — to
-travellers and approvers by email too, since lane 8 — each only once, so treat it as a live write.
+passport is the one that needs the queue (T-52). ⚠ **Run a sweep now** sends real reminders — to
+travellers and approvers by email too, since lane 8 — each only once, and moves trips, so treat it as a live write.
 
 ### 👁 On the page
 
@@ -2450,7 +2989,8 @@ it moved.
 
 **Card 2 — What the sweep moves** *(8c)* — the moves *(the second table above)*, and a line on *Did not travel*.
 
-**Card 3 — What would fire** — a preview, with an **as-of date** override and a **clear** button. Six
+**Card 3 — What would fire** — a preview, with **Evaluate as if it were** *(a date)* and **Back to today** —
+*"Nothing is sent by previewing. Set a future date to see what is coming."* Six
 columns: **Kind** · **Record** · **Due** · **Days** · **Tier** *(how urgent)* · **Sent to** *(Traveller, Desk,
 Approvers — lane 8; Line Manager — 8c; empty for a silent move)*. Its count line says how many would be sent and how many
 trip or group moves would be made. Empty state: *"Nothing due."*
@@ -2461,28 +3001,33 @@ trip or group moves would be made. Empty state: *"Nothing due."*
 **Card 5 — Sent and moved in the last 14 days** — the dispatch log, the moves among the reminders, with **Sent** — when
 the sweep sent it (or made the move), or *Not yet — next sweep* for one recorded and not sent (lane 8).
 
-### ▶ Walk it *(read-only, from an admin window, or skip)*
+### ▶ Walk it *(read-only, as `hr.head`)*
 
-**1 — If you have an admin window, open it.** All three lists are empty except *Due now*.
+**1 — Open the page.** Read Card 1's twelve kinds and Card 2's moves aloud, briefly.
 
-> *"Nothing has ever run on this database, which is honest. What the sweep does is chase four kinds
-> of date: a passport or visa about to expire, an advance past its settlement deadline, and a
-> departure coming up. And the preview tells you what it *would* send before you send it — with an
-> as-of date, so you can ask 'what will this look like on the first of next month'."*
+> *"The thing that watches the dates nobody else is watching. It chases twelve kinds of date — a passport, a visa,
+> an advance, a departure, an approval nobody has decided, a claim window about to close — each to the person who
+> acts on it. And it moves the trips themselves: under way on the day, completed the day after, closed once the
+> money is settled."*
 
-**2 — Point at *Due now* and find the short-dated passport.**
+**2 — Point at *Recent sweeps*.**
 
-> *"And there is the one we planted: a passport expiring in ten weeks, on a traveller who is
-> booked on a trip. That is the failure this module exists to prevent, and it is found by a job
-> rather than by somebody remembering."*
+- **On UAT:** hundreds of rows, one a day since the hosted sweep started — most of them the test harness's.
+- **On a rebuilt demo database:** none until 11 minutes after the API starts, then one a day.
 
-**3 — 🚫 Do not press *Run the sweep now* during a demo.** It dispatches.
+> *"It runs every night with nobody signed in. Nobody has to remember to press anything."*
 
-**4 — If you have no admin window, say it from chapter 5.5 instead:**
+**3 — The preview: set *Evaluate as if it were* to a month before `head.dev`'s passport expires** — on UAT it expires
+on 8 December 2026, so 8 November *(chapter 10a shows the date on a rebuilt database)*. Find it at its **30-day**
+rung.
 
-> *"And the passports are watched by a reminder sweep — expiring documents, lapsing visas, overdue
-> advances and upcoming departures, on a schedule, with a preview of what it will send before it
-> sends it. It sits under Administration because it dispatches to people."*
+> *"And the preview tells you what it would send before it sends it — so you can ask 'what will this look like next
+> month'. There is the one we planted: a passport with a month left. Its owner is told at ninety, thirty and seven
+> days, and once it lapses. It is found by a job rather than by somebody remembering."*
+
+Press **Back to today**.
+
+**4 — 🚫 Do not press *Run a sweep now* during a demo.** It dispatches, and it moves trips.
 
 ### ⚙ Behind the page
 
@@ -2499,12 +3044,11 @@ the `StaffTravel.*` topics.
 
 ### ⚠ Known gaps
 
-| Gap | |
-|---|---|
-| **T-52 · The reads are Admin-gated along with the writes.** The travel desk — the people who would act on an expiring passport — cannot see the queue at all. An open TDC question: should the desk see the reminder log? | *Fixed in closure lane 4 (D-3): the HR role holds `HR.Travel.Admin`* |
-| **T-53 · Nothing runs the sweep on a schedule.** There is no hosted service; the only trigger is the button on this screen | *Wrong when written: the sweep has run daily on a hosted service since 2026-08-17 (first 11 minutes after the API starts). Closure lane 8 proves the scheduled run — nobody signed in — on its own (`run-final-sweep-scheduled.mjs`)* |
-| **F2 · Every reminder went to the HR role, in the app only; a document got one notice before it lapsed; no visa-missing, claim or approval chase** | *Fixed in closure lane 8 (slice 8b) — the table above* |
-| **T-7 · Nothing moved a trip under way, and the sweep closed nothing** | *Fixed in closure lane 8 (slice 8c) — the moves above* |
+None open. *Fixed since the first edition:* **T-52** (lane 4, D-3 — the HR role holds `HR.Travel.Admin`, so the desk
+opens this screen), **T-53** (wrong when written: the sweep has run daily on a hosted service since 2026-08-17, first 11
+minutes after the API starts; lane 8 proves the scheduled run on its own, `run-final-sweep-scheduled.mjs`), **F2** (lane
+8, 8b — the people who act on each reminder, by email too, and the new kinds), **T-7** (lane 8, 8c — the sweep moves
+trips). The windows are constants — each one TDC's to confirm (closure plan § 6).
 
 ---
 
@@ -2513,7 +3057,7 @@ the `StaffTravel.*` topics.
 ### 📍 Where you are
 
 **Portal:** Time, Leave & Pay → **My Travel** · `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `documents`, `claims/[id]`) ·
-**as the `staff` persona**, in window B · **5 minutes**
+**as the `staff` persona**, in window C · **5 minutes**
 
 ### 📖 What it is
 
@@ -2613,38 +3157,39 @@ title, **its body** and an **Acknowledge** button.
 
 ### ▶ Walk it
 
-**1 — Switch to window B, signed in as `staff`**, and open **Time, Leave & Pay → My Travel**.
+**1 — Switch to window C, signed in as `staff`**, and open **Time, Leave & Pay → My Travel**.
 
-> *"And this is the other side. One trip — the Sebrepor site handover, approved, three hundred and
-> fifty cedis."*
+> *"And this is the other side. One trip — the Sebrepor site handover, completed, three hundred and fifty cedis."*
 
-**2 — Open it.**
+**2 — Open it, and walk the tabs.** *The trip*; *Before you go*; *Itinerary & bookings* (the car hire); then **Money**.
 
-> *"His own trip, read-only: where he went, what was booked, what he needs. And the claim we just
-> paid, which is the part he actually cares about."*
+> *"The traveller's own trip: where they went, what was booked, what they need. And the claim — which is the part
+> they actually care about: submitted, reviewed, and, if we paid it in chapter 9, paid, with the reference."*
 
-**3 — Press *Request travel*** and point at what is missing.
+Open the claim from the Money tab: *"payable to you"*, and each expense with the desk's decision.
 
-> *"No traveller field. This posts to a different endpoint entirely — one that takes no employee id
-> anywhere and stamps him from the token. The field is not disabled, it is absent, because a
-> disabled control implies the value was sent."*
+**3 — Back on My Travel, press *Request travel*** and point at what is missing.
+
+> *"No traveller field. This posts to a different endpoint entirely — one that takes no employee id anywhere and
+> stamps the traveller from the token. The field is not disabled, it is absent, because a disabled control implies
+> the value was sent."*
 
 Press **Cancel** rather than creating one.
 
-**4 — Scroll to the destination alerts** *(if the `staff` persona has any — the demo sends none, so
-this may be empty)*.
+**4 — Scroll to the destination alerts.** Empty — the demo's alerts were raised before an active alert went out on
+its own, and none was sent to the Sebrepor traveller.
 
-*If empty:*
-> *"And where his destination alerts arrive. Nothing for a day trip to Sebrepor — but for the Lagos
-> or London travellers, the advisory we were looking at earlier lands here, with the full text, and
-> only they can acknowledge it. Nobody can confirm on your behalf that you read a security briefing
-> about where you are going — an acknowledgement anyone can record for you records nothing."*
+> *"And this is where destination alerts arrive. Nothing for a day trip to Sebrepor — but for the Lagos or London
+> travellers, an advisory lands here with the full text, and only they can acknowledge it. Nobody can confirm on
+> your behalf that you read a security briefing about where you are going — an acknowledgement anyone can record for
+> you records nothing."*
 
 **5 — Close the loop back to the desk.**
 
-> *"Punch line for the whole module: everything the travel desk did — the request, the approval, the
-> flight, the hotel, the advance, the claim, the payment — and the traveller's own view of it is
-> four screens with no permissions on them at all."*
+> *"Punch line for the whole module: everything the travel desk did — the request, the approval, the flight, the
+> hotel, the advance, the claim, the payment — and the traveller's own view of it is six screens with no
+> permissions on them at all. They can ask a question, attach a file, file their own claim and confirm a briefing;
+> they cannot approve, pay or verify anything of their own."*
 
 ### ⚙ Behind the page
 
@@ -2671,55 +3216,56 @@ this may be empty)*.
 
 ### ⚠ Known gaps
 
-| Gap | |
-|---|---|
-| **T-54 · The traveller cannot raise an expense claim.** Claims are desk-only — the one part of the money chain an employee would most expect to start themselves | *Fixed in closure lane 7 (7d, D-38): File a claim on the trip's Money tab; the traveller adds expenses with their receipts and submits; the desk reviews and pays as before, and can still file for them* |
-| **T-55 · The traveller cannot see or acknowledge their risk assessment** — T-23's other half | *Fixed in closure lane 7 (7c1, E1): Before you go shows it, and I have read this records it; a Critical trip's ticket waits for it (D-37)* |
-| **T-56 · The traveller cannot upload a document or a receipt.** Both are desk acts | *Documents fixed in closure lane 7 (7c2): the Files tab attaches through the scan gate, downloads, and removes the traveller's own before submission (D-40); receipts come with 7d's claims* |
+None open. *Fixed since the first edition (lane 7):* **T-54** (7d, D-38 — *File a claim* on the Money tab; the
+traveller adds expenses with their receipts and submits; the desk reviews and pays as before, and can still file for
+them), **T-55** (7c1, E1 — *Before you go* shows the risk assessment and *I have read this* records it; a Critical
+trip's ticket waits for it, D-37), **T-56** (7c2 — the Files tab attaches through the scan gate, downloads, and removes
+the traveller's own before submission, D-40; receipts with 7d's claims).
 
 ---
 
 ## 16. Where staff travel shows up outside its own menu
 
-Ten places. Three are worth a minute of the demo; the rest are for the questions.
+Eleven places. Three are worth a minute of the demo; the rest are for the questions.
 
 | Where | What it shows | Worth showing? |
 |---|---|---|
-| **Finance — currencies and conversion** | Every currency picker in this module reads Finance's active-currency list, and every conversion delegates to Finance's `ConvertAsync`. Travel keeps no currency table and invents no rate | **Say it**, in chapter 4 and again on the dashboard. It is the discipline behind Rule 5 |
-| **Procurement — Suppliers** | `VendorId` on every booking points at a Procurement `Supplier`. `api/Suppliers` answers **400**, so there are no selectable vendors and no booking form offers the field (**T-8**) | Only if asked why *"preferred vendor mandatory"* checks nothing |
-| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9), and since 6c a driver kept away overnight travels on a request of their own and Fleet's incidents show on the Compliance tab. UAT has no fleet, so it is not demonstrable there* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
-| **The employee's position → staff level** | The policy guard resolves the applicable policy from the traveller's **staff level, which lives on their position**, not on the employee. A traveller with no position falls back to the organisation-wide policy | Worth one sentence in chapter 13 |
-| **Workflow inbox** (`/workflow/inbox`) | A submitted travel request appears in the assignee's inbox alongside every other approval in the ERP | **Yes** — 30 seconds, and it is the same point as every other module: a manager lives in one inbox |
+| **Finance — currencies and the dated rate** | Every currency picker reads the currencies through HR's own door (`api/hr/currencies` — Finance's answered 403 to the desk, O-19), and every conversion takes **Finance's rate for the day**: each expense at its own date's, a foreign advance at the payment day's (B12, D-15), the hotel cap in the policy's own currency. Travel keeps no currency table and invents no rate | **Say it**, in chapter 4 and again on the dashboard. It is the discipline behind Rule 5's footnote |
+| **Procurement — Suppliers** | A booking names a Procurement `Supplier`: the booking dialogs offer them since Procurement's supplier read was fixed (2026-09-22, **T-8**), and under a policy that makes preferred vendors mandatory a booking must name one (D-1) | Only if asked about preferred vendors |
+| **Fleet — vehicles** | `GroundTransportType.CompanyVehicle` reserves a **Fleet** vehicle asset, which is a different register from HR's own `CompanyAssets`. The demo's Sebrepor trip uses *PrivateCarHire* for exactly that reason. *Since closure lane 6 (slice 6a) the leg makes a real fleet trip — clashes and expiring compliance refused, its status, vehicle, driver and costs read from Fleet, cancelled with the leg or the trip; since slice 6b a paid fuel expense goes into Fleet's fuel log (chapter 9), and since 6c a driver kept away overnight travels on a request of their own and Fleet's incidents show on the Compliance tab. Since lane 8 (8c) the sweep starts a trip when Fleet dispatches its vehicle and tells the desk when every vehicle is back. UAT has no fleet, so it is not demonstrable there; what Fleet still owes is in `docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md`* | Mention it in chapter 5.3 if somebody asks about the pool vehicle |
+| **The traveller's unit and position → the policy** | The policy guard reads the traveller's **own organisation unit** — off the traveller, not the request, so a requester cannot pick a laxer unit — and walks **up the unit tree, nearest first**, so a directorate's policy covers its departments (O-5, lanes 1 and 4). The **staff level** comes from the traveller's **position**; a traveller with no position resolves to the organisation-wide policy. Only an approved policy is ever chosen | Worth one sentence in chapter 13 |
+| **Workflow** | A trip's first stage asks the traveller's line authority, its second the HR role (D-7, Rule 3) — on **Staff Travel → Approvals** (chapter 3a). ⚠ **Not from the generic or mobile workflow inbox**: those advance the engine's step without travel's own service, so the request's status does not follow — cross-module defect **#15** | Say it if asked "can managers approve from their inbox?" — *not yet; from Approvals* |
 | **The bell, and email** *(closure lane 8, slice 8a)* | One topic per event and audience, `StaffTravel.{Event}.Traveller` (in the app and by email) and `.Desk` (in the app, to the HR role's holders but whoever did it), editable on **Administration → Notification Topics**. The desk hears what it must act on: a trip approved (book it), cancelled or sent back for a change by someone outside the desk, an advance to approve, a claim to review, a destination alert sent, and the traveller's messages and files. The approvers keep the workflow engine's own *Approval required*. The old HR-role topics and the engine's three notices to the submitter are switched off — ⚠ a workflow-topic seed switches those three back on until the next travel notice | Only if asked who is told what |
 | **Attendance** *(closure lane 9, slice 9a)* | An approved trip's working days are on the traveller's daily attendance as **On duty**, never over a clock-in, leave or a clerk's entry; the monthly summary counts them as present. The trip's page says how many (chapter 5.1) | **Yes** — open the traveller's attendance for the trip's dates: the days are there, saying which trip |
 | **Leave** *(closure lane 9, slice 9b)* | A leave request over a trip's days — awaiting approval, approved or under way — shows *"Staff travel over these days"* on its page, to the employee, the approver and HR, however its dates were set; on the approvals list, where requests are approved in bulk, as a badge on the row. A warning, not a rule | Only if asked how leave and travel know about each other — travel warns of approved leave at its own submission too |
 | **Separation** *(closure lane 9, slice 9c)* | The clearance page has a **Staff travel** card: the leaver's trips not cancelled, rejected or closed (with live bookings), advances still open and claims not paid, each saying what happens to it — read live, a warning that holds nothing. The separation's approval **cancels the leaver's drafts, submissions and trips sent back**, each through travel's own cancel, *"Left the organisation on {day} — separation SEP-…"*; approved and under-way trips stay for the desk. From the approval on, travel refuses to raise or submit a trip that starts after the leaving day. When Internal Audit releases the final settlement, each advance it recovered is **settled in travel** with an internal note on its trip — and no travel posting, since the settlement's journal is the posting | Only if asked what happens to a leaver's travel — the cancelled trips and the settled advance show on their own pages |
-| **General Ledger** | ⚠ **Nothing.** No travel transaction posts to GL. Advances, claims and payments are recorded in travel's own tables and the Finance hand-off is an open backlog item (D-4) | Say it plainly if a finance director asks — see **T-58** |
+| **Payroll** | ⚠ **Nothing, on purpose.** A claim cannot be paid by payroll offset (D-10): payroll cannot receive one yet, so it would reach nobody. The question is with the payroll owner — `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`, defect **#37** | Say it if asked "can it go through the payslip?" |
+| **General Ledger** | **Claims and advances post** through HR's Finance posting register, each its own event: an advance **paid out**, a claim **approved** (recognised) and **paid** (settled, the advance it recovered as its own leg) since 2026-09-20; **cash handed back** and a **write-off** since lane 3 (2026-10-02). A voided payment reverses its journal. An advance a leaver's settlement recovered posts nothing in travel — the settlement's journal is the posting. Each claim and advance shows its rows on a **Finance** card (chapters 5.4, 9). ⚠ **No travel rule is switched on on UAT**, so its rows read *Unposted*; and on a database seeded with Finance's v2 books no HR posting lands at all — defect **#35** | Say it plainly if a finance director asks — and show a claim's Finance card |
 
 ---
 
 ## 17. Reset — putting the database back
 
-Do this after the room empties. Travel is the **hardest module in HR to reset**, because `hr.head`
-cannot delete anything and three of the live writes are money moving. Read this before you decide
-how much of chapter 9 to perform.
+Do this after the room empties. Travel is the **hardest module in HR to reset**: three of the live writes move money,
+and a number, once drawn, is spent. Since closure lanes 3 and 4 the HR desk holds `HR.Travel.Admin`, so most undos
+are buttons — but a deletion is allowed **only while the record is still a draft of itself** (Rule 2).
 
 | # | What you changed | Undo |
 |---|---|---|
-| 1 | **Travel request created** *(ch. 4, LW 1)* | Open it → **Cancel**, reason `Demonstration`. Cancelling is Write and works; deleting is Admin. A cancelled request with a reason is a clean end state |
-| 2 | **Itinerary activity added** *(ch. 5.2, LW 2)* | Removal is Admin. Either leave it — an extra courtesy call on a study tour is harmless — or `UPDATE StaffTravelItineraryActivities SET IsDeleted = 1 WHERE Title = '…'` |
-| 3 | **Budget set** *(ch. 5.4, LW 3)* | Leave it; it hangs off the request you cancelled in row 1 |
-| 4 | **Insurance recorded** *(ch. 5.5, LW 4)* | Same — it belongs to the cancelled request |
-| 5 | **Comment added** *(ch. 5.6, LW 5)* | Deleting a comment is Admin. Leave it; a comment is a comment |
-| 6 | **Request approved** *(ch. 5.8, LW 6)* | No un-approve, and the **workflow instance** would disagree with a status edit. Leave it approved — that is the honest state — or rebuild |
-| 7 | **Trip marked completed** *(ch. 5.8, LW 7)* | `UPDATE StaffTravelRequests SET Status = 3, CompletedAt = NULL WHERE RequestNumber = '…'` *(3 = Approved)* |
-| 8 | **Claim lines approved** *(ch. 9, LW 8)* | Covered by row 9 if you reset the claim |
-| 9 | **Claim reviewed** *(ch. 9, LW 9)* | `UPDATE StaffTravelExpenseClaims SET Status = 2, FinanceReviewedById = NULL, ReviewedAt = NULL, ReviewNotes = NULL WHERE ClaimNumber = '…'` *(2 = Submitted)*, and set every line back to `Status = 1, AmountApproved = NULL` |
-| 10 | **Claim paid** *(ch. 9, LW 10)* | ⚠ **The hardest one.** Payment recovered the advance, so **two** rows moved. Reset the claim as in row 9, *and* `UPDATE StaffTravelAdvances SET Status = 3, SettledAmount = 0 WHERE AdvanceNumber = '…'` *(3 = Disbursed)*, *and* clear `AdvanceDeducted` on the claim. **If you are not comfortable with that, do not perform LW 10** — read the pay dialog aloud and press Cancel instead |
-| 11 | **Visa requirement added** *(ch. 10, LW 11)* | Removal is Admin. `UPDATE StaffTravelVisaRequirements SET IsDeleted = 1 WHERE …` |
-| 12 | **Destination alert raised** *(ch. 11, LW 12)* | ⋯ → **Edit** → turn **Active** off. That works for `hr.head` and is the better undo anyway — an expired advisory is a real thing |
+| 1 | **Travel request created** *(ch. 4, LW 1)* | Open it → **Cancel**, reason `Demonstration` — a cancelled request with a reason is a clean end state. *(Deleting it is Admin, and only while it is a draft)* |
+| 2 | **Itinerary activity added** *(ch. 5.2, LW 2)* | Remove it (Admin) **while the version is a draft**. A **finalised** version stays finalised — finalise only if you are content to leave it so |
+| — | **Over-cap hotel on Kumasi** *(ch. 5.3, Option B only)* | Its ⋯ menu → **Cancel booking**. The exception's decision stays on Policy Breaches as a record |
+| 3 | **Budget approved** *(ch. 5.4, LW 3)* | **Edit budget**, change a part and save — a change withdraws the approval — then edit it back. The approval's history is the record |
+| 4 | **Insurance recorded** *(ch. 5.5, LW 4)* | Leave it; it belongs to the request you cancelled in row 1 |
+| 5 | **Comment added** *(ch. 5.6, LW 5)* | Leave it — no screen deletes a comment, and it has told the traveller anyway |
+| 6 | **Request approved** *(ch. 5.8, LW 6)* | No un-approve, and the **workflow instance** would disagree with a status edit. Leave it approved — that is the honest state — or rebuild. ⚠ An approved trip now holds its days on attendance (lane 9a) and receives the destination's alerts |
+| 7 | **Trip marked completed** *(ch. 5.8, LW 7)* | `UPDATE StaffTravelRequests SET Status = 7, CompletedAt = NULL WHERE RequestNumber = '…'` *(7 = In progress — the button is offered only once the trip is under way)*. The sweep completes it again the day after it ends |
+| 8–9 | **Claim lines reviewed, claim approved** *(ch. 9, LW 8–9)* | Leave it approved — a reviewed claim is a clean end state — or put it back to *Submitted* in SQL: the claim `Status = 2, TotalApproved = 0, TotalRejected = 0, NetPayable = TotalClaimed, FinanceReviewedById = NULL, FinanceReviewedAt = NULL, ReviewNotes = NULL`; each line `Status = 1, AmountApproved = NULL, AmountRejected = 0, RejectionReason = NULL, ReviewedById = NULL, ReviewedAt = NULL`. The Finance register's approval row stays; a later approval is recognised as the same event |
+| 10 | **Claim paid** *(ch. 9, LW 10, and the Kumasi recovery beat)* | **Void payment** as `hr.head` — an administrator who neither claimed nor paid — with a reason: the claim returns to *Approved*, the advance gets back what the payment recovered, the journal is reversed or its unposted row marked *Skipped*, and the trip gets an internal note. No SQL (T-39). A **Kumasi claim** made for the beat cannot then be deleted (only a draft can): void it, and leave it approved, or soft-delete it in SQL — its number is spent either way |
+| 11 | **Visa requirement added** *(ch. 10, LW 11)* | The bin icon on its row (Admin) |
+| 12 | **Destination alert raised** *(ch. 11, LW 12)* | ⋯ → **Edit** → untick **Active** — the better undo anyway; an expired advisory is a real thing. Remove (Admin) only while it has reached no trip |
 | 13 | **Travel policy approved** *(ch. 13, LW 13)* | **Withdraw** (Admin — any HR officer since closure lane 4) stands it down and keeps the record that it was approved. SQL, to make it a draft again: `UPDATE StaffTravelPolicies SET ApprovedById = NULL, ApprovedAt = NULL, IsCurrentVersion = 0 WHERE PolicyName = 'TDC Staff Travel Policy 2026'` |
-| — | **§ 2.4 Option B's permission grant** | **Retired by closure lane 4.** The HR role holds `HR.Travel.Admin` by design (D-3): the role map carries it, `seed-db` grants it, and UAT holds it since 2026-10-02. ⚠ **Do not remove it** — the HR desk's budget approvals, breach decisions and the reminders screen depend on it |
+| — | **The HR role's `HR.Travel.Admin`** | **Not a demo change.** The HR role holds it by design (D-3): the role map carries it, `seed-db` grants it, UAT since 2026-10-02. ⚠ **Do not remove it** — budget approvals, breach decisions, voids and the reminders screen depend on it |
 
 **The one thing that cannot be put back** is the **request number** — `TR-2026-00005` is spent. It
 comes from the shared `NumberSequences` table, which only moves forward, by design. The same is
@@ -2735,8 +3281,8 @@ Get-CimInstance Win32_Process -Filter "Name='ErpSystem.Api'" |
 powershell -File .\scripts\New-UatDatabase.ps1
 ```
 
-⚠ A rebuild renumbers every travel request in this book and costs you chapter 2's prep — including
-§ 2.4's policy decision, which you will have to make again.
+⚠ A rebuild starts every number again, and it **changes which side of every fork you are on**: a rebuilt database is the *rebuilt demo* of each walk, with the policy in force, London
+approved, the Hilton through D-8 and two budgets instead of four. Re-read chapter 2 after it.
 
 ---
 
@@ -2749,255 +3295,88 @@ other in HR, so the cutting is genuinely painful — cut in the order given at t
 |---|---|---|---|
 | 1 | `/hr/travel` | 2 | four trips, four shapes; the globe icons; **money in each row's own currency** |
 | 2 | `/hr/travel/[Lagos]` → **Itinerary** | 4 | the three legs, then **expand leg two's activities** — named contacts at LFZDC, mandatory flags. *"That is not a diary"* |
-| 3 | The same trip → **Bookings** | 3 | the flight's **two segments** with terminals and seats; then the Lagos hotel inside the cap |
-| 4 | `/hr/travel/[London]` → **Compliance** | 5 | *"fifteen working days to process"*; then Lagos's *"no visa, ECOWAS, zero days"*; then the **risk mitigation notes**. This is the duty-of-care beat |
-| 5 | `/administration/hr/travel/policies` → the policy | 4 | the four enforced caps, then **Draft**, then *"I cannot sign it, and that is the point"* |
-| 6 | `/hr/travel/claims/[Sebrepor]` | 5 | the three lines and the **receipt the line points at**; **review ≠ approving the lines**; then open the pay dialog and **read the advance recovery without pressing** |
+| 3 | `/hr/travel/[London]` → **Bookings** | 3 | the flight's **two segments** with terminals and seats; then the **Hilton over the cap** — on a rebuilt demo authorised by the second officer (D-8), on UAT said rather than shown |
+| 4 | The same trip → **Compliance** | 5 | *"fifteen days to process"*, and the flight waiting for the visa; then Lagos's *"no visa, ECOWAS, zero days"*; then the **risk mitigation notes**. This is the duty-of-care beat |
+| 5 | `/administration/hr/travel/policies` → the policy | 4 | the caps, then the **State**: on UAT *Draft — "I cannot sign it, and that is the point"*; on a rebuilt demo *In force*, signed by the second officer — and Policy Breaches' one row |
+| 6 | `/hr/travel/claims/[Sebrepor]` | 5 | the three lines and the **receipt the line points at**; **review ≠ approving the lines**; then Rule 6 in one sentence — the advance comes back when the claim is **paid**, by an officer who reviewed none of it |
 | 7 | `/hr/travel/dashboard` | 2 | the tiles, then the **currency sentence** |
 
 Cut, in this order if you must: the dashboard, then group travel *(never in the short path anyway)*,
-then the bookings tab, then the itinerary — **never chapters 4, 5 or 6 of this table**, which are
+then the bookings tab, then the itinerary — **never rows 4, 5 or 6 of this table**, which are
 the module's argument.
 
-**Do not put in the short path:** raising a request *(Rule 3's two dropdowns)*, paying a claim
-*(Rule 6 and the reset cost)*, the reminders screen *(403)*, or adding group participants.
+**Do not put in the short path:** raising a request *(it mints a fifth trip, and the register reads four)*, paying a
+claim *(it needs the second officer, and its undo is a void)*, **Run a sweep now** *(it dispatches and moves trips)*,
+or adding a traveller to the group.
 
 ---
 
 ## 19. What this walk found
 
-> ⚠ **The live state of every finding below is now kept in
-> `HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` (2026-10-01)** — its § 3d places each T-finding in a lane, as
-> deferred, or as already fixed. Three statements here were already wrong when that review re-read the
-> code: **T-5** (Finance's conversion was fixed on 2026-09-10), **T-53** (the reminder sweep has been
-> hosted daily since 2026-08-17) and **T-28** (the server does refuse to cancel a Cancelled, Completed
-> or Closed request). This section is the record of the walk, not a to-do list.
->
-> **Closure lane 0 (2026-10-01, committed `0b8cdf124`)** changed what several steps here show: **T-3,
-> T-12, T-15 and T-27 are fixed** (every dropdown is written from its enum; the composer has an
-> *Internal note* toggle), the request form now sends back the fields the **T-29** replace would erase,
-> the **T-6** copy says recovery happens on payment, and the attachment upload accepts all seven types.
-> It also found that **no travel currency dropdown could be filled by an HR officer or a traveller** —
-> they read a Finance list that answers 403 (closure finding O-19, fixed in the same lane). Where a step
-> below warns about one of these, the warning describes the code before lane 0.
->
-> **Closure lane 5, bookings and itinerary (2026-10-02) — lane 5 complete** (5a committed `4b7d12302`, 5b staged).
-> **The itinerary (5b):** planned while the trip is open; its status the server's — Draft, **Finalised**, Superseded,
-> Cancelled with the trip (D-25); a finalised or superseded version not changed; the days the trip's; the version in
-> force not deleted (O-15); a leg links only this trip's bookings and is **flagged when its date disagrees with the
-> booking's (T-19)**; legs and activities edited and removed. **A Critical or Emergency destination alert in force over
-> the trip shows as a warning on the request page (T-45).** **Bookings (5a):** **Bookings live on an approved trip** (D-23): made, changed, held, confirmed and ticketed while
-> the trip is Approved or under way, cancelled on any trip not closed, completed or a no-show once it has started.
-> Every booking falls inside the trip's dates, a day either side. **The status moves only by the row's verbs** —
-> an edit never changes it, a new booking is Pending, and the stamps, the fee, nights and totals are the server's
-> (D1, D5). Cancelling records a reason as an internal note and, on a flight or hotel, the supplier's fee. **A flight
-> on a trip needing a visa is ticketed once a visa application is approved or not required (T-24's ticketing half).**
-> Only a pending booking is deleted. **A trip with a confirmed or ticketed booking is not cancelled** until those are;
-> its holds are cancelled with it (D-24). Flight segments have a screen at last; hotels a star rating, ground transport
-> an actual cost. The demo pack approves London and no longer books Lagos (D-26) — § 2.1 and the head of § 5.3 say
-> what that changes on screen.
->
-> **Closure lane 4, policy and authority (2026-10-02) — lane 4 complete** (4a committed `19f20f2f2`, 4b
-> `3a6792a30`, 4c staged). **The policy (4a):** real cabin classes; an end no earlier than its start; a
-> staff-level band in rank order; its money limits in a stated currency (base by default; the hotel cap had
-> none, **T-9 fixed**). The server numbers versions, and whoever drafted or last changed a policy does not
-> approve it (**T-50 fixed**). A directorate's policy covers its units, and the nearest unit's wins. A
-> version approved to start later takes over on its own date instead of at once. A USD hotel rate is
-> converted at Finance's rate before it meets the cap. **Bookings (4b):** the policy's advance notice and
-> preferred suppliers bind (D-1). Ticking an exception now **asks** for it with a reason. The booking stays
-> *Pending*, never *Confirmed*, until a travel administrator who neither booked it nor asked authorises it,
-> or refuses it with a reason, on the new **Staff Travel → Policy Breaches** screen (D-8). An authorised
-> exception stands until the booking changes. A booking with an exception is cancelled, not deleted (D-20).
-> A policy exception is decided at the server's time by an administrator who did not raise it. A trip
-> rated, or assessed, *Prohibited* is not submitted or approved. **Authority (4c):** the **HR role holds
-> `HR.Travel.Admin`** (D-3; **T-2 fixed**), and each Admin act is refused to whoever did the thing it
-> checks: a budget to whoever set or last changed it (D-19), a comment edited only by its author (D-21).
-> The reminders screen opens to the HR desk (**T-52 fixed**). On the demo, `hr.officer` decides what
-> `hr.head` did. Rules 1 and 2, § 2.4 Option B and chapters 13–14 were updated in place; lane 10 rewrites
-> the six rules.
->
-> **Closure lane 3, the money chain (2026-10-02) — lane 3 complete** (3a committed `e2785ce7b`, 3b
-> `f49e5eb9c`, 3c `b08bd498d`). **Advances (3a):** raised only on an approved trip or one under way, for the
-> trip's traveller; approved above zero, no more than asked and within the trip's approved budget; nobody
-> approves, pays out or writes off their own, and the approver does not pay it out; **Reject, Cancel, Cash
-> back and Write off** (Admin) buttons; nothing is owed until the cash goes out; the sweep marks an advance
-> **Overdue** and a write-off marks it **Written off** (**T-21 fixed**); **Staff Travel → Advances** lists
-> overdue settlements; a deleted claim's or advance's number is never issued again. **Claims (3b):** filed
-> for the trip's traveller, in the base currency, only on a trip approved, under way or completed; each
-> expense valued at Finance's rate on its own date (**T-37 fixed**); under an approved policy, receipts
-> above its threshold (**T-35 fixed**, a per diem excepted) and its claim window (**T-36 fixed**) — both
-> bind only once a policy is approved, which Rule 1 still blocks on the demo; an expense approved in whole
-> or part with a reason for any cut; a claim **returned** to the claimant with a reason (**T-38 fixed**);
-> nobody reviews or pays their own claim and no reviewer pays it; no payroll offset; paying in full past
-> advance cash the claim does not name needs a recorded reason (**T-57** — naming the advance is still what
-> recovers it, Rule 6). **The budget and the void (3c):** a budget is set once the trip is approved, in the
-> trip's currency (**T-22 fixed**), within the trip's approved budget, its parts empty or adding up to the
-> total; a travel administrator approves it, and a change withdraws the approval; *Actual* now counts
-> advance cash paid out as well as claims paid, and an overrun is **flagged, not refused** (**T-20** stays
-> open — whether it should refuse is TDC's question); a travel administrator who neither claimed nor paid
-> it can **Void payment** on a paid claim with a reason — the journal is reversed, the advance's recovery
-> undone and the claim goes back to approved (**T-39 fixed**). The three Admin acts are in Rule 2's table.
-> *(Written before lane 4: "no demo persona holds Admin, so on the demo the budgets stay unapproved". Since
-> lane 4 the pack approves Kumasi's budget as `hr.officer` and leaves Sebrepor's awaiting approval.)*
->
-> **Closure lane 2, slice 2b (2026-10-02, committed `519418f00`) — lane 2 complete.** The screens: a **Travel
-> Approvals** queue under Staff Travel; the request page's own **Approve, Reject and Return** buttons,
-> drawn only for whoever may decide at the stage, with a banner saying whose decision it is; the approve
-> dialog asks for the **approved budget** at the last stage, prefilled with the estimate (**T-10
-> fixed**); an approver without travel permission sees the trip, not the desk's tabs. The workflow
-> designer now keeps the travel route's named approvers when the route is edited (cross-module defect
-> #34).
->
-> **Closure lane 2, slice 2a (2026-10-02, committed `4e4d85b2f`)** put travel approval in **two stages** — the
-> traveller's line manager, then HR (§ 1.6) — and gave the line manager a way in: the traveller's
-> supervisor or head of unit can now open the request, its comments and attachments, find it in a queue
-> of what waits for them, and approve, reject or return it, with no travel permission and no Manager
-> role; a Manager outside the traveller's line can do none of it and is no longer told about it. HR sets
-> the **approved budget** at its stage (**T-10** is fixed at the API; the dialog that asks for it is the
-> next slice). The screens — the approvals queue, the approver's view of the request — are slice 2b.
->
-> **Closure lane 1, slice 1c (2026-10-02, committed `895996b6f`) — lane 1 complete.** Groups now move by their own
-> buttons (**Open to travellers, Close, Reopen, Cancel group**) instead of an edit's status dropdown; the
-> **traveller limit binds** (**T-31 fixed**; a cancelled or rejected trip no longer holds a place); an
-> **existing draft request can be linked** to a group (**T-30 fixed**) and takes the group's destination
-> and dates; a new destination or new dates **reach every draft or returned trip** on the group
-> (**T-32 fixed** — submitted and approved trips keep their own and are marked "differs from the group");
-> a group cannot be cancelled while its travellers' trips are going ahead; deleting one takes its
-> travellers off it. The add-traveller dialog asks for purpose, risk, visa and health clearance. A
-> comment is edited or deleted by its author or a travel administrator only, and the traveller's portal
-> receives no internal note and no policy exception from the server.
->
-> **Closure lane 1, slice 1b (2026-10-02, committed `8fadfd31e`)** gave the request its other verbs: an approver can
-> **return a request for revision** with a reason, an approved trip can be sent back with **Request
-> change** and approved again (its bookings, advances and claims stay), the requester can **recall** a
-> submission, and the desk can **close** a completed trip once nothing is left to settle — after which
-> nothing more can be booked, advanced or claimed on it. **Cancel** now withdraws the approval in
-> progress, and is refused for a trip under way and for an approved trip whose advance cash is still out;
-> **Mark completed** waits for the trip to start; the request records **who approved** it. **T-7** is half
-> fixed (Closed has a writer; InProgress waits for lane 8) and **T-28** stays corrected.
->
-> **Closure lane 1, slice 1a (2026-10-02, committed `e1d050da2`)** changed the request form and submission: the form no
-> longer offers an organisation unit — a request carries the **traveller's own unit**, and whether it is
-> international follows from its two countries; a **Policy and limits** card shows the approved policy
-> that will apply and its limits before saving (**T-16 fixed**); submission refuses a trip estimated above
-> that policy's single-trip limit (**T-17 fixed** — it binds only once a policy is approved, which **T-1**
-> still blocks on the demo), a trip costed at nothing, a trip over the days of another of the traveller's
-> trips, and — from the portal — a trip whose departure has passed (the desk submits that one with a
-> reason, kept as an internal note). A request can be edited only while it is a Draft or returned for
-> revision, and travel cannot be raised for someone who has left. Approved leave over the trip's days is
-> shown as a warning on submission.
+The first edition's walk (2026-09-17) found **fifty-eight findings, T-1…T-58**. The travel final closure
+(2026-10-01…04) took each one into a lane, fixed it, kept it by decision or deferred it. **The live record is
+`HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` § 3d**, and each lane's *As built* there says what changed; the closure's own
+findings (A–O, E, K and the decisions D-1…D-62) are in the same plan. Each chapter of this guide names the findings
+fixed since the first edition under its *Known gaps*.
 
-**Fifty-eight findings.** This is the most complete module in HR by some distance — it was built as
-twelve slices with 506 harness assertions and two closure slices on top, and the density of
-*correct* decisions in it is higher than anywhere else in the product. Six behaviours will catch
-you out in a demonstration; **five** are the ones to fix before it is called finished.
+| Where each one stands | Findings |
+|---|---|
+| **Fixed by the closure** | lane 0: T-3, T-12, T-15, T-27, T-29 · lane 1: T-7 (with lane 8), T-16, T-17, T-28, T-30, T-31, T-32 · lane 2: T-10 · lane 3: T-21, T-22, T-35, T-36, T-37, T-38, T-39, T-57 · lane 4: T-1 and T-2 (D-3), T-9, T-46, T-50, T-52 · lane 5: T-19, T-24/T-42 (the ticket waits for the visa) · lane 6: T-8's vehicle half · lane 7: T-23/T-55, T-24/T-42 (the register sets the flag), T-25, T-26, T-40, T-44, T-54, T-56 |
+| **Fixed upstream — the first edition was wrong or overtaken** | T-5 and T-37's conversion half (Finance's conversion fixed 2026-09-10), T-8's supplier read (2026-09-22), T-43 (the alert body), T-53 (the sweep has run daily since 2026-08-17), T-58 (claims and advances post since 2026-09-20 — chapter 16), T-44's per-trip button (it existed) |
+| **Kept by decision** | **T-4** — the policy's rule register stays read-only (D-29); **T-49** — the older trip-level exception register stays without a screen (D-29; a *booking's* breach has one, chapter 13a); **T-6** — the advance is recovered on payment (Rule 6); **T-51** — a policy's level band targets `StaffLevel` (informational) |
+| **A warning, not a block** | **T-45** — a Critical or Emergency alert in force over a trip shows on the request page; whether it should block is TDC's question |
 
-### The six that affect a demonstration
+**Still open — deferred, each TDC's call or a later slice (plan § 6):**
 
-| # | Where | Finding |
+| # | Finding | Chapter |
 |---|---|---|
-| **T-1** | policies | **Every policy in every tenant is unapproved, so travel caps bind nowhere.** Approval is `HR.Travel.Admin` *and* needs an employee-linked caller, and no demo login is both. **This is a real behaviour change on the day somebody signs one** *(lane 4, D-3: `hr.officer` can sign now; the demo pack leaves the policy a draft until lane 10)* |
-| **T-2** | everywhere | **`hr.head` cannot delete anything, approve a policy, or authorise a breach.** Mostly correct design — Admin here is a *financial* authority — but every button still renders *(**fixed** by lane 4, D-3: HR holds Admin, each act refused to whoever did it — Rule 2)* |
-| **T-3** | request form | **Two dropdown values 400** — Purpose → *Negotiation* and Risk level → *Extreme* are not enum members. Five purposes and two risk levels are unreachable |
-| **T-4** | policies | **The rule register is enforced by nothing and ships read-only** — a recorded decision, not an omission |
-| **T-5** | everywhere | **Finance's currency conversion is inverted** and travel inherits it deliberately. The dashboard and the claims queue both refuse to add mixed currencies and say why |
-| **T-6** | claims | **The advance is recovered on payment, not approval** — so `netPayable` and the pay dialog disagree until the moment you press the button |
+| T-11 | The register is unpaged | 3 |
+| T-13 | The register has no search, date or traveller filter, though the API has all three | 3 |
+| T-14 | The register has no export | 3 |
+| T-18 | Only flights and hotels are capped — ground transport and car rentals have no policy check | 5.3 |
+| T-20 | A budget's parts do not bind; only the derived figures move, flagged red | 5.4 |
+| T-33 | The claims queue is unpaged and unfiltered | 8 |
+| T-34 | The claims queue has no export | 8 |
+| T-41 | The visa register has no reverse view — where does a given passport travel freely? | 10 |
+| T-47 | The dashboard has no date range | 12 |
+| T-48 | Actual spend is not on the dashboard, though each trip's budget derives it | 12 |
 
-### The five worth fixing first
-
-| # | Where | Finding | Why it is first |
-|---|---|---|---|
-| **T-3** | request form | **Write the two unions from the enums.** A dropdown value that 400s is the only thing in this module that fails in front of a user for no reason | Twenty minutes, and it is the one a user will hit |
-| **T-1** | policies | **Seed an approved policy, or decide that travel administrators are employee-linked accounts.** A control nobody can switch on is not a control | It is a seeding decision, not code — and until it is made, the module's best feature is inert |
-| **T-23 / T-55** | compliance | **Give the risk-assessment acknowledgement a `/me` route**, exactly as the destination alert already has. Today the gate and the service check do not overlap, so **nobody** can acknowledge a security briefing | It is the duty-of-care record, and it is unreachable |
-| **T-24 / T-42** | compliance | **Make `RequiresVisa` gate something.** A trip flagged as needing a visa can be approved, booked and completed with no visa application, into a country the requirements table says needs one *(lane 5: the ticket now waits for the visa; the derived flag is lane 7's)* | It is the failure the module exists to prevent |
-| **T-58** | finance | **The GL hand-off.** No travel transaction posts to the general ledger; advances, claims and payments live only in travel's tables | It is the open item a finance director will find first |
-
-### Everything else, by area
-
-| # | Area | Finding |
-|---|---|---|
-| T-7 | requests | `InProgress` and `Closed` are unreachable — nothing moves a trip into progress on departure or closes it after payment *(fixed: lane 1's Close trip, lane 8's sweep — chapter 14)* |
-| T-8 | bookings | **No vendor field on any booking form**; Procurement's `SuppliersController` answers 400, so *preferred vendor mandatory* checks nothing |
-| T-9 | policies | **The hotel cap has no currency** — a bare decimal compared against a booking's rate. Sound only while both are in the same currency |
-| T-10 | requests | `approvedBudget` is never sent on approval, so the Overview's *Approved budget* reads an em dash on approved trips |
-| T-11 | register | Unpaged — `requests/all`, not `requests` |
-| T-12 | register | The type filter offers four of eleven travel types |
-| T-13 | register | No search, no date filter, no traveller filter — all three exist on the API |
-| T-14 | register | No export |
-| T-15 | request form | `Emergency` is missing from the travel-type list |
-| T-16 | request form | The policy is neither chosen nor shown when a request is raised |
-| T-17 | request form | `MaxSingleTripBudget` is not checked against the estimate |
-| T-18 | bookings | **Only flights and hotels are capped** — ground transport and car rentals have no policy check at all |
-| T-19 | bookings | Nothing reconciles a booking against the itinerary |
-| T-20 | finance | The budget's per-line splits are not enforced — only the derived *Committed* figure moves |
-| T-21 | finance | `Overdue` and `WrittenOff` advance statuses are set by nothing |
-| T-22 | finance | A budget carries a currency on its DTO that no form offers |
-| T-25 | compliance | Health requirements are shown per country and never checked against the traveller |
-| T-26 | compliance | An expiring passport blocks nothing; only the reminder sweep reads the expiry |
-| T-27 | comments | **An internal comment cannot be posted from the screen** — the composer always sends `isVisibleToTraveller: true` |
-| T-28 | requests | Cancelling has no status guard on the server; the screen's own check is the only thing stopping a completed trip being cancelled |
-| T-29 | requests | The update DTO is a **replace, not a patch** — every omitted field is written back as its default |
-| T-30 | groups | **No way to link an existing request to a group from any screen** — the only door creates new ones |
-| T-31 | groups | `maxParticipants` is not enforced |
-| T-32 | groups | The group's dates and destination are neither pushed to nor checked against its participants |
-| T-33 | claims | Unpaged and unfiltered, on the screen finance lives on |
-| T-34 | claims | No export |
-| T-35 | claims | **`ReceiptRequiredAbove` is not enforced** — a line of any size is accepted with no receipt |
-| T-36 | claims | `ExpenseSubmissionDays` is not enforced |
-| T-37 | claims | Claim and line currencies may differ, and the conversion is Finance's inverted one |
-| T-38 | claims | `Returned` is set by nothing — a claim cannot be sent back for more information |
-| T-39 | claims | **There is no payment reversal** |
-| T-40 | visa requirements | Nothing expires a requirement, on a page whose own subtitle says a wrong entry is worse than a missing one |
-| T-41 | visa requirements | No reverse view — you cannot ask where a given passport travels freely |
-| T-43 | alerts | *(closed)* The compliance strip showed alerts with no body for months, because the per-country read returned a summary DTO and the client typed it as the full record |
-| T-44 | alerts | *(closed — closure lanes 7a and 8a)* **Raising an alert notified nobody automatically** — notifications were created one at a time by an endpoint no screen calls. An active alert now reaches every approved or under-way trip in its window, the traveller in the app and by email |
-| T-45 | alerts | An alert does not flag or block a booking to the destination it warns about, at any severity |
-| T-46 | requests | `TravelRiskLevel.Prohibited` prohibits nothing |
-| T-47 | dashboard | No date range — it is always "now" |
-| T-48 | dashboard | Actual spend is not on it, though it is derived per request |
-| T-49 | policies | **The policy-exception flow has no screen at all** — withheld deliberately, because nothing raises an exception until rule evaluation exists |
-| T-50 | policies | Version number and *is current version* are caller-declared; nothing stops two current versions |
-| T-51 | policies | `AppliesToLevelFromId` targets `StaffLevel`, not a salary level — an FK's name is not its target |
-| T-52 | reminders | **The reads are Admin-gated with the writes**, so the travel desk cannot see the queue it would act on |
-| T-53 | reminders | Nothing runs the sweep on a schedule; the only trigger is the button |
-| T-54 | portal | **The traveller cannot raise an expense claim** — the one part of the money chain they would expect to start |
-| T-56 | portal | The traveller cannot upload a document or a receipt |
-| T-57 | claims | Choosing the advance when filing is what links the recovery — it is **not** inferred from the trip, so a claim filed without it is paid in full |
+*Seen while rewriting this guide (lane 10):* a travel document's verifier may be its owner — the two-person rule does
+not reach verification (chapter 10a).
 
 ### What is genuinely strong here
 
-This list is longer than the demo-affecting one, and that is the honest summary of the module:
+This list is longer than the open one, and that is the honest summary of the module:
 
-- **The policy guard is a real financial control**, correctly placed: it refuses at the point of
-  writing a booking, resolves the applicable policy from the traveller's staff level and unit rather
-  than trusting the caller, takes domestic-or-international **from the request** so a booking cannot
-  get a second opinion, and **returns the exception flag to store rather than accepting the caller's
-  claim of it**. Before it existed, a caller could book First class, declare that the policy allowed
-  First, tick their own exception, and nothing refused it.
-- **Who may approve a breach is separated from who may book.** A travel clerk with Write cannot
-  authorise their own exception; it needs Admin. And the service takes that decision as an explicit
-  parameter rather than inspecting claims itself — *because a service that quietly inspects the
-  caller's identity is the thing that made these fields spoofable in the first place.*
-- **A policy is a draft until signed**, so the person spending the money cannot set their own limit.
-- **The advance–claim link closes the money loop**, at payment, with `min(outstanding, approved)` —
-  and the pay dialog is deliberately built not to quote a figure the act is about to change.
-- **Around twenty actor holes were closed.** Every *"who did this"* used to be read from the request
-  body; all five actor ids are now the token, and none is a form field.
-- **Reviewing is not updating.** Three separate endpoints stamp a decider, and the plain update
-  cannot touch those fields.
-- **Derived money is recomputed on read, onto the DTO rather than the entity** — because a
-  write-only rollup is stale immediately, and a read that writes is a different problem.
-- **Mixed currencies are never silently added**, on either the dashboard or the claims queue, and
-  both say why on the screen.
-- **`isInternational` is derived from the two countries** rather than being a boolean a request could
-  lie about.
-- **The self-service surface takes no employee id anywhere**, and its 404 deliberately does not
-  distinguish "not yours" from "deleted".
-- **Two features were deliberately *not* shipped** — the rule editor and the exception flow — on the
-  argument that an editable control that does nothing creates false assurance. The write paths stay
-  implemented and harness-covered so enforcement is a screen change. That is a better answer than
-  the feature would have been.
+- **The policy guard is a real financial control**, correctly placed: it refuses at the point of writing a booking,
+  resolves the applicable policy from the traveller's own unit — walking up the tree — and staff level rather than
+  trusting the caller, takes domestic-or-international **from the request** so a booking cannot get a second opinion,
+  and **returns the exception flag to store rather than accepting the caller's claim of it**. Before it existed, a
+  caller could book First class, declare that the policy allowed First, tick their own exception, and nothing
+  refused it.
+- **A breach is decided by somebody else.** A booking over the cap is saved Pending, and only a travel administrator
+  who neither booked it, asked for it nor travels on it can let it through (D-8) — on a screen that shows who did.
+- **A policy is a draft until a second person signs it**, so the person who drafts the limits cannot put them in force
+  (C3), and the person spending the money cannot set their own.
+- **Every money act takes two people** — a budget, an advance, a claim's payment, a payment's void — and nobody
+  approves, pays or is paid their own (Rule 5).
+- **The advance–claim link closes the money loop**, at payment, with `min(outstanding, approved)` — the pay dialog is
+  built not to quote a figure the act is about to change, and a claim that leaves the traveller's advance out cannot
+  be paid in full without a reason.
+- **Trips move themselves.** The nightly sweep starts, completes and closes trips by their dates and their money, and
+  chases twelve kinds of date to the people who act on them.
+- **Around twenty actor holes were closed.** Every *"who did this"* used to be read from the request body; every actor
+  id is now the token, and none is a form field.
+- **Reviewing is not updating.** Separate endpoints stamp a decider, and the plain update cannot touch those fields.
+- **Derived money is recomputed on read, onto the DTO rather than the entity** — because a write-only rollup is stale
+  immediately, and a read that writes is a different problem.
+- **Mixed currencies are never silently added**, on either the dashboard or the claims queue, and both say why on the
+  screen.
+- **`isInternational` is derived from the two countries** rather than being a boolean a request could lie about.
+- **The self-service surface takes no employee id anywhere**, and its 404 deliberately does not distinguish "not
+  yours" from "deleted".
+- **One feature is still deliberately *not* shipped** — the rule editor — on the argument that an editable control
+  that does nothing creates false assurance. That is a better answer than the feature would have been.
 
 ---
 
@@ -3006,50 +3385,55 @@ This list is longer than the demo-affecting one, and that is the honest summary 
 | # | Route | Chapter | Persona |
 |---|---|---|---|
 | 1 | `/hr/travel` | 3 | hr.head |
-| 2 | `/hr/travel/new` | 4 | hr.head |
-| 3 | `/hr/travel/[id]` — Overview | 5.1 | hr.head |
-| 4 | `/hr/travel/[id]` — Itinerary | 5.2 | hr.head |
-| 5 | `/hr/travel/[id]` — Bookings | 5.3 | hr.head |
-| 6 | `/hr/travel/[id]` — Finance | 5.4 | hr.head |
-| 7 | `/hr/travel/[id]` — Compliance | 5.5 | hr.head |
-| 8 | `/hr/travel/[id]` — Comments | 5.6 | hr.head |
-| 9 | `/hr/travel/[id]` — Attachments | 5.7 | hr.head |
-| 10 | `/hr/travel/[id]` — Workflow | 5.8 | hr.head |
-| 11 | `/hr/travel/[id]/edit` | 6 | hr.head |
-| 12 | `/hr/travel/groups` | 7 | hr.head |
-| 13 | `/hr/travel/groups/[id]` | 7 | hr.head |
-| 14 | `/hr/travel/claims` | 8 | hr.head |
-| 15 | `/hr/travel/claims/[id]` | 9 | hr.head |
-| 16 | `/hr/travel/claims/new` | 9b | hr.head |
-| 17 | `/hr/travel/visa-requirements` | 10 | hr.head |
-| 18 | `/hr/travel/alerts` | 11 | hr.head |
-| 19 | `/hr/travel/dashboard` | 12 | hr.head |
-| 20 | `/administration/hr/travel/policies` (+ `new`, `[id]`) | 13 | hr.head *(+ admin)* |
-| 21 | `/administration/hr/travel/reminders` | 14 | **admin only** |
-| 22 | `/me/travel` (+ `new`, `[id]`, `[id]/edit`) | 15 | **staff** |
-| — | `/workflow/inbox` | 16 | the assignee |
+| 2 | `/hr/travel/approvals` | 3a | whoever a trip's stage asks — a line authority, then the HR role |
+| 3 | `/hr/travel/new` | 4 | hr.head |
+| 4 | `/hr/travel/[id]` — Overview | 5.1 | hr.head |
+| 5 | `/hr/travel/[id]` — Itinerary | 5.2 | hr.head |
+| 6 | `/hr/travel/[id]` — Bookings | 5.3 | hr.head *(hr.officer authorises a breach)* |
+| 7 | `/hr/travel/[id]` — Finance | 5.4 | hr.head *(hr.officer approves the budget, pays an advance out)* |
+| 8 | `/hr/travel/[id]` — Compliance | 5.5 | hr.head |
+| 9 | `/hr/travel/[id]` — Comments | 5.6 | hr.head |
+| 10 | `/hr/travel/[id]` — Attachments | 5.7 | hr.head |
+| 11 | `/hr/travel/[id]` — Workflow | 5.8 | hr.head |
+| 12 | `/hr/travel/[id]/edit` | 6 | hr.head |
+| 13 | `/hr/travel/groups` | 7 | hr.head |
+| 14 | `/hr/travel/groups/[id]` | 7 | hr.head |
+| 15 | `/hr/travel/claims` | 8 | hr.head |
+| 16 | `/hr/travel/advances` | 8a | hr.head |
+| 17 | `/hr/travel/claims/[id]` | 9 | hr.head reviews · **hr.officer pays** |
+| 18 | `/hr/travel/claims/new` | 9b | hr.head |
+| 19 | `/hr/travel/visa-requirements` | 10 | hr.head |
+| 20 | `/hr/travel/documents` | 10a | hr.head |
+| 21 | `/hr/travel/alerts` | 11 | hr.head |
+| 22 | `/hr/travel/dashboard` | 12 | hr.head |
+| 23 | `/administration/hr/travel/policies` (+ `new`, `[id]`) | 13 | hr.head drafts · **hr.officer approves** |
+| 24 | `/hr/travel/breaches` | 13a | hr.head reads · **hr.officer decides** |
+| 25 | `/administration/hr/travel/reminders` | 14 | hr.head *(Admin, since lane 4)* |
+| 26 | `/me/travel` (+ `new`, `[id]`, `[id]/edit`, `claims/[id]`, `documents`) | 15 | **staff** |
+| — | `/workflow/inbox` | 16 | ⚠ **not for travel** — it strands the request (#15); approve on route 2 |
 
 ---
 
 ## Appendix B — the permission map, in one table
 
-`hr.head` holds **Read**, **Write** and **Approve**, and, since closure lane 4 (D-3), **Admin**. Before
-lane 4 it did not. The rows below describe the tiers; Rule 2 lists who each Admin act is refused to.
+`hr.head` and `hr.officer` hold **Read**, **Write**, **Approve** and, since closure lane 4 (D-3), **Admin**. The
+rows below describe the tiers; Rule 2 lists who each act is refused to, whatever the tier.
 
 | Tier | Actions |
 |---|---|
-| **No permission — signed in and internal** | the whole **`api/staff-travel/me`** surface: list, read, create, update, submit and cancel **your own** travel request; read and **acknowledge your own** destination-alert notifications. It takes no employee id anywhere |
-| **`HR.Travel.Read`** | the **entire controller set** carries it at class level: every read of requests, groups, comments, attachments, itineraries, legs, activities, all four booking kinds and their segments, budgets, advances, claims and lines, per-diem rates, policies, rules, exceptions, documents, visa requirements, visa applications, risk assessments, alerts, notifications, insurance and health requirements — plus the **dashboard** |
-| **`HR.Travel.Write`** | raise, amend, **submit**, **approve**, **reject**, **cancel** and **complete** a travel request; add and amend comments and attachments; create and version **itineraries**, legs and activities and **set the current version**; create and amend **every booking kind** *(subject to the policy guard)*; set a **budget**; request, **approve** and **disburse** an advance; create, add lines to, **submit**, **review a line**, **review** and **pay** an expense claim; maintain **per-diem rates**; author **policies** *(drafts only)* and their **rules**; create and **decide policy exceptions**; record and **verify travel documents**; maintain **visa requirements**, **visa applications**, **risk assessments**, **alerts**, **notifications**, **insurance** and **health requirements**; create and amend **groups** and **add participants** |
-| **`HR.Travel.Admin`** — ***held by HR since lane 4*** | **every delete in the module** — and, more importantly: **approve a travel policy** *(which is what makes its caps bind at all)*, **withdraw a policy**, **authorise or refuse a booking's policy exception**, **decide a policy exception**, **write off an advance**, **approve a budget**, **void a payment**, and **the entire Reminders screen including its reads** |
+| **No permission — signed in and internal: the portal** (`api/staff-travel/me`) | **your own** trips: list, read, raise, amend, submit, cancel, **recall**, **Request change**; their itinerary, bookings, health requirements and destination alerts; the policy preview for a trip you are planning; **acknowledge your own risk assessment** (E1); your files (upload, download, remove your own) and messages to the desk; **your own claims** — file, amend, add and change lines with receipts, submit, remove a draft (D-38); **your own travel documents** — list, add, amend, remove an unverified one (E2); your destination-alert notifications and their acknowledgement. It takes **no employee id anywhere** — the traveller is the token, and a 404 means *"not yours"* |
+| **No permission — signed in and internal: the decision** | **approve, reject and return a trip for revision** (`StaffTravelApprovalsController`) — the **service** decides who may, stage by stage: the traveller's line authority at stage 1, HR at stage 2, never the traveller (D-7). The *Approvals* screen and the trip's read door are the same: whoever the trip waits for may open it |
+| **`HR.Travel.Read`** | every read of requests, groups, comments, attachments, itineraries, legs, activities, the four booking kinds and segments, budgets, advances, claims and lines, per-diem rates, policies, rules, exceptions, documents, visa requirements and applications, risk assessments, alerts, notifications, insurance, health requirements and clearances — plus the **dashboard**, the **Advances** queue and **Policy Breaches** |
+| **`HR.Travel.Write`** | raise, amend, **submit**, **cancel** (and *did not travel*), **Request change**, **complete** and **close** a trip; comments and attachments; itineraries — create, version, **finalise**, legs and activities; **every booking kind** and its verbs *(subject to the policy — a breach is saved Pending, Rule 1)*; set a **budget**; request, **approve** and **pay out** an advance, record cash handed back; create, add lines to, **submit**, **review** and **pay** a claim — **never two halves of one payment, never one's own** (D-2, D-16); maintain per-diem rates; draft **policies** and their **rules**; raise a **policy exception**; record and **verify** travel documents; visa requirements and applications, risk assessments, **alerts** (raised active, they go out at once — E6), insurance, health requirements and **tick a health requirement** for a trip; groups — create, open, close, reopen, cancel, add a traveller, link a request |
+| **`HR.Travel.Admin`** — ***held by HR since lane 4*** | **every delete**, and only while the record is still a draft of itself (Rule 2); **approve** *(never the author)* and **withdraw** a policy; **authorise or refuse a booking's breach** *(never the booker, the asker or the traveller — D-8)*; **decide a policy exception** *(never whoever raised it — C4)*; **write off an advance**; **approve a budget** *(never the traveller or whoever set it — D-19)*; **void a payment**; **the Reminders screen, reads included** |
 | **`HR.Travel.Approve`** | interim authority to approve a travel request **where no workflow definition is published**. A `STAFF_TRAVEL_REQUEST` definition **is** seeded and published, so it does nothing on this database |
 
-> **Two things worth naming.** First, **`HR.Travel.Admin` is a financial authority here**, not a
-> housekeeping one: it decides what the organisation may spend on travel and who may exceed it. The
-> permission map says so on purpose. Second, **a permission an unlinked account holds is a
-> permission it cannot exercise** — three Admin writes stamp an `Employee` foreign key, and `admin`
-> is SuperAdmin but not employee-linked. That is Rule 1's root cause, and it is a seeding question:
-> are TDC's travel administrators real employees, or service accounts?
+> **Two things worth naming.** First, **`HR.Travel.Admin` is a financial authority here**, not a housekeeping one:
+> it decides what the organisation may spend on travel and who may exceed it — which is why each of its acts is
+> refused to whoever did the thing it checks. Second, **a permission an unlinked account holds is a permission it
+> cannot exercise**: the Admin writes that stamp an `Employee` foreign key (approving a policy, authorising a
+> breach) need the caller's employee link, and `admin` is SuperAdmin but not employee-linked. Until lane 4 that
+> was why nobody could sign the demo's policy; since then the HR desk, which is employee-linked, can.
 
 ---
 
@@ -3057,16 +3441,20 @@ lane 4 it did not. The rows below describe the tiers; Rule 2 lists who each Admi
 
 | Document | What it adds |
 |---|---|
-| `plans/HR-Area-12-Travel-Build-Plan.md` | The canonical build plan — twelve slices, the decisions D-1…D-6, and the open TDC questions in § 9 |
-| `dev-harness/hr-travel/README.md` | 506 assertions across 16 files, plus the defect table each slice found |
-| `dev-harness/hr-demo-smoke/scenarios/080-travel.mjs`, `081-travel-logistics.mjs` | Exactly what the demo database holds, and how to rebuild it. **`080` first** — `081` reads the four requests it builds |
+| `docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` | **The live record.** The closure's lanes 0–10, every decision (D-1…D-62), each lane's *As built*, and § 3d — where each of this guide's T-findings now stands |
+| `plans/HR-Area-12-Travel-Build-Plan.md` | The original build plan — twelve slices and the decisions they took |
+| `docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` | The programme's questions for TDC — for travel, whether a claim may be paid through payroll. Travel's own (the reminder windows, whether an overrun or an alert should refuse, the claim window with no policy) are in the closure plan's § 6 |
+| `dev-harness/hr-travel/README.md` | The closure's suites: **1,868 assertions a regression pass** — ten suites (1,646) and the reminders (222); 1,883 with the scheduled sweep, 1,953 with the posting proof on a scratch copy. The first edition's sixteen suites are retired to `retired/`, each with the reason |
+| `dev-harness/hr-demo-smoke/scenarios/080-travel.mjs`, `081-travel-logistics.mjs` | Exactly what a demo database holds, and how to rebuild it. **`080` first** — `081` reads the four requests it builds. Since lane 10, 080 approves the policy as `hr.officer` before the trips are submitted (D-60) |
 | `dev-harness/hr-demo-smoke/runbook/book-2-operations-hr.html` | § 3 is the short version of this guide, for the standard demo pack |
-| `docs/HR/integration/HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md` | The currency and exchange-rate boundary, and why travel inherits Finance's conversion rather than disagreeing with it |
-| `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` | The GL posting sweep (D-4) — 18 entries, of which travel's advances, claims and payments are several |
-| `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` | **#1** Procurement's dead `SuppliersController` *(T-8)* and **#2** Finance's inverted conversion *(T-5)* — both owned by other teams |
+| `docs/HR/integration/HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md` | The currency and exchange-rate boundary: Finance's rate for the day, read through HR's own door |
+| `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` | Area 12's rows — what travel posts (12.1–12.3 since 2026-09-20, 12.6–12.7 since lane 3), what it deliberately does not (12.8), and the budget commitment still unposted (12.4–12.5) |
+| `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` | What payroll would need to receive a travel claim, before payroll offset can come back (D-10, #37) |
+| `docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md` | What travel already reads from Fleet, and what Fleet still owes it (#38) |
+| `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` | Other teams' defects travel meets: **#15** a generic-inbox approval strands the request · **#34** the workflow designer hides and deletes "person named by the record" approvers · **#35** no HR posting lands on a database seeded with Finance's v2 books · **#36** the notification dispatcher undoes a soft delete · **#37** payroll has no intake for a one-off amount owed · **#38** Fleet double-books and approves nobody. *(#1 Procurement's suppliers and #2 Finance's conversion, both met by the first edition, are resolved)* |
 | `docs/HR/integration/HR-WORKFLOW-ENGINE-INTEGRATION.md` | How `StaffTravelRequest` reaches the engine, after its bespoke chain was retired |
 | `docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-SYSTEM-GUIDE.md` | The neighbouring module, and the counter-example on approvals: company schedule deliberately does **not** use the engine |
-| `docs/HR/areas/attendance/HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md` | Where a traveller's days show up as attendance, and the geofence that does not apply to them |
+| `docs/HR/areas/attendance/HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md` | Where a traveller's days show up as attendance — *On duty*, since lane 9 — and the geofence that does not apply to them |
 
 ---
 
