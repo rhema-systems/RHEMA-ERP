@@ -100,6 +100,8 @@ if (args.Length > 0 && args[0] == "seed-finance-baseline")
 
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceBaselineProvisioningSeeder>>();
         await new FinanceBaselineProvisioningSeeder(db, logger).SeedAsync(tenant.Id, DateTime.UtcNow);
+        var taxLogger = scope.ServiceProvider.GetRequiredService<ILogger<FinanceTaxAccountProvisioningSeeder>>();
+        await new FinanceTaxAccountProvisioningSeeder(db, taxLogger).SeedAsync(tenant.Id);
 
         // Protected statement layouts depend on the canonical books and classification
         // hierarchy established by the Finance baseline. Provision them through this same

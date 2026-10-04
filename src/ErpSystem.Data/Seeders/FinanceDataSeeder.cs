@@ -2907,27 +2907,8 @@ public class FinanceDataSeeder
         var purchaseGetfund = await GetOrCreateTaxAsync(tenantId, "GETFUND-PUR", "GETFund Levy on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Levy, true, baseDate, systemUserId);
         var purchaseVat = await GetOrCreateTaxAsync(tenantId, "VAT-STD-PUR", "Input VAT (Standard)", 15.0m, TaxApplicability.Purchases, TaxCategory.Standard, true, baseDate, systemUserId);
 
-        var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
-        var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
-        var inputVatReceivableAccountId = Guid.Parse("00000005-1140-0000-0000-000000000001");
-        foreach (var outputTax in new[] { nhil, getfund, vatStd })
-        {
-            outputTax.TaxPayableAccountId ??= taxPayableAccountId;
-        }
-        foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
-        {
-            // Preserve tenant overrides. These are baseline defaults only for installations that
-            // have not yet mapped a statutory control account.
-            purchaseWht.TaxPayableAccountId ??= taxPayableAccountId;
-        }
-        whtReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
-        vatWithholdingReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
-        foreach (var purchaseTax in new[] { purchaseNhil, purchaseGetfund, purchaseVat })
-        {
-            purchaseTax.TaxReceivableAccountId ??= inputVatReceivableAccountId;
-        }
-
         await _context.SaveChangesAsync();
+        await new FinanceTaxAccountProvisioningSeeder(_context, _logger).SeedAsync(tenantId);
 
         // 2. Create Tax Groups
         

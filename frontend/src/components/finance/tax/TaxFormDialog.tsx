@@ -15,6 +15,7 @@ import { TaxApplicability, TaxCalculationMethod, TaxCategory, type CreateTaxDto,
 import type { Account } from '@/types/finance';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { getTaxAccountRequirements } from '@/lib/finance/tax-account-requirements';
 
 interface TaxFormDialogProps {
     open: boolean;
@@ -121,6 +122,11 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
     const [changeReason, setChangeReason] = useState('');
     const { toast } = useToast();
     const isEditing = Boolean(tax);
+    const accountRequirements = getTaxAccountRequirements(
+        formData.applicability,
+        formData.category,
+        Boolean(formData.isInputTaxDeductible),
+    );
 
     const liabilityAccounts = useMemo(
         () => accounts.filter(account => account.accountType === 'Liability' && account.status === 'Active'),
@@ -158,6 +164,14 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
     }, [open, tax]);
 
     const handleSave = async () => {
+        if (accountRequirements.payableRequired && !formData.taxPayableAccountId) {
+            toast({ title: 'Tax payable account required', description: accountRequirements.guidance, variant: 'destructive' });
+            return;
+        }
+        if (accountRequirements.receivableRequired && !formData.taxReceivableAccountId) {
+            toast({ title: 'Tax receivable account required', description: accountRequirements.guidance, variant: 'destructive' });
+            return;
+        }
         setIsSaving(true);
         try {
             const payload = {
@@ -317,7 +331,7 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-md border p-4">
                         <TaxAccountPicker
                             id="tax-payable-account"
-                            label="Tax Payable Account"
+                            label={`Tax Payable Account${accountRequirements.payableRequired ? ' *' : ''}`}
                             value={formData.taxPayableAccountId}
                             placeholder="Search liability accounts..."
                             accounts={liabilityAccounts}
@@ -326,13 +340,16 @@ export function TaxFormDialog({ open, tax, accounts, accountsLoading = false, on
                         />
                         <TaxAccountPicker
                             id="tax-receivable-account"
-                            label="Tax Receivable Account"
+                            label={`Tax Receivable Account${accountRequirements.receivableRequired ? ' *' : ''}`}
                             value={formData.taxReceivableAccountId}
                             placeholder="Search asset accounts..."
                             accounts={assetAccounts}
                             disabled={accountsLoading}
                             onChange={(value) => setFormData({ ...formData, taxReceivableAccountId: value })}
                         />
+                        <p className="md:col-span-2 text-xs text-muted-foreground" role="note">
+                            {accountRequirements.guidance}
+                        </p>
                     </div>
 
                     <div className="flex flex-col gap-3 rounded-md border p-4">

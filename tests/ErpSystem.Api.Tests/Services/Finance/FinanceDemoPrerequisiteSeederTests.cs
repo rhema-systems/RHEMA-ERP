@@ -21,8 +21,15 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         var seedMethod = typeof(FinanceDataSeeder).GetMethod(
             "SeedTaxConfigurationAsync",
             BindingFlags.Instance | BindingFlags.NonPublic);
+        var chartMethod = typeof(FinanceDataSeeder).GetMethod(
+            "GetStandardChartOfAccounts",
+            BindingFlags.Instance | BindingFlags.NonPublic);
 
         seedMethod.Should().NotBeNull();
+        chartMethod.Should().NotBeNull();
+        var accounts = (List<Account>)chartMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
+        context.Accounts.AddRange(accounts);
+        await context.SaveChangesAsync();
         await (Task)seedMethod!.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
 
         var purchaseGroup = await context.TaxGroups.SingleAsync(group =>
@@ -48,6 +55,17 @@ public sealed class FinanceDemoPrerequisiteSeederTests
         salesTaxes.Should().HaveCount(3);
         salesTaxes.Should().OnlyContain(tax => tax.TaxPayableAccountId.HasValue,
             "every sales tax component must have an output-tax control account before AR approval can post it");
+        var outputTaxAccount = accounts.Single(account => account.AccountCode == "2200");
+        salesTaxes.Should().OnlyContain(tax => tax.TaxPayableAccountId == outputTaxAccount.Id);
+        componentTaxes.Should().OnlyContain(tax =>
+            tax.TaxReceivableAccountId == accounts.Single(account => account.AccountCode == "1140").Id);
+
+        var tenantOverrideId = Guid.NewGuid();
+        salesTaxes[0].TaxPayableAccountId = tenantOverrideId;
+        await context.SaveChangesAsync();
+        await new FinanceTaxAccountProvisioningSeeder(context, NullLogger.Instance).SeedAsync(tenantId);
+        salesTaxes[0].TaxPayableAccountId.Should().Be(tenantOverrideId,
+            "provisioning must not overwrite an explicit tenant mapping");
 
         var withholdingGroup = await context.TaxGroups.SingleAsync(group =>
             group.TenantId == tenantId && group.Code == "WHT-SERVICES");
