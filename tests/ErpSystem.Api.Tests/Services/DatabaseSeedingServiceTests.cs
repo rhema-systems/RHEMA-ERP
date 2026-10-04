@@ -128,6 +128,23 @@ public partial class DatabaseSeedingServiceTests
         seedMethod.Should().NotBeNull();
         await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
 
+        var exchangeRateDefinition = await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .SingleAsync(definition => definition.TenantId == tenant.Id &&
+                definition.EntityType.Code == "ExchangeRate");
+        exchangeRateDefinition.IsActive.Should().BeTrue();
+        exchangeRateDefinition.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Published);
+        exchangeRateDefinition.PublishedAt.Should().NotBeNull();
+        exchangeRateDefinition.Steps
+            .Where(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .Select(step => step.Name)
+            .Should().Equal(
+                "Accounts Officer Review",
+                "Finance Manager Approval",
+                "Financial Controller Final Approval");
+
         var bookWorkflowCodes = new[]
         {
             "AccountingBookInitialization", "AccountingBookPeriodLifecycle", "AccountingBookLifecycle",
@@ -193,6 +210,11 @@ public partial class DatabaseSeedingServiceTests
         await context.SaveChangesAsync();
 
         await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+
+        (await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .CountAsync(definition => definition.TenantId == tenant.Id &&
+                definition.EntityType.Code == "ExchangeRate")).Should().Be(1);
 
         paymentBatch.IsActive.Should().BeFalse();
         paymentBatch.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Draft);

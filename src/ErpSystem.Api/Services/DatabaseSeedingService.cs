@@ -2084,26 +2084,17 @@ namespace ErpSystem.Web.Services
                     var tenantId = tenant.Id;
                     await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
                     await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
-                    foreach (var spec in GetFinanceWorkflowSeedSpecs())
-                    {
-                        var approvalStages = spec.EntityCode.StartsWith("RecurringJournal", StringComparison.Ordinal)
-                            ? RecurringJournalApprovalStages
-                            : spec.EntityCode is
-                                "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
-                                    or "DeltaAdjustmentJournal"
-                                ? AccountingBookApprovalStages
-                            : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                                ? FinancePaymentApprovalStages
-                                : FinanceApprovalStages;
+                    var workflowSpecs = GetFinanceWorkflowSeedSpecs();
 
-                        await EnsureSequentialWorkflowDefinitionSeededAsync(
-                            tenant.Id,
-                            spec.EntityCode,
-                            spec.EntityName,
-                            spec.EntityClassName,
-                            spec.DefinitionName,
-                            spec.Description,
-                            approvalStages);
+                    // Exchange-rate entry is a Finance-wide posting prerequisite. Provision it
+                    // before the larger catalogue so a failure in an unrelated workflow cannot
+                    // leave rate creation without approval authority while startup continues.
+                    var exchangeRateSpec = workflowSpecs.Single(spec => spec.EntityCode == "ExchangeRate");
+                    await EnsureFinanceWorkflowSpecSeededAsync(tenant.Id, exchangeRateSpec);
+
+                    foreach (var spec in workflowSpecs.Where(spec => spec.EntityCode != "ExchangeRate"))
+                    {
+                        await EnsureFinanceWorkflowSpecSeededAsync(tenant.Id, spec);
                     }
                     await EnsureVendorPaymentControlWorkflowSeededAsync(tenant.Id);
                     await EnsureApPaymentControlPoliciesSeededAsync(tenant.Id);
@@ -2136,6 +2127,28 @@ namespace ErpSystem.Web.Services
             {
                 _logger.LogError(ex, "Failed to seed finance workflows");
             }
+        }
+
+        private Task EnsureFinanceWorkflowSpecSeededAsync(Guid tenantId, FinanceWorkflowSeedSpec spec)
+        {
+            var approvalStages = spec.EntityCode.StartsWith("RecurringJournal", StringComparison.Ordinal)
+                ? RecurringJournalApprovalStages
+                : spec.EntityCode is
+                    "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                        or "DeltaAdjustmentJournal"
+                    ? AccountingBookApprovalStages
+                : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                    ? FinancePaymentApprovalStages
+                    : FinanceApprovalStages;
+
+            return EnsureSequentialWorkflowDefinitionSeededAsync(
+                tenantId,
+                spec.EntityCode,
+                spec.EntityName,
+                spec.EntityClassName,
+                spec.DefinitionName,
+                spec.Description,
+                approvalStages);
         }
 
         private async Task RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(Guid tenantId)
