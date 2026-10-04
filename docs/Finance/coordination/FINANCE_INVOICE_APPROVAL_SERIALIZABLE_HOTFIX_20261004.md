@@ -1,6 +1,6 @@
 ---
 integration_cycle: none
-integration_status: ready_for_review
+integration_status: pr_open
 integration_decision: include
 candidate_branch: codex/finance-invoice-approval-serializable
 candidate_head: 7d038b33a08b5843396b13689594c44c6fe7a350
@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none
 verification_status: passed
 integration_commit: pending
-pull_request: none
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/349
 ---
 
 # Finance invoice approval serializable-transaction hotfix
@@ -41,6 +41,7 @@ pull_request: none
 ## Completed commits
 
 - `7d038b33a08b5843396b13689594c44c6fe7a350` - `fix(finance): serialize invoice approval outcomes` (production code and regression tests).
+- `27f17e71573feee13a2c63a765c8ec59532b03b8` - `docs(finance): record invoice approval hotfix` (coordination and verification record).
 
 ## Verification
 
