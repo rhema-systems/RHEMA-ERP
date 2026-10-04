@@ -3,10 +3,11 @@ integration_cycle: FIN-UAT-2026-10-04-A
 integration_status: ready_for_review
 integration_decision: include
 candidate_branch: codex/fin-uat-fixed-asset-bulk-20261004
-candidate_head: c91385a8bf88446de38054b3dc546eade54001b0-plus-uncommitted-correction
+candidate_head: pending-consolidation
 base_commit: 6b59a3e841c61f5c0e295f9cce2571fc0d664d8c
 target_ref: origin/master
 depends_on: c91385a8bf88446de38054b3dc546eade54001b0
+completed_commits: b9fb9db7999e1b326e6be3262cd7442773abf44f
 migration_status: none-required
 verification_status: focused-tests-passed-baseline-typecheck-failures
 integration_commit: pending
@@ -36,6 +37,7 @@ Authorized scope:
 - Branch: `codex/fin-uat-fixed-asset-bulk-20261004`
 - Exact base: `6b59a3e841c61f5c0e295f9cce2571fc0d664d8c` (`origin/master` observed 2026-10-04)
 - The related fixed-asset opening bulk-selection work was committed as `c91385a8bf88446de38054b3dc546eade54001b0` and is preserved.
+- The verified fixed-asset correction implementation was committed locally as `b9fb9db79` (`fix(finance): correct fixed asset opening imports`).
 
 ## Implementation record
 
@@ -85,7 +87,7 @@ No schema or data migration is required.
 
 ## Authorization boundaries
 
-- The user authorized immediate implementation of the delete UI and import-validation gaps.
+- The user authorized immediate implementation of the delete UI and import-validation gaps, followed by a local commit for later consolidation.
 - No push, PR creation, deployment, database mutation, migration application, worktree removal or branch deletion is authorized.
 
 ## Integration outcome
