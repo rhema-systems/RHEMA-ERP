@@ -200,6 +200,10 @@ public class FixedAssetsController : ControllerBase
         {
             return NotFound();
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     [HttpPost("{id}/capitalize")]
