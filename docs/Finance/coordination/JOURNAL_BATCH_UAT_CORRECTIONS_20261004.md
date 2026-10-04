@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none_required
 verification_status: focused_tests_passed
 integration_commit: 641cfcf4d
-pull_request: pending-creation
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 ---
 
 # Journal Batch UAT corrections - 2026-10-04

@@ -10,7 +10,7 @@ depends_on: none
 migration_status: none
 verification_status: focused-passed-browser-uat-pending
 integration_commit: 641cfcf4d
-pull_request: pending-creation
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 ---
 
 # Finance UAT workstream: AR/AP draft invoice lifecycle and list consistency

@@ -11,7 +11,7 @@ completed_commits: b9fb9db7999e1b326e6be3262cd7442773abf44f
 migration_status: none-required
 verification_status: focused-tests-passed-baseline-typecheck-failures
 integration_commit: 641cfcf4d
-pull_request: pending-creation
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 ---
 
 # Finance UAT workstream: Fixed-asset opening import correction
