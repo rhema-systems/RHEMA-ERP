@@ -775,3 +775,21 @@ This also answers the 2026-08-20 question *"How is a daily rate worked out for e
 works it out.
 
 **Meanwhile:** the three default roles can value pay; HR cannot.
+
+## Should staff expense claims ever be paid through the payroll? *(raised 2026-10-04)*
+
+When an employee's travel or medical expense claim is approved, an HR officer pays it and records how: bank transfer,
+cash, cheque and so on. Two of the screens also offered **"through payroll"** — travel's *Payroll offset*, medical's
+*Salary deduction* — meaning the amount would be added to the employee's next salary. But the payroll system has no
+way to receive such an amount, so a claim "paid" that way was marked paid while **the employee received nothing**.
+
+Travel no longer offers it (since 2026-10-02). **Medical still does** — no claim on the demo database has used it — and
+has been left as it is until this is answered. The payroll system's owner has been asked whether payroll could take
+these amounts (`docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`).
+
+**We need from TDC:** **does TDC ever reimburse expense claims through the salary**, or always pay them separately (bank
+transfer, cash, cheque)? If always separately, the "through payroll" option is removed from medical too and nothing
+more is needed.
+
+**Meanwhile:** travel claims are paid by bank transfer, cash, cheque or corporate card. Medical's *Salary deduction*
+should not be chosen — it pays nobody.

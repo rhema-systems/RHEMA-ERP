@@ -95,7 +95,8 @@ baseline (D-13); lane 0 was built the same day.**
    user's go (restore point `ErpSystemDB_UAT_before_fixretire.bak`), and every teardown now retires its own (8b's *Found on
    the way*). ⚠ Cross-module defect #36 (the notification
    dispatcher undoes soft deletes) — the shared teardown deletes a run's notices again 35 s later.
-12. **Lane 9** (cross-module touchpoints) — **SOURCE-CHECKED 2026-10-03** against `6de559255` (lane 9's *Source check*:
+12. **Lane 9** (cross-module touchpoints) — ✅ **COMPLETE 2026-10-04** (the close: two regression passes clean — see
+   *Lane 9 close* under lane 9). **SOURCE-CHECKED 2026-10-03** against `6de559255` (lane 9's *Source check*:
    V1–V10; slices 9a–9d; decisions D-53…D-58 taken by the user, all as recommended). Three of the checklist's premises do not hold:
    attendance has no column for travel's rows (V1 — § 5's "no schema" was wrong), leave has no warning path (V5), and the
    clearance never sees travel (V6); a recovered advance stays out in travel after the final settlement (V7). **9a**
@@ -107,8 +108,9 @@ baseline (D-13); lane 0 was built the same day.**
    committed `c2e21c5be`. **9c** separation (D-56…D-58) — the clearance's Travel block, the approval's cascade, no trip
    after the leaving day, the recovered advance settled in travel without a posting; touchpoints 71/71 twice, the cascade
    and the release 36/36 twice on a scratch copy, one regression pass unchanged — committed `738e3acaf`. **9d** the payroll
-   hand-off (D-10) — `HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` and cross-module row #37, documents only — **staged 2026-10-04**.
-   Next: the lane's close — two regression passes. **From 9c on the run cadence
+   hand-off (D-10) — `HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` and cross-module row #37, documents only — committed `954b6b464`.
+   **The close** — two regression passes, every suite unchanged twice, after two harness gaps of the new cadence were
+   closed (and one unexplained SQL error recorded) — **staged 2026-10-04**. **From 9c on the run cadence
    is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
    (`tools/run-regression.sh <tag> [2]`).
 13. **Then** lane **10** (§ 2). Source-check it against this document before building it — line numbers are as of HEAD
@@ -211,7 +213,7 @@ posting); the generic workflow inbox's desync is cross-module defect #15 and is 
 | **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
 | **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
 | **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
-| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ◐ source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c committed `738e3acaf` (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged); 9d staged 2026-10-04 (the payroll hand-off and row #37 — documents only); the close's two passes owed |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ✅ complete 2026-10-04 — source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c committed `738e3acaf` (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged); 9d committed `954b6b464` (the payroll hand-off and row #37 — documents only); the close: two regression passes clean (2026-10-04) |
 | **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ☐ |
 
 A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
@@ -3173,6 +3175,41 @@ no claim paid by payroll offset (its paid claims are bank transfers, all of them
 - *Corrected:* 9c's as-built note had the generic inbox's stranded approvals as a finding; it is cross-module defect
   **#15**, recorded since 2026-08-26.
 
+**Lane 9 close (2026-10-04) — two regression passes, at the user's cadence (§ 7).** No migration (112 = 112); the API
+started on UAT at 13:50 UTC; the scheduled run **15/15** (882446) first.
+- *The first two passes* (`tools/run-regression.sh 9close 2`): pass 2 unchanged in every suite; pass 1 failed two:
+  - **lifecycle 256/257** (804617) — *"no live row is left … expected 0, got 2"*. **A harness gap of the new cadence.**
+    Leave's reminder sweep, which runs once about 17 minutes after an API start, reminded the run's fixture chief (a
+    Manager — UAT's pending leave asks every one) at 14:08:18, mid-teardown: once in the app, twice by email. The
+    dispatcher wrote them back after the fixture's retirement (#36); the per-suite 35-s wait used to absorb that, and
+    the once-per-pass re-delete covered only notices on deleted trips. The same sweep posted the run's planted
+    approved leave onto its traveller's attendance (five days, 1–5 Feb 2027); the run deleted the leave, the days
+    stayed — UAT's attendance read 61, not 56. **Fixed in the harness:** under `TRAVEL_REDELETE=defer` the teardown
+    leaves notices to fixture logins and addresses to `tools/redelete-pass.mjs`, which now covers them; the fixture's
+    retirement hard-deletes its employees' daily attendance (leave's and travel's own model) and soft-deletes their
+    monthly summaries, counting any left. Both run against the leftovers: 3 notices re-deleted, the 5 days removed,
+    attendance back to 56; the whole travel fixture rehearsed at zero live rows in every table.
+  - **fleet 188/194** (991615) — §15's sweep answered **500**: *"Incorrect syntax near ')'"* (SQL error 102) on the
+    sweep's claim-window read (`StaffTravelReminderService.ClaimWindowsAsync`, lane 8b), request `0HNP23Q7VS0I8:0000000B`,
+    14:11:00 UTC; the five checks reading that sweep failed with it. **Unexplained, and recorded as such:** the statement
+    EF logged is complete and valid, fixed and parameterised; it has run in every sweep since 8b (every scheduled,
+    reminders, fleet and touchpoints run — dozens of suite runs) without error, and did not recur in the three passes
+    after it. No
+    travel code runs a query concurrently (no unawaited task, raw ADO or parallel work in the sweep, its notices or the
+    attendance posting). The connection runs with MARS, under which interleaved use of one connection can garble a
+    command — a guess, not a finding. Watch for it; if it recurs, capture the server's view (an Extended Events
+    `error_reported` session on error 102 shows the text SQL Server actually received).
+- *The close's two passes*, rerun on the fixed harness (`tools/run-regression.sh 9close2 2`, 14:41–15:04 UTC), **every
+  suite unchanged twice**: portal **177** (893138, 328229), compliance **96** (918196, 353373), bookings **148** (948906,
+  383833), money **288** (974040, 410250), policy **131** (031441, 467047), lifecycle **257** (050609, 487493), truth **118**
+  (129116, 562983), approvals **123** (137986, 571801), fleet **194** (173003, 607866), touchpoints **71** (217608, 654449);
+  reminders after them **222/222** (729236). Pass 1's re-delete removed 10 notices the dispatcher had written back onto
+  touchpoints' deleted trips (approval requests and a *Ready to book*, created 14:47:02–03) — the mechanism working; pass 2
+  and reminders' found none. Leave's sweep had already run for this API start, so the rerun did not meet it again: the
+  fixes are proven on the leftovers above, not by a second collision.
+- *After the runs:* the demo's four trips as they were (Kumasi approved, its two days on duty; two awaiting approval;
+  Sebrepor completed), attendance at 56, no trip, notice or attendance row of the day's fixtures live. The API stopped.
+
 ### Lane 10 — Docs, demo pack, harness, hand-offs
 
 - [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
@@ -3502,3 +3539,9 @@ database); lane 0's truth suite is the first UAT run (D-13 skipped the old suite
   writing it: medical still offers *Salary deduction*, the same gap D-10 closed for travel — named in both, the user's
   call. 9c's note on stranded inbox approvals corrected to defect #15. Lane 9's checklist ticked. Staged. Next: the lane's
   close — two regression passes.
+- **2026-10-04, later** — The user committed 9d (`954b6b464`) and deferred medical's *Salary deduction* ("log it for later":
+  the finish plan's hand-offs lane, the TDC open questions, the Finance integration backlog). **LANE 9 COMPLETE.** The
+  close's first two passes met two gaps the new cadence opened in the harness — leave's once-per-start sweep reminding a
+  fixture chief and posting a planted leave mid-teardown, with no per-suite wait left to absorb the dispatcher (#36) —
+  both closed in the harness, and one unexplained SQL syntax error in the sweep, recorded with its evidence. Rerun: two
+  passes, every suite unchanged twice. Staged (with the four logging edits). Next: lane 10.

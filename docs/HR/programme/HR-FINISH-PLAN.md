@@ -1374,6 +1374,15 @@ declared finished without pretending these are closed.
       bare `[Authorize]` behind the external-user allowlist, with procurement exposed *today*;
       **#9** Projects' maintenance follow-through throws for every tenant; **#10** maintenance
       numbers collide within one second behind unique indexes.
+- [ ] **Payroll cannot receive a staff claim** — cross-module defect **#37** (2026-10-04; the file holds 37 entries now),
+      full report [`HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`](../integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md). A claim
+      "paid through payroll" was marked Paid with nobody paying the employee. Travel's *Payroll offset* is refused
+      (travel closure D-10). **HR's own follow-up, deliberately deferred by the user 2026-10-04:** medical's *Salary
+      deduction* is still offered on the medical claim page and pays nobody; it stays until payroll's owner and TDC
+      answer ([open question](HR-OPEN-QUESTIONS-FOR-TDC.md), *"Should staff expense claims ever be paid through the
+      payroll?"*). If the answer is no, or slow, switch it off the way D-10 did — the claim page's pay dialog only (the same
+      option list also feeds an insurer's preferred method and premium records, which may mean something else), the API
+      refusing it, old rows kept; the medical harness twice.
 - [x] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
       `Employees`, so a fresh environment cannot be deployed with `dotnet ef database update`.
       `rebuild-db` works around it. A squashed baseline generated from the current model is separate
