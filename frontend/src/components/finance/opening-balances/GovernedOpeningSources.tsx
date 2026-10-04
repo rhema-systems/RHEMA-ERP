@@ -4,6 +4,9 @@ import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Download,
   ExternalLink,
   Landmark,
   Loader2,
@@ -11,6 +14,7 @@ import {
   Scale,
   ShieldCheck,
   Trash2,
+  Upload,
   Warehouse,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -33,6 +37,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { SearchableOptionPicker } from '@/components/finance/accounting-books/searchable-option-picker';
 import type {
   CreateBankAccountOpeningBalanceDto,
   CreateResidualGlEquityOpeningBalanceDto,
@@ -44,6 +49,10 @@ import {
   type GovernedInventoryOpeningResult,
   type OpeningStockOptions,
 } from '@/lib/finance/opening-balance-governance';
+import {
+  buildInventoryOpeningTemplateCsv,
+  parseInventoryOpeningImportFile,
+} from '@/lib/finance/inventory-opening-import';
 
 type GovernedBusyAction = 'bank' | 'inventory' | 'residual' | null;
 
@@ -96,6 +105,8 @@ type InventoryLineDraft = {
   expiryDate: string;
   notes: string;
 };
+
+const INVENTORY_LINES_PER_PAGE = 50;
 
 function newInventoryLine(): InventoryLineDraft {
   return {
@@ -207,6 +218,9 @@ export function GovernedOpeningSources({
   const [inventoryLines, setInventoryLines] = useState<InventoryLineDraft[]>([
     newInventoryLine(),
   ]);
+  const [inventoryPage, setInventoryPage] = useState(0);
+  const [inventoryImportErrors, setInventoryImportErrors] = useState<string[]>([]);
+  const [inventoryImportFileName, setInventoryImportFileName] = useState('');
   const [inventoryResult, setInventoryResult] =
     useState<GovernedInventoryOpeningResult | null>(null);
   const [accruedExpensesAccountId, setAccruedExpensesAccountId] = useState('');
@@ -245,6 +259,11 @@ export function GovernedOpeningSources({
         0
       ),
     [inventoryLines]
+  );
+  const inventoryPageCount = Math.max(1, Math.ceil(inventoryLines.length / INVENTORY_LINES_PER_PAGE));
+  const visibleInventoryLines = inventoryLines.slice(
+    inventoryPage * INVENTORY_LINES_PER_PAGE,
+    (inventoryPage + 1) * INVENTORY_LINES_PER_PAGE
   );
   const residualTotal =
     positiveNumber(accruedExpensesAmount) +
@@ -305,6 +324,47 @@ export function GovernedOpeningSources({
     setInventoryLines((current) =>
       current.map((line) => (line.key === key ? { ...line, ...patch } : line))
     );
+  };
+
+  const downloadInventoryTemplate = () => {
+    const firstItemCode = openingStockOptions?.items[0]?.itemCode ?? 'ITEM-001';
+    const firstLocationCode = selectedWarehouse?.locations[0]?.code ?? 'MAIN';
+    const url = URL.createObjectURL(new Blob([
+      buildInventoryOpeningTemplateCsv(firstItemCode, firstLocationCode),
+    ], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = 'inventory-opening-template.csv';
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importInventorySchedule = async (file?: File) => {
+    if (!file || !selectedWarehouse) return;
+    const result = await parseInventoryOpeningImportFile(
+      file,
+      openingStockOptions?.items ?? [],
+      selectedWarehouse
+    );
+    setInventoryImportFileName(file.name);
+    setInventoryImportErrors(result.errors);
+    if (result.errors.length > 0) return;
+    setInventoryLines(result.rows.map((row) => ({ ...newInventoryLine(), ...row })));
+    if (!inventorySourceReference.trim()) {
+      setInventorySourceReference(file.name.replace(/\.(csv|xlsx)$/i, '').slice(0, 50));
+    }
+    setInventoryPage(0);
+  };
+
+  const downloadInventoryImportErrors = () => {
+    const content = ['error', ...inventoryImportErrors]
+      .map((value) => `"${value.replace(/"/g, '""')}"`).join('\r\n');
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${inventoryImportFileName.replace(/\.(csv|xlsx)$/i, '') || 'inventory-opening'}-errors.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   };
 
   const prepareInventory = async () => {
@@ -630,6 +690,9 @@ export function GovernedOpeningSources({
                     value={warehouseId}
                     onValueChange={(value) => {
                       setWarehouseId(value);
+                      setInventoryImportErrors([]);
+                      setInventoryImportFileName('');
+                      setInventoryPage(0);
                       setInventoryLines((current) =>
                         current.map((line) => ({ ...line, locationId: '' }))
                       );
@@ -686,7 +749,68 @@ export function GovernedOpeningSources({
                   />
                 </div>
                 <div className="space-y-3">
-                  {inventoryLines.map((line, index) => {
+                  <div className="space-y-3 rounded-md border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">Bulk schedule import</p>
+                        <p className="text-xs text-muted-foreground">Preflight CSV or XLSX rows against the selected warehouse and current eligible item catalog before replacing the draft.</p>
+                      </div>
+                      <Button type="button" variant="outline" size="sm" onClick={downloadInventoryTemplate} disabled={!selectedWarehouse}>
+                        <Download className="mr-2 h-4 w-4" />Download template
+                      </Button>
+                    </div>
+                    <Label htmlFor="inventory-opening-import" className="flex cursor-pointer items-center justify-center rounded-md border border-dashed px-3 py-4 text-sm font-medium hover:bg-muted">
+                      <Upload className="mr-2 h-4 w-4" />Choose CSV or XLSX schedule
+                    </Label>
+                    <Input
+                      id="inventory-opening-import"
+                      aria-label="Import inventory opening schedule"
+                      type="file"
+                      accept=".csv,.xlsx"
+                      className="sr-only"
+                      disabled={!canPrepareInventory || !selectedWarehouse || busyAction !== null}
+                      onChange={(event) => void importInventorySchedule(event.target.files?.[0])}
+                    />
+                    {inventoryImportFileName && (
+                      <p className="text-xs text-muted-foreground">Preflight file: {inventoryImportFileName}</p>
+                    )}
+                    {inventoryImportErrors.length > 0 && (
+                      <Alert variant="destructive">
+                        <AlertCircle className="h-4 w-4" />
+                        <AlertTitle>{inventoryImportErrors.length} import error{inventoryImportErrors.length === 1 ? '' : 's'} — draft not replaced</AlertTitle>
+                        <AlertDescription>
+                          <ul className="mt-1 max-h-48 list-disc space-y-1 overflow-auto pl-5">
+                            {inventoryImportErrors.slice(0, 50).map((error, index) => <li key={`${index}-${error}`}>{error}</li>)}
+                          </ul>
+                          {inventoryImportErrors.length > 50 && <p className="mt-2">Showing the first 50 errors. Correct the source file and run preflight again.</p>}
+                          <Button type="button" variant="outline" size="sm" className="mt-3" onClick={downloadInventoryImportErrors}>
+                            <Download className="mr-2 h-4 w-4" />Download all errors
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                    {inventoryImportFileName && inventoryImportErrors.length === 0 && inventoryLines.length > 0 && (
+                      <Alert>
+                        <ShieldCheck className="h-4 w-4" />
+                        <AlertTitle>Preflight passed</AlertTitle>
+                        <AlertDescription>{inventoryLines.length.toLocaleString()} rows loaded. Review the paged preview and totals before preparation.</AlertDescription>
+                      </Alert>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      {inventoryLines.length.toLocaleString()} schedule line{inventoryLines.length === 1 ? '' : 's'} · showing at most {INVENTORY_LINES_PER_PAGE} per page
+                    </p>
+                    {inventoryPageCount > 1 && (
+                      <div className="flex items-center gap-2">
+                        <Button type="button" variant="outline" size="sm" aria-label="Previous inventory rows" disabled={inventoryPage === 0} onClick={() => setInventoryPage((page) => Math.max(0, page - 1))}><ChevronLeft className="h-4 w-4" /></Button>
+                        <span className="text-sm">Page {inventoryPage + 1} of {inventoryPageCount}</span>
+                        <Button type="button" variant="outline" size="sm" aria-label="Next inventory rows" disabled={inventoryPage >= inventoryPageCount - 1} onClick={() => setInventoryPage((page) => Math.min(inventoryPageCount - 1, page + 1))}><ChevronRight className="h-4 w-4" /></Button>
+                      </div>
+                    )}
+                  </div>
+                  {visibleInventoryLines.map((line, pageIndex) => {
+                    const index = inventoryPage * INVENTORY_LINES_PER_PAGE + pageIndex;
                     const item = openingStockOptions?.items.find(
                       (option) => option.id === line.inventoryItemId
                     );
@@ -717,9 +841,10 @@ export function GovernedOpeningSources({
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                        <Select
+                        <SearchableOptionPicker
+                          label={`Inventory item ${index + 1}`}
                           value={line.inventoryItemId}
-                          onValueChange={(value) =>
+                          onChange={(value) =>
                             updateInventoryLine(line.key, {
                               inventoryItemId: value,
                               serialNumber: '',
@@ -727,50 +852,28 @@ export function GovernedOpeningSources({
                               batchNumber: '',
                             })
                           }
+                          options={(openingStockOptions?.items ?? []).map((option) => ({ value: option.id, label: `${option.itemCode} — ${option.name} (${option.unitOfMeasure})` }))}
+                          placeholder="Select server item"
+                          searchPlaceholder="Search item code or name..."
+                          emptyMessage="No eligible stock item found."
                           disabled={!canPrepareInventory || busyAction !== null}
-                        >
-                          <SelectTrigger
-                            aria-label={`Inventory item ${index + 1}`}
-                          >
-                            <SelectValue placeholder="Select server item" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(openingStockOptions?.items ?? []).map(
-                              (option) => (
-                                <SelectItem key={option.id} value={option.id}>
-                                  {option.itemCode} — {option.name} (
-                                  {option.unitOfMeasure})
-                                </SelectItem>
-                              )
-                            )}
-                          </SelectContent>
-                        </Select>
-                        <Select
+                        />
+                        <SearchableOptionPicker
+                          label={`Inventory location ${index + 1}`}
                           value={line.locationId}
-                          onValueChange={(value) =>
+                          onChange={(value) =>
                             updateInventoryLine(line.key, { locationId: value })
                           }
+                          options={(selectedWarehouse?.locations ?? []).map((option) => ({ value: option.id, label: `${option.code} — ${option.name}` }))}
+                          placeholder="Select warehouse location"
+                          searchPlaceholder="Search location code or name..."
+                          emptyMessage="No eligible warehouse location found."
                           disabled={
                             !canPrepareInventory ||
                             !selectedWarehouse ||
                             busyAction !== null
                           }
-                        >
-                          <SelectTrigger
-                            aria-label={`Inventory location ${index + 1}`}
-                          >
-                            <SelectValue placeholder="Select warehouse location" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(selectedWarehouse?.locations ?? []).map(
-                              (option) => (
-                                <SelectItem key={option.id} value={option.id}>
-                                  {option.code} — {option.name}
-                                </SelectItem>
-                              )
-                            )}
-                          </SelectContent>
-                        </Select>
+                        />
                         <div className="grid grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label htmlFor={`inventory-quantity-${line.key}`}>
@@ -870,12 +973,10 @@ export function GovernedOpeningSources({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() =>
-                      setInventoryLines((current) => [
-                        ...current,
-                        newInventoryLine(),
-                      ])
-                    }
+                    onClick={() => setInventoryLines((current) => {
+                      setInventoryPage(Math.floor(current.length / INVENTORY_LINES_PER_PAGE));
+                      return [...current, newInventoryLine()];
+                    })}
                     disabled={!canPrepareInventory || busyAction !== null}
                   >
                     <Plus className="mr-2 h-4 w-4" />
@@ -917,6 +1018,7 @@ export function GovernedOpeningSources({
                     !selectedWarehouse ||
                     !inventorySourceReference.trim() ||
                     !inventoryDescription.trim() ||
+                    inventoryImportErrors.length > 0 ||
                     !validInventoryLines
                   }
                   onClick={prepareInventory}
