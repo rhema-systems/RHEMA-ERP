@@ -564,7 +564,8 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 request.SalesCompletedAt,
                 request.Notes,
                 ticket.Id,
-                ticket.TicketNumber), cancellationToken);
+                ticket.TicketNumber,
+                Guid.TryParse(currentUser.UserId, out var handoffActorUserId) ? handoffActorUserId : null), cancellationToken);
 
             ticket.EstateListingApplicationCaseId = result.ProcedureCaseId;
             ticket.EstateListingApplicationReference = result.ReferenceNumber;

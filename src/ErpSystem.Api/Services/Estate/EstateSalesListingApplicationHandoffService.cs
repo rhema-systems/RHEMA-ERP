@@ -1,7 +1,9 @@
 using ErpSystem.Core.DTOs.Procedures;
+using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Data;
@@ -35,7 +37,8 @@ public sealed record EstateSalesListingApplicationHandoffRequest(
     DateTime? SalesCompletedAt,
     string? Notes,
     Guid? EhcTicketId = null,
-    string? EhcTicketNumber = null);
+    string? EhcTicketNumber = null,
+    Guid? ActorUserId = null);
 
 public sealed record EstateSalesListingApplicationHandoffResult(
     Guid ProcedureCaseId,
@@ -48,7 +51,8 @@ public sealed record EstateSalesListingApplicationHandoffResult(
 
 public sealed class EstateSalesListingApplicationHandoffService(
     ApplicationDbContext db,
-    IProcedureCaseService procedureCaseService) : IEstateSalesListingApplicationHandoffService
+    IProcedureCaseService procedureCaseService,
+    INotificationService notificationService) : IEstateSalesListingApplicationHandoffService
 {
     public async Task<EstateSalesListingApplicationHandoffResult> CreateAsync(
         Guid tenantId,
@@ -102,6 +106,13 @@ public sealed class EstateSalesListingApplicationHandoffService(
                 && item.TenantId == tenantId
                 && !item.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Customer Business Partner was not found.");
+        var portalRecipientIds = await EstatePortalCustomerRecipientResolver.ResolveAsync(
+            db,
+            tenantId,
+            null,
+            "Sales - Estate Enquiry",
+            customer.Id,
+            cancellationToken);
 
         var existingCase = await db.ProcedureCases
             .AsNoTracking()
@@ -120,7 +131,20 @@ public sealed class EstateSalesListingApplicationHandoffService(
                 request.ListingId,
                 demarcation is not null,
                 cancellationToken);
-            return ToResult(existingCase, alreadyExists: true);
+            var existingResult = ToResult(existingCase, alreadyExists: true);
+            var alreadyNotified = existingCase.Fields.Any(field =>
+                string.Equals(field.Key, "customerNotificationStatus", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(field.Value, "Estate handoff notified", StringComparison.OrdinalIgnoreCase));
+            if (!alreadyNotified)
+            {
+                await NotifyPortalCustomersAsync(
+                    tenantId,
+                    request,
+                    existingResult,
+                    portalRecipientIds,
+                    cancellationToken);
+            }
+            return existingResult;
         }
 
         var listingReference = demarcation is null
@@ -193,7 +217,9 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["commercialReviewStatus"] = "Completed by Sales",
             ["decisionStatus"] = "Pending Estate review",
             ["reservationStatus"] = "Sales completed",
-            ["customerNotificationStatus"] = "Handled by Sales",
+            ["customerNotificationStatus"] = portalRecipientIds.Count > 0
+                ? "Pending Estate handoff notification"
+                : "Pending customer portal link",
             ["customerAcceptanceStatus"] = "Accepted in Sales",
             ["customerAcceptanceDate"] = completedAt.ToString("yyyy-MM-dd"),
             ["billingStartStatus"] = requestType == "Purchase"
@@ -213,7 +239,7 @@ public sealed class EstateSalesListingApplicationHandoffService(
         };
 
         var executionStrategy = db.Database.CreateExecutionStrategy();
-        return await executionStrategy.ExecuteAsync(async () =>
+        var result = await executionStrategy.ExecuteAsync(async () =>
         {
             await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
             try
@@ -255,6 +281,78 @@ public sealed class EstateSalesListingApplicationHandoffService(
                 throw;
             }
         });
+
+        await NotifyPortalCustomersAsync(
+            tenantId,
+            request,
+            result,
+            portalRecipientIds,
+            cancellationToken);
+        return result;
+    }
+
+    private async Task NotifyPortalCustomersAsync(
+        Guid tenantId,
+        EstateSalesListingApplicationHandoffRequest request,
+        EstateSalesListingApplicationHandoffResult result,
+        IReadOnlyCollection<Guid> recipientIds,
+        CancellationToken cancellationToken)
+    {
+        if (recipientIds.Count == 0)
+        {
+            return;
+        }
+
+        var notified = false;
+        foreach (var recipientId in recipientIds)
+        {
+            try
+            {
+                await notificationService.CreateNotificationAsync(
+                    new CreateNotificationDto
+                    {
+                        RecipientId = recipientId,
+                        Type = "estate.property.sales-handoff",
+                        Title = "Property request handed to Estate",
+                        Message = $"Your property request {result.ReferenceNumber ?? result.Title} has been handed to Estate for processing. Open My Property Requests to follow its progress and respond to document, agreement, or payment requests.",
+                        Priority = "Normal",
+                        EntityType = "ProcedureCase",
+                        EntityId = result.ProcedureCaseId,
+                        ActionUrl = $"/external-portal/my-property-requests/{result.ProcedureCaseId}",
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["salesOpportunityId"] = request.SalesOpportunityId,
+                            ["salesReference"] = request.SalesReference,
+                            ["estateApplicationReference"] = result.ReferenceNumber ?? string.Empty,
+                            ["currentStage"] = result.CurrentStageName
+                        }
+                    },
+                    request.ActorUserId ?? recipientId,
+                    tenantId);
+                notified = true;
+            }
+            catch
+            {
+                // The Estate case remains valid if one notification channel is unavailable.
+            }
+        }
+
+        if (!notified)
+        {
+            return;
+        }
+
+        await db.ProcedureCaseFields
+            .IgnoreQueryFilters()
+            .Where(field => field.TenantId == tenantId
+                && field.ProcedureCaseId == result.ProcedureCaseId
+                && !field.IsDeleted
+                && field.Key == "customerNotificationStatus")
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(field => field.Value, "Estate handoff notified")
+                .SetProperty(field => field.UpdatedAt, DateTime.UtcNow)
+                .SetProperty(field => field.LastModifiedById, request.ActorUserId),
+                cancellationToken);
     }
 
     private async Task CommitListingUnpublishAsync(

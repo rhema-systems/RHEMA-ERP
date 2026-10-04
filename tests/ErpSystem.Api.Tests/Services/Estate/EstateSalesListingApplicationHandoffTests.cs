@@ -1,5 +1,6 @@
 using System.Text.Json;
 using ErpSystem.Api.Services.Estate;
+using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Estate;
@@ -7,6 +8,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Data;
 using Microsoft.Data.Sqlite;
@@ -36,7 +38,10 @@ public sealed class EstateSalesListingApplicationHandoffTests
         db.AddRange(asset, untouched, partner, opportunity);
         await db.SaveChangesAsync();
 
-        var service = new EstateSalesListingApplicationHandoffService(db, SuccessfulProcedureService().Object);
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            SuccessfulProcedureService().Object,
+            Mock.Of<INotificationService>());
         await service.CreateAsync(tenantId, Request(asset.Id, partner.Id, opportunity.Id));
 
         var persisted = await db.EstateManagedAssets.AsNoTracking().SingleAsync(item => item.Id == asset.Id);
@@ -63,7 +68,10 @@ public sealed class EstateSalesListingApplicationHandoffTests
         db.AddRange(land, selected, sibling, partner, opportunity);
         await db.SaveChangesAsync();
 
-        var service = new EstateSalesListingApplicationHandoffService(db, SuccessfulProcedureService().Object);
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            SuccessfulProcedureService().Object,
+            Mock.Of<INotificationService>());
         await service.CreateAsync(tenantId, Request(selected.Id, partner.Id, opportunity.Id));
 
         var persistedLand = await db.EstateManagedAssets.AsNoTracking().SingleAsync(item => item.Id == land.Id);
@@ -90,13 +98,68 @@ public sealed class EstateSalesListingApplicationHandoffTests
         procedures.Setup(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()))
             .ThrowsAsync(new InvalidOperationException("Estate workflow failed."));
 
-        var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            procedures.Object,
+            Mock.Of<INotificationService>());
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             service.CreateAsync(tenantId, Request(asset.Id, partner.Id, opportunity.Id)));
 
         var persisted = await db.EstateManagedAssets.AsNoTracking().SingleAsync(item => item.Id == asset.Id);
         Assert.True(persisted.IsPublishedToExternalPortal);
         Assert.Equal("Published", persisted.ExternalListingStatus);
+    }
+
+    [Fact]
+    public async Task SuccessfulHandoffNotifiesLinkedPortalCustomerWithRequestLink()
+    {
+        await using var fixture = await RelationalFixture.CreateAsync();
+        var db = fixture.Db;
+        var asset = ManagedAsset(EstateManagedAssetType.Property, "PROPERTY-PORTAL", DateTime.UtcNow.AddDays(-1));
+        var partner = Customer();
+        var portalUserId = Guid.NewGuid();
+        var linkedPortalUserId = Guid.NewGuid();
+        partner.UserId = portalUserId;
+        var opportunity = ClosedWonOpportunity();
+        var portalLink = new BusinessPartnerUser
+        {
+            TenantId = tenantId,
+            BusinessPartnerId = partner.Id,
+            UserId = linkedPortalUserId,
+            IsActive = true
+        };
+        db.AddRange(asset, partner, opportunity, portalLink);
+        await db.SaveChangesAsync();
+
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(item => item.CreateNotificationAsync(
+                It.IsAny<CreateNotificationDto>(),
+                It.IsAny<Guid>(),
+                tenantId))
+            .ReturnsAsync(new NotificationDto());
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            SuccessfulProcedureService().Object,
+            notifications.Object);
+
+        var result = await service.CreateAsync(
+            tenantId,
+            Request(asset.Id, partner.Id, opportunity.Id) with { ActorUserId = Guid.NewGuid() });
+
+        notifications.Verify(item => item.CreateNotificationAsync(
+            It.Is<CreateNotificationDto>(notification =>
+                notification.RecipientId == portalUserId
+                && notification.Type == "estate.property.sales-handoff"
+                && notification.EntityId == result.ProcedureCaseId
+                && notification.ActionUrl == $"/external-portal/my-property-requests/{result.ProcedureCaseId}"),
+            It.IsAny<Guid>(),
+            tenantId), Times.Once);
+        notifications.Verify(item => item.CreateNotificationAsync(
+            It.Is<CreateNotificationDto>(notification =>
+                notification.RecipientId == linkedPortalUserId
+                && notification.EntityId == result.ProcedureCaseId),
+            It.IsAny<Guid>(),
+            tenantId), Times.Once);
     }
 
     private Mock<IProcedureCaseService> SuccessfulProcedureService()
@@ -245,7 +308,8 @@ public sealed class EstateSalesListingApplicationHandoffTests
                 typeof(BusinessPartner),
                 typeof(Opportunity),
                 typeof(ProcedureCase),
-                typeof(ProcedureCaseField)
+                typeof(ProcedureCaseField),
+                typeof(BusinessPartnerUser)
             };
             if (includeDemarcations) types.Add(typeof(EstateLandDemarcation));
             var tables = types.Select(type => db.Model.FindEntityType(type)!.GetTableName()!).ToArray();

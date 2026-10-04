@@ -509,7 +509,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 request.SalesPaymentReference,
                 request.Currency,
                 request.SalesCompletedAt,
-                request.Notes), cancellationToken);
+                request.Notes,
+                ActorUserId: GetUserId()), cancellationToken);
             return Ok(new
             {
                 success = true,

@@ -499,15 +499,14 @@ public partial class DatabaseSeedingServiceTests
         definitions.Should().OnlyContain(item => item.IsActive
             && item.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published
             && item.PublishedAt.HasValue
-            && item.Steps.Count == 8);
+            && item.Steps.Count == 5);
         definitions.Should().OnlyContain(item => item.Steps.OrderBy(step => step.Order)
             .Select(step => step.Name)
             .SequenceEqual(new[]
             {
-                "Estate intake review", "Commercial and availability review",
-                "Estate decision and agreement", "Legal agreement review",
-                "Customer agreement execution", "Payment, billing and Finance check",
-                "Legal conveyance or lease follow-up", "Estate completion"
+                "Intake and validate property request", "Commercial and availability review",
+                "Management decision", "Approved transaction handoff",
+                "Customer update and close"
             }));
     }
 
