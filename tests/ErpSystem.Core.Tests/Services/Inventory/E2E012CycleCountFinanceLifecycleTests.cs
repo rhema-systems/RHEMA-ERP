@@ -126,6 +126,15 @@ public sealed partial class E2E012CycleCountFinanceLifecycleTests : IAsyncLifeti
             Name = "Cycle-count items",
             IsActive = true
         };
+        var eachUnit = new UnitOfMeasure
+        {
+            TenantId = _tenantId,
+            Code = "EA",
+            Name = "Each",
+            DecimalPlaces = 0,
+            RoundingIncrement = 1m,
+            IsActive = true
+        };
         await _context.AddRangeAsync(
             User(_initiatorId, "cycle.initiator"),
             User(_counterId, "cycle.counter"),
@@ -134,6 +143,7 @@ public sealed partial class E2E012CycleCountFinanceLifecycleTests : IAsyncLifeti
             User(_financeApproverId, "finance.approver"),
             User(_auditUserId, "audit.attestor"),
             category,
+            eachUnit,
             new Warehouse
             {
                 Id = _warehouseId,
@@ -160,6 +170,7 @@ public sealed partial class E2E012CycleCountFinanceLifecycleTests : IAsyncLifeti
                 ItemCode = "ABC-A-001",
                 Name = "Representative ABC item",
                 CategoryId = category.Id,
+                UnitOfMeasureId = eachUnit.Id,
                 UnitOfMeasure = "EA",
                 Status = ItemStatus.Active,
                 ABCClass = "A",
