@@ -757,6 +757,10 @@ public static class CompanyScheduleMappingExtensions
             LocationName = entity.SiteLocation?.Name,
             DepartmentId = entity.DepartmentId,
             DepartmentName = entity.Department?.Name,
+            OrganizationUnitId = entity.OrganizationUnitId,
+            OrganizationUnitName = entity.OrganizationUnit?.Name,
+            ScopeDescription = DescribeScope(entity),
+            RecursAnnually = entity.RecursAnnually,
             IsPaidClosure = entity.IsPaidClosure,
             CountsAsWorkingDay = entity.CountsAsWorkingDay,
             AnnouncementDate = entity.AnnouncementDate,
@@ -782,9 +786,27 @@ public static class CompanyScheduleMappingExtensions
             AffectsAllStations = dto.AffectsAllStations,
             LocationId = dto.LocationId,
             DepartmentId = dto.DepartmentId,
+            OrganizationUnitId = dto.OrganizationUnitId,
+            RecursAnnually = dto.RecursAnnually,
             IsPaidClosure = dto.IsPaidClosure,
             CountsAsWorkingDay = dto.CountsAsWorkingDay,
             CommunicationNotes = dto.CommunicationNotes
+        };
+    }
+
+    /// <summary>
+    /// Who a closure covers, from its type (company-schedule final closure, D-1). The scope is the
+    /// one <see cref="BusinessClosureRules.ScopeOf"/> answers, so the register says what the
+    /// leave and diary code actually do.
+    /// </summary>
+    private static string DescribeScope(BusinessClosure entity)
+    {
+        var scope = BusinessClosureRules.ScopeOf(entity);
+        return scope.Kind switch
+        {
+            ClosureScopeKind.Site => $"Site: {entity.SiteLocation?.Name ?? "(site not found)"}",
+            ClosureScopeKind.Unit => $"Unit: {entity.OrganizationUnit?.Name ?? "(unit not found)"} and everything beneath it",
+            _ => "Whole company",
         };
     }
 
@@ -798,6 +820,8 @@ public static class CompanyScheduleMappingExtensions
         entity.AffectsAllStations = dto.AffectsAllStations;
         entity.LocationId = dto.LocationId;
         entity.DepartmentId = dto.DepartmentId;
+        entity.OrganizationUnitId = dto.OrganizationUnitId;
+        entity.RecursAnnually = dto.RecursAnnually;
         entity.IsPaidClosure = dto.IsPaidClosure;
         entity.CountsAsWorkingDay = dto.CountsAsWorkingDay;
         entity.CommunicationNotes = dto.CommunicationNotes;

@@ -1630,17 +1630,26 @@ public class BusinessClosureService : IBusinessClosureService
     private readonly IBusinessClosureRepository _closureRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrClosureCalendar _closureCalendar;
+    private readonly IHrWorkingDayCalculator _workingDays;
+    private readonly IHrAudienceResolver _audience;
     private readonly ILogger<BusinessClosureService> _logger;
 
     public BusinessClosureService(
         IBusinessClosureRepository closureRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IHrClosureCalendar closureCalendar,
+        IHrWorkingDayCalculator workingDays,
+        IHrAudienceResolver audience,
         ILogger<BusinessClosureService> logger)
     {
         _closureRepository = closureRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _closureCalendar = closureCalendar;
+        _workingDays = workingDays;
+        _audience = audience;
         _logger = logger;
     }
 
@@ -1655,22 +1664,20 @@ public class BusinessClosureService : IBusinessClosureService
         return tenantId;
     }
 
-    private Guid RequireCurrentTenant(Guid tenantId)
-    {
-        var current = GetTenantId();
-        if (tenantId != Guid.Empty && tenantId != current)
-            throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
-        return current;
-    }
+    /// <summary>
+    /// The tenant's closures with every name a DTO shows. ⚠ The tenant filter is in the query, not
+    /// applied after loading every tenant's rows (F-30).
+    /// </summary>
+    private IQueryable<BusinessClosure> WithNames(Guid tenantId) => _closureRepository.GetQueryable()
+        .Include(c => c.SiteLocation)
+        .Include(c => c.Department)
+        .Include(c => c.OrganizationUnit)
+        .Include(c => c.AnnouncedBy)
+        .Where(c => c.TenantId == tenantId);
 
     private async Task<BusinessClosure> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entity = await _closureRepository.GetQueryable()
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy)
-            .FirstOrDefaultAsync(c => c.Id == id && c.TenantId == tenantId, cancellationToken);
+        var entity = await WithNames(GetTenantId()).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Business closure with ID '{id}' not found.");
@@ -1685,25 +1692,13 @@ public class BusinessClosureService : IBusinessClosureService
 
     public async Task<IEnumerable<BusinessClosureDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = await _closureRepository.GetQueryable()
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy)
-            .Where(c => c.TenantId == tenantId)
-            .ToListAsync(cancellationToken);
-
+        var entities = await WithNames(GetTenantId()).ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<BusinessClosureDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var query = _closureRepository.GetQueryable()
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy)
-            .Where(c => c.TenantId == tenantId);
+        var query = WithNames(GetTenantId());
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -1722,52 +1717,67 @@ public class BusinessClosureService : IBusinessClosureService
         };
     }
 
+    /// <summary>
+    /// Closures with a day in the range — overlapping it, not only contained in it (F-4), and a
+    /// recurring closure whose yearly repeat falls in it (C-38).
+    /// </summary>
     public async Task<IEnumerable<BusinessClosureDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entities = (await _closureRepository.GetByDateRangeAsync(startDate, endDate))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
-    }
+        => await InRangeAsync(DateOnly.FromDateTime(startDate), DateOnly.FromDateTime(endDate), cancellationToken);
 
     public async Task<IEnumerable<BusinessClosureDto>> GetByTypeAsync(ClosureType type, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _closureRepository.GetByTypeAsync(type))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await WithNames(GetTenantId()).Where(c => c.Type == type).ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
+    /// <summary>
+    /// The closures that shut this site: the company-wide ones and the site's own, by each closure's
+    /// type (D-1). A unit-wide closure is not listed — it follows the unit's staff, not a building.
+    /// </summary>
     public async Task<IEnumerable<BusinessClosureDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _closureRepository.GetByLocationAsync(locationId))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var entities = await WithNames(GetTenantId()).OrderBy(c => c.StartDate).ToListAsync(cancellationToken);
+        return entities
+            .Where(c => BusinessClosureRules.ScopeOf(c) is var scope
+                        && (scope.Kind == ClosureScopeKind.Company
+                            || (scope.Kind == ClosureScopeKind.Site && scope.TargetId == locationId)))
+            .ToDtoList();
     }
 
+    /// <summary>Closures with a day from today (UTC) to <paramref name="daysAhead"/> days on, recurring ones included.</summary>
     public async Task<IEnumerable<BusinessClosureDto>> GetUpcomingClosuresAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _closureRepository.GetUpcomingClosuresAsync(daysAhead))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await InRangeAsync(today, today.AddDays(Math.Clamp(daysAhead, 0, 366)), cancellationToken);
     }
 
-    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null, CancellationToken cancellationToken = default)
+    private async Task<List<BusinessClosureDto>> InRangeAsync(DateOnly from, DateOnly to, CancellationToken cancellationToken)
     {
+        if (to < from) return [];
+
         var tenantId = GetTenantId();
-        var query = _closureRepository.GetQueryable()
-            .Where(c => c.TenantId == tenantId && c.StartDate <= date && c.EndDate >= date);
+        var candidates = await BusinessClosureRules
+            .Candidates(WithNames(tenantId), tenantId, from, to)
+            .ToListAsync(cancellationToken);
 
-        if (locationId.HasValue)
-            query = query.Where(c => c.AffectsAllStations || c.LocationId == locationId.Value);
-
-        if (departmentId.HasValue)
-            query = query.Where(c => c.AffectsAllStations || c.DepartmentId == departmentId.Value);
-
-        return await query.AnyAsync(cancellationToken);
+        return candidates
+            .Where(c => BusinessClosureRules.OccurrencesIn(c, from, to).Any())
+            .OrderBy(c => c.StartDate)
+            .ToDtoList();
     }
+
+    /// <summary>
+    /// Whether a closure that is a day off covers <paramref name="date"/> for someone at this site
+    /// and in this unit (lane 1: C-37, F-2).
+    /// </summary>
+    /// <remarks>
+    /// Compares DATES — a time on the closure's last day used to make that day answer false. With
+    /// no site and no unit, only a company-wide closure answers yes. A partial closure keeps the day
+    /// a working day, so it never answers yes.
+    /// </remarks>
+    public Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? organizationUnitId = null, CancellationToken cancellationToken = default)
+        => _closureCalendar.IsNonWorkingClosureAsync(
+            GetTenantId(), DateOnly.FromDateTime(date), locationId, organizationUnitId, cancellationToken);
 
     public async Task<BusinessClosureDto> CreateAsync(CreateBusinessClosureDto createDto, Guid announcedById, CancellationToken cancellationToken = default)
     {
@@ -1777,14 +1787,18 @@ public class BusinessClosureService : IBusinessClosureService
         entity.AnnouncedById = announcedById;
         entity.AnnouncementDate = DateTime.UtcNow;
 
+        var warnings = await ValidateAsync(entity, tenantId, cancellationToken);
+
         await _closureRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Business closure created: {Title}", entity.Title);
 
-        // Re-read so locationName and announcedByName are resolved — see the note on
+        // Re-read so the site, unit and announcer names are resolved — see the note on
         // CompanyEventService.CreateAsync.
-        return await GetByIdAsync(entity.Id, cancellationToken);
+        var dto = await GetByIdAsync(entity.Id, cancellationToken);
+        dto.Warnings = warnings;
+        return dto;
     }
 
     public async Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default)
@@ -1792,13 +1806,17 @@ public class BusinessClosureService : IBusinessClosureService
         var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        var warnings = await ValidateAsync(entity, entity.TenantId, cancellationToken);
 
         await _closureRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Business closure updated: {Title}", entity.Title);
 
-        return entity.ToDto();
+        // Re-read, as create does: the navigations still point at the old site and unit (F-46).
+        var dto = await GetByIdAsync(entity.Id, cancellationToken);
+        dto.Warnings = warnings;
+        return dto;
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -1811,6 +1829,98 @@ public class BusinessClosureService : IBusinessClosureService
         _logger.LogInformation("Business closure deleted: {Id}", id);
 
         return true;
+    }
+
+    /// <summary>
+    /// The one validator for create and update (lane 1). Refuses by throwing, with a sentence that
+    /// says what to change; answers the warnings that do not stop the save.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    /// <item>The type against the scope and dates, the two derived flags set (D-1, C-38) —
+    /// <see cref="BusinessClosureRules.ValidateAndNormalise"/>.</item>
+    /// <item>The site and the unit exist in this tenant: a stranger's id used to surface as a
+    /// foreign-key 500.</item>
+    /// <item>No second closure of the same scope on the same days, a yearly repeat included (C-39):
+    /// the refusal names the other one, which is the one to change.</item>
+    /// <item>Warned, not refused: a day that is already a public holiday, and a scope with nobody in
+    /// it — a site high in the location tree has no staff assigned to it directly.</item>
+    /// </list>
+    /// </remarks>
+    private async Task<List<string>> ValidateAsync(BusinessClosure entity, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var refusal = BusinessClosureRules.ValidateAndNormalise(entity);
+        if (refusal != null)
+            throw new InvalidOperationException(refusal);
+
+        string? siteName = null;
+        if (entity.LocationId is { } locationId)
+        {
+            siteName = await _unitOfWork.Repository<Location>().GetQueryable()
+                .Where(l => l.Id == locationId && l.TenantId == tenantId && !l.IsDeleted)
+                .Select(l => l.Name)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The site chosen for this closure was not found. Choose the site again.");
+        }
+
+        string? unitName = null;
+        if (entity.OrganizationUnitId is { } unitId)
+        {
+            unitName = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .Where(u => u.Id == unitId && u.TenantId == tenantId && !u.IsDeleted)
+                .Select(u => u.Name)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The organisation unit chosen for this closure was not found. Choose the unit again.");
+        }
+
+        var scope = BusinessClosureRules.ScopeOf(entity);
+        var scopeText = scope.Kind switch
+        {
+            ClosureScopeKind.Site => siteName!,
+            ClosureScopeKind.Unit => $"{unitName} and everything beneath it",
+            _ => "the whole company",
+        };
+
+        // ── C-39: one closure per scope per day ────────────────────────────────
+        var others = await _closureRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.Id != entity.Id)
+            .ToListAsync(cancellationToken);
+        var clash = others.FirstOrDefault(o =>
+            BusinessClosureRules.ScopeOf(o) == scope && BusinessClosureRules.Overlap(o, entity));
+        if (clash != null)
+        {
+            var when = BusinessClosureRules.Describe(BusinessClosureRules.FirstOccurrence(clash))
+                       + (clash.RecursAnnually ? ", every year" : string.Empty);
+            throw new InvalidOperationException(
+                $"'{clash.Title}' already closes {scopeText} on {when}. "
+                + "Change that closure rather than adding a second one over the same days.");
+        }
+
+        // ── Warnings ───────────────────────────────────────────────────────────
+        var warnings = new List<string>();
+
+        var first = BusinessClosureRules.FirstOccurrence(entity);
+        var holidays = await _workingDays.GetHolidaysAsync(tenantId, first.Start, first.End, cancellationToken);
+        foreach (var holiday in holidays)
+        {
+            var day = BusinessClosureRules.Describe(new ClosureOccurrence(holiday.Date, holiday.Date));
+            warnings.Add(holiday.InLieu
+                ? $"{day} is already a day off in lieu of {holiday.Name}."
+                : $"{day} is already a public holiday ({holiday.Name}).");
+        }
+
+        if (scope.Kind != ClosureScopeKind.Company)
+        {
+            var reach = (await _audience.ResolveForTenantAsync(
+                tenantId, [BusinessClosureRules.AudienceRuleOf(scope)], cancellationToken)).Count;
+            if (reach == 0)
+                warnings.Add(scope.Kind == ClosureScopeKind.Site
+                    ? $"No active employee is assigned to {siteName} itself, so this closure covers nobody. "
+                      + "Staff are assigned to the sites beneath it; choose one of those."
+                    : $"No active employee is in {unitName} or beneath it, so this closure covers nobody.");
+        }
+
+        return warnings;
     }
 }
 

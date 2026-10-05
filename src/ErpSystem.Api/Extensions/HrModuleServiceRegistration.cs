@@ -745,6 +745,10 @@ public static class HrModuleServiceRegistration
         // design — Monday to Friday less the tenant's public holidays, never the appellant's own
         // roster, or the same deadline would fall on different dates for different people.
         services.AddScoped<IHrWorkingDayCalculator, HrWorkingDayCalculator>();
+        // Company-schedule final closure, lane 1: HR's one reader of business closures — which fall
+        // in a range, whom each covers, whether a date is a closure day. Tenant-explicit, so the
+        // nightly leave paths can use it with nobody signed in.
+        services.AddScoped<IHrClosureCalendar, HrClosureCalendar>();
 
         // FR-HR-181's grievance ladder. Separate from the disciplinary case on purpose: a grievance
         // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.

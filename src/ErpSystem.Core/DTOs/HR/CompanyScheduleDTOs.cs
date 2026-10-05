@@ -1048,12 +1048,32 @@ public class BusinessClosureDto : BaseDto
     public string? LocationName { get; set; }
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+
+    /// <summary>The unit an organisation-unit closure covers, with everything beneath it (D-1, D-5).</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>
+    /// Who the closure covers, read from its type, as a sentence for the register: "Whole company",
+    /// "Site: Tema", "Unit: Finance and everything beneath it".
+    /// </summary>
+    public string ScopeDescription { get; set; } = string.Empty;
+
+    /// <summary>Falls on the same month and day every later year (C-38).</summary>
+    public bool RecursAnnually { get; set; }
+
     public bool IsPaidClosure { get; set; }
     public bool CountsAsWorkingDay { get; set; }
     public DateTime AnnouncementDate { get; set; }
     public Guid? AnnouncedById { get; set; }
     public string? AnnouncedByName { get; set; }
     public string? CommunicationNotes { get; set; }
+
+    /// <summary>
+    /// Things the person saving should know that do not stop the save — the closure falls on a
+    /// public holiday, or its site has no staff assigned to it. Set on create and update only.
+    /// </summary>
+    public List<string> Warnings { get; set; } = new();
 }
 
 /// <summary>
@@ -1079,8 +1099,15 @@ public class CreateBusinessClosureDto : CreateDtoBase
 
     public bool AffectsAllStations { get; set; } = true;
     public Guid? LocationId { get; set; }
+
+    /// <summary>⚠ Retired (D-5): refused when set. Choose <see cref="OrganizationUnitId"/> instead.</summary>
     public Guid? DepartmentId { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+    public bool RecursAnnually { get; set; }
     public bool IsPaidClosure { get; set; }
+
+    /// <summary>Follows the type: a partial closure counts as a working day, every other type does not.</summary>
     public bool CountsAsWorkingDay { get; set; }
 
     [MaxLength(1000)]
@@ -1110,8 +1137,15 @@ public class UpdateBusinessClosureDto : UpdateDtoBase
 
     public bool AffectsAllStations { get; set; }
     public Guid? LocationId { get; set; }
+
+    /// <summary>⚠ Retired (D-5): refused when set. Choose <see cref="OrganizationUnitId"/> instead.</summary>
     public Guid? DepartmentId { get; set; }
+
+    public Guid? OrganizationUnitId { get; set; }
+    public bool RecursAnnually { get; set; }
     public bool IsPaidClosure { get; set; }
+
+    /// <summary>Follows the type: a partial closure counts as a working day, every other type does not.</summary>
     public bool CountsAsWorkingDay { get; set; }
 
     [MaxLength(1000)]

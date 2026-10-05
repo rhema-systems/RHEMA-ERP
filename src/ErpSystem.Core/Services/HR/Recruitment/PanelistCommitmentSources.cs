@@ -404,14 +404,28 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
 /// a virtual panel is unaffected by the building being locked. What matters is that the recruiter
 /// is told, which is what C-5 (*"closures reach nothing"*) was about.</para>
 ///
-/// <para>The commitment is attributed to every panelist in the query, because the closure applies to
-/// the organisation rather than to a person: attributing it to nobody would mean it never appeared
-/// on a row and the recruiter would never see it.</para>
+/// <para><b>A closure is attributed to the people it covers</b> (company-schedule final closure,
+/// lane 1: R4-13.1). A company-wide one reaches every panelist, external ones included, since the
+/// office is shut; a site closure reaches staff assigned to that site; a unit closure the staff of
+/// that unit and everything beneath it. It used to reach everybody, so the Accra diary showed the
+/// Tema site's closure. A partial closure is labelled as a working day. A yearly closure appears
+/// on its repeat in the asked-about years (C-38).</para>
+///
+/// <para><b>Holidays come from the one definition</b> leave and the statutory clocks use (R4-10A.4):
+/// the default calendar's active Mandatory and SubstituteDay holidays, with the day in lieu. This
+/// used to read every holiday of every calendar, retired and optional ones included. A holiday is
+/// the whole tenant's, so it reaches every panelist.</para>
 /// </remarks>
 public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
 {
-    private readonly IUnitOfWork _unitOfWork;
-    public ClosureCommitmentSource(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly IHrClosureCalendar _closures;
+    private readonly IHrWorkingDayCalculator _workingDays;
+
+    public ClosureCommitmentSource(IHrClosureCalendar closures, IHrWorkingDayCalculator workingDays)
+    {
+        _closures = closures;
+        _workingDays = workingDays;
+    }
 
     public string SourceName => "closures and public holidays";
 
@@ -423,40 +437,63 @@ public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
             .ToList();
         if (everyone.Count == 0) return Array.Empty<PanelistCommitment>();
 
+        var from = q.FromDate;
+        var to = q.ToDate;
         var dayStart = q.DayStart;
         var dayEnd = q.DayEnd;
         var commitments = new List<PanelistCommitment>();
 
-        var closures = await _unitOfWork.Repository<BusinessClosure>().GetQueryable()
-            .Where(c => c.TenantId == q.TenantId && !c.IsDeleted
-                     && c.StartDate <= dayEnd && c.EndDate >= dayStart)
-            .ToListAsync(ct);
+        var closures = await _closures.GetClosuresAsync(q.TenantId, from, to, ct);
+        if (closures.Count > 0)
+        {
+            var coverage = await _closures.CoverageAsync(q.TenantId, closures, q.EmployeeIds, ct);
+            foreach (var c in closures)
+            {
+                var companyWide = BusinessClosureRules.ScopeOf(c).Kind == ClosureScopeKind.Company;
+                var covered = coverage[c.Id];
+                var label = BusinessClosureRules.IsNonWorking(c)
+                    ? $"Business closure: {c.Title}"
+                    : $"Partial closure (a working day): {c.Title}";
 
-        // ⚠ Clipped to the asked-about window. A two-week shutdown reported as spanning the whole
-        // fortnight is right; reported as spanning the query is wrong the moment the query is one day.
-        foreach (var c in closures)
+                foreach (var occurrence in BusinessClosureRules.OccurrencesIn(c, from, to))
+                {
+                    // ⚠ Clipped to the asked-about window. A two-week shutdown reported as spanning the
+                    // whole fortnight is right; reported as spanning the query is wrong the moment the
+                    // query is one day.
+                    var start = occurrence.Start.ToDateTime(TimeOnly.MinValue);
+                    var end = occurrence.End.ToDateTime(TimeOnly.MinValue);
+                    foreach (var (id, external) in everyone)
+                    {
+                        if (external ? !companyWide : !covered.Contains(id)) continue;
+                        commitments.Add(new PanelistCommitment(
+                            id, external, CommitmentKind.Closure, CommitmentHardness.Soft, label,
+                            start > dayStart ? start : dayStart,
+                            end < dayEnd ? end : dayEnd,
+                            IsDayGranular: true));
+                    }
+                }
+            }
+        }
+
+        // One commitment per run of consecutive days of the same holiday, as there was one per
+        // holiday row before.
+        var holidays = await _workingDays.GetHolidaysAsync(q.TenantId, from, to, ct);
+        var runs = new List<(DateOnly First, DateOnly Last, string Label)>();
+        foreach (var day in holidays)
+        {
+            var label = day.InLieu ? $"Day off in lieu of {day.Name}" : $"Public holiday: {day.Name}";
+            if (runs.Count > 0 && runs[^1].Label == label && runs[^1].Last.AddDays(1) == day.Date)
+                runs[^1] = (runs[^1].First, day.Date, label);
+            else
+                runs.Add((day.Date, day.Date, label));
+        }
+
+        foreach (var (first, last, label) in runs)
             foreach (var (id, external) in everyone)
                 commitments.Add(new PanelistCommitment(
-                    id, external, CommitmentKind.Closure, CommitmentHardness.Soft,
-                    $"Business closure: {c.Title}",
-                    c.StartDate > dayStart ? c.StartDate : dayStart,
-                    c.EndDate < dayEnd ? c.EndDate : dayEnd,
-                    IsDayGranular: true));
-
-        var from = q.FromDate;
-        var to = q.ToDate;
-        var holidays = await _unitOfWork.Repository<PublicHoliday>().GetQueryable()
-            .Where(h => h.TenantId == q.TenantId && !h.IsDeleted
-                     && h.DateFrom <= to && h.DateTo >= from)
-            .ToListAsync(ct);
-
-        foreach (var h in holidays)
-            foreach (var (id, external) in everyone)
-                commitments.Add(new PanelistCommitment(
-                    id, external, CommitmentKind.Holiday, CommitmentHardness.Soft,
-                    $"Public holiday: {h.HolidayName}",
-                    h.DateFrom.ToDateTime(TimeOnly.MinValue),
-                    h.DateTo.ToDateTime(TimeOnly.MaxValue),
+                    id, external, CommitmentKind.Holiday, CommitmentHardness.Soft, label,
+                    first.ToDateTime(TimeOnly.MinValue),
+                    last.ToDateTime(TimeOnly.MaxValue),
                     IsDayGranular: true));
 
         return commitments;

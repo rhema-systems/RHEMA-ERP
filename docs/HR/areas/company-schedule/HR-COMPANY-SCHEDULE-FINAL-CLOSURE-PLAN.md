@@ -28,7 +28,8 @@ has not started (the user: "don't start the actual development yet").
    Finance references are updated to HEAD; the drill service is named correctly (lane 2).
 1. § 1a is settled. **§ 1b holds the nine decisions raised by the review.** D-12 (recurring events
    are a light series) and D-17 (no milestone link) are settled, and with them what the migration
-   contains. **Seven remain pending the user** — D-10, D-11, D-13, D-14, D-15, D-16 and D-18 — each
+   contains. D-15 was settled at lane 1's source check (§ 1c). **Six remain pending the user** —
+   D-10, D-11, D-13, D-14, D-16 and D-18 — each
    needed before the lanes § 2 lists against it; none blocks lane 0.
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** Next is lane 1, whose source
    check needs D-15 settled first. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
@@ -79,10 +80,11 @@ under D-9 none stands without one.
 - **R4-3.1** — the landing answering a 403 with "Nothing scheduled" — is a live defect, owned by
   lane 5.
 
-### 1b. Decisions raised by the review (2026-10-01) — two settled, seven pending the user
+### 1b. Decisions raised by the review (2026-10-01) — three settled, six pending the user
 
-**D-12 and D-17 were settled by the user on 2026-10-01, as recommended (✅ below).** The other seven
-are pending; each is needed before the lanes in its "Blocks" column, and none blocks lane 0.
+**D-12 and D-17 were settled by the user on 2026-10-01, as recommended, and D-15 on 2026-10-04 at
+lane 1's source check (✅ below).** The other six are pending; each is needed before the lanes in its
+"Blocks" column.
 
 | # | Question | Recommendation | Blocks |
 |---|---|---|---|
@@ -91,7 +93,7 @@ are pending; each is needed before the lanes in its "Blocks" column, and none bl
 | **D-12** ✅ | Recurring events: a series, or independent occurrences? | **Settled 2026-10-01, as recommended: a light series, in which the occurrences are the series.** Each occurrence stays a full event, with its own number, guest list, RSVPs, attendance register, tasks and papers; `RecurrenceSeriesId` and `OccurrenceNumber` tie them together, and there is **no series table**. Series behaviour is a scope choice, "this occurrence / this and following / the whole series", on adding or removing a guest, editing, rescheduling and cancelling. A guest added to the series gets one invitation listing the dates and answers each date or all at once. "Book this room for every occurrence" makes one booking per date and lists the dates where the room is taken. A series action never changes an occurrence that is past or completed. A series needs an end date or a count, up to 52, and can be extended later. A monthly rule on a day a month lacks falls on that month's last day, counted from the first date; an occurrence on a holiday or company-wide closure is generated and flagged, not skipped. *Why: answers and attendance are per meeting, since people miss one week and not the next; independent occurrences would mean re-inviting everyone every week; and an ordinary event needs no special case in the clash check, the reminder sweep, the diaries or the calendar.* | Lane 2. Lane 0: no series table |
 | **D-13** | May staff book rooms themselves? | **Yes, from the portal**: their own bookings only, the same room rules, approval-required rooms routed to the approver, staff cancel their own. HR keeps the desk. | Lanes 3, 7 |
 | **D-14** | Calendar invites in the emails? | **Yes**: an `.ics` on invitation, reschedule and cancellation — a stable UID per event, SEQUENCE raised on each change, METHOD REQUEST and CANCEL. The email DTO already carries attachments; the templated send needs an overload. External guests answer from their mail client to the organiser, and HR records it at the desk, which answers F-36. | Lane 2 |
-| **D-15** | Unpaid closures, and closures added after leave was approved? | HR records the pay flag and **exposes closures to payroll read-only**, logged as a cross-module item, because payroll is another developer's module (F-51). **A closure created, moved or deleted re-charges the approved leave it overlaps**, and the employee is told (F-52). | Lane 1 |
+| **D-15** ✅ | Unpaid closures, and closures added after leave was approved? | **Settled 2026-10-04 at lane 1's source check, refined there into D-15a, D-15b and D-15c (§ 1c); the payroll half goes into the payroll hand-off rather than the register.** *As first recommended:* HR records the pay flag and **exposes closures to payroll read-only**, logged as a cross-module item, because payroll is another developer's module (F-51). **A closure created, moved or deleted re-charges the approved leave it overlaps**, and the employee is told (F-52). | Lane 1 |
 | **D-16** | Who is "Management only"? | **The heads of organisation units** (`OrganizationUnit.HeadEmployeeId`), plus the organiser and participants; "Management" visibility uses the same population (F-43). | Lanes 2, 7 |
 | **D-17** ✅ | The milestone link to one employee's award or certification (C-41)? | **Settled 2026-10-01, as recommended: dropped.** Company milestones are company facts: the guide's own walkthrough files the ISO 9001 quality certification as one, while a training-module certificate and a long-service award each belong to one employee. A milestone's evidence is its documents (D-3); awards and milestones meet, if anywhere, through a company event for the awards ceremony. C-41 closes as decided, not built, which is a decision rather than a deferral. | Lane 0: no link columns. Lane 4: nothing to build |
 | **D-18** | Retiring a room that has future bookings? | **Offer "cancel these N bookings and tell their bookers"**, and refuse deletion once a room has any booking history — deactivate instead (F-49). | Lane 3 |
@@ -107,6 +109,52 @@ are pending; each is needed before the lanes in its "Blocks" column, and none bl
 | **L0-1** | F-53: should the migration move rows saved against a department onto the unit with the same name? | **No — the unit replaces the department outright (D-5), and there is nothing to move.** No event or closure carries a `DepartmentId` on UAT, the dev database or the test-data database, live or deleted. The "legacy rows shown read-only and listed for HR" handling is dropped from lanes 1 and 2. `DepartmentId` stays in the schema only while today's code reads it; a later migration drops it once lanes 1 and 2 have moved every read to the unit. *The first recommendation kept a name-match step as protection for other databases; withdrawn, as it could never act.* |
 | **L0-2** | D-1: should the migration rewrite old closures whose saved scope contradicts their type? | **No.** No closure contradicts D-1: UAT's one is a whole-company Full closure, and the other two databases have none. Lane 1 reads a closure's scope from its type and refuses a contradictory save from now on. |
 
+**Lane 1 source check (2026-10-04, at b72535647) — what the code says.**
+- **The closure service** (`CompanyScheduleService.cs:1628-1815`) has no validation on create or
+  update. Its update answers with the unsaved entity rather than a re-read (the F-46 shape).
+  `IsClosureDateAsync` (:1757) ANDs site and department as F-2 says, and so does the repository's
+  copy (`CompanyScheduleRepository.cs:636`).
+- **Re-charging approved leave needs no new arithmetic.** Reschedule and recall already do it:
+  - the days: `CalculateLeaveDaysAsync`, the one definition of chargeable days;
+  - the balance: `LeaveBalanceRecalculationService.RecalculateAsync`. `UsedDays` is derived from the
+    approved requests, not stored, so re-deriving cannot give a day back twice (`LeaveService.cs:1389`);
+  - attendance: `ReconcileAttendanceAsync` re-posts the request and drops days that are no longer
+    chargeable.
+
+  **Nothing re-charges approved leave today**, for closures (F-52) or for public holidays:
+  `PublicHolidayService` create, update and delete touch no leave.
+- **A finished leave year.** The year-end carry-over computes from balances ("set, not stacked").
+  Re-charging leave in a year whose carry-over has run would strand the day returned in that year
+  until the run was repeated.
+- **`IHrWorkingDayCalculator`** (`HrWorkingDayCalculator.cs`) reads the default calendar's active
+  Mandatory and SubstituteDay holidays. Nine services use it: leave, `LeaveChargeableDays`, the
+  leave usage reader, leave reminders, the discipline deadlines, discipline reminders, two discipline
+  services, and travel's attendance posting. Company-wide closures added there reach all nine.
+- **The audience resolver's usual methods take the tenant from the signed-in user**
+  (`HrAudienceResolver.cs:24`), and the nightly leave paths have nobody signed in. *Corrected while
+  building 1a:* the resolver already has tenant-explicit methods, `ResolveForTenantAsync` and
+  `UnitAncestryAsync`, and leave already uses the second. Lane 1 uses those, plus a batched
+  `UnitAncestriesAsync` added in 1a, so the unit tree is read once per question.
+- **Announcements:** `HrAnnouncementService` creates a draft and then publishes it, with no approval
+  step. Publishing refuses an audience that reaches nobody (`:237-255`), so a closure whose scope
+  holds no staff must not fail the closure's own save.
+- **Payroll reads none of HR's days off** (read-only look; the module is not ours). It keeps its own
+  `PayrollHolidays` (flat dates) and `PayrollNonWorkingDays` (weekday codes with overtime rates), and
+  takes working and absent days as inputs on each pay line. The payroll hand-off
+  (`integration/handoffs/HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md`) already records holidays as "two
+  lists, no bridge" (§ 2.1), and HR's holiday-pay fields as "stored by HR, read by nothing" (§ 3,
+  item 2). `BusinessClosure.IsPaidClosure` is the same shape. It is not yet in the cross-module
+  register.
+
+**Lane 1 decisions — ✅ settled by the user on 2026-10-04, all four as recommended.**
+
+| # | Question | Recommendation |
+|---|---|---|
+| **D-15a** | A closure added, moved or deleted over leave already approved: re-charge the leave? | **Yes, with one routine.** For each approved, in-progress or completed request over the changed days, for the employees the closure covers: recompute its days, re-derive the balance, re-post attendance, and tell the employee the old and new count, in the app and by email. It reaches leave in the current and later leave years, **including leave already taken** — an emergency closure is often recorded after the day. A closure in a finished leave year re-charges nothing automatically: HR is shown the requests it overlaps, to adjust by hand. A Partial closure never re-charges, because it is still a working day. |
+| **D-15b** | The same gap for public holidays: a holiday added after leave is approved does not give the day back either. Close it too? | **Yes, with the same routine,** called from `PublicHolidayService`'s create, update and delete (HR's own code). Otherwise a holiday and a closure on the same day would treat the same leave differently. |
+| **D-15c** | Unpaid closures and payroll? | **HR keeps the pay flag it already has and makes closures readable through the same HR reader leave uses.** No payroll code is touched. Closures are added to the payroll hand-off beside holidays (§ 2.1 and the § 3 table) rather than as a new register entry, so the payroll owner sees all of HR's days off together. |
+| **L1-1** | Announcing a closure: publish automatically on save, or prepare it for HR to send? | **Prepare it; HR sends it with one click.** Saving a non-working closure offers "Announce to the N staff it covers": an announcement already addressed by the closure's scope and worded from it, published when HR confirms. An announcement reaches every covered employee at once and cannot be unsent, and a closure is often typed, corrected, then confirmed; publishing on save would turn each correction into another broadcast. The staff whose leave changes are told individually anyway (D-15a). *The plan's text said "announced"; this is the source check's refinement.* |
+
 ---
 
 ## 2. Lane status
@@ -114,7 +162,7 @@ are pending; each is needed before the lanes in its "Blocks" column, and none bl
 | Lane | Scope | Waits on | Status | Proof |
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
-| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; announcements | D-15 | ☐ | `run-final-review.mjs` closures block |
+| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ◐ 1a built and proved (79/79 ×2); 1b–1e to come | `run-final-review.mjs` closures block |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
@@ -337,17 +385,19 @@ it was applied to UAT (§ 6).
 - ⚠ From this commit, the Admin-only `POST company-profile/seal-assets/{kind}` accepts `Logo`, because
   the route binds the enum. Nothing reads a logo asset until lane 4.
 
-### Lane 1 — Closures (D-1, D-4, D-5, D-15; C-5, C-37, C-38, C-39, R4-10A.4, R4-13.1, F-2, F-24, F-28, F-29, F-51, F-52)
+### Lane 1 — Closures (D-1, D-4, D-5, D-15a–c, L1-1; C-5, C-37, C-38, C-39, R4-10A.4, R4-13.1, F-2, F-24, F-28, F-29, F-51, F-52)
 
-- [ ] One validator in `BusinessClosureService` for create and update: the D-1 matrix; `EndDate` on or
+- [x] One validator in `BusinessClosureService` for create and update: the D-1 matrix; `EndDate` on or
       after `StartDate`; site and unit must exist in the tenant; an overlapping closure of the same
       scope refused with a sentence naming the other (C-39), recurrence included; a closure over a
-      public holiday warned.
-- [ ] **Scope through the existing audience resolver** (*review: the first draft invented a new scope
+      public holiday warned. *✅ 1a — and a scope with nobody in it warned too.*
+- [ ] **Scope through the existing audience resolver** *(✅ 1a for `IsClosureDateAsync` and
+      `ClosureCommitmentSource`; leave is 1b)* (*review: the first draft invented a new scope
       helper*). A closure's scope is an audience rule — `AllEmployees`, `Location` or
       `OrganizationUnit`, which already reaches the unit's subtree — evaluated with
       `IHrAudienceResolver.IncludesAsync` / `ResolveAsync`. ⚠ A `Location` rule matches one location
-      exactly; see C-16 in lane 5. Used by:
+      exactly; see C-16 in lane 5. Read through `IHrClosureCalendar`, which is tenant-explicit (the
+      nightly leave paths have nobody signed in) and uses the resolver's tenant-explicit methods. Used by:
       - `IsClosureDateAsync` — comparing dates, not date-times (a time on the closure's last day answered
         false); a query with no scope answers company-wide closures only (C-37);
       - `ClosureCommitmentSource` (R4-13.1);
@@ -355,37 +405,94 @@ it was applied to UAT (§ 6).
 - [ ] **Leave, redesigned by the review (F-28).**
       - Company-wide closures that are not working days join `IHrWorkingDayCalculator`'s holiday set, so
         leave, the discipline statutory clocks (F-29) and the diary agree with no change at those call
-        sites. So does travel's on-duty posting (`StaffTravelAttendancePosting`, § 3c). The source
-        check confirms that a trip day on a closure should not post as on duty.
+        sites. So does travel's on-duty posting (`StaffTravelAttendancePosting`, § 3c): a trip day
+        on a company-wide closure is not posted as on duty, which is travel's own rule for a holiday.
       - Site and unit closures become a per-employee overlay: the employee is threaded through
         `GetChargeableDaysAsync` / `CalculateLeaveDaysAsync`, and `LeaveUsageReader` and
         `LeaveReminderService` keep the company set once plus an overlay per employee.
       - The leave calendar draws them as "Closure: title".
-- [ ] **(D-15, F-52)** A closure created, moved or deleted re-charges the approved leave it overlaps;
-      the employee is told.
-- [ ] **(D-15, F-51)** The pay flag is exposed to payroll read-only; entry in
-      `docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
-- [ ] **(F-34)** A new or changed non-working closure is announced to the staff it covers — an
-      `HrAnnouncement` with the closure's audience rule, which raises the in-app topic (and email where
-      the topic has it on).
+- [ ] **(D-15a, F-52) One re-charge routine.** A closure created, moved or deleted re-charges the
+      approved leave it overlaps. It covers each Approved, InProgress or Completed request over the
+      changed days (old and new, for a move), for the employees the closure covers:
+      - `CalculateLeaveDaysAsync` recounts the days, with that employee's overlay;
+      - `RecalculateAsync` re-derives the balance, for each leave year the request touches;
+      - `ReconcileAttendanceAsync` re-posts attendance;
+      - the employee is told the old and new count, in the app and by email.
+
+      It reaches leave in the current and later leave years, **taken leave included**. A closure in a
+      finished leave year (carry-over already run) re-charges nothing automatically, and the save's
+      answer lists the requests it overlaps for HR to adjust by hand. A Partial closure never
+      re-charges, because it is still a working day. A request whose count does not change is left
+      alone, with no notice.
+- [ ] **(D-15b)** `PublicHolidayService` create, update and delete call the same routine for the
+      tenant's staff. A holiday added after leave is approved gives the day back too.
+- [ ] **(D-15c, F-51)** HR keeps `IsPaidClosure`. Closures, with the flag, are readable through the HR
+      reader leave uses; no payroll code is touched. Closures join holidays in the payroll hand-off
+      (`integration/handoffs/HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md` § 2.1 and the § 3 table), *not*
+      a new entry in the cross-module register.
+- [ ] **(L1-1, F-34) Announce on HR's click, not on save.** Saving a non-working closure offers
+      "Announce to the N staff it covers". It prepares an `HrAnnouncement` addressed by the closure's
+      audience rule and worded from it (title, dates, whether staff are paid), and publishes it when HR
+      confirms. Publishing raises the in-app topic, and email where the topic has it on. A scope that
+      reaches nobody shows "no staff to tell" instead of the button and never fails the closure's
+      save.
 - [ ] **(R4-10A.4, the holiday half — in no lane before the review)** The diary's and the calendar's
       holidays come from `IHrWorkingDayCalculator` — the default calendar, active, mandatory and
-      substitute days — not from every calendar.
+      substitute days — not from every calendar. *✅ 1a for the diaries and the clash check, through
+      the calculator's new `GetHolidaysAsync`, which names each day; the calendar is lane 7.*
 - [ ] The attendance side logged in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` (A-92).
 - [ ] (D-9, C-38) `RecursAnnually`: the resolver path, `is-closure-date`, the diary source, the leave
       reader and the calendar all treat a recurring closure as covering the same month and day in
       every later year; the form has the switch ("Recurs every year — the year-end stocktake is typed
-      once"); the register says "Every year".
+      once"); the register says "Every year". *✅ 1a for the rules, the range and upcoming reads,
+      `is-closure-date` and the diary source; the leave reader is 1b, the form 1e, the calendar lane 7.*
 - [ ] `closures/page.tsx`: the type decides what renders (Full → nothing; Site → the site select,
-      required; Organisation unit → `OrganizationUnitPickerField`, required; Partial → the whole-company
-      switch plus both pickers, and the working-day switch locked on, described). The working-day
+      required; Organisation unit → `OrganizationUnitPickerField`, required; Partial → exactly ONE of
+      the whole company, a site or a unit, and the working-day switch shown on and locked, described).
+      *1a: a partial closure takes one scope, not a site and a unit together, because the audience
+      resolver unions its rules and "this unit at that site" could not be expressed.* The working-day
       switch's description becomes honest. `organizationUnitId` / `organizationUnitName` replace
       `departmentId` on the wire. No legacy department rows exist (L0-1), so nothing is shown for them;
       once lanes 1 and 2 read only the unit, a later migration drops `DepartmentId` from both tables.
 
-**State:** *(filled when it lands)*
+**State (2026-10-05): slice 1a built and proved; 1b–1e to come.** Slices: **1a** closure rules and
+scope · **1b** leave counts closures · **1c** the re-charge routine for closures and holidays · **1d**
+announce on HR's click, payroll reader and hand-off · **1e** the closures screen.
 
-### Lane 2 — Events (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
+*1a — what was built:*
+- `BusinessClosureRules`, pure: scope from type, the D-1 checks, which normalise the two derived
+  flags and refuse real contradictions, yearly occurrences, overlap, and the candidate query.
+- `IHrClosureCalendar`, tenant-explicit: closures in a range, coverage of given employees, the
+  closure-date check.
+- `IHrAudienceResolver.UnitAncestriesAsync`, which reads the unit tree once.
+- `IHrWorkingDayCalculator.GetHolidaysAsync`, the same days as before, each with its holiday's name.
+- `BusinessClosureService`: the validator and its warnings; the update re-read (F-46); the tenant
+  filter inside every read (F-30); range reads by overlap (F-4); the site filter (company-wide closures
+  and the site's own); `is-closure-date?organizationUnitId=` replacing `departmentId`.
+- `ClosureCommitmentSource`: closures go to the people they cover (R4-13.1); holidays come from the
+  calculator (R4-10A.4).
+- The closure repository's six custom reads are removed.
+- DTOs: `organizationUnitId`/`Name`, `scopeDescription`, `recursAnnually`, `warnings`.
+
+*Refusals are 422 with the rule's sentence* — this controller's `CompanyScheduleBusinessRulesAttribute`,
+not the 400 the first suite draft expected.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` block 1a: **79/79 on two clean passes.** It covers the D-1 refusals and the
+  allowed cases, C-39 (a yearly repeat included), the closure-date check (C-37, F-2, C-38, a time on
+  the last day), the diaries (A, B and C by site and unit), ranges, the site filter, both warnings
+  and the re-read.
+- Regression, once each: `run-slice0` 24/24, `run-slice1` 32/32, `run-slice2` 62/62, `run-slice3`
+  44/44, `run-round4-d` 39/39.
+- **The first pass found two harness errors, not code errors.** It expected 400, and its cleanup
+  deleted the login, which answers 500 because the login has security-log rows. That left one login
+  active. Fixed: refusals expect 422, and the login is switched off and the counts are of what was
+  actually removed.
+- **The round-4 suites switch off nothing.** The 15 logins they minted were switched off by hand
+  (`tools/switch-off-login.mjs`). Their 10 employees, 6 events, 1 room and 3 bookings stay on UAT:
+  R4-2.1, lane 6's tidy step.
+- API log: only cross-module #23 (the payroll profile FK, on every fixture employee) and the first
+  pass's user delete. (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
 
 **Validation and references**
 - [ ] One window validator for create, update and reschedule (end on or after start; times only when
@@ -664,7 +771,8 @@ it was applied to UAT (§ 6).
       card; a calendar chapter); Appendix B's permission map gains the new doors; Appendix A's route
       list gains the calendar and loses the fiscal screens.
 - [ ] `docs/HR/README.md`; `docs/HR/programme/HR-FINISH-PLAN.md` (D-02 closed by D-8; F-27 recorded as
-      HR-wide); `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` (attendance A-92; payroll, unpaid closures);
+      HR-wide); `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` (attendance A-92); the payroll hand-off
+      (closures beside holidays, D-15c);
       the configuration register (new endpoints and topics); the demo runbook's closure aside (in
       `dev-harness/`, outside the repo); memory `hr-company-schedule-guide-findings`.
 
@@ -850,3 +958,15 @@ built API, so no web host and no seeders).
   With the user's go, the migration was applied first to a restored copy of UAT and then to UAT:
   history 142 → 143, every object present, no row changed; the backup is kept (§ 6). Next: lane 1,
   which needs D-15.
+- **2026-10-04, later** — **Lane 1 source-checked (§ 1c).** No approved leave is re-charged today, by a
+  closure or by a holiday. The re-charge parts already exist in reschedule and recall. Payroll reads
+  none of HR's days off, and its hand-off already records holidays the same way. The audience
+  resolver is bound to the signed-in user's tenant. The user settled **D-15a** (re-charge, taken
+  leave included, finished years by hand), **D-15b** (holidays too), **D-15c** (pay flag into the
+  payroll hand-off) and **L1-1** (announce on HR's click), all as recommended. Six of § 1b's decisions
+  remain pending. Next: build lane 1.
+- **2026-10-05** — **Lane 1, slice 1a built and proved** (closure rules and scope; lane 1 State).
+  `run-final-review.mjs` scored 79/79 on two clean passes, and the round-4 net 201/201. The first pass
+  corrected the suite, not the code: refusals here are 422. It also showed that a login which has
+  signed in cannot be deleted, so it is switched off instead. 16 harness logins left active on UAT
+  (1 of this suite's, 15 of the round-4 suites') were switched off. Next: 1b, leave counts closures.

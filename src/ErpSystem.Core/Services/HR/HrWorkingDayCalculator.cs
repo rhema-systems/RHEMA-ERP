@@ -58,7 +58,23 @@ public interface IHrWorkingDayCalculator
     /// </remarks>
     Task<IReadOnlySet<DateOnly>> GetHolidayDatesAsync(
         Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The same days as <see cref="GetHolidayDatesAsync"/>, each with the holiday's name, in date
+    /// order — for screens that say WHICH holiday (company-schedule final closure, R4-10A.4).
+    /// </summary>
+    /// <remarks>
+    /// The diaries and the clash check used to read every holiday of every calendar, retired and
+    /// optional ones included; this keeps them on the one definition leave and the statutory clocks
+    /// already use.
+    /// </remarks>
+    Task<IReadOnlyList<HrHolidayDay>> GetHolidaysAsync(
+        Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
 }
+
+/// <summary>A day the tenant does not work because of a holiday, and the holiday's name.</summary>
+/// <param name="InLieu">True when the day is the working day given in lieu of a holiday on a weekend.</param>
+public sealed record HrHolidayDay(DateOnly Date, string Name, bool InLieu);
 
 public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
 {
@@ -137,7 +153,21 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
         return all;
     }
 
+    public async Task<IReadOnlyList<HrHolidayDay>> GetHolidaysAsync(
+        Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default)
+    {
+        if (to < from) return [];
+
+        return (await LoadNamedHolidaysAsync(tenantId, cancellationToken))
+            .Where(h => h.Date >= from && h.Date <= to)
+            .OrderBy(h => h.Date)
+            .ToList();
+    }
+
     private async Task<HashSet<DateOnly>> LoadHolidaysAsync(Guid tenantId, CancellationToken cancellationToken)
+        => (await LoadNamedHolidaysAsync(tenantId, cancellationToken)).Select(h => h.Date).ToHashSet();
+
+    private async Task<List<HrHolidayDay>> LoadNamedHolidaysAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         var calendar = await _unitOfWork.Repository<HolidayCalendar>()
             .GetQueryable()
@@ -145,8 +175,8 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
             .OrderByDescending(c => c.IsDefault)
             .FirstOrDefaultAsync(cancellationToken);
 
-        var dates = new HashSet<DateOnly>();
-        if (calendar == null) return dates;
+        var days = new List<HrHolidayDay>();
+        if (calendar == null) return days;
 
         var holidays = await _unitOfWork.Repository<PublicHoliday>()
             .GetQueryable()
@@ -164,13 +194,13 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
                 continue;
 
             for (var day = holiday.DateFrom; day <= holiday.DateTo; day = day.AddDays(1))
-                dates.Add(day);
+                days.Add(new HrHolidayDay(day, holiday.HolidayName, InLieu: false));
 
             // The working day given in lieu when a holiday falls on a weekend is not worked either.
             if (holiday.SubstitutionDate is DateOnly substitute)
-                dates.Add(substitute);
+                days.Add(new HrHolidayDay(substitute, holiday.HolidayName, InLieu: true));
         }
 
-        return dates;
+        return days;
     }
 }

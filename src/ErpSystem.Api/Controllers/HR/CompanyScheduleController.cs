@@ -660,13 +660,18 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<BusinessClosureDto>>> GetUpcomingClosures([FromQuery] int daysAhead = 30)
         => Ok(await _closureService.GetUpcomingClosuresAsync(daysAhead));
 
+    /// <summary>
+    /// Whether a closure that is a day off covers the date for someone at this site and in this
+    /// organisation unit (company-schedule final closure, lane 1). With neither, only a company-wide
+    /// closure answers true; a partial closure never does — its day is still worked.
+    /// </summary>
     [HttpGet("closures/is-closure-date")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<bool>> IsClosureDate(
         [FromQuery] DateTime date,
         [FromQuery] Guid? locationId = null,
-        [FromQuery] Guid? departmentId = null)
-        => Ok(await _closureService.IsClosureDateAsync(date, locationId, departmentId));
+        [FromQuery] Guid? organizationUnitId = null)
+        => Ok(await _closureService.IsClosureDateAsync(date, locationId, organizationUnitId));
 
     [HttpPost("closures")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]

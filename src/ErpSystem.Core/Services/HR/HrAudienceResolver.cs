@@ -149,6 +149,30 @@ public class HrAudienceResolver : IHrAudienceResolver
         return chain;
     }
 
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlySet<Guid>>> UnitAncestriesAsync(
+        Guid tenantId, IEnumerable<Guid> unitIds, CancellationToken cancellationToken = default)
+    {
+        var wanted = unitIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? [];
+        var result = new Dictionary<Guid, IReadOnlySet<Guid>>();
+        if (wanted.Count == 0 || tenantId == Guid.Empty) return result;
+
+        var parents = (await UnitEdgesAsync(tenantId, cancellationToken))
+            .ToDictionary(e => e.Id, e => e.ParentUnitId);
+
+        foreach (var unitId in wanted)
+        {
+            var chain = new HashSet<Guid> { unitId };
+            var current = unitId;
+            while (parents.TryGetValue(current, out var parent) && parent is { } parentId)
+            {
+                if (!chain.Add(parentId)) break; // a cycle in the data
+                current = parentId;
+            }
+            result[unitId] = chain;
+        }
+        return result;
+    }
+
     // ── Internals ─────────────────────────────────────────────────────────────
 
     /// <summary>

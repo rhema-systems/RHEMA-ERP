@@ -579,76 +579,11 @@ public class BusinessClosureRepository : GenericRepository<BusinessClosure>, IBu
     {
     }
 
-    public async Task<IEnumerable<BusinessClosure>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
-    {
-        return await _dbSet
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Include(c => c.AnnouncedBy)
-            .Where(c => c.StartDate >= startDate && c.EndDate <= endDate)
-            .OrderBy(c => c.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<BusinessClosure>> GetByTypeAsync(ClosureType type)
-    {
-        return await _dbSet
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Where(c => c.Type == type)
-            .OrderBy(c => c.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<BusinessClosure>> GetByLocationAsync(Guid locationId)
-    {
-        return await _dbSet
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Where(c => c.AffectsAllStations || c.LocationId == locationId)
-            .OrderBy(c => c.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<BusinessClosure>> GetByDepartmentAsync(Guid departmentId)
-    {
-        return await _dbSet
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Where(c => c.AffectsAllStations || c.DepartmentId == departmentId)
-            .OrderBy(c => c.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<BusinessClosure>> GetUpcomingClosuresAsync(int daysAhead = 30)
-    {
-        var today = DateTime.Today;
-        var futureDate = today.AddDays(daysAhead);
-
-        return await _dbSet
-            .Include(c => c.SiteLocation)
-            .Include(c => c.Department)
-            .Where(c => c.StartDate >= today && c.StartDate <= futureDate)
-            .OrderBy(c => c.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null)
-    {
-        var query = _dbSet.Where(c => c.StartDate <= date && c.EndDate >= date);
-
-        if (locationId.HasValue)
-        {
-            query = query.Where(c => c.AffectsAllStations || c.LocationId == locationId.Value);
-        }
-
-        if (departmentId.HasValue)
-        {
-            query = query.Where(c => c.AffectsAllStations || c.DepartmentId == departmentId.Value);
-        }
-
-        return await query.AnyAsync();
-    }
+    // ⚠ Company-schedule final closure, lane 1: the six custom reads that stood here are gone. They
+    // loaded every tenant's rows, matched ranges by containment rather than overlap, read "today" in
+    // server time, knew nothing of a closure's type or of a yearly repeat, and ANDed site and
+    // department (F-2, F-4, F-5, F-30). Closures are read through BusinessClosureRules and
+    // IHrClosureCalendar, which have one answer to "which days" and "who is covered".
 }
 
 #endregion Business Closure Repository
