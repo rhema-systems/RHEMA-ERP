@@ -31,7 +31,17 @@ public interface ICompanyEventService
     /// <see cref="UpdateCompanyEventDto.RescheduleReason"/> and does what <see cref="RescheduleEventAsync"/> does.
     /// </summary>
     Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Approves an event awaiting approval — through the workflow engine when one is under way, the
+    /// approve tier when none is (lane 2b, D-10). The organiser may not approve it.
+    /// </summary>
+    Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, string? comments = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rejects an event awaiting approval: it is cancelled with the reason, its room bookings with it, and
+    /// everybody invited is told (lane 2b).
+    /// </summary>
+    Task<CompanyEventChangeDto> RejectEventAsync(Guid eventId, Guid rejectedById, string reason, CancellationToken cancellationToken = default);
     Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default);
     Task<CompanyEventChangeDto> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default);
     Task<bool> CompleteEventAsync(CompleteEventDto completeDto, CancellationToken cancellationToken = default);

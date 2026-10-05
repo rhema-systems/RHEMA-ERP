@@ -34,7 +34,7 @@ has not started (the user: "don't start the actual development yet").
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
-   (2026-10-05). **Next: 2b, approval on the workflow engine (D-10).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   (2026-10-05) and 2b, approval on the workflow engine (D-10). **Next: 2c, the audience (D-16).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -309,7 +309,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a built and proved (250/250 ×2; round-4 net 207/207); 2b next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a, 2b built and proved (275/275 ×2; round-4 net 207/207); 2c next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -904,7 +904,7 @@ change.
       for `LocationId`, `OrganizationUnitId`, participant `EmployeeId` (active), task `AssignedToId`.
 
 **Lifecycle** (*review: two of the first draft's guards contradicted other rules*)
-- [ ] *✅ 2a for the guards, and the organiser may not approve their own event; the engine is 2b.* **Approve:** requires approval and not yet approved, while Scheduled, Rescheduled or Postponed —
+- [x] *✅ 2a for the guards (the organiser may not approve their own event); ✅ 2b on the engine, with Reject (which cancels the event) beside it.* **Approve:** requires approval and not yet approved, while Scheduled, Rescheduled or Postponed —
       the first draft's "Scheduled only" stranded a moved event, since a reschedule now sets
       Rescheduled. On the engine per D-10.
 - [x] *✅ 2a.* **Cancel:** not cancelled or completed; cascades to the event's live linked bookings.
@@ -1042,6 +1042,85 @@ built, proved twice and handed over on its own:
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2b — what was built (2026-10-05): approval on the workflow engine (D-10).*
+- **The HR recipe, applied a ninth time:**
+  - a status adapter (`CompanyEventWorkflowStatusAdapter`, `HrCompanyScheduleWorkflowStatusAdapters.cs`):
+    - Approved → Confirmed, or stays Postponed;
+    - Pending or Recalled → awaiting approval (confirmed back to scheduled). Recall is written out,
+      because the default sets a "Draft" the enum lacks;
+    - Rejected → cancelled, "Not approved: reason".
+  - the entity type `CompanyEvent` in the catalogue (no other module uses the key);
+  - an inbox title "name on date" linking to the event page;
+  - routing fields (category, type, scope, budget, attendees, unit, organiser) for when conditional
+    routing works (#3);
+  - `CompanyEvent` in the frontend's workflow type list.
+- **The seeded definition:** `COMPANY_EVENT`, one approval step for the HR desk (HR, TenantAdmin as
+  backstop), with the creator barred (`preventInitiatorApproval`). It reaches a database through the
+  seeders, not an API start.
+- **The service:**
+  - an event that needs approval starts its approval when it is created (no draft). With no published
+    definition it waits and is never auto-approved (`HrWorkflowFallbackAuthority`);
+  - Approve keeps 2a's record rules, then the engine decides. With no approval under way (no
+    definition, an older event, or a start that failed) `HR.Company.Approve` decides, so the event is
+    never stuck;
+  - **Reject** (`POST events/{id}/reject`, reason required) cancels the event, its room bookings with
+    it, and tells everybody invited. *The user did not rule on this; the event has no other state for
+    "not going ahead". Recorded for the user to confirm or change.*
+  - Cancel and delete withdraw an approval still under way; a move of an approved event starts a
+    fresh one.
+  - `HR.Company.Approve`'s description now names events.
+- **The event page:** the shared approval actions (who it waits for, Approve, Reject with a reason;
+  Recall off) and a Workflow tab, in place of the bespoke Approve button.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2b: **275/275 on two clean passes**; 2b has 25 assertions:
+  - **no definition:** the event waits (not approved on creation), and the approve tier approves it;
+  - **a definition naming one approver** (a second HR login, linked to B, so the engine's notices
+    reach the run's people only):
+    - creating the event starts the approval, naming the approver;
+    - the creator, who is not the organiser, is refused by the ENGINE (403, not named and barred);
+    - the named approver approves it, and the approval completes;
+    - the approver is told, linked to the event page, and nobody outside the run is told;
+    - a move clears the approval and starts a fresh one, approved again;
+    - the approver may not approve an event they organise (422);
+    - a rejection with no reason is refused; a rejection cancels the event, saying why, with its room
+      booking;
+    - a cancellation withdraws an approval under way.
+- Regression: the round-4 net **207/207**. `run-slice0`'s approval now runs the no-definition path.
+- **A harness defect found and fixed:** `GET /api/Workflow/definitions` is PAGED (25 of 118). The
+  first run's opening guard and its retire read page one, so both were vacuous and the definition
+  stayed published. The leftover named an approver login already switched off, so the next run's
+  approval starts were refused by the engine ("no independent active user… eligible"). They fell back
+  to the approve tier as designed, three times in the log. The suite now filters by entity type with a
+  wide page. ⚠ Other HR harnesses that list definitions unfiltered have the same blind spot.
+- **UAT changes:** the suite's entity-type seed added exactly one type, `CompanyEvent` (217 → 218;
+  nothing switched off or updated). Three harness definitions, all retired. 15 CompanyEvent instances,
+  all completed or cancelled. Nothing of the run's left; 15 harness logins switched off.
+- **UAT's definition, published on the user's word (2026-10-05):** "Company Event Approval", id
+  `74c589fc…`.
+  - **Why not the seeder:** start-up seeding is off. `seed-workflows` touches every module (Finance,
+    help desk SQL, procurement, estates, legal…). And the seeder SKIPS this type on UAT anyway: its
+    existence check counts any definition for the type, retired harness ones included.
+  - **How:** `dev-harness/hr-company-schedule/tools/publish-company-event-definition.mjs` builds it in
+    the seeder's exact shape (Draft → PendingApproval for the roles HR and TenantAdmin, initiator
+    barred, distinct approvers → Approved), re-reads it (3 steps, 2 transitions) and is idempotent. A
+    rebuilt database gets it from the seeder.
+  - **What it means on UAT:** an event that needs approval asks the whole HR desk, which on UAT is two
+    logins, `hr.head` and `hr.officer`. Its creator may not approve it, so one approves what the other
+    creates.
+  - **The suites, adapted:**
+    - every approval is by a second HR login (B in the review suite, a minted officer in `run-slice0`);
+    - block 2b runs the engine checks through the real definition when it is live, and skips the
+      no-definition path (proved twice before);
+    - both suites withdraw the notices their events raise (soft delete by SQL, re-checked after the API
+      stopped: 0 live).
+  - **Re-proof against it:** `run-final-review.mjs` **270/270 on two clean passes**. That is 275 less
+    the five checks that need no definition: the waiting event, the tier's approval, publishing the
+    harness definition, "only the run's people told", and retiring it. The round-4 net is **208/208**,
+    `run-slice0` gaining the notice check. The desk was asked 18 times each across the runs, all
+    withdrawn. No 500s; no refused starts.
+- API log: #23, #39, the three refused starts above; no request answered 500.
 
 *2a — what was built (2026-10-05):*
 - **`CompanyEventRules`, pure.** It holds:
@@ -1533,3 +1612,13 @@ built API, so no web host and no seeders).
     deadline); it now sends one.
 
   Next: 2b, approval on the workflow engine.
+- **2026-10-05, later** — **Lane 2, slice 2b built and proved** (approval on the engine; lane 2
+  State). `run-final-review.mjs` scored 275/275 on two clean passes; the round-4 net 207/207.
+  - **Rejecting cancels the event:** the user's ruling is to be confirmed.
+  - **A harness defect:** the workflow definitions listing is paged, which made a guard and a retire
+    vacuous. Fixed; other HR harnesses share the blind spot.
+  - **UAT:** the `CompanyEvent` entity type is registered. The user then asked for the definition: it is
+    published (by a tool in the seeder's shape, because the seeder skips it on UAT). The suites run
+    against it, 270/270 twice and the round-4 net 208/208.
+
+  Next: 2c, the audience.

@@ -27,6 +27,8 @@ export const moduleEntityTypeMap: Record<string, string[]> = {
     'LeaveEncashment',
     'TrainingNomination',
     'StaffAttendanceRegularization',
+    // Company-schedule final closure, lane 2b (D-10).
+    'CompanyEvent',
     'StaffOvertimeRequest',
     'RemoteWorkRequest',
     'ConsultantTimesheet',

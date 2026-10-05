@@ -466,6 +466,16 @@ public class CompleteEventDto
 }
 
 /// <summary>
+/// An approver's decision on an event (lane 2b, D-10): optional comments on approval, the reason on a
+/// rejection — which the organiser and everybody invited are told.
+/// </summary>
+public class EventDecisionDto
+{
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+}
+
+/// <summary>
 /// What cancelling, rescheduling or deleting an event did beyond the event itself (lane 2a: F-38, F-39),
 /// so the screen can say it rather than leave HR to discover it.
 /// </summary>

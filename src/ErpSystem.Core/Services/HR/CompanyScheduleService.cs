@@ -8,6 +8,7 @@ using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.CompanySchedule;
 using ErpSystem.Core.Services.HR.Extensions;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +38,13 @@ public class CompanyEventService : ICompanyEventService
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly ICompanyHrPolicySettingsService _policySettings;
 
+    /// <summary>Approval on the workflow engine (lane 2b, D-10).</summary>
+    private readonly IWorkflowIntegrationService _workflow;
+    private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
+
+    /// <summary>The engine's entity-type key — registered in the catalogue, the display service and the seeder.</summary>
+    private const string WorkflowEntityType = "CompanyEvent";
+
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
         IEventParticipantRepository participantRepository,
@@ -47,8 +55,12 @@ public class CompanyEventService : ICompanyEventService
         IUnitOfWork unitOfWork,
         ITemplatedEmailService templatedEmail,
         ILogger<CompanyEventService> logger,
-        ICompanyHrPolicySettingsService policySettings)
+        ICompanyHrPolicySettingsService policySettings,
+        IWorkflowIntegrationService workflow,
+        IWorkflowStatusAdapterRegistry workflowAdapters)
     {
+        _workflow = workflow;
+        _workflowAdapters = workflowAdapters;
         _policySettings = policySettings;
         _eventRepository = eventRepository;
         _participantRepository = participantRepository;
@@ -639,6 +651,106 @@ public class CompanyEventService : ICompanyEventService
             "event rescheduled", cancellationToken: cancellationToken);
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2b — approval on the workflow engine (D-10)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Sends an event that needs approval to the engine: at creation (an event has no draft), and again
+    /// when an approved event moves (its approval was for the old time).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Submitting must never approve.</b> With no published definition the engine answers
+    /// Approved; <see cref="HrWorkflowFallbackAuthority.SubmitAsync"/> turns that into Pending, so the
+    /// event waits for the module's own approve tier instead.</para>
+    ///
+    /// <para>A start that fails leaves the event awaiting approval, with no instance: the decision then
+    /// falls to the approve tier (<see cref="DecideAsync"/>), so the event is never stuck.</para>
+    /// </remarks>
+    private async Task StartApprovalAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (result, outcome) = await HrWorkflowFallbackAuthority.SubmitAsync(_workflow, WorkflowEntityType, e.Id);
+            if (!result.ExecutionResult.Success)
+            {
+                _logger.LogWarning("Approval did not start for event {EventNumber}: {Message}",
+                    e.EventNumber, result.ExecutionResult.Message);
+                return;
+            }
+
+            _workflowAdapters.GetAdapter(WorkflowEntityType).ApplySubmitOutcome(e, outcome, null);
+            await _eventRepository.UpdateAsync(e);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Approval did not start for event {EventNumber}; it waits for the approve tier.", e.EventNumber);
+        }
+    }
+
+    /// <summary>
+    /// The decision, from the engine when the event has an approval under way, and from the approve tier
+    /// (<c>HR.Company.Approve</c>) when it has none.
+    /// </summary>
+    /// <remarks>
+    /// "None" covers an unconfigured tenant, an event that predates lane 2b, and a start that failed —
+    /// with no instance <c>CanUserApproveAsync</c> answers false for everybody, and the event would be
+    /// stuck for ever.
+    /// </remarks>
+    private async Task<WorkflowOutcome> DecideAsync(CompanyEvent e, string action, string? comments)
+    {
+        var userId = _currentUserProvider.UserId;
+        if (userId == Guid.Empty)
+            throw new UnauthorizedAccessException("Sign in to decide on an event.");
+
+        var description = (action == "Reject" ? "reject" : "approve") + " a company event";
+        if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, e.Id))
+            return await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+                _workflow, _currentUserProvider, WorkflowEntityType, e.Id, userId, action, comments,
+                description, HrPermissions.ApproveCompany);
+
+        HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(_currentUserProvider, description, HrPermissions.ApproveCompany);
+        return action == "Reject" ? WorkflowOutcome.Rejected : WorkflowOutcome.Approved;
+    }
+
+    /// <summary>Withdraws an approval still under way, when the event is cancelled or deleted.</summary>
+    private async Task CancelApprovalAsync(CompanyEvent e, string reason)
+    {
+        try
+        {
+            if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, e.Id))
+                await _workflow.CancelWorkflowAsync(WorkflowEntityType, e.Id, reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not withdraw the approval of event {EventNumber}.", e.EventNumber);
+        }
+    }
+
+    /// <summary>
+    /// The rules a decision answers to, whoever the engine names (lane 2a): the event needs approval and
+    /// has none, is scheduled, rescheduled or postponed, and is not the decider's own.
+    /// </summary>
+    private static void EnsureDecidable(CompanyEvent entity, Guid deciderEmployeeId, string verb)
+    {
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {ClosedState(entity)}, so there is nothing to {verb}.");
+        if (!entity.RequiresApproval)
+            throw new InvalidOperationException($"{entity.EventName} does not need approval.");
+        if (entity.ApprovalDate != null)
+            throw new InvalidOperationException(
+                $"{entity.EventName} is already approved"
+              + (entity.ApprovedBy is { } by ? $", by {by.FullName}." : "."));
+        if (entity.Status is not (EventStatus.Scheduled or EventStatus.Rescheduled or EventStatus.Postponed))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {entity.Status}; only a scheduled, rescheduled or postponed event waits for approval.");
+        if (deciderEmployeeId == entity.OrganizerId)
+            throw new InvalidOperationException(
+                $"You organise {entity.EventName}, so someone else must {verb} it.");
+    }
+
     public async Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid callerEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -658,6 +770,9 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Company event created: {EventNumber}", entity.EventNumber);
+
+        // D-10: an event that needs approval goes to the engine now — events have no draft to submit.
+        if (entity.RequiresApproval) await StartApprovalAsync(entity, cancellationToken);
 
         // ⚠ Re-read before mapping. `entity` is the graph we just inserted: its Organizer,
         // Department and SiteLocation navigations are still null, so mapping it straight to a DTO
@@ -696,8 +811,9 @@ public class CompanyEventService : ICompanyEventService
 
         // ⚠ An edit that changes the window is a reschedule (F-37, R4-7.1): it used to write the dates
         // straight in, so nothing kept the original, the status stayed, and nobody was told.
+        CompanyEventChangeDto? moved = null;
         if (moving)
-            await MoveAsync(entity, before, updateDto.RescheduleReason!.Trim(), cancellationToken);
+            moved = await MoveAsync(entity, before, updateDto.RescheduleReason!.Trim(), cancellationToken);
         else if (entity.RsvpDeadline != rsvpDeadlineBefore)
             // A new deadline is a new chase (round 4, lane N-b2).
             entity.RsvpReminderSentDate = null;
@@ -708,6 +824,8 @@ public class CompanyEventService : ICompanyEventService
         _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
 
         if (moving) await NotifyRescheduledAsync(entity, cancellationToken);
+        // D-10: an approved event that moved is approved afresh — its approval was for the old time.
+        if (moved?.ApprovalCleared == true) await StartApprovalAsync(entity, cancellationToken);
 
         // ⚠ Re-read (F-46): the entity's navigations were loaded before the change, so a new organiser,
         // site or unit would answer with the old name.
@@ -715,41 +833,67 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <remarks>
-    /// Guards (lane 2a): the event needs approval and has none, is scheduled, rescheduled or postponed, and
-    /// is not the approver's own — whoever created it, the organiser may not approve it. D-10 moves the
-    /// decision onto the workflow engine (slice 2b); these rules stay.
+    /// <para>The record's rules first (lane 2a, <see cref="EnsureDecidable"/>), so a refusal explains
+    /// itself in terms of the event — then the decision, through the engine (lane 2b, D-10). A definition
+    /// with more than one stage leaves the event awaiting approval until the last.</para>
+    ///
+    /// <para>⚠ Approving from the generic <c>/workflow/inbox</c> drives the engine only and does not reach
+    /// the event (cross-module #15), as for every HR approval. The inbox row links here.</para>
     /// </remarks>
-    public async Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, CancellationToken cancellationToken = default)
+    public async Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, string? comments = null, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(eventId, cancellationToken);
+        EnsureDecidable(entity, approvedById, "approve");
 
-        if (CompanyEventRules.IsClosed(entity))
-            throw new InvalidOperationException(
-                $"{entity.EventName} is {ClosedState(entity)}, so there is nothing to approve.");
-        if (!entity.RequiresApproval)
-            throw new InvalidOperationException($"{entity.EventName} does not need approval.");
-        if (entity.ApprovalDate != null)
-            throw new InvalidOperationException(
-                $"{entity.EventName} is already approved"
-              + (entity.ApprovedBy is { } by ? $", by {by.FullName}." : "."));
-        if (entity.Status is not (EventStatus.Scheduled or EventStatus.Rescheduled or EventStatus.Postponed))
-            throw new InvalidOperationException(
-                $"{entity.EventName} is {entity.Status}; only a scheduled, rescheduled or postponed event waits for approval.");
-        if (approvedById == entity.OrganizerId)
-            throw new InvalidOperationException(
-                $"You organise {entity.EventName}, so someone else must approve it.");
-
-        entity.ApprovedById = approvedById;
-        entity.ApprovalDate = DateTime.UtcNow;
-        // A postponed event stays postponed — approved, but with no date to confirm.
-        if (entity.Status != EventStatus.Postponed) entity.Status = EventStatus.Confirmed;
+        var outcome = await DecideAsync(entity, "Approve", comments);
+        // ⚠ The approver's EMPLOYEE id: ApprovedById is an Employee foreign key.
+        _workflowAdapters.GetAdapter(WorkflowEntityType).ApplyApprovalOutcome(entity, outcome, approvedById);
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event approved: {EventNumber}", entity.EventNumber);
+        _logger.LogInformation("Company event approval for {EventNumber}: {Outcome}", entity.EventNumber, outcome);
 
         return true;
+    }
+
+    /// <summary>
+    /// Rejects an event awaiting approval: it is cancelled, with the reason, its room bookings with it,
+    /// and everybody invited is told (lane 2b). An event has no other state for "not going ahead".
+    /// </summary>
+    public async Task<CompanyEventChangeDto> RejectEventAsync(Guid eventId, Guid rejectedById, string reason, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            throw new InvalidOperationException("Say why the event is not approved — the organiser and everybody invited are told.");
+
+        var entity = await GetOwnedEventAsync(eventId, cancellationToken);
+        EnsureDecidable(entity, rejectedById, "reject");
+
+        var outcome = await DecideAsync(entity, "Reject", reason.Trim());
+        _workflowAdapters.GetAdapter(WorkflowEntityType).ApplyApprovalOutcome(entity, outcome, rejectedById, reason.Trim());
+
+        var change = new CompanyEventChangeDto();
+        if (outcome == WorkflowOutcome.Rejected)
+            change.BookingsCancelled = await CancelLinkedBookingsAsync(
+                entity, $"{entity.EventNumber} was not approved: {reason.Trim()}", cancellationToken);
+
+        await _eventRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Company event {EventNumber} rejection: {Outcome}, {Bookings} room booking(s) cancelled",
+            entity.EventNumber, outcome, change.BookingsCancelled.Count);
+
+        if (outcome == WorkflowOutcome.Rejected)
+            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
+                tokens =>
+                {
+                    tokens["CancellationReason"] = entity.CancellationReason;
+                    return tokens;
+                },
+                "event not approved", cancellationToken: cancellationToken);
+
+        change.Event = await GetByIdAsync(entity.Id, cancellationToken);
+        return change;
     }
 
     public async Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default)
@@ -772,6 +916,9 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event cancelled: {EventNumber}, {Bookings} room booking(s) with it",
             entity.EventNumber, bookings.Count);
+
+        // D-10: an approval still under way is withdrawn — there is nothing left to approve.
+        await CancelApprovalAsync(entity, $"The event was cancelled: {reason}");
 
         await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
             tokens =>
@@ -826,6 +973,8 @@ public class CompanyEventService : ICompanyEventService
         // ⚠ Round 4, D6. Everybody invited is told, and told what it moved FROM — which is only
         // possible because C-2 keeps the original window.
         await NotifyRescheduledAsync(entity, cancellationToken);
+        // D-10: an approved event that moved is approved afresh — its approval was for the old time.
+        if (change.ApprovalCleared) await StartApprovalAsync(entity, cancellationToken);
 
         change.Event = await GetByIdAsync(entity.Id, cancellationToken);
         return change;
@@ -866,6 +1015,7 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await CancelApprovalAsync(entity, "The event was deleted.");
 
         _logger.LogInformation("Company event deleted: {Id}, {Bookings} room booking(s) cancelled with it", id, bookings.Count);
 

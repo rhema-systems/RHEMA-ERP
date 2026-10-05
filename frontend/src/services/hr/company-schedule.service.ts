@@ -149,8 +149,17 @@ class CompanyEventService {
     return apiService.put<CompanyEvent>(`${this.baseUrl}/events/${id}`, { ...data, id });
   }
 
-  approve(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/events/${id}/approve`);
+  /**
+   * Approves an event awaiting approval (lane 2b, D-10). The workflow engine decides whether the caller
+   * may; the organiser never may. Comments are optional.
+   */
+  approve(id: string, comments?: string | null): Promise<void> {
+    return apiService.post<void>(`${this.baseUrl}/events/${id}/approve`, { comments: comments ?? null });
+  }
+
+  /** Rejects an event awaiting approval: it is cancelled with the reason, its room bookings with it (lane 2b). */
+  reject(id: string, comments: string): Promise<CompanyEventChange> {
+    return apiService.post<CompanyEventChange>(`${this.baseUrl}/events/${id}/reject`, { comments });
   }
 
   /** Cancels the event and its live room bookings; answers the bookings cancelled (lane 2a). */

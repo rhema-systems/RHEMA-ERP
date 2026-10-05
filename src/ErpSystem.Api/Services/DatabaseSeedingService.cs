@@ -542,6 +542,8 @@ namespace ErpSystem.Web.Services
                 // Performance closure D-104: a pay or employment decision is the appointing authority's alone — no
                 // administrator backstop, which would be a system role making a business decision.
                 var managingDirector = new[] { Constants.Roles.ManagingDirector };
+                // Company-schedule final closure D-10: an event that needs approval is the HR desk's to approve.
+                var hrDesk = new[] { Constants.Roles.Hr, Constants.Roles.TenantAdmin };
 
                 var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
                 {
@@ -583,6 +585,9 @@ namespace ErpSystem.Web.Services
                     // describes for "the line manager approves".
                     ("HR_TEAM_TERMS_OF_REFERENCE", "HR Team Terms Of Reference", "Committee Charter Approval", "A committee's terms of reference: Draft -> PendingApproval (owning unit's head, or HR) -> Approved.", staffRaised),
                     ("HR_TEAM_OBJECTIVE", "HR Team Objective", "Team Objective Approval", "What a team undertakes to deliver: Draft -> PendingApproval (owning unit's head, or HR) -> Active.", staffRaised),
+                    // Company-schedule final closure, lane 2b (D-10). The approval starts when the event is
+                    // created — events have no draft — and CompanyEventService refuses the organiser as approver.
+                    ("COMPANY_EVENT", "Company Event", "Company Event Approval", "A company event that needs approval: Draft -> PendingApproval (HR) -> Approved.", hrDesk),
                     // Round 3, lane S. A pay change is an executive decision; the service applies it
                     // to HR and to payroll the moment the engine says Approved.
                     ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
@@ -597,6 +602,9 @@ namespace ErpSystem.Web.Services
                 var barInitiator = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
                 {
                     "PERFORMANCE_IMPROVEMENT_PLAN", "SALARY_REVIEW_PROPOSAL", "EMPLOYMENT_ACTION_PROPOSAL", "APPRAISAL_TEMPLATE",
+                    // Company-schedule D-10: whoever creates an event does not approve it either. The organiser
+                    // (who may be somebody else, D-11) is refused by the service.
+                    "COMPANY_EVENT",
                 };
 
                 foreach (var tenant in tenants)

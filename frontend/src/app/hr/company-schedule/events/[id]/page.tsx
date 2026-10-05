@@ -40,6 +40,9 @@ import {
 } from '@/components/hr/company-schedule/EventPanels';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 import { toIsoInstant } from '@/components/hr/employee/tabs/fields';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import type { CompanyEventChange } from '@/types/hr/company-schedule';
 
 /** What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a). */
@@ -145,13 +148,34 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     onError: fail('Could not chase the invitations'),
   });
 
-  const approve = useMutation({
-    mutationFn: () => companyEventService.approve(id),
-    onSuccess: async () => {
-      await refresh();
-      toast({ title: 'Event approved' });
+  // Lane 2b (D-10): approval runs on the workflow engine. The shared actions show who it waits for and
+  // offer Approve and Reject to whoever the engine names; the decision goes through this module's own
+  // endpoints, which apply it to the event (the generic inbox path does not — cross-module #15).
+  const awaitingApproval =
+    !!event &&
+    event.requiresApproval &&
+    !event.approvalDate &&
+    !event.isCancelled &&
+    ['Scheduled', 'Rescheduled', 'Postponed'].includes(event.status);
+  const workflow = useWorkflowRecord({
+    entityType: 'CompanyEvent',
+    entityId: id,
+    entityLabel: 'Company event',
+    entityNumber: event?.eventNumber,
+    status: awaitingApproval ? 'PendingApproval' : (event?.status ?? 'Scheduled'),
+    // Events have no draft: the approval starts when the event is created.
+    canSubmit: false,
+    canApproveReject: awaitingApproval,
+    // No recall: the generic button would call the engine directly and leave the event waiting with
+    // nothing under way.
+    canRecall: false,
+    enabled: !!event?.requiresApproval,
+    commands: {
+      approve: (ctx) => companyEventService.approve(id, ctx.comments || null),
+      reject: (ctx) => companyEventService.reject(id, ctx.comments || ''),
+      afterAction: refresh,
     },
-    onError: fail('Could not approve the event'),
+    onOpenWorkflows: () => router.push('/administration/workflow'),
   });
 
   const cancel = useMutation({
@@ -236,11 +260,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         backHref="/hr/company-schedule/events"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {event.requiresApproval && !event.approvedById && open && (
-              <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
-              </Button>
-            )}
+            {event.requiresApproval && <WorkflowApprovalActions {...workflow.actionProps} />}
             {open && (
               <>
                 <Button variant="outline" onClick={() => setRescheduleOpen(true)}>
@@ -403,11 +423,27 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="attendance">Attendance ({event.attendanceRecords?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({event.tasks?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="attachments">Attachments ({event.attachments?.length ?? 0})</TabsTrigger>
+          {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
         <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} /></TabsContent>
         <TabsContent value="attendance" className="pt-4"><AttendancePanel eventId={id} /></TabsContent>
         <TabsContent value="tasks" className="pt-4"><TasksPanel eventId={id} /></TabsContent>
         <TabsContent value="attachments" className="pt-4"><AttachmentsPanel eventId={id} /></TabsContent>
+        {event.requiresApproval && (
+          <WorkflowTabContent
+            {...workflow.tabProps}
+            value="workflow"
+            entityType="CompanyEvent"
+            entityId={id}
+            entityLabel="Company event"
+            entityNumber={event.eventNumber}
+            status={awaitingApproval ? 'PendingApproval' : event.status}
+            onAfterAction={async () => {
+              await refresh();
+              await workflow.refresh();
+            }}
+          />
+        )}
       </Tabs>
 
       {/* Cancel */}

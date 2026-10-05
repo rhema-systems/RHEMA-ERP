@@ -587,8 +587,8 @@ public static class HrPermissions
         new(ApproveDiscipline, "Approve Disciplinary actions (unconfigured)",
             "Approve or reject disciplinary actions WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. ⚠ The natural-justice rules — who may decide a case, and that the employee was queried and heard — are enforced on the record by the service and are NOT granted here.",
             CategoryDiscipline),
-        new(ApproveCompany, "Approve Team records (unconfigured)",
-            "Approve or reject team objectives and terms of reference WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition.",
+        new(ApproveCompany, "Approve Team records and company events (unconfigured)",
+            "Approve or reject team objectives, terms of reference and company events that need approval WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. It does not let you approve an event you organise.",
             CategoryCompany),
 
         // ── Defined, but deliberately NOT granted to the HR desk ─────────────────────────────

@@ -150,15 +150,36 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Approves an event awaiting approval (lane 2b, D-10): the engine decides whether the caller may — the
+    /// approver its definition names — and with no approval under way, <c>HR.Company.Approve</c>. The
+    /// organiser may not approve their own. The body is optional: <c>{ comments }</c>.
+    /// </summary>
     [HttpPost("events/{id:guid}/approve")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> ApproveEvent(Guid id)
+    public async Task<IActionResult> ApproveEvent(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] EventDecisionDto? dto)
     {
         var ctx = TryGetEmployeeWriteContext(out _, out _, out var approvedById, "Approving an event");
         if (ctx != null) return ctx;
 
-        await _eventService.ApproveEventAsync(id, approvedById);
+        await _eventService.ApproveEventAsync(id, approvedById, dto?.Comments);
         return Ok(new { message = "Event approved" });
+    }
+
+    /// <summary>
+    /// Rejects an event awaiting approval (lane 2b): it is cancelled with the reason, which everybody
+    /// invited is told, and its room bookings are cancelled with it. Body: <c>{ comments }</c>, required.
+    /// </summary>
+    [HttpPost("events/{id:guid}/reject")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<CompanyEventChangeDto>> RejectEvent(Guid id, [FromBody] EventDecisionDto dto)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var rejectedById, "Rejecting an event");
+        if (ctx != null) return ctx;
+
+        return Ok(await _eventService.RejectEventAsync(id, rejectedById, dto.Comments ?? string.Empty));
     }
 
     /// <summary>Cancels the event and its live room bookings, and answers what was cancelled (F-39).</summary>
