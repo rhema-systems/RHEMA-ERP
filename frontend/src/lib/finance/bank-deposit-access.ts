@@ -10,3 +10,15 @@ export function isIndependentBankDepositReviewer(
         actorId.toLowerCase() !== submittedById.toLowerCase(),
     );
 }
+
+// Bank acknowledgement is a separate permissioned action, but it retains the same
+// maker/checker boundary enforced by BankingSettlementService. Fail closed until the
+// API supplies the submitter identity.
+export function canRecordBankDepositAcknowledgement(
+    actorId: string | null | undefined,
+    submittedById: string | null | undefined,
+    hasConfirmationPermission: boolean,
+) {
+    return hasConfirmationPermission &&
+        isIndependentBankDepositReviewer(actorId, submittedById);
+}
