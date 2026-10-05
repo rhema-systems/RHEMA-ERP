@@ -32,8 +32,9 @@ has not started (the user: "don't start the actual development yet").
    D-10, D-11, D-13, D-14, D-16 and D-18 — each
    needed before the lanes § 2 lists against it; none blocks lane 0.
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
-   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Next: lane 2 (events).** Its
-   source check comes first, and it waits on four of the pending decisions: D-10, D-11, D-14 and D-16. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Next: lane 2 (events),
+   source-checked 2026-10-05 (§ 1c).** It waits on four decisions, D-10, D-11, D-14 and D-16, now
+   sharpened in § 1c's lane 2 table. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -155,6 +156,149 @@ lane 1's source check (✅ below).** The other six are pending; each is needed b
 | **D-15b** | The same gap for public holidays: a holiday added after leave is approved does not give the day back either. Close it too? | **Yes, with the same routine,** called from `PublicHolidayService`'s create, update and delete (HR's own code). Otherwise a holiday and a closure on the same day would treat the same leave differently. |
 | **D-15c** | Unpaid closures and payroll? | **HR keeps the pay flag it already has and makes closures readable through the same HR reader leave uses.** No payroll code is touched. Closures are added to the payroll hand-off beside holidays (§ 2.1 and the § 3 table) rather than as a new register entry, so the payroll owner sees all of HR's days off together. |
 | **L1-1** | Announcing a closure: publish automatically on save, or prepare it for HR to send? | **Prepare it; HR sends it with one click.** Saving a non-working closure offers "Announce to the N staff it covers": an announcement already addressed by the closure's scope and worded from it, published when HR confirms. An announcement reaches every covered employee at once and cannot be unsent, and a closure is often typed, corrected, then confirmed; publishing on save would turn each correction into another broadcast. The staff whose leave changes are told individually anyway (D-15a). *The plan's text said "announced"; this is the source check's refinement.* |
+
+**Lane 2 source check (2026-10-05, at b95423646) — what the code says.** *Three read-only passes:*
+*the event core; notifications; approval, audience and the rest. Their key claims were then checked by*
+*hand.* None of lane 2's findings is fixed, and the plan's line references into the event code still
+hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-959`).
+
+- **No validation and no state guards.**
+  - Create, update and reschedule (`:329-475`) check no window, no RSVP deadline and no reminder
+    settings. `[Required]` on a non-nullable date never fails, so an omitted date is saved as
+    0001-01-01.
+  - No lifecycle method has a guard:
+    - Approve works on an event that needs no approval, and on the organiser's own;
+    - a second Cancel overwrites the reason and emails everyone again;
+    - Complete runs on a cancelled or future event;
+    - Update writes any `Status` (Confirmed on an unapproved event; an "un-cancel" that leaves
+      `IsCancelled` set), and writes the dates directly (F-37, R4-7.1).
+  - **Nothing ever sets `Rescheduled` or `InProgress`** (C-7).
+  - Reschedule resets no answers *(F-38's "answers reset" is the target, not today)*. It keeps the
+    chase stamp on purpose (`:445-447`).
+  - `EnsureExistsAsync` exists nowhere; it is new work. The model is the closure checks
+    (`:2036-2053`).
+- **F-10, corrected:** another tenant's id is **stored silently**, not a 500. The DbContext's tenant
+  filter is inert, because nothing constructs it with a tenant (`ApplicationDbContext.cs:50-52, 10555`).
+  Only a non-existent id gives a 500. A participant from another tenant is then emailed.
+- **Bookings link to events by `RoomBooking.EventId`.** It is set from the body, never validated,
+  and never acted on, so cancel, delete and reschedule leave linked bookings alone (F-38, F-39). On
+  UAT none of the 19 bookings is linked.
+- **The organiser (D-11).**
+  - `OrganizerId` is set from the token on create and never changes.
+  - ⚠ **`CreatedBy` / `CreatedById` are never stamped**: null on all 42 live events on UAT. So "the
+    creator stays in `CreatedBy`" is only true once the service stamps it.
+  - The diaries and the clash check read participants only (the organiser is absent unless invited).
+  - The reminder sweep never reminds the organiser.
+  - `HasConflictingEventAsync` (`CompanyScheduleRepository.cs:129`) is the only organiser-based check,
+    and nothing calls it.
+- **Approval (D-10).**
+  - Fields: `RequiresApproval`, `ApprovedById` (an Employee FK) and `ApprovalDate`. There is no
+    `IsApproved` and no Draft or awaiting-approval status: an event is created `Scheduled`, a booking
+    `Tentative` or `Confirmed`.
+  - No workflow code, entity type or definition exists for either; UAT has none either.
+  - On UAT **no event requires approval** (0 of 42).
+  - The pieces the engine route would use all exist:
+    - the fallback guard `HrWorkflowFallbackAuthority`;
+    - an end-to-end example in travel: entity type, submit, approve, adapter, display resolver,
+      seed, frontend type;
+    - the permission `HR.Company.Approve`, granted to the HR desk. Its description still says "team
+      objectives and terms of reference".
+  - Three traps:
+    - with no submit step, the instance must start at create (as attendance does);
+    - the adapter's default recall sets a "Draft" status that does not exist, so it must be
+      written out;
+    - the two-stage seeding helper cannot set `preventInitiatorApproval`, which in any case guards
+      the creator, not the organiser. A service check against `OrganizerId` / `BookedById` is
+      needed whatever is seeded (recipe trap 7).
+  - Like every HR approval, approving from the generic `/workflow/inbox` does not reach the record
+    (cross-module #15). The inbox links to the event page, where Approve works.
+- **The audience (D-16).**
+  - `Scope`, `Visibility`, `ShowOnCompanyCalendar`, `ShowOnIntranet` and `Priority` are stored and
+    shown, and **read by nothing**.
+  - `IHrAudienceResolver` has no rule for unit heads or managers.
+  - Orientation already defines "Management" as **unit heads plus anyone named as a line manager**
+    (`OrientationEnrollmentTriggerService.cs:1280-1287`).
+  - ⚠ **Data:**
+    - UAT: 39 of TDC's 42 seeded units have a head. The demo seeder appoints the employee with the
+      lowest staff number in each unit.
+    - TDC's own data, as measured 2026-08 (`IEmployeeRelationsResponderService.cs:12`): 2 of 48
+      units had a head, and 5.8% of staff a line manager.
+    - UAT has 488 line managers, and 14 people at the "Management Staff" level.
+- **Notifications.**
+  - Five templated emails: invitation, RSVP chase, reminder, rescheduled, cancelled
+    (`CompanyScheduleEmailCatalog.cs`). Nothing in-app for events or bookings *(F-31 now stands for
+    those only: closures announce in-app since 1d)*.
+  - Nothing is sent on approve, on update (even when the dates change), complete, delete, a reply
+    or a removal.
+  - **F-33 is wider than written:** the per-event buttons refuse only a cancelled event, so they also
+    run on completed, postponed and past events, and after the RSVP deadline. The hourly sweep does
+    refuse an unapproved event.
+  - F-35: no send skips an inactive employee. `StaffTravelNotices` does not either, so copying it
+    does not deliver F-35.
+  - **R4-6.3, sharper:**
+    - every attempt counts as a delivery;
+    - the invitation is marked Sent before it is sent;
+    - the reminder and chase stamps are written on a run that delivered nothing, so the sweep never
+      retries. Orientation's dispatcher already tells "no mail server" from "no address".
+  - **The in-app model:** travel's `StaffTravelNotices` shape (one class owning the topics,
+    never failing the act), publishing one event with a list of recipients as announcements do.
+    Topics are in-app only; **email stays on the templated catalogue**, because the topic path
+    queues rows (no delivery result), loses the catalogue's wording and drops attachments.
+- **Calendar invites (D-14).**
+  - `SendAsync` already takes attachments; only `SendForTenantAsync` lacks them, and its core
+    supports them, so the overload is a few lines.
+  - **Interviews already build an `.ics`** (`JobInterviewService.BuildInterviewIcs`, `:3085-3128`):
+    a random UID on each send, `SEQUENCE:0`, no ORGANIZER, floating time, no CANCEL.
+  - **SEQUENCE has nowhere to live:** there is no column for it.
+  - Mail goes from the system address with no Reply-To, so an external guest's reply reaches the
+    organiser only through the invite's ORGANIZER line.
+  - External guests receive all five emails and have no way to answer. Anonymous token-link replies
+    exist elsewhere (interview attendance, offers, client timesheets).
+- **Smaller corrections:**
+  - **F-58 (new):** `ToDetailDto` drops the original window (`CompanyScheduleMappingExtensions.cs:111`;
+    only `ToDto`, `:78`, copies it). The event page reads the detail, so it never shows the original
+    dates: a cause behind R4-6.1 and F-21.
+  - **Recurrence (C-14):** the five old fields are create-only. `RecurrenceSeriesId` and
+    `OccurrenceNumber` (lane 0) are read and written by nothing. UAT's two "recurring" events are
+    harness rows.
+  - **`CompanyEventCommitmentSource.WindowOf`** builds one window from the start day
+    (R4-10A.2, confirmed).
+  - The repository reads use containment, not overlap. None filters by tenant inside the query
+    (F-30). Event, task, room and booking updates return the unsaved entity (F-46).
+  - `CompanyEvent.OrganizationUnitId` (lane 0) is read and written by nothing; `DepartmentId` is
+    used everywhere, the form included.
+  - **Attachments:**
+    - all 12 on UAT are path-only (F-54);
+    - the event's panel is a local `ResourceCollectionTab`;
+    - the shared `AttachmentsPanel` has no field for the attachment type (Agenda, Minutes…), so
+      the event panel needs its own upload dialog, as union documents built.
+  - **Tasks:** Completed through update sets no date. Complete has no guard. `Overdue` is set by
+    nothing; the repository's computed query has no caller and uses server-local `DateTime.Today`.
+  - **Participants:**
+    - re-marking attendance overwrites the check-in (F-1);
+    - check-out has no rule;
+    - an external guest needs neither name nor email on the server, and duplicates are not
+      refused;
+    - a reply accepts any `InvitationStatus` and ignores the event in its route (F-11);
+    - removal needs Admin and tells nobody;
+    - C-21 and C-22 have no endpoints.
+  - **The drill (C-51):**
+    - drill numbers are typed by hand (there is no "DRL-" generator);
+    - `EventName` is 100 characters, but a plan's name can be 200;
+    - SHE already reminds about the next drill ("DrillDue"), so the company event must be created
+      with reminders off;
+    - the event is created server-side, so SHE users need no HR permission.
+  - **UAT residue:** 402 active "E2E Closure …" units from the performance harness (2026-09-29 to
+    10-01) appear in every unit picker on UAT. They are not this module's to delete.
+
+**Lane 2 decisions — pending the user.** The four the lane waits on, sharpened by the check:
+
+| # | Question | Recommendation |
+|---|---|---|
+| **D-10** | Approval of events (and lane 3's bookings): the workflow engine, or the one-click flag? | **The engine**, as recommended in § 1b. **What it means in code:** the instance starts at create for an event that needs approval ("awaiting approval" = needs approval and not yet approved, no new status); a one-stage definition per entity, addressed to the HR desk role, with `preventInitiatorApproval`; the service refuses the organiser (or booker) as approver, whoever created it; `HR.Company.Approve` is the fallback tier when no definition is published, its description corrected; recall written out in the adapter; an approved event that is rescheduled starts a fresh instance. Approving from `/workflow/inbox` does not reach the record (#15), as for every HR approval. **If the flag is kept instead:** the same guards (needs approval, not yet approved, not the organiser, `HR.Company.Approve`) and an in-app notice to the approvers. It is much less code, but it is the one approval in HR the inbox never shows. |
+| **D-11** | Who is the organiser? | **An Organiser picker** defaulting to the signed-in employee, as recommended — and **the service now stamps `CreatedById` / `CreatedBy` on create**, since it never has. The organiser is always in the event's diary and clash check, and is reminded. |
+| **D-14** | Calendar invites in the emails? | **Yes, built on the interview builder:** one shared invite builder with a **stable UID per event** (the event's id), ORGANIZER = the organiser's email, times in UTC, METHOD REQUEST and CANCEL, and the interview invites moved onto it. **SEQUENCE needs a stored counter:** one small migration (an `int` on the event, raised on each reschedule or cancellation). It is the first schema change after lane 0. External guests answer from their mail client to the organiser, and HR records the answer at the desk (F-36). |
+| **D-16** | Who is "Management only"? | **Orientation's existing definition: unit heads plus anyone named as a line manager**, as one new audience rule in `IHrAudienceResolver`, so "Management" means one thing across HR. *(§ 1b recommended heads only. On TDC's own data both lists were nearly empty when measured in August, so the form shows how many people the event reaches before it is saved, and a "Management only" event that reaches nobody is warned about.)* |
 
 ---
 
@@ -872,8 +1016,31 @@ change.
       drill's location, all-day on `NextDrillScheduledDate`, name "Emergency drill: plan name") when a
       drill is recorded with a next date, and moves it when that date changes; the event page shows
       "From emergency drill DRL-… (plan)" with a link; deleting the drill cancels the event.
+      *Source check (§ 1c):*
+      - the drill number is typed by hand;
+      - the name is cut to the event's 100 characters;
+      - the event is made with reminders off (SHE sends "DrillDue" itself);
+      - it is made server-side, so SHE users need no HR permission.
 
-**State:** *(filled when it lands)*
+**State (2026-10-05): source-checked (§ 1c); waits on D-10, D-11, D-14, D-16.** Proposed slices, each
+built, proved twice and handed over on its own:
+- **2a** windows, references and lifecycle guards:
+  - the update-dates-through-reschedule path, C-7, F-37…F-40;
+  - the organiser (D-11) and the `CreatedBy` stamp;
+  - clash firmness (F-41) and the multi-day window (R4-10A.2);
+  - reads: overlap, tenant inside the query, re-read after update, F-58's original dates;
+  - the unit replacing the department, and F-44.
+- **2b** approval (D-10).
+- **2c** the audience (D-16), the calendar commitment source and `ShowOnIntranet`.
+- **2d** participants, attendance, tasks: F-1, F-11, F-35, C-21, C-22, removal on Write.
+- **2e** notices:
+  - the in-app notices class;
+  - delivered vs issued (R4-6.3), F-33;
+  - the new notices;
+  - calendar invites (D-14, with its migration).
+- **2f** recurrence as a light series (D-12).
+- **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
+- **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
 
 ### Lane 3 — Rooms and bookings (D-10, D-13, D-18; C-8, C-28, C-30, C-31, C-32, C-33, C-36, R4-9.1, R4-12.1, F-6, F-7, F-15, F-18, F-34, F-47…F-50)
 
@@ -1269,3 +1436,20 @@ built API, so no web host and no seeders).
   The calendar halves of R4-10A.4 and C-38 are handed to lane 7 in writing.
 
   Next: lane 2. Its source check comes first, and it waits on D-10, D-11, D-14 and D-16.
+- **2026-10-05, later** — **Lane 2 source-checked** (§ 1c). Three read-only passes, with the key
+  claims checked by hand. No lane 2 finding is fixed.
+  - **Corrections:**
+    - F-10: another tenant's id is stored silently, because the DbContext's tenant filter is inert;
+    - F-33 is wider than written;
+    - F-38's "answers reset" is the target, not today;
+    - there is no `EnsureExistsAsync` to reuse;
+    - the drill has no "DRL-" numbers, and its plan name can overflow the event's.
+  - **New: F-58**, the event page never shows the original dates, because `ToDetailDto` drops them.
+  - **Facts the four decisions turn on:**
+    - `CreatedBy` is never stamped on events;
+    - neither events nor bookings have a submit step;
+    - interviews already build an `.ics`, but SEQUENCE has no column;
+    - unit heads are plentiful on UAT only because the demo seeder appoints them.
+
+  D-10, D-11, D-14 and D-16 are put to the user with refined recommendations. Proposed slices in
+  lane 2's State.
