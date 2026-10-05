@@ -103,10 +103,11 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByOrganizer(Guid organizerId)
         => Ok(await _eventService.GetByOrganizerAsync(organizerId));
 
-    [HttpGet("events/department/{departmentId:guid}")]
+    /// <summary>Events for one organisation unit (lane 2a; replaces the retired department read, D-5).</summary>
+    [HttpGet("events/unit/{organizationUnitId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByDepartment(Guid departmentId)
-        => Ok(await _eventService.GetByDepartmentAsync(departmentId));
+    public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByOrganizationUnit(Guid organizationUnitId)
+        => Ok(await _eventService.GetByOrganizationUnitAsync(organizationUnitId));
 
     [HttpGet("events/status/{status}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -123,15 +124,19 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetUpcomingEvents([FromQuery] int daysAhead = 30)
         => Ok(await _eventService.GetUpcomingEventsAsync(daysAhead));
 
+    /// <summary>
+    /// Creates an event. The organiser is the one chosen on the form, or the caller (D-11); the caller is
+    /// recorded as the creator either way, so an account with no employee record still cannot create one.
+    /// </summary>
     [HttpPost("events")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<CompanyEventDto>> CreateEvent([FromBody] CreateCompanyEventDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = TryGetEmployeeWriteContext(out _, out _, out var organizerId, "Organising an event");
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var callerEmployeeId, "Organising an event");
         if (ctx != null) return ctx;
 
-        var created = await _eventService.CreateAsync(dto, organizerId);
+        var created = await _eventService.CreateAsync(dto, callerEmployeeId);
         return CreatedAtAction(nameof(GetEvent), new { id = created.Id }, created);
     }
 
@@ -156,22 +161,25 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(new { message = "Event approved" });
     }
 
+    /// <summary>Cancels the event and its live room bookings, and answers what was cancelled (F-39).</summary>
     [HttpPost("events/{id:guid}/cancel")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> CancelEvent(Guid id, [FromBody] CancelEventDto dto)
+    public async Task<ActionResult<CompanyEventChangeDto>> CancelEvent(Guid id, [FromBody] CancelEventDto dto)
     {
         dto.EventId = id;
-        await _eventService.CancelEventAsync(dto);
-        return Ok(new { message = "Event cancelled" });
+        return Ok(await _eventService.CancelEventAsync(dto));
     }
 
+    /// <summary>
+    /// Moves the event — its room bookings with it, answers back to awaiting a reply, an approval cleared —
+    /// and answers what changed (F-38, C-7).
+    /// </summary>
     [HttpPost("events/{id:guid}/reschedule")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> RescheduleEvent(Guid id, [FromBody] RescheduleEventDto dto)
+    public async Task<ActionResult<CompanyEventChangeDto>> RescheduleEvent(Guid id, [FromBody] RescheduleEventDto dto)
     {
         dto.EventId = id;
-        await _eventService.RescheduleEventAsync(dto);
-        return Ok(new { message = "Event rescheduled" });
+        return Ok(await _eventService.RescheduleEventAsync(dto));
     }
 
     [HttpPost("events/{id:guid}/complete")]
@@ -183,13 +191,11 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(new { message = "Event completed" });
     }
 
+    /// <summary>Deletes the event after cancelling its live room bookings; answers 200 with the bookings cancelled (F-39).</summary>
     [HttpDelete("events/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteEvent(Guid id)
-    {
-        await _eventService.DeleteAsync(id);
-        return NoContent();
-    }
+    public async Task<ActionResult<CompanyEventChangeDto>> DeleteEvent(Guid id)
+        => Ok(await _eventService.DeleteAsync(id));
 
     #region Participants
 

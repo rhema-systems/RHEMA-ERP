@@ -194,14 +194,13 @@ public sealed class TravelCommitmentSource : IPanelistCommitmentSource
 /// Meetings and company events the panelist is a PARTICIPANT of — not merely ones they organise.
 /// </summary>
 /// <remarks>
-/// <para>⚠ The company-schedule module's own <c>HasConflictingEventAsync</c> checks the ORGANIZER
-/// only, which is the smallest useful part of the answer: the people whose diaries an interview
-/// actually collides with are the ones invited to the meeting, and a board meeting has one
-/// organiser and twelve attendees.</para>
+/// <para>The guests AND the organiser (lane 2a, D-11). The module's old organiser-only overlap check
+/// had no caller and is gone; the people an interview collides with are everyone the meeting holds —
+/// a board meeting has one organiser and twelve attendees.</para>
 ///
-/// <para>Hardness turns on the participant's own answer. Somebody who ACCEPTED a Confirmed meeting
-/// has said they will be there, so that is hard. An unanswered invitation, a Declined one, or a
-/// merely Scheduled event is soft — the check should say "they may be busy", not refuse.</para>
+/// <para>Hardness turns on the person's own answer. Somebody who ACCEPTED a firm meeting has said
+/// they will be there, so that is hard; an unanswered invitation, or an event still awaiting approval,
+/// is soft — the check should say "they may be busy", not refuse.</para>
 /// </remarks>
 public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
 {
@@ -232,40 +231,62 @@ public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
                      && p.Event.StartDate <= dayEnd && p.Event.EndDate >= dayStart)
             .ToListAsync(ct);
 
+        // ⚠ The organiser is committed to the event whether or not they invited themselves (D-11, lane
+        // 2a). Before this the diaries and the clash check read the guest list only, so the person
+        // running the meeting looked free during it.
+        var organised = await _unitOfWork.Repository<CompanyEvent>().GetQueryable()
+            .Where(e => q.EmployeeIds.Contains(e.OrganizerId)
+                     && e.TenantId == q.TenantId && !e.IsDeleted
+                     && !e.IsCancelled && e.Status != EventStatus.Cancelled
+                     && e.StartDate <= dayEnd && e.EndDate >= dayStart)
+            .ToListAsync(ct);
+
         var commitments = new List<PanelistCommitment>();
+        var counted = new HashSet<(Guid Employee, Guid Event)>();
         foreach (var p in rows)
         {
-            var ev = p.Event!;
-            // ⚠ The event's own day, not the query's first — over a range they differ.
-            var (start, end) = WindowOf(ev, DateOnly.FromDateTime(ev.StartDate));
-
-            // An event with times must actually overlap the asked-about window; an all-day one covers it.
-            if (!ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue && !q.Overlaps(start, end))
-                continue;
-
-            var accepted = p.InvitationStatus == InvitationStatus.Accepted;
-            var confirmed = ev.Status is EventStatus.Confirmed or EventStatus.InProgress;
-            var hard = accepted && confirmed && !ev.IsAllDayEvent && ev.StartTime.HasValue;
-
-            commitments.Add(new PanelistCommitment(
-                p.EmployeeId!.Value, false, CommitmentKind.Event,
-                hard ? CommitmentHardness.Hard : CommitmentHardness.Soft,
-                $"{ev.EventName} ({ev.Status}, invitation {p.InvitationStatus})",
-                start, end,
-                IsDayGranular: ev.IsAllDayEvent || !ev.StartTime.HasValue,
-                Reference: ev.EventNumber));
+            counted.Add((p.EmployeeId!.Value, p.Event!.Id));
+            AddDays(commitments, q, p.EmployeeId!.Value, p.Event!,
+                accepted: p.InvitationStatus == InvitationStatus.Accepted,
+                $"{p.Event!.EventName} ({p.Event.Status}, invitation {p.InvitationStatus})");
         }
+        foreach (var ev in organised.Where(e => !counted.Contains((e.OrganizerId, e.Id))))
+            AddDays(commitments, q, ev.OrganizerId, ev, accepted: true, $"{ev.EventName} ({ev.Status}, organiser)");
 
         return commitments;
     }
 
-    private static (DateTime Start, DateTime End) WindowOf(CompanyEvent ev, DateOnly date)
+    /// <summary>
+    /// One commitment per day of the event inside the query (R4-10A.2): a timed event over several days
+    /// keeps its hours each day.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ It used to build one window, from the first day, so days two onward never reached the
+    /// clash check or the diaries.</para>
+    ///
+    /// <para>Hard when the person has said yes — the organiser always has — to a timed event that is
+    /// firm (<see cref="CompanyEventRules.IsFirm"/>, F-41): an event needing no approval counts once
+    /// scheduled, where before only Confirmed did and nothing but Approve set it.</para>
+    /// </remarks>
+    private static void AddDays(
+        List<PanelistCommitment> commitments, PanelistCommitmentQuery q, Guid employeeId, CompanyEvent ev,
+        bool accepted, string label)
     {
-        if (ev.IsAllDayEvent || !ev.StartTime.HasValue || !ev.EndTime.HasValue)
-            return (date.ToDateTime(TimeOnly.MinValue), date.ToDateTime(TimeOnly.MaxValue));
+        var timed = !ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue;
+        var hard = accepted && timed && CompanyEventRules.IsFirm(ev);
 
-        return (date.ToDateTime(TimeOnly.MinValue) + ev.StartTime.Value,
-                date.ToDateTime(TimeOnly.MinValue) + ev.EndTime.Value);
+        foreach (var (_, start, end) in CompanyEventRules.DailyWindows(ev, q.FromDate, q.ToDate))
+        {
+            // A timed day must actually overlap the asked-about window; an all-day one covers it.
+            if (timed && !q.Overlaps(start, end)) continue;
+
+            commitments.Add(new PanelistCommitment(
+                employeeId, false, CommitmentKind.Event,
+                hard ? CommitmentHardness.Hard : CommitmentHardness.Soft,
+                label, start, end,
+                IsDayGranular: !timed,
+                Reference: ev.EventNumber));
+        }
     }
 }
 

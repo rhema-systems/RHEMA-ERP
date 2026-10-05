@@ -39,6 +39,20 @@ import {
   TasksPanel,
 } from '@/components/hr/company-schedule/EventPanels';
 import { companyEventService } from '@/services/hr/company-schedule.service';
+import { toIsoInstant } from '@/components/hr/employee/tabs/fields';
+import type { CompanyEventChange } from '@/types/hr/company-schedule';
+
+/** What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a). */
+function describeChange(change?: CompanyEventChange | null): string | undefined {
+  if (!change) return undefined;
+  const parts: string[] = [];
+  const list = (n: string[]) => `${n.length} room booking${n.length === 1 ? '' : 's'} (${n.join(', ')})`;
+  if (change.bookingsMoved?.length) parts.push(`${list(change.bookingsMoved)} moved with it`);
+  if (change.bookingsCancelled?.length) parts.push(`${list(change.bookingsCancelled)} cancelled with it`);
+  if (change.answersReset) parts.push(`${change.answersReset} accepted or tentative repl${change.answersReset === 1 ? 'y' : 'ies'} asked again`);
+  if (change.approvalCleared) parts.push('it waits for approval again');
+  return parts.length ? `${parts.join('; ')}.` : undefined;
+}
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const hhmm = (t?: string | null) => (t ? t.slice(0, 5) : null);
@@ -87,6 +101,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     newEndDate: '',
     newEndTime: '',
     rescheduleReason: '',
+    newRsvpDeadline: '',
   });
   const [completeOpen, setCompleteOpen] = useState(false);
   const [complete, setComplete] = useState({ actualAttendance: '', outcomeSummary: '' });
@@ -141,11 +156,11 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
 
   const cancel = useMutation({
     mutationFn: () => companyEventService.cancel(id, cancelReason.trim()),
-    onSuccess: async () => {
+    onSuccess: async (change) => {
       await refresh();
       setCancelOpen(false);
       setCancelReason('');
-      toast({ title: 'Event cancelled' });
+      toast({ title: 'Event cancelled', description: describeChange(change) });
     },
     onError: fail('Could not cancel the event'),
   });
@@ -158,11 +173,12 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         newEndDate: reschedule.newEndDate,
         newEndTime: reschedule.newEndTime ? `${reschedule.newEndTime}:00` : null,
         rescheduleReason: reschedule.rescheduleReason.trim(),
+        newRsvpDeadline: toIsoInstant(reschedule.newRsvpDeadline),
       }),
-    onSuccess: async () => {
+    onSuccess: async (change) => {
       await refresh();
       setRescheduleOpen(false);
-      toast({ title: 'Event rescheduled' });
+      toast({ title: 'Event rescheduled — everybody invited is told', description: describeChange(change) });
     },
     onError: fail('Could not reschedule the event'),
   });
@@ -185,9 +201,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
 
   const remove = useMutation({
     mutationFn: () => companyEventService.remove(id),
-    onSuccess: async () => {
+    onSuccess: async (change) => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
-      toast({ title: 'Event deleted' });
+      toast({ title: 'Event deleted', description: describeChange(change) });
       router.push('/hr/company-schedule/events');
     },
     onError: fail('Could not delete the event'),
@@ -206,6 +222,11 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
   }
 
   const open = !event.isCancelled && event.status !== 'Completed';
+  // Complete only once it has started (F-40); event times are GMT, as the server compares them.
+  const startsAt = new Date(
+    `${event.startDate.slice(0, 10)}T${event.isAllDayEvent || !event.startTime ? '00:00:00' : event.startTime}Z`,
+  );
+  const started = startsAt.getTime() <= Date.now();
 
   return (
     <div className="space-y-6 p-6">
@@ -225,17 +246,22 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
                 <Button variant="outline" onClick={() => setRescheduleOpen(true)}>
                   <CalendarClock className="mr-2 h-4 w-4" /> Reschedule
                 </Button>
-                <Button variant="outline" onClick={() => setCompleteOpen(true)}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Complete
-                </Button>
+                {started && (
+                  <Button variant="outline" onClick={() => setCompleteOpen(true)}>
+                    <CheckCircle2 className="mr-2 h-4 w-4" /> Complete
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setCancelOpen(true)}>
                   <XCircle className="mr-2 h-4 w-4" /> Cancel
                 </Button>
               </>
             )}
-            <Button variant="outline" onClick={() => router.push(`/hr/company-schedule/events/${id}/edit`)}>
-              <Pencil className="mr-2 h-4 w-4" /> Edit
-            </Button>
+            {/* A cancelled or completed event can no longer be edited (lane 2a). */}
+            {open && (
+              <Button variant="outline" onClick={() => router.push(`/hr/company-schedule/events/${id}/edit`)}>
+                <Pencil className="mr-2 h-4 w-4" /> Edit
+              </Button>
+            )}
             {canDelete && (
               <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="mr-2 h-4 w-4" /> Delete
@@ -269,7 +295,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <Detail label="Location type">{spaced(event.locationType)}</Detail>
           <Detail label="Site">{event.locationName || '—'}</Detail>
           <Detail label="Venue">{event.venueName || '—'}</Detail>
-          <Detail label="Department">{event.departmentName || 'Company-wide'}</Detail>
+          <Detail label="Organisation unit">{event.organizationUnitName || event.departmentName || '—'}</Detail>
 
           {event.locationType !== 'OnSite' && (
             <Detail label="Meeting link">
@@ -420,7 +446,10 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reschedule</DialogTitle>
-            <DialogDescription>The original dates are kept on the record as history.</DialogDescription>
+            <DialogDescription>
+              The original dates are kept. Everybody invited is told why; accepted and tentative replies are
+              asked again; room bookings for the event move with it. Leave the times empty to keep its hours.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -460,6 +489,20 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               />
             </div>
           </div>
+          {event.requiresRsvp && (
+            <div className="space-y-2">
+              <Label htmlFor="newRsvpDeadline">New RSVP deadline</Label>
+              <Input
+                id="newRsvpDeadline"
+                type="datetime-local"
+                value={reschedule.newRsvpDeadline}
+                onChange={(e) => setReschedule({ ...reschedule, newRsvpDeadline: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Needed only if the current one would fall after the new start. Empty keeps it.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="rescheduleReason">Reason</Label>
             <Textarea

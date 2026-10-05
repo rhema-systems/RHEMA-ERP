@@ -202,6 +202,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
             .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken);
@@ -210,6 +211,22 @@ public class CompanyEventService : ICompanyEventService
             throw new ArgumentException($"Company event with ID '{id}' not found.");
         return entity;
     }
+
+    /// <summary>
+    /// This tenant's events, with the names a list shows (lane 2a, F-30).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The tenant is inside the query. The repository's list reads had none — the DbContext's own
+    /// tenant filter is inert, as noted above — so they loaded every tenant's events and filtered here.
+    /// They are gone; the lists are built on this.
+    /// </remarks>
+    private IQueryable<CompanyEvent> TenantEvents(Guid tenantId) =>
+        _eventRepository.GetQueryable()
+            .Include(e => e.Organizer)
+            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
+            .Include(e => e.SiteLocation)
+            .Where(e => e.TenantId == tenantId);
 
     public async Task<CompanyEventDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -223,6 +240,7 @@ public class CompanyEventService : ICompanyEventService
         var entity = await _eventRepository.GetQueryable()
             .Include(e => e.Organizer)
             .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
             .Include(e => e.Participants).ThenInclude(p => p.Employee)
@@ -239,27 +257,15 @@ public class CompanyEventService : ICompanyEventService
 
     public async Task<IEnumerable<CompanyEventDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = await _eventRepository.GetQueryable()
-            .Include(e => e.Organizer)
-            .Include(e => e.Department)
-            // The register shows the site; without this it reads blank here while the detail
-            // page shows it, which looks like missing data rather than a missing Include.
-            .Include(e => e.SiteLocation)
-            .Where(e => e.TenantId == tenantId)
-            .ToListAsync(cancellationToken);
-
+        // The register shows the site; TenantEvents includes it — without it the register read blank
+        // while the detail page showed it, which looked like missing data rather than a missing Include.
+        var entities = await TenantEvents(GetTenantId()).ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<CompanyEventDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var query = _eventRepository.GetQueryable()
-            .Include(e => e.Organizer)
-            .Include(e => e.Department)
-            .Include(e => e.SiteLocation)
-            .Where(e => e.TenantId == tenantId);
+        var query = TenantEvents(GetTenantId());
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -278,62 +284,375 @@ public class CompanyEventService : ICompanyEventService
         };
     }
 
+    /// <remarks>
+    /// ⚠ By OVERLAP (lane 2a): every event that touches the range. The repository's read wanted the
+    /// event to fit inside it, so a conference running into the range from the day before was missing.
+    /// </remarks>
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetByDateRangeAsync(startDate, endDate))
-            .Where(e => e.TenantId == tenantId);
+        var from = startDate.Date;
+        var toExclusive = endDate.Date.AddDays(1);
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => e.StartDate < toExclusive && e.EndDate >= from)
+            .OrderBy(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByOrganizerAsync(Guid organizerId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetByOrganizerAsync(organizerId))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => e.OrganizerId == organizerId)
+            .OrderByDescending(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
-    public async Task<IEnumerable<CompanyEventSummaryDto>> GetByDepartmentAsync(Guid departmentId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<CompanyEventSummaryDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetByDepartmentAsync(departmentId))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => e.OrganizationUnitId == organizationUnitId)
+            .OrderByDescending(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByStatusAsync(EventStatus status, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetByStatusAsync(status))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => e.Status == status)
+            .OrderByDescending(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetByCategoryAsync(EventCategory category, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetByCategoryAsync(category))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => e.Category == category)
+            .OrderByDescending(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
+    /// <remarks>
+    /// Live events touching the next <paramref name="daysAhead"/> days, today by UTC — the repository
+    /// used the server's local date (the F-5 shape) and missed an event already under way.
+    /// </remarks>
     public async Task<IEnumerable<CompanyEventSummaryDto>> GetUpcomingEventsAsync(int daysAhead = 30, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _eventRepository.GetUpcomingEventsAsync(daysAhead))
-            .Where(e => e.TenantId == tenantId);
+        var today = DateTime.UtcNow.Date;
+        var horizon = today.AddDays(Math.Max(0, daysAhead));
+        var entities = await TenantEvents(GetTenantId())
+            .Where(e => !e.IsCancelled && e.Status != EventStatus.Cancelled
+                        && e.EndDate >= today && e.StartDate <= horizon)
+            .OrderBy(e => e.StartDate)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
-    public async Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid organizerId, CancellationToken cancellationToken = default)
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2a — windows, references and the lifecycle (final closure)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    private static void Refuse(string? refusal)
+    {
+        if (refusal != null) throw new InvalidOperationException(refusal);
+    }
+
+    /// <summary>How an event that can no longer change is named in a refusal.</summary>
+    private static string ClosedState(CompanyEvent e) =>
+        e.IsCancelled || e.Status == EventStatus.Cancelled ? "cancelled" : "completed";
+
+    private static void ApplyWindow(CompanyEvent e, EventWindow w)
+    {
+        e.StartDate = w.StartDate.Date;
+        e.StartTime = w.StartTime;
+        e.EndDate = w.EndDate.Date;
+        e.EndTime = w.EndTime;
+        e.IsAllDayEvent = w.AllDay;
+    }
+
+    /// <summary>
+    /// Checks the window and the reply and reminder settings hung off it, drops what does not apply, and
+    /// writes the window onto the event (lane 2a). Refuses with a sentence — a 422.
+    /// </summary>
+    private static void ValidateWindow(CompanyEvent e, EventWindow window)
+    {
+        var deadline = e.RsvpDeadline;
+        var days = e.ReminderDaysBefore;
+        Refuse(CompanyEventRules.ValidateAndNormalise(ref window, e.RequiresRsvp, ref deadline, e.SendReminders, ref days));
+        ApplyWindow(e, window);
+        e.RsvpDeadline = deadline;
+        e.ReminderDaysBefore = days;
+    }
+
+    /// <summary>The window and settings, the retired department, the unit an event for a unit needs, and what it points at.</summary>
+    private async Task ValidateAsync(
+        CompanyEvent e, EventWindow window, Guid tenantId, bool checkOrganiser, CancellationToken cancellationToken)
+    {
+        if (e.DepartmentId is not null)
+            throw new InvalidOperationException(
+                "Events are for an organisation unit now, not a department. Choose the organisation unit instead.");
+
+        ValidateWindow(e, window);
+
+        if (e.Scope == ParticipantScope.Department && e.OrganizationUnitId is null)
+            throw new InvalidOperationException(
+                "An event for a unit needs the unit. Choose the organisation unit, or choose another audience.");
+
+        await EnsureReferencesAsync(e, tenantId, checkOrganiser, cancellationToken);
+    }
+
+    /// <summary>
+    /// The site and the unit must be this tenant's and live; a new organiser must be an active employee
+    /// of this tenant (lane 2a, D-11).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Before this, an unknown id failed at the database as a 500, and another tenant's id was
+    /// STORED: its foreign key is satisfied, and the DbContext's tenant filter is inert (F-10).</para>
+    ///
+    /// <para>The organiser is checked only when it is new, so an event whose organiser has since left can
+    /// still be edited — and handed to someone else.</para>
+    /// </remarks>
+    private async Task EnsureReferencesAsync(CompanyEvent e, Guid tenantId, bool checkOrganiser, CancellationToken cancellationToken)
+    {
+        if (e.LocationId is { } locationId
+            && !await _unitOfWork.Repository<Location>().GetQueryable()
+                .AnyAsync(l => l.Id == locationId && l.TenantId == tenantId && !l.IsDeleted, cancellationToken))
+            throw new InvalidOperationException("The site chosen for this event was not found. Choose the site again.");
+
+        if (e.OrganizationUnitId is { } unitId
+            && !await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .AnyAsync(u => u.Id == unitId && u.TenantId == tenantId && !u.IsDeleted, cancellationToken))
+            throw new InvalidOperationException(
+                "The organisation unit chosen for this event was not found. Choose the unit again.");
+
+        if (!checkOrganiser) return;
+        var organiser = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(x => x.Id == e.OrganizerId && x.TenantId == tenantId && !x.IsDeleted)
+            .Select(x => new { x.IsActive })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (organiser is null)
+            throw new InvalidOperationException("The organiser chosen was not found. Choose the organiser again.");
+        if (!organiser.IsActive)
+            throw new InvalidOperationException(
+                "The organiser chosen is no longer an active employee. Choose someone who is.");
+    }
+
+    /// <summary>
+    /// Records who created the event (D-11).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Nothing stamped it before lane 2a — <c>CreatedBy</c> was null on every event on UAT — so once the
+    /// organiser could be somebody else, who made the event would have been lost.
+    /// </remarks>
+    private void StampCreator(CompanyEvent e)
+    {
+        var userId = _currentUserProvider.UserId;
+        e.CreatedById = userId == Guid.Empty ? null : userId;
+        e.CreatedBy = !string.IsNullOrWhiteSpace(_currentUserProvider.FullName) ? _currentUserProvider.FullName
+            : !string.IsNullOrWhiteSpace(_currentUserProvider.Username) ? _currentUserProvider.Username
+            : e.CreatedById?.ToString();
+    }
+
+    /// <summary>
+    /// The status an edit may set (F-37): scheduled, in progress or postponed — and confirmed where no
+    /// approval is needed, or it has been given.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The edit wrote any status. Confirmed made an unapproved event look approved — and firm in the
+    /// clash check; Cancelled left <c>IsCancelled</c> unset; an "un-cancel" left it set.
+    /// </remarks>
+    private static void ApplyStatus(CompanyEvent e, EventStatus status)
+    {
+        if (!Enum.IsDefined(status))
+            throw new InvalidOperationException("Choose the status: scheduled, in progress or postponed.");
+
+        switch (status)
+        {
+            case EventStatus.Cancelled:
+                throw new InvalidOperationException(
+                    "Cancel the event with Cancel, which asks for the reason and tells everybody invited.");
+            case EventStatus.Completed:
+                throw new InvalidOperationException("Complete the event with Complete, once it has taken place.");
+            case EventStatus.Rescheduled:
+                throw new InvalidOperationException(
+                    "An event becomes Rescheduled when its dates move. Change the dates, or use Reschedule.");
+            case EventStatus.Confirmed when CompanyEventRules.IsAwaitingApproval(e):
+                throw new InvalidOperationException(
+                    $"{e.EventName} needs approval. Approve it rather than marking it confirmed.");
+        }
+
+        e.Status = status;
+    }
+
+    /// <summary>The event's room bookings that are still live.</summary>
+    private IQueryable<RoomBooking> LiveLinkedBookings(CompanyEvent e) =>
+        _unitOfWork.Repository<RoomBooking>().GetQueryable()
+            .Where(b => b.EventId == e.Id && b.TenantId == e.TenantId && !b.IsDeleted && !b.IsCancelled
+                        && b.Status != BookingStatus.Cancelled && b.Status != BookingStatus.Completed
+                        && b.Status != BookingStatus.NoShow);
+
+    /// <summary>
+    /// Cancels the event's live room bookings with it (F-39): a cancelled or deleted meeting must not
+    /// keep its room.
+    /// </summary>
+    private async Task<List<string>> CancelLinkedBookingsAsync(CompanyEvent e, string reason, CancellationToken cancellationToken)
+    {
+        var linked = await LiveLinkedBookings(e).ToListAsync(cancellationToken);
+        var now = DateTime.UtcNow;
+        foreach (var b in linked)
+        {
+            b.IsCancelled = true;
+            b.CancellationDate = now;
+            b.CancellationReason = reason.Length > 1000 ? reason[..1000] : reason;
+            b.Status = BookingStatus.Cancelled;
+        }
+        return linked.Select(b => b.BookingNumber).ToList();
+    }
+
+    /// <summary>
+    /// Moves the event's live room bookings by the same amount as the event (F-38), refusing the whole
+    /// move — before anything is written — when a room is taken at the new time.
+    /// </summary>
+    /// <remarks>
+    /// A booking in a room that needs approval waits for approval again once moved, as the event does.
+    /// The room's own limits (longest booking, furthest ahead) are lane 3's to apply to a moved booking.
+    /// </remarks>
+    private async Task<List<string>> MoveLinkedBookingsAsync(CompanyEvent e, TimeSpan delta, CancellationToken cancellationToken)
+    {
+        if (delta == TimeSpan.Zero) return new();
+
+        var linked = await LiveLinkedBookings(e).Include(b => b.Room).ToListAsync(cancellationToken);
+        if (linked.Count == 0) return new();
+
+        var moving = linked.Select(b => b.Id).ToList();
+        var taken = new List<string>();
+        foreach (var b in linked)
+        {
+            var start = b.StartDateTime + delta;
+            var end = b.EndDateTime + delta;
+            var clash = await _unitOfWork.Repository<RoomBooking>().GetQueryable()
+                .Where(o => o.TenantId == e.TenantId && o.RoomId == b.RoomId && !o.IsDeleted && !o.IsCancelled
+                            && o.Status != BookingStatus.Cancelled && !moving.Contains(o.Id)
+                            && o.StartDateTime < end && o.EndDateTime > start)
+                .Select(o => o.BookingNumber)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (clash != null) taken.Add($"{b.Room?.RoomName ?? "the room"} ({clash})");
+        }
+
+        if (taken.Count > 0)
+            throw new InvalidOperationException(
+                $"{e.EventName} cannot move: its room is already booked at the new time — {string.Join(", ", taken)}. "
+              + "Move or cancel that booking, or choose another time.");
+
+        foreach (var b in linked)
+        {
+            b.StartDateTime += delta;
+            b.EndDateTime += delta;
+            b.BookingDate = b.StartDateTime.Date;
+            if (b.Room is { RequiresApproval: true } && b.ApprovalDate != null)
+            {
+                b.ApprovedById = null;
+                b.ApprovedBy = null;
+                b.ApprovalDate = null;
+                b.Status = BookingStatus.Tentative;
+            }
+        }
+        return linked.Select(b => b.BookingNumber).ToList();
+    }
+
+    /// <summary>
+    /// What every move does — Reschedule, and an edit that changes the window (F-37, F-38, C-7). The new
+    /// window is already validated and on the event; <paramref name="before"/> is where it was.
+    /// </summary>
+    /// <remarks>
+    /// <para>The rooms move first, so a taken room refuses the move before anything changes.</para>
+    ///
+    /// <para>⚠ <b>Answers go back to awaiting a reply.</b> "Yes" was an answer for the old time, so an
+    /// accepted or tentative invitation is asked again — and the chase stamp is cleared so the sweep may
+    /// chase it. A decline stands: the person said no to the event, not to the hour.</para>
+    ///
+    /// <para>An approved event that moves waits for approval again: the approval was for the old time.</para>
+    /// </remarks>
+    private async Task<CompanyEventChangeDto> MoveAsync(
+        CompanyEvent e, EventWindow before, string reason, CancellationToken cancellationToken)
+    {
+        var change = new CompanyEventChangeDto
+        {
+            BookingsMoved = await MoveLinkedBookingsAsync(e, EventWindow.Of(e).Start - before.Start, cancellationToken),
+        };
+
+        // ⚠ `??=` keeps the FIRST original (round 4, D7; C-2): "when was this first meant to be?" has one answer.
+        e.OriginalStartDate ??= before.StartDate;
+        e.OriginalStartTime ??= before.StartTime;
+        e.OriginalEndDate ??= before.EndDate;
+        e.OriginalEndTime ??= before.EndTime;
+
+        e.IsRescheduled = true;
+        e.RescheduledDate = DateTime.UtcNow;
+        e.RescheduleReason = reason;
+        e.Status = EventStatus.Rescheduled;
+        e.ReminderSentDate = null;
+        e.RsvpReminderSentDate = null;
+
+        if (e.RequiresApproval && e.ApprovalDate != null)
+        {
+            e.ApprovedById = null;
+            e.ApprovedBy = null;
+            e.ApprovalDate = null;
+            change.ApprovalCleared = true;
+        }
+
+        var answered = await _participantRepository.GetQueryable()
+            .Where(p => p.EventId == e.Id && p.TenantId == e.TenantId && !p.IsDeleted
+                        && (p.InvitationStatus == InvitationStatus.Accepted || p.InvitationStatus == InvitationStatus.Tentative))
+            .ToListAsync(cancellationToken);
+        foreach (var p in answered)
+        {
+            p.InvitationStatus = InvitationStatus.Sent;
+            p.ResponseDate = null;
+        }
+        change.AnswersReset = answered.Count;
+
+        return change;
+    }
+
+    /// <summary>Tells everybody invited that the event moved, and from when (round 4, D6).</summary>
+    private Task NotifyRescheduledAsync(CompanyEvent entity, CancellationToken cancellationToken)
+    {
+        var original = entity.OriginalStartDate is { } os
+            ? os.ToString("dddd, d MMMM yyyy")
+              + (entity.OriginalStartTime is { } ost && entity.OriginalEndTime is { } oet
+                  ? $@", {ost:hh\:mm} – {oet:hh\:mm}"
+                  : string.Empty)
+            : null;
+
+        return NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventRescheduled,
+            tokens =>
+            {
+                tokens["OriginalWhen"] = original;
+                tokens["RescheduleReason"] = entity.RescheduleReason;
+                return tokens;
+            },
+            "event rescheduled", cancellationToken: cancellationToken);
+    }
+
+    public async Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid callerEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        Refuse(CompanyEventRules.RefuseCategory(createDto.Category));
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
-        entity.OrganizerId = organizerId;
+        // D-11: the organiser is chosen, defaulting to whoever creates it — who is recorded as the creator.
+        entity.OrganizerId = createDto.OrganizerId is { } chosen && chosen != Guid.Empty ? chosen : callerEmployeeId;
+        await ValidateAsync(entity, EventWindow.Of(entity), tenantId, checkOrganiser: true, cancellationToken);
+
         entity.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
         entity.Status = EventStatus.Scheduled;
+        StampCreator(entity);
 
         await _eventRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -350,39 +669,80 @@ public class CompanyEventService : ICompanyEventService
     public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _eventRepository.GetQueryable()
-            .Include(e => e.Organizer)
-            .Include(e => e.Department)
-            .Include(e => e.SiteLocation)
-            .FirstOrDefaultAsync(e => e.Id == updateDto.Id && e.TenantId == tenantId, cancellationToken);
+        var entity = await GetOwnedEventAsync(updateDto.Id, cancellationToken);
 
-        if (entity == null)
-            throw new ArgumentException($"Company event with ID '{updateDto.Id}' not found.");
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {ClosedState(entity)}, so it can no longer be edited.");
+        if (updateDto.Category != entity.Category)
+            Refuse(CompanyEventRules.RefuseCategory(updateDto.Category));
 
-        var startBefore = entity.StartDate;
+        var before = EventWindow.Of(entity);
+        var requested = new EventWindow(
+            updateDto.StartDate, updateDto.StartTime, updateDto.EndDate, updateDto.EndTime, updateDto.IsAllDayEvent);
+        var moving = !requested.SameAs(before);
         var rsvpDeadlineBefore = entity.RsvpDeadline;
-        updateDto.UpdateEntity(entity);
+        var organiserChanged = updateDto.OrganizerId is { } chosen && chosen != Guid.Empty && chosen != entity.OrganizerId;
 
-        // An edit that moves a date moves what was reminded of it (round 4, lane N-b2): a reminder or a
-        // chase already sent for the old date is cleared, and the sweep sends it again for the new one.
-        if (entity.StartDate != startBefore) entity.ReminderSentDate = null;
-        if (entity.RsvpDeadline != rsvpDeadlineBefore) entity.RsvpReminderSentDate = null;
+        if (moving && string.IsNullOrWhiteSpace(updateDto.RescheduleReason))
+            throw new InvalidOperationException(
+                "Changing the dates or times moves the event, and everybody invited is told why. Give the reason for the change.");
+
+        updateDto.UpdateEntity(entity);
+        if (organiserChanged) entity.OrganizerId = updateDto.OrganizerId!.Value;
+        if (updateDto.Status is { } status && status != entity.Status) ApplyStatus(entity, status);
+
+        await ValidateAsync(entity, moving ? requested : before, tenantId, organiserChanged, cancellationToken);
+
+        // ⚠ An edit that changes the window is a reschedule (F-37, R4-7.1): it used to write the dates
+        // straight in, so nothing kept the original, the status stayed, and nobody was told.
+        if (moving)
+            await MoveAsync(entity, before, updateDto.RescheduleReason!.Trim(), cancellationToken);
+        else if (entity.RsvpDeadline != rsvpDeadlineBefore)
+            // A new deadline is a new chase (round 4, lane N-b2).
+            entity.RsvpReminderSentDate = null;
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event updated: {EventNumber}", entity.EventNumber);
+        _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
 
-        return entity.ToDto();
+        if (moving) await NotifyRescheduledAsync(entity, cancellationToken);
+
+        // ⚠ Re-read (F-46): the entity's navigations were loaded before the change, so a new organiser,
+        // site or unit would answer with the old name.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>
+    /// Guards (lane 2a): the event needs approval and has none, is scheduled, rescheduled or postponed, and
+    /// is not the approver's own — whoever created it, the organiser may not approve it. D-10 moves the
+    /// decision onto the workflow engine (slice 2b); these rules stay.
+    /// </remarks>
     public async Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(eventId, cancellationToken);
 
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {ClosedState(entity)}, so there is nothing to approve.");
+        if (!entity.RequiresApproval)
+            throw new InvalidOperationException($"{entity.EventName} does not need approval.");
+        if (entity.ApprovalDate != null)
+            throw new InvalidOperationException(
+                $"{entity.EventName} is already approved"
+              + (entity.ApprovedBy is { } by ? $", by {by.FullName}." : "."));
+        if (entity.Status is not (EventStatus.Scheduled or EventStatus.Rescheduled or EventStatus.Postponed))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {entity.Status}; only a scheduled, rescheduled or postponed event waits for approval.");
+        if (approvedById == entity.OrganizerId)
+            throw new InvalidOperationException(
+                $"You organise {entity.EventName}, so someone else must approve it.");
+
         entity.ApprovedById = approvedById;
         entity.ApprovalDate = DateTime.UtcNow;
-        entity.Status = EventStatus.Confirmed;
+        // A postponed event stays postponed — approved, but with no date to confirm.
+        if (entity.Status != EventStatus.Postponed) entity.Status = EventStatus.Confirmed;
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -392,19 +752,26 @@ public class CompanyEventService : ICompanyEventService
         return true;
     }
 
-    public async Task<bool> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default)
+    public async Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(cancelDto.EventId, cancellationToken);
 
+        // ⚠ A second cancel overwrote the reason and emailed everybody again.
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException($"{entity.EventName} is already {ClosedState(entity)}.");
+
+        var reason = cancelDto.CancellationReason.Trim();
         entity.IsCancelled = true;
         entity.CancellationDate = DateTime.UtcNow;
-        entity.CancellationReason = cancelDto.CancellationReason;
+        entity.CancellationReason = reason;
         entity.Status = EventStatus.Cancelled;
+        var bookings = await CancelLinkedBookingsAsync(entity, $"{entity.EventNumber} was cancelled: {reason}", cancellationToken);
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event cancelled: {EventNumber}", entity.EventNumber);
+        _logger.LogInformation("Company event cancelled: {EventNumber}, {Bookings} room booking(s) with it",
+            entity.EventNumber, bookings.Count);
 
         await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
             tokens =>
@@ -414,69 +781,68 @@ public class CompanyEventService : ICompanyEventService
             },
             "event cancelled", cancellationToken: cancellationToken);
 
-        return true;
+        return new CompanyEventChangeDto
+        {
+            Event = await GetByIdAsync(entity.Id, cancellationToken),
+            BookingsCancelled = bookings,
+        };
     }
 
-    public async Task<bool> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default)
+    public async Task<CompanyEventChangeDto> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(rescheduleDto.EventId, cancellationToken);
 
-        // ⚠ Round 4, D7 (C-2). The original date was LOST. This wrote `RescheduledDate =
-        // DateTime.UtcNow` — which records when somebody pressed the button, not what the event was
-        // moved from — and then overwrote StartDate/EndDate, so nothing anywhere remembered the
-        // original. Meanwhile the dialog tells the user the original is kept. The interview path got
-        // this right in lane C with `OriginalDate`; this is the same repair.
-        //
-        // ⚠ `??=` on the first move only. Rescheduling twice must keep the FIRST original: the
-        // question "when was this originally going to be?" has one answer, and overwriting it on
-        // each move would make a twice-moved event claim it was always meant for last Tuesday.
-        entity.OriginalStartDate ??= entity.StartDate;
-        entity.OriginalStartTime ??= entity.StartTime;
-        entity.OriginalEndDate   ??= entity.EndDate;
-        entity.OriginalEndTime   ??= entity.EndTime;
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is {ClosedState(entity)}, so it cannot be moved.");
 
-        entity.IsRescheduled = true;
-        entity.RescheduledDate = DateTime.UtcNow;
-        entity.RescheduleReason = rescheduleDto.RescheduleReason;
-        entity.StartDate = rescheduleDto.NewStartDate;
-        entity.StartTime = rescheduleDto.NewStartTime;
-        entity.EndDate = rescheduleDto.NewEndDate;
-        entity.EndTime = rescheduleDto.NewEndTime;
-        // A reminder sent for the old date reminds nobody of the new one (round 4, lane N-b2): the
-        // sweep reminds again, ReminderDaysBefore ahead of the new date. The RSVP deadline has not moved,
-        // so its chase stands.
-        entity.ReminderSentDate = null;
+        var before = EventWindow.Of(entity);
+        // A move that names no times keeps the event's hours: the dialog moves the day.
+        var keepHours = rescheduleDto.NewStartTime is null && rescheduleDto.NewEndTime is null;
+        var requested = new EventWindow(
+            rescheduleDto.NewStartDate,
+            keepHours ? entity.StartTime : rescheduleDto.NewStartTime,
+            rescheduleDto.NewEndDate,
+            keepHours ? entity.EndTime : rescheduleDto.NewEndTime,
+            entity.IsAllDayEvent);
+        if (requested.SameAs(before))
+            throw new InvalidOperationException(
+                $"{entity.EventName} is already on {CompanyEventRules.Describe(before)}. Choose a different time.");
+
+        // ⚠ F-38: a deadline after the new start cannot be met. A new one may come with the move; the
+        // window check refuses the move without it.
+        if (rescheduleDto.NewRsvpDeadline is { } newDeadline) entity.RsvpDeadline = newDeadline;
+        ValidateWindow(entity, requested);
+
+        var change = await MoveAsync(entity, before, rescheduleDto.RescheduleReason.Trim(), cancellationToken);
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event rescheduled: {EventNumber}", entity.EventNumber);
+        _logger.LogInformation(
+            "Company event rescheduled: {EventNumber}; {Bookings} room booking(s) moved, {Answers} answer(s) reset",
+            entity.EventNumber, change.BookingsMoved.Count, change.AnswersReset);
 
         // ⚠ Round 4, D6. Everybody invited is told, and told what it moved FROM — which is only
-        // possible because C-2 above now keeps the original window. Before this lane the event moved
-        // and the participants found out by looking.
-        var original = entity.OriginalStartDate is { } os
-            ? os.ToString("dddd, d MMMM yyyy")
-              + (entity.OriginalStartTime is { } ost && entity.OriginalEndTime is { } oet
-                  ? $@", {ost:hh\:mm} – {oet:hh\:mm}"
-                  : string.Empty)
-            : null;
+        // possible because C-2 keeps the original window.
+        await NotifyRescheduledAsync(entity, cancellationToken);
 
-        await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventRescheduled,
-            tokens =>
-            {
-                tokens["OriginalWhen"] = original;
-                tokens["RescheduleReason"] = entity.RescheduleReason;
-                return tokens;
-            },
-            "event rescheduled", cancellationToken: cancellationToken);
-
-        return true;
+        change.Event = await GetByIdAsync(entity.Id, cancellationToken);
+        return change;
     }
 
     public async Task<bool> CompleteEventAsync(CompleteEventDto completeDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(completeDto.EventId, cancellationToken);
+
+        if (CompanyEventRules.IsClosed(entity))
+            throw new InvalidOperationException($"{entity.EventName} is already {ClosedState(entity)}.");
+        // ⚠ F-40: an outcome and an attendance for something that has not happened yet.
+        var start = EventWindow.Of(entity).Start;
+        if (start > DateTime.UtcNow)
+            throw new InvalidOperationException(
+                $"{entity.EventName} has not started yet — it starts {CompanyEventRules.Describe(start)}. "
+              + "Complete it once it has taken place.");
 
         entity.Status = EventStatus.Completed;
         entity.ActualStartTime = completeDto.ActualStartTime;
@@ -492,16 +858,18 @@ public class CompanyEventService : ICompanyEventService
         return true;
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <remarks>Cancels the event's live room bookings first, as Cancel does (F-39).</remarks>
+    public async Task<CompanyEventChangeDto> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(id, cancellationToken);
+        var bookings = await CancelLinkedBookingsAsync(entity, $"{entity.EventNumber} was deleted.", cancellationToken);
 
         await _eventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event deleted: {Id}", id);
+        _logger.LogInformation("Company event deleted: {Id}, {Bookings} room booking(s) cancelled with it", id, bookings.Count);
 
-        return true;
+        return new CompanyEventChangeDto { BookingsCancelled = bookings };
     }
 
     #region Participant Operations

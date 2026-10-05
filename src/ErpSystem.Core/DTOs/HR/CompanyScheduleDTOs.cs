@@ -53,9 +53,15 @@ public class CompanyEventDto : BaseDto
     // Organizer
     public Guid OrganizerId { get; set; }
     public string OrganizerName { get; set; } = string.Empty;
+
+    /// <summary>⚠ Retired (D-5): no event carries one (L0-1). Read only, for any older row.</summary>
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
-    
+
+    /// <summary>The organisation unit the event is for — required when <see cref="Scope"/> is Department (D-5).</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
     // Participants
     public ParticipantScope Scope { get; set; }
     public string ScopeName => Scope.ToString();
@@ -226,7 +232,18 @@ public class CreateCompanyEventDto : CreateDtoBase
     public string? MeetingPassword { get; set; }
 
     public Guid? LocationId { get; set; }
+
+    /// <summary>⚠ Retired (D-5): refused when set. Choose <see cref="OrganizationUnitId"/> instead.</summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>The organisation unit the event is for; required when <see cref="Scope"/> is Department.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    /// <summary>
+    /// Who organises it (D-11) — an active employee. Empty means the person creating it; whoever creates
+    /// it is recorded as the creator either way.
+    /// </summary>
+    public Guid? OrganizerId { get; set; }
 
     // Participants
     [Required]
@@ -321,7 +338,15 @@ public class UpdateCompanyEventDto : UpdateDtoBase
     public string? MeetingPassword { get; set; }
 
     public Guid? LocationId { get; set; }
+
+    /// <summary>⚠ Retired (D-5): refused when set. Choose <see cref="OrganizationUnitId"/> instead.</summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>The organisation unit the event is for; required when <see cref="Scope"/> is Department.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    /// <summary>Who organises it (D-11) — an active employee. Empty leaves the organiser as it is.</summary>
+    public Guid? OrganizerId { get; set; }
 
     // Participants
     [Required]
@@ -336,8 +361,19 @@ public class UpdateCompanyEventDto : UpdateDtoBase
     public bool ShowOnCompanyCalendar { get; set; }
     public bool ShowOnIntranet { get; set; }
 
-    // Status
-    public EventStatus Status { get; set; }
+    /// <summary>
+    /// Scheduled, In progress or Postponed — or Confirmed where the event needs no approval. Empty
+    /// leaves it as it is. Cancelled, Completed and Rescheduled come from their own actions (F-37).
+    /// </summary>
+    public EventStatus? Status { get; set; }
+
+    /// <summary>
+    /// Why the dates or times moved. An edit that changes the dates, the times or the all-day switch is
+    /// a reschedule (F-37, R4-7.1): the original window is kept, the guests are told, and this is the
+    /// reason they read. Refused without it when the window changes; ignored otherwise.
+    /// </summary>
+    [MaxLength(2000)]
+    public string? RescheduleReason { get; set; }
 
     // Budget
     public bool HasBudget { get; set; }
@@ -403,6 +439,12 @@ public class RescheduleEventDto
     [Required]
     [MaxLength(2000)]
     public string RescheduleReason { get; set; } = string.Empty;
+
+    /// <summary>
+    /// A new reply-by date, when the event asks for replies and the current one would fall after the
+    /// new start. Empty keeps the current deadline (F-38).
+    /// </summary>
+    public DateTime? NewRsvpDeadline { get; set; }
 }
 
 /// <summary>
@@ -421,6 +463,28 @@ public class CompleteEventDto
 
     [MaxLength(2000)]
     public string? OutcomeSummary { get; set; }
+}
+
+/// <summary>
+/// What cancelling, rescheduling or deleting an event did beyond the event itself (lane 2a: F-38, F-39),
+/// so the screen can say it rather than leave HR to discover it.
+/// </summary>
+public class CompanyEventChangeDto
+{
+    /// <summary>The event as it now stands; null after a delete.</summary>
+    public CompanyEventDto? Event { get; set; }
+
+    /// <summary>Room bookings made for the event that moved with it, by number.</summary>
+    public List<string> BookingsMoved { get; set; } = new();
+
+    /// <summary>Room bookings made for the event that were cancelled with it, by number.</summary>
+    public List<string> BookingsCancelled { get; set; } = new();
+
+    /// <summary>Accepted or tentative answers set back to awaiting a reply, because the time changed.</summary>
+    public int AnswersReset { get; set; }
+
+    /// <summary>The event had been approved, moved, and now waits for approval again.</summary>
+    public bool ApprovalCleared { get; set; }
 }
 
 #endregion

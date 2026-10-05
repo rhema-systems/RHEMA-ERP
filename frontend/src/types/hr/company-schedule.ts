@@ -69,6 +69,15 @@ export type FiscalPeriodType = 'Quarter' | 'Month' | 'SemiAnnual';
 export const EVENT_CATEGORIES: EventCategory[] = [
   'Meeting', 'Training', 'CompanyEvent', 'Deadline', 'Holiday', 'Conference', 'SocialEvent', 'Milestone',
 ];
+/**
+ * The categories a NEW event may take (F-44): public holidays and company milestones have their own
+ * registers, and the server refuses them. The two values stay in `EVENT_CATEGORIES` for older rows.
+ */
+export const EVENT_CATEGORIES_FOR_NEW: EventCategory[] = EVENT_CATEGORIES.filter(
+  (c) => c !== 'Holiday' && c !== 'Milestone',
+);
+/** The statuses an edit may set (lane 2a); Confirmed only where no approval is needed. */
+export const EVENT_EDITABLE_STATUSES: EventStatus[] = ['Scheduled', 'InProgress', 'Postponed'];
 export const EVENT_TYPES: EventType[] = ['Internal', 'External', 'ClientMeeting', 'Statutory', 'BoardMeeting'];
 export const EVENT_PRIORITIES: EventPriority[] = ['Critical', 'High', 'Medium', 'Low'];
 export const RECURRENCE_PATTERNS: RecurrencePattern[] = [
@@ -179,8 +188,12 @@ export interface CompanyEvent extends AuditFields {
 
   organizerId: string;
   organizerName: string;
+  /** ⚠ Retired (D-5): no event carries one. Read only, for any older row. */
   departmentId?: string | null;
   departmentName?: string | null;
+  /** The organisation unit the event is for — required when `scope` is Department. */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
 
   scope: ParticipantScope;
   scopeName: string;
@@ -272,8 +285,8 @@ export interface CompanyEventDetail extends CompanyEvent {
 }
 
 /**
- * ⚠ **No `organizerId`.** The API takes the organiser from the caller's token — a value the client
- * cannot know is a value the client must not send. Same rule as the manpower budget's approver.
+ * `organizerId` is optional (D-11, lane 2a): empty means the person creating it, who is recorded as the
+ * creator either way. `departmentId` is gone — the server refuses one (D-5); choose `organizationUnitId`.
  */
 export interface CreateCompanyEvent {
   eventName: string;
@@ -297,7 +310,8 @@ export interface CreateCompanyEvent {
   onlineMeetingLink?: string | null;
   meetingPassword?: string | null;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  organizerId?: string | null;
   scope: ParticipantScope;
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
@@ -339,7 +353,9 @@ export interface UpdateCompanyEvent {
   onlineMeetingLink?: string | null;
   meetingPassword?: string | null;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  /** Empty leaves the organiser as it is. */
+  organizerId?: string | null;
   scope: ParticipantScope;
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
@@ -347,7 +363,10 @@ export interface UpdateCompanyEvent {
   visibility: EventVisibility;
   showOnCompanyCalendar: boolean;
   showOnIntranet: boolean;
-  status: EventStatus;
+  /** Scheduled, InProgress or Postponed — or Confirmed where no approval is needed. Empty leaves it as it is. */
+  status?: EventStatus | null;
+  /** Required when the dates, times or all-day switch change: an edit that moves the event is a reschedule. */
+  rescheduleReason?: string | null;
   hasBudget: boolean;
   budgetAmount?: number | null;
   actualCost?: number | null;
@@ -372,6 +391,20 @@ export interface RescheduleEvent {
   newEndDate: string;
   newEndTime?: string | null;
   rescheduleReason: string;
+  /** A new reply-by date, when the current one would fall after the new start. */
+  newRsvpDeadline?: string | null;
+}
+
+/** What cancelling, rescheduling or deleting an event did beyond the event (lane 2a). */
+export interface CompanyEventChange {
+  /** The event as it now stands; null after a delete. */
+  event?: CompanyEvent | null;
+  bookingsMoved: string[];
+  bookingsCancelled: string[];
+  /** Accepted or tentative answers set back to awaiting a reply. */
+  answersReset: number;
+  /** It had been approved, moved, and now waits for approval again. */
+  approvalCleared: boolean;
 }
 
 export interface CompleteEvent {

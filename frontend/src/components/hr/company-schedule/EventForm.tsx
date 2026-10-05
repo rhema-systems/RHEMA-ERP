@@ -22,12 +22,13 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { locationService } from '@/services/hr/location.service';
 import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
-import { departmentService } from '@/services/hr/lookup.service';
+import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
+import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import {
-  EVENT_CATEGORIES,
+  EVENT_CATEGORIES_FOR_NEW,
+  EVENT_EDITABLE_STATUSES,
   EVENT_LOCATION_TYPES,
   EVENT_PRIORITIES,
-  EVENT_STATUSES,
   EVENT_TYPES,
   EVENT_VISIBILITIES,
   PARTICIPANT_SCOPES,
@@ -36,20 +37,28 @@ import {
 import type {
   CompanyEvent,
   CreateCompanyEvent,
+  EventStatus,
   UpdateCompanyEvent,
 } from '@/types/hr/company-schedule';
 
 /**
  * The event authoring form, shared by create and edit.
  *
- * ⚠ **There is no organiser field, and that is deliberate.** The API takes the organiser from the
- * token; a value the client cannot know is a value the client must not send.
+ * **The organiser is a choice (D-11, lane 2a)**, empty meaning "me": the API records whoever saves it
+ * as the creator either way, so the field never lets anyone act as someone else.
  *
  * ⚠ **Create and update are not the same shape.** Recurrence is create-only — the update DTO drops
  * it entirely, so sending it on an edit would silently do nothing. Status and actual cost are the
  * mirror image: update-only. The `mode` prop decides which half renders, rather than one form
  * pretending both exist.
+ *
+ * ⚠ **On an edit, changing the dates, times or the all-day switch is a reschedule** (F-37): the form
+ * then asks for the reason, which everybody invited is told. The rules below mirror the server's, so a
+ * refusal is seen before the save rather than after it.
  */
+
+/** "09:30:00" or "09:30" → "09:30", so the two shapes compare. */
+const hm = (t?: string | null) => (t ?? '').slice(0, 5);
 
 const schema = z.object({
   eventName: z.string().min(1, 'Name is required').max(100),
@@ -76,7 +85,9 @@ const schema = z.object({
   onlineMeetingLink: z.string().max(700).optional().or(z.literal('')),
   meetingPassword: z.string().max(100).optional().or(z.literal('')),
   locationId: z.string().optional().or(z.literal('')),
-  departmentId: z.string().optional().or(z.literal('')),
+  organizationUnitId: z.string().optional().or(z.literal('')),
+  organizerId: z.string().optional().or(z.literal('')),
+  rescheduleReason: z.string().max(2000).optional().or(z.literal('')),
 
   scope: z.string().min(1, 'Scope is required'),
   estimatedAttendees: z.coerce.number().int().min(0).optional(),
@@ -103,14 +114,38 @@ const schema = z.object({
   reminderDaysBefore: z.coerce.number().int().min(0).optional(),
   additionalNotes: z.string().max(2000).optional().or(z.literal('')),
 })
-  .refine((v) => !v.endDate || !v.startDate || v.endDate >= v.startDate, {
-    message: 'End date cannot be before the start date',
-    path: ['endDate'],
-  })
-  .refine((v) => !v.isRecurring || !!v.recurrencePattern, {
-    message: 'Pick a pattern for a recurring event',
-    path: ['recurrencePattern'],
+  .superRefine((v, ctx) => {
+    const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+    if (v.endDate && v.startDate && v.endDate < v.startDate)
+      issue('endDate', 'The event ends before it starts. Set the last day on or after the first.');
+    if (!v.isAllDayEvent) {
+      if (!!v.startTime !== !!v.endTime) issue(v.startTime ? 'endTime' : 'startTime', 'Give both a start and an end time, or mark it all-day.');
+      else if (v.startTime && v.endTime && hm(v.endTime) <= hm(v.startTime))
+        issue('endTime', v.startDate === v.endDate
+          ? 'The end time must be after the start time.'
+          : "Over several days the times are each day's hours: set the end time after the start time.");
+    }
+    if (v.isRecurring && !v.recurrencePattern) issue('recurrencePattern', 'Pick a pattern for a recurring event');
+    if (v.requiresRsvp) {
+      if (!v.rsvpDeadline) issue('rsvpDeadline', 'An event that asks for replies needs a reply-by date.');
+      else if (v.startDate && v.rsvpDeadline > `${v.startDate}T${v.isAllDayEvent || !v.startTime ? '00:00' : hm(v.startTime)}`)
+        issue('rsvpDeadline', 'The RSVP deadline falls after the event starts. Set it on or before the start.');
+    }
+    if (v.sendReminders && (v.reminderDaysBefore === undefined || Number.isNaN(v.reminderDaysBefore)))
+      issue('reminderDaysBefore', 'Say how many days before the event the reminder goes.');
+    if (v.scope === 'Department' && !v.organizationUnitId)
+      issue('organizationUnitId', 'An event for a unit needs the unit.');
   });
+
+/**
+ * Whether the form's dates, times or all-day switch differ from the event's — what makes an edit a
+ * reschedule (F-37), so the form asks for the reason.
+ */
+export function windowChanged(e: CompanyEvent, v: EventFormValues): boolean {
+  if (e.startDate.slice(0, 10) !== v.startDate || e.endDate.slice(0, 10) !== v.endDate) return true;
+  if (e.isAllDayEvent !== v.isAllDayEvent) return true;
+  return !v.isAllDayEvent && (hm(e.startTime) !== hm(v.startTime) || hm(e.endTime) !== hm(v.endTime));
+}
 
 export type EventFormValues = z.infer<typeof schema>;
 
@@ -136,7 +171,9 @@ export const emptyEventForm: EventFormValues = {
   onlineMeetingLink: '',
   meetingPassword: '',
   locationId: '',
-  departmentId: '',
+  organizationUnitId: '',
+  organizerId: '',
+  rescheduleReason: '',
   scope: 'Selected',
   estimatedAttendees: undefined,
   requiresRsvp: false,
@@ -182,7 +219,9 @@ export function eventToForm(e: CompanyEvent): EventFormValues {
     onlineMeetingLink: e.onlineMeetingLink ?? '',
     meetingPassword: e.meetingPassword ?? '',
     locationId: e.locationId ?? '',
-    departmentId: e.departmentId ?? '',
+    organizationUnitId: e.organizationUnitId ?? '',
+    organizerId: e.organizerId,
+    rescheduleReason: '',
     scope: e.scope,
     estimatedAttendees: e.estimatedAttendees ?? undefined,
     requiresRsvp: e.requiresRsvp,
@@ -234,7 +273,8 @@ export function toCreatePayload(v: EventFormValues): CreateCompanyEvent {
     onlineMeetingLink: orNull(v.onlineMeetingLink),
     meetingPassword: orNull(v.meetingPassword),
     locationId: orNull(v.locationId),
-    departmentId: orNull(v.departmentId),
+    organizationUnitId: orNull(v.organizationUnitId),
+    organizerId: orNull(v.organizerId),
     scope: v.scope as CreateCompanyEvent['scope'],
     estimatedAttendees: numOrNull(v.estimatedAttendees),
     requiresRsvp: v.requiresRsvp,
@@ -275,7 +315,8 @@ export function toUpdatePayload(id: string, v: EventFormValues): UpdateCompanyEv
     onlineMeetingLink: orNull(v.onlineMeetingLink),
     meetingPassword: orNull(v.meetingPassword),
     locationId: orNull(v.locationId),
-    departmentId: orNull(v.departmentId),
+    organizationUnitId: orNull(v.organizationUnitId),
+    organizerId: orNull(v.organizerId),
     scope: v.scope as UpdateCompanyEvent['scope'],
     estimatedAttendees: numOrNull(v.estimatedAttendees),
     requiresRsvp: v.requiresRsvp,
@@ -283,7 +324,8 @@ export function toUpdatePayload(id: string, v: EventFormValues): UpdateCompanyEv
     visibility: v.visibility as UpdateCompanyEvent['visibility'],
     showOnCompanyCalendar: v.showOnCompanyCalendar,
     showOnIntranet: v.showOnIntranet,
-    status: (orNull(v.status) as UpdateCompanyEvent['status']) ?? 'Scheduled',
+    status: (orNull(v.status) as UpdateCompanyEvent['status']) ?? null,
+    rescheduleReason: orNull(v.rescheduleReason),
     hasBudget: v.hasBudget,
     budgetAmount: v.hasBudget ? numOrNull(v.budgetAmount) : null,
     actualCost: v.hasBudget ? numOrNull(v.actualCost) : null,
@@ -307,20 +349,30 @@ export function useEventForm(initial: EventFormValues) {
   });
 }
 
+/**
+ * The statuses an edit can offer (lane 2a): scheduled, in progress, postponed; confirmed where no
+ * approval is needed or it has been given; and whatever the event already is, so the field shows it.
+ */
+function statusOptions(event?: CompanyEvent) {
+  const allowed = new Set<EventStatus>(EVENT_EDITABLE_STATUSES);
+  if (event && (!event.requiresApproval || event.approvalDate)) allowed.add('Confirmed');
+  if (event) allowed.add(event.status);
+  return opts([...allowed]);
+}
+
 export function EventFormFields({
   form,
   mode,
+  event,
 }: {
   form: UseFormReturn<EventFormValues>;
   mode: 'create' | 'edit';
+  /** The event being edited — for its organiser's name, its status, and whether the dates moved. */
+  event?: CompanyEvent;
 }) {
   const { data: locations } = useQuery({
     queryKey: ['hr', 'locations', 'all'],
     queryFn: () => locationService.getAll(),
-  });
-  const { data: departments } = useQuery({
-    queryKey: ['hr', 'departments', 'all'],
-    queryFn: () => departmentService.getAll(),
   });
 
   const locationType = form.watch('locationType');
@@ -331,6 +383,13 @@ export function EventFormFields({
   const hasBudget = form.watch('hasBudget');
   const sendReminders = form.watch('sendReminders');
   const requiresRsvp = form.watch('requiresRsvp');
+  const scope = form.watch('scope');
+  const category = form.watch('category');
+  const moved = mode === 'edit' && !!event && windowChanged(event, form.watch());
+
+  // A public holiday or milestone stays offered only on an older event that already is one (F-44).
+  const forNew: readonly string[] = EVENT_CATEGORIES_FOR_NEW;
+  const categories = mode === 'create' || forNew.includes(category) ? forNew : [...forNew, category];
 
   return (
     <div className="space-y-6">
@@ -340,15 +399,35 @@ export function EventFormFields({
           <TextField form={form} name="eventName" label="Event name" required />
           <TextareaField form={form} name="description" label="Description" />
           <FieldRow>
-            <SelectField form={form} name="category" label="Category" required options={opts(EVENT_CATEGORIES)} />
+            <SelectField
+              form={form}
+              name="category"
+              label="Category"
+              required
+              options={opts(categories)}
+              description="Public holidays and company milestones have their own registers."
+            />
             <SelectField form={form} name="type" label="Type" required options={opts(EVENT_TYPES)} />
           </FieldRow>
           <FieldRow>
             <SelectField form={form} name="priority" label="Priority" required options={opts(EVENT_PRIORITIES)} />
             {mode === 'edit' && (
-              <SelectField form={form} name="status" label="Status" options={opts(EVENT_STATUSES)} />
+              <SelectField
+                form={form}
+                name="status"
+                label="Status"
+                options={statusOptions(event)}
+                description="Cancel, complete and reschedule have their own buttons on the event."
+              />
             )}
           </FieldRow>
+          <EmployeePickerField
+            form={form}
+            name="organizerId"
+            label="Organiser"
+            initialLabel={event?.organizerName ?? null}
+            placeholder={mode === 'create' ? 'You — or search for someone else' : 'Search for the organiser'}
+          />
         </CardContent>
       </Card>
 
@@ -365,6 +444,16 @@ export function EventFormFields({
               <TimeField form={form} name="startTime" label="Start time" />
               <TimeField form={form} name="endTime" label="End time" />
             </FieldRow>
+          )}
+          {moved && (
+            <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950">
+              <p className="text-sm text-amber-900 dark:text-amber-100">
+                Changing the dates or times moves the event. Everybody invited is told why, accepted and
+                tentative replies go back to awaiting an answer, its room bookings move with it, the
+                original dates are kept, and an approved event waits for approval again.
+              </p>
+              <TextareaField form={form} name="rescheduleReason" label="Reason for the change" />
+            </div>
           )}
 
           {/* Recurrence is create-only — the update DTO has no recurrence fields at all. */}
@@ -432,23 +521,28 @@ export function EventFormFields({
       <Card>
         <CardHeader><CardTitle>Who</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <FieldRow>
-            <SelectField form={form} name="scope" label="Audience" required options={opts(PARTICIPANT_SCOPES)} />
-            <SelectField
-              form={form}
-              name="departmentId"
-              label="Department"
-              allowEmpty
-              emptyLabel="Company-wide"
-              options={(departments ?? []).map((d) => ({ value: d.id, label: d.name }))}
-            />
-          </FieldRow>
+          <SelectField form={form} name="scope" label="Audience" required options={opts(PARTICIPANT_SCOPES)} />
+          <OrganizationUnitPickerField
+            form={form}
+            name="organizationUnitId"
+            label="Organisation unit"
+            required={scope === 'Department'}
+            allowEmpty={scope !== 'Department'}
+            emptyLabel="Not for one unit"
+            hint={
+              scope === 'Department'
+                ? 'The unit the event is for, with every unit beneath it.'
+                : 'Optional: the unit hosting the event.'
+            }
+          />
           <FieldRow>
             <NumberField form={form} name="estimatedAttendees" label="Estimated attendees" />
             <SelectField form={form} name="visibility" label="Visibility" options={opts(EVENT_VISIBILITIES)} />
           </FieldRow>
           <SwitchField form={form} name="requiresRsvp" label="Requires RSVP" />
-          {requiresRsvp && <DateTimeField form={form} name="rsvpDeadline" label="RSVP deadline" />}
+          {requiresRsvp && (
+            <DateTimeField form={form} name="rsvpDeadline" label="RSVP deadline" />
+          )}
           <FieldRow>
             <SwitchField form={form} name="showOnCompanyCalendar" label="Show on company calendar" />
             <SwitchField form={form} name="showOnIntranet" label="Show on intranet" />
@@ -486,7 +580,7 @@ export function EventFormFields({
             label="Send reminders"
             description="Everybody who has not declined is emailed once, automatically, the days before the event set below — and again if the date moves."
           />
-          {sendReminders && <NumberField form={form} name="reminderDaysBefore" label="Days before" />}
+          {sendReminders && <NumberField form={form} name="reminderDaysBefore" label="Days before" required />}
           <TextareaField form={form} name="additionalNotes" label="Notes" />
         </CardContent>
       </Card>

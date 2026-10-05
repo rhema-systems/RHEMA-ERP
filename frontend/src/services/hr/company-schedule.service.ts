@@ -11,6 +11,7 @@ import type {
   ClosureAnnouncementPreview,
   ClosureType,
   CompanyEvent,
+  CompanyEventChange,
   CompanyEventDetail,
   CompanyEventSummary,
   CompanyMilestone,
@@ -123,8 +124,9 @@ class CompanyEventService {
     return apiService.get<CompanyEventSummary[]>(`${this.baseUrl}/events/organizer/${organizerId}`);
   }
 
-  getByDepartment(departmentId: string): Promise<CompanyEventSummary[]> {
-    return apiService.get<CompanyEventSummary[]>(`${this.baseUrl}/events/department/${departmentId}`);
+  /** Events for one organisation unit (lane 2a; the department read is retired, D-5). */
+  getByUnit(organizationUnitId: string): Promise<CompanyEventSummary[]> {
+    return apiService.get<CompanyEventSummary[]>(`${this.baseUrl}/events/unit/${organizationUnitId}`);
   }
 
   getByStatus(status: EventStatus): Promise<CompanyEventSummary[]> {
@@ -151,21 +153,24 @@ class CompanyEventService {
     return apiService.post<void>(`${this.baseUrl}/events/${id}/approve`);
   }
 
-  cancel(id: string, cancellationReason: string): Promise<void> {
+  /** Cancels the event and its live room bookings; answers the bookings cancelled (lane 2a). */
+  cancel(id: string, cancellationReason: string): Promise<CompanyEventChange> {
     const body: CancelEvent = { eventId: id, cancellationReason };
-    return apiService.post<void>(`${this.baseUrl}/events/${id}/cancel`, body);
+    return apiService.post<CompanyEventChange>(`${this.baseUrl}/events/${id}/cancel`, body);
   }
 
-  reschedule(id: string, data: Omit<RescheduleEvent, 'eventId'>): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/events/${id}/reschedule`, { ...data, eventId: id });
+  /** Moves the event with its room bookings; answers what moved and what was reset (lane 2a). */
+  reschedule(id: string, data: Omit<RescheduleEvent, 'eventId'>): Promise<CompanyEventChange> {
+    return apiService.post<CompanyEventChange>(`${this.baseUrl}/events/${id}/reschedule`, { ...data, eventId: id });
   }
 
   complete(id: string, data: Omit<CompleteEvent, 'eventId'>): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/events/${id}/complete`, { ...data, eventId: id });
   }
 
-  remove(id: string): Promise<void> {
-    return apiService.delete<void>(`${this.baseUrl}/events/${id}`);
+  /** Company Admin. Cancels the event's live room bookings first; answers them (lane 2a). */
+  remove(id: string): Promise<CompanyEventChange> {
+    return apiService.delete<CompanyEventChange>(`${this.baseUrl}/events/${id}`);
   }
 
   // ── participants ──────────────────────────────────────────────────────────

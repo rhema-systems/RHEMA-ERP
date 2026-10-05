@@ -5,18 +5,13 @@ namespace ErpSystem.Core.Interfaces.HR;
 
 #region Company Event Repository
 
+/// <remarks>
+/// ⚠ Lane 2a removed the nine custom reads: none filtered by tenant (F-30), the range read wanted
+/// containment rather than overlap, the upcoming read used the server's local date, and three had no
+/// caller. The event service builds its lists on its own tenant-scoped query.
+/// </remarks>
 public interface ICompanyEventRepository : IGenericRepository<CompanyEvent>
 {
-    Task<CompanyEvent?> GetByEventNumberAsync(string eventNumber);
-    Task<IEnumerable<CompanyEvent>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<CompanyEvent>> GetByOrganizerAsync(Guid organizerId);
-    Task<IEnumerable<CompanyEvent>> GetByDepartmentAsync(Guid departmentId);
-    Task<IEnumerable<CompanyEvent>> GetByStatusAsync(EventStatus status);
-    Task<IEnumerable<CompanyEvent>> GetByCategoryAsync(EventCategory category);
-    Task<IEnumerable<CompanyEvent>> GetUpcomingEventsAsync(int daysAhead = 30);
-    Task<IEnumerable<CompanyEvent>> GetActiveEventsAsync(DateTime? asOfDate = null);
-    Task<bool> HasConflictingEventAsync(Guid organizerId, DateTime startDate, DateTime endDate, Guid? excludeEventId = null);
-
     /// <summary>
     /// The next event number, from the shared sequence and probed against the table before it is
     /// used (round 4, D7 — company-schedule defect C-6).

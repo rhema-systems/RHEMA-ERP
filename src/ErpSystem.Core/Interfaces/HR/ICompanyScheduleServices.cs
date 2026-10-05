@@ -14,17 +14,28 @@ public interface ICompanyEventService
     Task<PagedResult<CompanyEventDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetByOrganizerAsync(Guid organizerId, CancellationToken cancellationToken = default);
-    Task<IEnumerable<CompanyEventSummaryDto>> GetByDepartmentAsync(Guid departmentId, CancellationToken cancellationToken = default);
+    /// <summary>Events for one organisation unit (lane 2a — replaces the retired department read, D-5).</summary>
+    Task<IEnumerable<CompanyEventSummaryDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetByStatusAsync(EventStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetByCategoryAsync(EventCategory category, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetUpcomingEventsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
-    Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid organizerId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates an event. The organiser is <see cref="CreateCompanyEventDto.OrganizerId"/> when given,
+    /// otherwise <paramref name="callerEmployeeId"/>; the caller is recorded as the creator either way (D-11).
+    /// </summary>
+    Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid callerEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Edits an event. A change of dates, times or the all-day switch is a reschedule (F-37): it needs
+    /// <see cref="UpdateCompanyEventDto.RescheduleReason"/> and does what <see cref="RescheduleEventAsync"/> does.
+    /// </summary>
     Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveEventAsync(Guid eventId, Guid approvedById, CancellationToken cancellationToken = default);
-    Task<bool> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default);
-    Task<bool> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default);
+    Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default);
+    Task<CompanyEventChangeDto> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default);
     Task<bool> CompleteEventAsync(CompleteEventDto completeDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<CompanyEventChangeDto> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Participant operations
     /// <summary>

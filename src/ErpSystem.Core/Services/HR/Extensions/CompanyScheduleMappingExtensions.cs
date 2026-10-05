@@ -7,85 +7,95 @@ public static class CompanyScheduleMappingExtensions
 {
     #region CompanyEvent
 
-    public static CompanyEventDto ToDto(this CompanyEvent entity)
+    public static CompanyEventDto ToDto(this CompanyEvent entity) => Fill(new CompanyEventDto(), entity);
+
+    /// <summary>
+    /// Every field of the event, for the list read and the detail read alike.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The detail read used to be a hand-made copy of this list, and it drifted: it never carried the
+    /// original window, so the event page could not show what a moved event was moved from (F-58). One
+    /// filler for both means a field added here reaches both.
+    /// </remarks>
+    private static T Fill<T>(T dto, CompanyEvent entity) where T : CompanyEventDto
     {
-        return new CompanyEventDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            EventNumber = entity.EventNumber,
-            EventName = entity.EventName,
-            Description = entity.Description,
-            Category = entity.Category,
-            Type = entity.Type,
-            Priority = entity.Priority,
-            StartDate = entity.StartDate,
-            StartTime = entity.StartTime,
-            EndDate = entity.EndDate,
-            EndTime = entity.EndTime,
-            IsAllDayEvent = entity.IsAllDayEvent,
-            IsRecurring = entity.IsRecurring,
-            RecurrencePattern = entity.RecurrencePattern,
-            RecurrenceDetails = entity.RecurrenceDetails,
-            RecurrenceEndDate = entity.RecurrenceEndDate,
-            RecurrenceCount = entity.RecurrenceCount,
-            LocationType = entity.LocationType,
-            VenueName = entity.VenueName,
-            VenueAddress = entity.VenueAddress,
-            OnlineMeetingLink = entity.OnlineMeetingLink,
-            MeetingPassword = entity.MeetingPassword,
-            LocationId = entity.LocationId,
-            LocationName = entity.SiteLocation?.Name,
-            OrganizerId = entity.OrganizerId,
-            OrganizerName = entity.Organizer?.FullName ?? string.Empty,
-            DepartmentId = entity.DepartmentId,
-            DepartmentName = entity.Department?.Name,
-            Scope = entity.Scope,
-            EstimatedAttendees = entity.EstimatedAttendees,
-            RequiresRsvp = entity.RequiresRsvp,
-            RsvpDeadline = entity.RsvpDeadline,
-            Visibility = entity.Visibility,
-            ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar,
-            ShowOnIntranet = entity.ShowOnIntranet,
-            Status = entity.Status,
-            RequiresApproval = entity.RequiresApproval,
-            ApprovedById = entity.ApprovedById,
-            ApprovedByName = entity.ApprovedBy?.FullName,
-            ApprovalDate = entity.ApprovalDate,
-            HasBudget = entity.HasBudget,
-            BudgetAmount = entity.BudgetAmount,
-            ActualCost = entity.ActualCost,
-            BudgetCode = entity.BudgetCode,
-            RequiredResources = entity.RequiredResources,
-            CateringRequirements = entity.CateringRequirements,
-            TechnicalRequirements = entity.TechnicalRequirements,
-            SendReminders = entity.SendReminders,
-            ReminderDaysBefore = entity.ReminderDaysBefore,
-            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
-            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
-            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
-            ActualStartTime = entity.ActualStartTime,
-            ActualEndTime = entity.ActualEndTime,
-            ActualAttendance = entity.ActualAttendance,
-            OutcomeSummary = entity.OutcomeSummary,
-            IsCancelled = entity.IsCancelled,
-            CancellationDate = entity.CancellationDate,
-            CancellationReason = entity.CancellationReason,
-            IsRescheduled = entity.IsRescheduled,
-            RescheduledDate = entity.RescheduledDate,
-            // Round 4, D7 (C-2). Null on an event that never moved, and on any moved before this
-            // lane — the original was overwritten then and cannot be recovered.
-            OriginalStartDate = entity.OriginalStartDate,
-            OriginalStartTime = entity.OriginalStartTime,
-            OriginalEndDate = entity.OriginalEndDate,
-            OriginalEndTime = entity.OriginalEndTime,
-            RescheduleReason = entity.RescheduleReason,
-            AdditionalNotes = entity.AdditionalNotes,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy
-        };
+        dto.Id = entity.Id;
+        dto.TenantId = entity.TenantId;
+        dto.EventNumber = entity.EventNumber;
+        dto.EventName = entity.EventName;
+        dto.Description = entity.Description;
+        dto.Category = entity.Category;
+        dto.Type = entity.Type;
+        dto.Priority = entity.Priority;
+        dto.StartDate = entity.StartDate;
+        dto.StartTime = entity.StartTime;
+        dto.EndDate = entity.EndDate;
+        dto.EndTime = entity.EndTime;
+        dto.IsAllDayEvent = entity.IsAllDayEvent;
+        dto.IsRecurring = entity.IsRecurring;
+        dto.RecurrencePattern = entity.RecurrencePattern;
+        dto.RecurrenceDetails = entity.RecurrenceDetails;
+        dto.RecurrenceEndDate = entity.RecurrenceEndDate;
+        dto.RecurrenceCount = entity.RecurrenceCount;
+        dto.LocationType = entity.LocationType;
+        dto.VenueName = entity.VenueName;
+        dto.VenueAddress = entity.VenueAddress;
+        dto.OnlineMeetingLink = entity.OnlineMeetingLink;
+        dto.MeetingPassword = entity.MeetingPassword;
+        dto.LocationId = entity.LocationId;
+        dto.LocationName = entity.SiteLocation?.Name;
+        dto.OrganizerId = entity.OrganizerId;
+        dto.OrganizerName = entity.Organizer?.FullName ?? string.Empty;
+        dto.DepartmentId = entity.DepartmentId;
+        dto.DepartmentName = entity.Department?.Name;
+        dto.OrganizationUnitId = entity.OrganizationUnitId;
+        dto.OrganizationUnitName = entity.OrganizationUnit?.Name;
+        dto.Scope = entity.Scope;
+        dto.EstimatedAttendees = entity.EstimatedAttendees;
+        dto.RequiresRsvp = entity.RequiresRsvp;
+        dto.RsvpDeadline = entity.RsvpDeadline;
+        dto.Visibility = entity.Visibility;
+        dto.ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar;
+        dto.ShowOnIntranet = entity.ShowOnIntranet;
+        dto.Status = entity.Status;
+        dto.RequiresApproval = entity.RequiresApproval;
+        dto.ApprovedById = entity.ApprovedById;
+        dto.ApprovedByName = entity.ApprovedBy?.FullName;
+        dto.ApprovalDate = entity.ApprovalDate;
+        dto.HasBudget = entity.HasBudget;
+        dto.BudgetAmount = entity.BudgetAmount;
+        dto.ActualCost = entity.ActualCost;
+        dto.BudgetCode = entity.BudgetCode;
+        dto.RequiredResources = entity.RequiredResources;
+        dto.CateringRequirements = entity.CateringRequirements;
+        dto.TechnicalRequirements = entity.TechnicalRequirements;
+        dto.SendReminders = entity.SendReminders;
+        dto.ReminderDaysBefore = entity.ReminderDaysBefore;
+        // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
+        dto.ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null;
+        dto.RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null;
+        dto.ActualStartTime = entity.ActualStartTime;
+        dto.ActualEndTime = entity.ActualEndTime;
+        dto.ActualAttendance = entity.ActualAttendance;
+        dto.OutcomeSummary = entity.OutcomeSummary;
+        dto.IsCancelled = entity.IsCancelled;
+        dto.CancellationDate = entity.CancellationDate;
+        dto.CancellationReason = entity.CancellationReason;
+        dto.IsRescheduled = entity.IsRescheduled;
+        dto.RescheduledDate = entity.RescheduledDate;
+        // Round 4, D7 (C-2). Null on an event that never moved, and on any moved before that
+        // lane — the original was overwritten then and cannot be recovered.
+        dto.OriginalStartDate = entity.OriginalStartDate;
+        dto.OriginalStartTime = entity.OriginalStartTime;
+        dto.OriginalEndDate = entity.OriginalEndDate;
+        dto.OriginalEndTime = entity.OriginalEndTime;
+        dto.RescheduleReason = entity.RescheduleReason;
+        dto.AdditionalNotes = entity.AdditionalNotes;
+        dto.CreatedAt = entity.CreatedAt;
+        dto.CreatedBy = entity.CreatedBy ?? string.Empty;
+        dto.UpdatedAt = entity.UpdatedAt;
+        dto.UpdatedBy = entity.UpdatedBy;
+        return dto;
     }
 
     public static CompanyEventSummaryDto ToSummaryDto(this CompanyEvent entity)
@@ -110,82 +120,11 @@ public static class CompanyScheduleMappingExtensions
 
     public static CompanyEventDetailDto ToDetailDto(this CompanyEvent entity)
     {
-        var dto = new CompanyEventDetailDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            EventNumber = entity.EventNumber,
-            EventName = entity.EventName,
-            Description = entity.Description,
-            Category = entity.Category,
-            Type = entity.Type,
-            Priority = entity.Priority,
-            StartDate = entity.StartDate,
-            StartTime = entity.StartTime,
-            EndDate = entity.EndDate,
-            EndTime = entity.EndTime,
-            IsAllDayEvent = entity.IsAllDayEvent,
-            IsRecurring = entity.IsRecurring,
-            RecurrencePattern = entity.RecurrencePattern,
-            RecurrenceDetails = entity.RecurrenceDetails,
-            RecurrenceEndDate = entity.RecurrenceEndDate,
-            RecurrenceCount = entity.RecurrenceCount,
-            LocationType = entity.LocationType,
-            VenueName = entity.VenueName,
-            VenueAddress = entity.VenueAddress,
-            OnlineMeetingLink = entity.OnlineMeetingLink,
-            MeetingPassword = entity.MeetingPassword,
-            LocationId = entity.LocationId,
-            LocationName = entity.SiteLocation?.Name,
-            OrganizerId = entity.OrganizerId,
-            OrganizerName = entity.Organizer?.FullName ?? string.Empty,
-            DepartmentId = entity.DepartmentId,
-            DepartmentName = entity.Department?.Name,
-            Scope = entity.Scope,
-            EstimatedAttendees = entity.EstimatedAttendees,
-            RequiresRsvp = entity.RequiresRsvp,
-            RsvpDeadline = entity.RsvpDeadline,
-            Visibility = entity.Visibility,
-            ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar,
-            ShowOnIntranet = entity.ShowOnIntranet,
-            Status = entity.Status,
-            RequiresApproval = entity.RequiresApproval,
-            ApprovedById = entity.ApprovedById,
-            ApprovedByName = entity.ApprovedBy?.FullName,
-            ApprovalDate = entity.ApprovalDate,
-            HasBudget = entity.HasBudget,
-            BudgetAmount = entity.BudgetAmount,
-            ActualCost = entity.ActualCost,
-            BudgetCode = entity.BudgetCode,
-            RequiredResources = entity.RequiredResources,
-            CateringRequirements = entity.CateringRequirements,
-            TechnicalRequirements = entity.TechnicalRequirements,
-            SendReminders = entity.SendReminders,
-            ReminderDaysBefore = entity.ReminderDaysBefore,
-            // ⚠ As UTC: a datetime2 reads back unspecified and JSON then drops its Z (round 4, lane E).
-            ReminderSentDate = entity.ReminderSentDate is { } reminded ? DateTime.SpecifyKind(reminded, DateTimeKind.Utc) : null,
-            RsvpReminderSentDate = entity.RsvpReminderSentDate is { } chased ? DateTime.SpecifyKind(chased, DateTimeKind.Utc) : null,
-            ActualStartTime = entity.ActualStartTime,
-            ActualEndTime = entity.ActualEndTime,
-            ActualAttendance = entity.ActualAttendance,
-            OutcomeSummary = entity.OutcomeSummary,
-            IsCancelled = entity.IsCancelled,
-            CancellationDate = entity.CancellationDate,
-            CancellationReason = entity.CancellationReason,
-            IsRescheduled = entity.IsRescheduled,
-            RescheduledDate = entity.RescheduledDate,
-            RescheduleReason = entity.RescheduleReason,
-            AdditionalNotes = entity.AdditionalNotes,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy,
-            Participants = entity.Participants?.Select(p => p.ToDto()).ToList() ?? new List<EventParticipantDto>(),
-            AttendanceRecords = entity.AttendanceRecords?.Select(a => a.ToDto()).ToList() ?? new List<EventAttendanceDto>(),
-            Attachments = entity.Attachments?.Select(a => a.ToDto()).ToList() ?? new List<EventAttachmentDto>(),
-            Tasks = entity.Tasks?.Select(t => t.ToDto()).ToList() ?? new List<EventTaskDto>()
-        };
-
+        var dto = Fill(new CompanyEventDetailDto(), entity);
+        dto.Participants = entity.Participants?.Select(p => p.ToDto()).ToList() ?? new List<EventParticipantDto>();
+        dto.AttendanceRecords = entity.AttendanceRecords?.Select(a => a.ToDto()).ToList() ?? new List<EventAttendanceDto>();
+        dto.Attachments = entity.Attachments?.Select(a => a.ToDto()).ToList() ?? new List<EventAttachmentDto>();
+        dto.Tasks = entity.Tasks?.Select(t => t.ToDto()).ToList() ?? new List<EventTaskDto>();
         return dto;
     }
 
@@ -215,6 +154,7 @@ public static class CompanyScheduleMappingExtensions
             MeetingPassword = dto.MeetingPassword,
             LocationId = dto.LocationId,
             DepartmentId = dto.DepartmentId,
+            OrganizationUnitId = dto.OrganizationUnitId,
             Scope = dto.Scope,
             EstimatedAttendees = dto.EstimatedAttendees,
             RequiresRsvp = dto.RequiresRsvp,
@@ -235,6 +175,14 @@ public static class CompanyScheduleMappingExtensions
         };
     }
 
+    /// <summary>
+    /// The fields an edit sets directly.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not the dates, the times, the all-day switch, the status or the organiser (lane 2a): a change
+    /// of window is a reschedule, the status has its rules and its own actions, and the organiser is
+    /// checked first. The service applies those.
+    /// </remarks>
     public static void UpdateEntity(this UpdateCompanyEventDto dto, CompanyEvent entity)
     {
         entity.EventName = dto.EventName;
@@ -242,11 +190,6 @@ public static class CompanyScheduleMappingExtensions
         entity.Category = dto.Category;
         entity.Type = dto.Type;
         entity.Priority = dto.Priority;
-        entity.StartDate = dto.StartDate;
-        entity.StartTime = dto.StartTime;
-        entity.EndDate = dto.EndDate;
-        entity.EndTime = dto.EndTime;
-        entity.IsAllDayEvent = dto.IsAllDayEvent;
         entity.LocationType = dto.LocationType;
         entity.VenueName = dto.VenueName;
         entity.VenueAddress = dto.VenueAddress;
@@ -254,6 +197,7 @@ public static class CompanyScheduleMappingExtensions
         entity.MeetingPassword = dto.MeetingPassword;
         entity.LocationId = dto.LocationId;
         entity.DepartmentId = dto.DepartmentId;
+        entity.OrganizationUnitId = dto.OrganizationUnitId;
         entity.Scope = dto.Scope;
         entity.EstimatedAttendees = dto.EstimatedAttendees;
         entity.RequiresRsvp = dto.RequiresRsvp;
@@ -261,7 +205,6 @@ public static class CompanyScheduleMappingExtensions
         entity.Visibility = dto.Visibility;
         entity.ShowOnCompanyCalendar = dto.ShowOnCompanyCalendar;
         entity.ShowOnIntranet = dto.ShowOnIntranet;
-        entity.Status = dto.Status;
         entity.HasBudget = dto.HasBudget;
         entity.BudgetAmount = dto.BudgetAmount;
         entity.ActualCost = dto.ActualCost;

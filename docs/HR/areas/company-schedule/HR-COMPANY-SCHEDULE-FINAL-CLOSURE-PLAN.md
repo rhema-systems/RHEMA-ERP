@@ -28,13 +28,13 @@ has not started (the user: "don't start the actual development yet").
    Finance references are updated to HEAD; the drill service is named correctly (lane 2).
 1. § 1a is settled. **§ 1b holds the nine decisions raised by the review.** D-12 (recurring events
    are a light series) and D-17 (no milestone link) are settled, and with them what the migration
-   contains. D-15 was settled at lane 1's source check (§ 1c). **Six remain pending the user** —
-   D-10, D-11, D-13, D-14, D-16 and D-18 — each
-   needed before the lanes § 2 lists against it; none blocks lane 0.
+   contains. D-15 was settled at lane 1's source check (§ 1c). D-10, D-11, D-14 and D-16 were settled
+   at lane 2's source check (2026-10-05, § 1c, all as refined there). **Two remain pending the user** —
+   D-13 and D-18, both lane 3's.
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
-   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Next: lane 2 (events),
-   source-checked 2026-10-05 (§ 1c).** It waits on four decisions, D-10, D-11, D-14 and D-16, now
-   sharpened in § 1c's lane 2 table. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
+   way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
+   (2026-10-05). **Next: 2b, approval on the workflow engine (D-10).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -82,21 +82,22 @@ under D-9 none stands without one.
 - **R4-3.1** — the landing answering a 403 with "Nothing scheduled" — is a live defect, owned by
   lane 5.
 
-### 1b. Decisions raised by the review (2026-10-01) — three settled, six pending the user
+### 1b. Decisions raised by the review (2026-10-01) — seven settled, two pending the user
 
-**D-12 and D-17 were settled by the user on 2026-10-01, as recommended, and D-15 on 2026-10-04 at
-lane 1's source check (✅ below).** The other six are pending; each is needed before the lanes in its
-"Blocks" column.
+**D-12 and D-17 were settled by the user on 2026-10-01, as recommended; D-15 on 2026-10-04 at lane 1's
+source check; D-10, D-11, D-14 and D-16 on 2026-10-05 at lane 2's source check, as refined in § 1c's
+lane 2 table, which supersedes their rows here (✅ below).** D-13 and D-18 are pending; each is needed
+before the lanes in its "Blocks" column.
 
 | # | Question | Recommendation | Blocks |
 |---|---|---|---|
-| **D-10** | Approval of events and bookings: the workflow engine, or the one-click flag? | **The engine**, like every other HR approval: the four-step recipe, definitions of two steps or more, the auto-approve guard where no definition is published, and `preventInitiatorApproval` to stop self-approval. It gives the approver an inbox entry and a notification (C-3, the approver half of F-34). No schema: the engine links by entity type and id. If the flag is kept instead: refuse self-approval — the approver may not be the organiser or the booker. | Lanes 2, 3; harness definitions |
-| **D-11** | Who is the organiser? | **An Organiser picker** defaulting to the signed-in employee; the creator stays in `CreatedBy`. Diaries, the clash check and the calendar use the organiser (F-42). | Lane 2 |
+| **D-10** ✅ | Approval of events and bookings: the workflow engine, or the one-click flag? | **The engine**, like every other HR approval: the four-step recipe, definitions of two steps or more, the auto-approve guard where no definition is published, and `preventInitiatorApproval` to stop self-approval. It gives the approver an inbox entry and a notification (C-3, the approver half of F-34). No schema: the engine links by entity type and id. If the flag is kept instead: refuse self-approval — the approver may not be the organiser or the booker. | Lanes 2, 3; harness definitions |
+| **D-11** ✅ | Who is the organiser? | **An Organiser picker** defaulting to the signed-in employee; the creator stays in `CreatedBy`. Diaries, the clash check and the calendar use the organiser (F-42). | Lane 2 |
 | **D-12** ✅ | Recurring events: a series, or independent occurrences? | **Settled 2026-10-01, as recommended: a light series, in which the occurrences are the series.** Each occurrence stays a full event, with its own number, guest list, RSVPs, attendance register, tasks and papers; `RecurrenceSeriesId` and `OccurrenceNumber` tie them together, and there is **no series table**. Series behaviour is a scope choice, "this occurrence / this and following / the whole series", on adding or removing a guest, editing, rescheduling and cancelling. A guest added to the series gets one invitation listing the dates and answers each date or all at once. "Book this room for every occurrence" makes one booking per date and lists the dates where the room is taken. A series action never changes an occurrence that is past or completed. A series needs an end date or a count, up to 52, and can be extended later. A monthly rule on a day a month lacks falls on that month's last day, counted from the first date; an occurrence on a holiday or company-wide closure is generated and flagged, not skipped. *Why: answers and attendance are per meeting, since people miss one week and not the next; independent occurrences would mean re-inviting everyone every week; and an ordinary event needs no special case in the clash check, the reminder sweep, the diaries or the calendar.* | Lane 2. Lane 0: no series table |
 | **D-13** | May staff book rooms themselves? | **Yes, from the portal**: their own bookings only, the same room rules, approval-required rooms routed to the approver, staff cancel their own. HR keeps the desk. | Lanes 3, 7 |
-| **D-14** | Calendar invites in the emails? | **Yes**: an `.ics` on invitation, reschedule and cancellation — a stable UID per event, SEQUENCE raised on each change, METHOD REQUEST and CANCEL. The email DTO already carries attachments; the templated send needs an overload. External guests answer from their mail client to the organiser, and HR records it at the desk, which answers F-36. | Lane 2 |
+| **D-14** ✅ | Calendar invites in the emails? | **Yes**: an `.ics` on invitation, reschedule and cancellation — a stable UID per event, SEQUENCE raised on each change, METHOD REQUEST and CANCEL. The email DTO already carries attachments; the templated send needs an overload. External guests answer from their mail client to the organiser, and HR records it at the desk, which answers F-36. | Lane 2 |
 | **D-15** ✅ | Unpaid closures, and closures added after leave was approved? | **Settled 2026-10-04 at lane 1's source check, refined there into D-15a, D-15b and D-15c (§ 1c); the payroll half goes into the payroll hand-off rather than the register.** *As first recommended:* HR records the pay flag and **exposes closures to payroll read-only**, logged as a cross-module item, because payroll is another developer's module (F-51). **A closure created, moved or deleted re-charges the approved leave it overlaps**, and the employee is told (F-52). | Lane 1 |
-| **D-16** | Who is "Management only"? | **The heads of organisation units** (`OrganizationUnit.HeadEmployeeId`), plus the organiser and participants; "Management" visibility uses the same population (F-43). | Lanes 2, 7 |
+| **D-16** ✅ | Who is "Management only"? | **The heads of organisation units** (`OrganizationUnit.HeadEmployeeId`), plus the organiser and participants; "Management" visibility uses the same population (F-43). | Lanes 2, 7 |
 | **D-17** ✅ | The milestone link to one employee's award or certification (C-41)? | **Settled 2026-10-01, as recommended: dropped.** Company milestones are company facts: the guide's own walkthrough files the ISO 9001 quality certification as one, while a training-module certificate and a long-service award each belong to one employee. A milestone's evidence is its documents (D-3); awards and milestones meet, if anywhere, through a company event for the awards ceremony. C-41 closes as decided, not built, which is a decision rather than a deferral. | Lane 0: no link columns. Lane 4: nothing to build |
 | **D-18** | Retiring a room that has future bookings? | **Offer "cancel these N bookings and tell their bookers"**, and refuse deletion once a room has any booking history — deactivate instead (F-49). | Lane 3 |
 
@@ -291,7 +292,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
   - **UAT residue:** 402 active "E2E Closure …" units from the performance harness (2026-09-29 to
     10-01) appear in every unit picker on UAT. They are not this module's to delete.
 
-**Lane 2 decisions — pending the user.** The four the lane waits on, sharpened by the check:
+**Lane 2 decisions — ✅ settled by the user on 2026-10-05, all four as recommended below** ("let's go with your recommendations for the four decisions"):
 
 | # | Question | Recommendation |
 |---|---|---|
@@ -308,11 +309,11 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a built and proved (250/250 ×2; round-4 net 207/207); 2b next | events block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
-| **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13, D-16 | ☐ | calendar block, two logins |
+| **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
 
 ---
@@ -896,30 +897,30 @@ change.
 ### Lane 2 — Events (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
 
 **Validation and references**
-- [ ] One window validator for create, update and reschedule (end on or after start; times only when
+- [x] *✅ 2a (`CompanyEventRules`); a missing date, which bound as 0001-01-01, is refused too.* One window validator for create, update and reschedule (end on or after start; times only when
       not all-day, end time after start time on a same-day event; RSVP deadline on or before the
       start; `SendReminders` ⇒ `ReminderDaysBefore` ≥ 0; `RequiresRsvp` ⇒ a deadline).
-- [ ] `EnsureExistsAsync` (tenant-scoped, not deleted, refusing as a rule — a 422, not a "not found")
+- [ ] *✅ 2a for the event's site, unit and organiser (an active employee); participants and task assignees are 2d.* `EnsureExistsAsync` (tenant-scoped, not deleted, refusing as a rule — a 422, not a "not found")
       for `LocationId`, `OrganizationUnitId`, participant `EmployeeId` (active), task `AssignedToId`.
 
 **Lifecycle** (*review: two of the first draft's guards contradicted other rules*)
-- [ ] **Approve:** requires approval and not yet approved, while Scheduled, Rescheduled or Postponed —
+- [ ] *✅ 2a for the guards, and the organiser may not approve their own event; the engine is 2b.* **Approve:** requires approval and not yet approved, while Scheduled, Rescheduled or Postponed —
       the first draft's "Scheduled only" stranded a moved event, since a reschedule now sets
       Rescheduled. On the engine per D-10.
-- [ ] **Cancel:** not cancelled or completed; cascades to the event's live linked bookings.
-- [ ] **Reschedule:** not cancelled or completed; window valid; status → Rescheduled (C-7);
+- [x] *✅ 2a.* **Cancel:** not cancelled or completed; cascades to the event's live linked bookings.
+- [x] *✅ 2a; a move to the same window is refused, and a move that names no times keeps the hours. The bookings move without lane 3's room limits, which lane 3 applies.* **Reschedule:** not cancelled or completed; window valid; status → Rescheduled (C-7);
       Accepted/Tentative answers reset to Sent **and the RSVP chase stamp cleared**; refused when the
       RSVP deadline would fall after the new start unless a new deadline is given; **linked live
       bookings move with the event**, each re-checked for clashes, the reschedule refused naming any
       room that is taken; an approved event that moves returns to awaiting approval, as a moved booking
       does (D-10). (F-38)
-- [ ] **Complete:** not cancelled, not already completed, **not before the event starts** (F-40).
-- [ ] **Delete** (Admin): cancels the event's live linked bookings first, as cancel does (F-39).
-- [ ] **Update:** refused on a cancelled or completed event. `Status` only Scheduled / InProgress /
+- [x] *✅ 2a.* **Complete:** not cancelled, not already completed, **not before the event starts** (F-40).
+- [x] *✅ 2a; answers 200 with the bookings cancelled.* **Delete** (Admin): cancels the event's live linked bookings first, as cancel does (F-39).
+- [x] *✅ 2a; an edit that moves the window needs a reason and takes the reschedule path.* **Update:** refused on a cancelled or completed event. `Status` only Scheduled / InProgress /
       Postponed, and Confirmed only where no approval is required — the first draft allowed Confirmed,
       which made an unapproved event look approved. **Any change of start or end date or time, or of
       the all-day switch, goes through the reschedule path** (F-37, R4-7.1).
-- [ ] **(F-41)** The clash check treats an accepted invitation to an event that needs no approval as
+- [x] *✅ 2a (`CompanyEventRules.IsFirm`).* **(F-41)** The clash check treats an accepted invitation to an event that needs no approval as
       firm once it is Scheduled or Rescheduled — no data change.
 
 **Recurrence (D-2, D-12 — settled: a light series)**
@@ -942,7 +943,7 @@ change.
       "Occurrence 3 of 10" and links the series; the register filters by series.
 
 **Audience and organiser** (*review: reuse the audience resolver; no new `EventAudience` helper*)
-- [ ] The organiser per **D-11**; the organiser and the participants always see and are committed to
+- [ ] *✅ 2a for the picker, the creator stamp, the diaries and the clash check; reminding the organiser is 2e.* The organiser per **D-11**; the organiser and the participants always see and are committed to
       the event.
 - [ ] When `ShowOnCompanyCalendar` is on, the event's audience is an audience rule: `Scope = AllStaff`
       → `AllEmployees`; `Scope = Department` → the event's `OrganizationUnit` (its subtree);
@@ -951,7 +952,7 @@ change.
       `CompanyEventCommitmentSource` and lane 7. Form descriptions say exactly this.
 - [ ] `ShowOnIntranet` publishes an `HrAnnouncement` to the same audience (*review: the first draft
       only relabelled it*); `Priority` stays a label and says so.
-- [ ] **(R4-10A.2 — backend, moved here from lane 5)** `CompanyEventCommitmentSource` yields a window
+- [x] *✅ 2a (`CompanyEventRules.DailyWindows`).* **(R4-10A.2 — backend, moved here from lane 5)** `CompanyEventCommitmentSource` yields a window
       per day for a multi-day timed event (`WindowOf` takes the start day only today), so days two
       onward reach the clash check and the diaries.
 
@@ -985,12 +986,12 @@ change.
 - [ ] Calendar invites and external replies per **D-14** (F-36).
 
 **Reads and contracts**
-- [ ] Range endpoints: overlap semantics; UTC dates throughout the repository; **the tenant filter
+- [ ] *✅ 2a for events (the repository's nine reads removed; the service's own tenant-scoped query); rooms, bookings, milestones and fiscal are their lanes'.* Range endpoints: overlap semantics; UTC dates throughout the repository; **the tenant filter
       inside every repository query** (F-30).
-- [ ] Update responses re-read after save, as creates do (F-46).
-- [ ] (F-44) "Holiday" and "Milestone" leave the category picker (the values kept for old rows), with
+- [ ] *✅ 2a for events; tasks are 2d, rooms and bookings lane 3.* Update responses re-read after save, as creates do (F-46).
+- [x] *✅ 2a; the server refuses them on create and on a change of category.* (F-44) "Holiday" and "Milestone" leave the category picker (the values kept for old rows), with
       a line pointing to public holidays and milestones.
-- [ ] `events/department/{id}` → `events/unit/{id}`; the event form's Department picker →
+- [x] *✅ 2a; the department is refused on the wire (D-5), and the page shows the unit.* `events/department/{id}` → `events/unit/{id}`; the event form's Department picker →
       `OrganizationUnitPickerField`.
 - [ ] (D-9, C-10…C-13, C-25) `GET events/search` and `GET bookings/search` — server-side filters
       (text, status, category, site, unit, organiser, from/to on overlap), sort and paging; `GET
@@ -1022,7 +1023,7 @@ change.
       - the event is made with reminders off (SHE sends "DrillDue" itself);
       - it is made server-side, so SHE users need no HR permission.
 
-**State (2026-10-05): source-checked (§ 1c); waits on D-10, D-11, D-14, D-16.** Proposed slices, each
+**State (2026-10-05): source-checked (§ 1c); D-10, D-11, D-14, D-16 settled the same day.** Slices, each
 built, proved twice and handed over on its own:
 - **2a** windows, references and lifecycle guards:
   - the update-dates-through-reschedule path, C-7, F-37…F-40;
@@ -1041,6 +1042,74 @@ built, proved twice and handed over on its own:
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2a — what was built (2026-10-05):*
+- **`CompanyEventRules`, pure.** It holds:
+  - the window check, one for create, edit and reschedule;
+  - firmness (F-41) and awaiting-approval;
+  - the categories that belong elsewhere (F-44);
+  - the per-day windows of an event (R4-10A.2).
+
+  The window check refuses, with the sentence to act on:
+  - a missing date (it bound as 0001-01-01);
+  - an end before the start, or one time without the other;
+  - asking for replies without a deadline, or a deadline after the start;
+  - reminders without a lead, or a negative lead.
+
+  It drops what does not apply: an all-day event's times, an unused deadline, an unused lead.
+- **The event service:**
+  - **References:** the site, the unit and a new organiser are checked in the tenant, as a 422 (F-10).
+  - **D-5 and D-11:** a department is refused; an event for a unit needs the unit; the organiser is
+    chosen, defaulting to the caller, and the creator is stamped (`CreatedBy` was null on every event).
+  - **Status by edit:** only Scheduled, In progress or Postponed, or Confirmed where no approval is
+    needed. Cancel, Complete and Reschedule have their own actions (F-37).
+  - **Approve:** refuses an event that needs no approval, one already approved, one in another
+    status, and the organiser's own.
+  - **Cancel twice, complete before the start, and editing a closed event** are refused.
+  - **One move path, `MoveAsync`, for Reschedule and an edit that changes the window:**
+    - the event's live room bookings move by the same amount, and the move is refused, naming the
+      room, if a room is taken;
+    - the first original window is kept;
+    - the status becomes Rescheduled (C-7);
+    - the reminder and chase stamps are cleared;
+    - an approval is cleared;
+    - accepted and tentative answers go back to Sent.
+  - **Cancel and delete** cancel the live linked bookings (F-39). Cancel, reschedule and delete answer
+    `CompanyEventChangeDto`.
+  - **Reads:** the lists run on one tenant-scoped query, the repository's nine custom reads are
+    removed (F-30), ranges use overlap, "upcoming" uses UTC, and `events/unit/{id}` replaces the
+    department read. Updates re-read (F-46).
+  - **Mapping:** one filler for the list and detail reads, so the detail now carries the original
+    window (F-58).
+- **The diary and clash source:** the organiser is committed whether invited or not (D-11); every
+  day of the event counts; an accepted, firm, timed event is hard.
+- **The screens:**
+  - the form gains the organiser picker, the unit picker in place of the department, the categories
+    for a new event, the statuses an edit may set, and a reason box when the dates move;
+  - the event page gains a new RSVP deadline on reschedule, shows Complete only once started and Edit
+    only while open, toasts what moved or was cancelled, and shows the unit.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2a: **250/250 on two clean passes**; 2a has 94 assertions. They
+  cover each refusal (422 and its sentence), what is dropped, the organiser and the creator, the unit
+  read, overlap, the diary (organiser, day two, firm and awaiting-approval), the status, approval and
+  move rules, a room booking moved, refused on a clash, cancelled and deleted with its event, complete
+  before and after the start, and the re-read. The creator reads back as the HR login's name with its
+  user id.
+- Regression:
+  - the round-4 net **207/207**. `run-slice0` is now 28 and `run-slice2` 64, both updated for 2a's
+    rules: the organiser approving their own event is refused, a plain edit sends its RSVP deadline
+    and keeps its times, and completing before the start is refused;
+  - `hr-recruitment/run-round4-d` (the interview clash check, which reads the changed source)
+    **58/58**.
+- API log: only #23 and #39; no request answered 500.
+- Clean-up: none of the run's events, bookings or room left. 20 harness logins (round-4's and the
+  recruitment suite's) switched off. The recruitment suite leaves its documented E2E residue
+  (README), and the round-4 suites theirs (R4-2.1).
+- **Demo pack:** scenario 110's board meeting asked for replies with no deadline, which 2a now
+  refuses. It now sends one, three days before the meeting (`dev-harness/hr-demo-smoke`, outside the
+  repo).
+- Not yet walked in a browser (lane 5).
 
 ### Lane 3 — Rooms and bookings (D-10, D-13, D-18; C-8, C-28, C-30, C-31, C-32, C-33, C-36, R4-9.1, R4-12.1, F-6, F-7, F-15, F-18, F-34, F-47…F-50)
 
@@ -1453,3 +1522,14 @@ built API, so no web host and no seeders).
 
   D-10, D-11, D-14 and D-16 are put to the user with refined recommendations. Proposed slices in
   lane 2's State.
+- **2026-10-05, later** — **D-10, D-11, D-14, D-16 settled** by the user, all as refined in § 1c.
+- **2026-10-05, later** — **Lane 2, slice 2a built and proved** (windows, references, organiser,
+  diary, lifecycle; lane 2 State). `run-final-review.mjs` scored 250/250 on two clean passes, with
+  94 checks in 2a. The round-4 net was 207/207 and the recruitment clash suite 58/58. No request
+  answered 500.
+  - **Suites updated for the new rules:** `run-slice0`'s HR approved its own event; `run-slice2`
+    edited times without a reason, and completed an event before it began.
+  - **The demo pack's scenario 110** would have lost its board meeting on rebuild (replies asked, no
+    deadline); it now sends one.
+
+  Next: 2b, approval on the workflow engine.
