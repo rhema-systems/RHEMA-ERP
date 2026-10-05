@@ -20,6 +20,13 @@ Assess safe edit/delete management for genuinely unused Draft budget scenarios a
 - The current client does not expose `segmentValueId`, although that optional property remains in the client/server DTOs, entity, duplicate key, reporting, and budget-control logic.
 - Therefore the training instruction to select `Segment Type COMPANY` and then `Department / Unit DEFAULT` describes two selections that the current UI cannot reproduce. A scenario configured with the DEPARTMENT control dimension can select its DEFAULT value, but cannot also select COMPANY as a separate segment value.
 - Classification: confirmed training/product contract drift. A product decision is required before implementation: retire the legacy segment axis and update the guide, or restore an explicit governed segment selector and define its relationship to Finance dimensions.
+- Industry comparison completed against current Oracle Planning, SAP Analytics Cloud Planning, and Microsoft Dynamics 365 Finance guidance:
+  - Oracle models an approval unit as scenario + version + entity, with optional secondary dimensions for finer approval scope.
+  - SAP generates planning tasks from a driving dimension, usually an organizational hierarchy; other model dimensions remain planning context and filters.
+  - Dynamics 365 uses an organizational hierarchy to distribute budget planning responsibility, while budget lines carry the selected financial dimensions.
+- Product decision: a RHEMA Budget Return is a responsibility/workflow envelope for one scenario and one primary organizational distribution value, with optional governed secondary dimension scope if later required. Budget worksheet lines retain the complete accounting and Finance-dimension combination.
+- `COMPANY` must not be presented as a second return selector when it merely repeats the current tenant/legal-entity context. Account-code segments and planning distribution dimensions are different concepts and must not be combined as duplicate responsibility axes.
+- Recommended compatibility path: use the scenario's Finance control dimension/value as the current return distribution contract; update the training guide; inventory existing non-null `SegmentValueId` data and downstream consumers before deprecating or migrating the legacy field.
 
 ## Changed files
 
@@ -42,7 +49,8 @@ Assess safe edit/delete management for genuinely unused Draft budget scenarios a
 
 - Inspect scenario update/delete routes, permissions, entity dependencies, and UI actions.
 - Decide whether `SegmentValueId` is an active business axis or deprecated legacy residue.
-- Align the training guide and UI/API contract to the chosen model.
+- Inventory existing `SegmentValueId` data and downstream consumers, then design a compatibility migration/deprecation plan; do not silently remove the field.
+- Align the training guide and UI/API contract to the dimension-driven responsibility model.
 - Add backend authorization/dependency tests and frontend visibility/selection tests before implementation.
 
 ## Authorization boundaries
