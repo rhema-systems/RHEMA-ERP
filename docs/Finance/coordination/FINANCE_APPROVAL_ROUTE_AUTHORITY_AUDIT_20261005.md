@@ -177,6 +177,7 @@ The persisted route -> permission -> role -> stage chain is valid. ACCESS_FORBID
 ## Completed local commit
 
 - 7540f6ade - fix(finance): align approval authority contracts
+- 4ce834927 - fix(finance): close receipt and cash approval gaps
 - The coordination-ledger update that records this result is a documentation-only successor commit.
 
 ## Verification evidence

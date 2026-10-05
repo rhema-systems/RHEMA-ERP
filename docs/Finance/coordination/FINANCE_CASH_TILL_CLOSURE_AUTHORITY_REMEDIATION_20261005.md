@@ -56,6 +56,10 @@ There is currently no dedicated till-closure workflow instance, shared Finance a
 - UAT data mutation: none.
 - Deployment/restart: not performed.
 
+## Completed commit
+
+- `4ce834927a78b742ea264194ab6274b5338636e4` - `fix(finance): close receipt and cash approval gaps`
+
 ## Authorization boundaries
 
 Push/update of PR #352 is authorized. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.

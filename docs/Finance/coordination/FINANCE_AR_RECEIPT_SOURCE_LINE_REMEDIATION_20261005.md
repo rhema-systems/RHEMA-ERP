@@ -46,6 +46,10 @@ Diagnose and correct AR receipt processing that fails with: At least one authori
 - UAT data mutation: none.
 - Deployment/restart: not performed.
 
+## Completed commit
+
+- `4ce834927a78b742ea264194ab6274b5338636e4` - `fix(finance): close receipt and cash approval gaps`
+
 ## Authorization boundaries
 
 Local diagnosis, implementation, testing, commit, and push to existing PR #352 are within the active Finance remediation scope. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
