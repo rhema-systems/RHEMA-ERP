@@ -3718,12 +3718,16 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return null;
 
             var lines = await BuildCustomerPaymentDimensionLineContextsAsync(payment, producer, cancellationToken);
+            if (lines.Count == 0)
+            {
+                if (input?.Lines.Count > 0)
+                    throw new InvalidOperationException(
+                        "Allocated customer-payment dimensions are inherited from the exact invoice lines and cannot be supplied by a client.");
+                return null;
+            }
             FinanceSourceDocumentDimensionInputDto? trustedInput = input;
             if (input is not null)
             {
-                if (lines.Count == 0 && input.Lines.Count > 0)
-                    throw new InvalidOperationException(
-                        "Allocated customer-payment dimensions are inherited from the exact invoice lines and cannot be supplied by a client.");
                 if (lines.Count == 1 && input.Lines.Count > 1)
                     throw new InvalidOperationException(
                         "An unallocated customer advance has exactly one authoritative economic line.");
@@ -3768,18 +3772,22 @@ namespace ErpSystem.Api.Services.Finance.AR
                 return;
             if (_sourceDimensions is not null)
             {
-                if (!await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, producer, cancellationToken))
-                    await SynchronizeCustomerPaymentSourceDimensionsAsync(
-                        payment, input: null, producer, cancellationToken);
-                var result = await _sourceDimensions.ValidateAndFreezeAsync(
-                    producer, payment.Id, payment.PaymentDate,
-                    await BuildCustomerPaymentDimensionLineContextsAsync(payment, producer, cancellationToken),
-                    requireCurrentBudgetEvidence: false,
-                    cancellationToken);
-                if (result.ReadinessWarnings.Any(message =>
-                        message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidOperationException(
-                        "Required Finance dimensions are missing from one or more customer-payment economic lines.");
+                var lines = await BuildCustomerPaymentDimensionLineContextsAsync(
+                    payment, producer, cancellationToken);
+                if (lines.Count > 0)
+                {
+                    if (!await HasCustomerPaymentDimensionProvenanceAsync(payment.Id, producer, cancellationToken))
+                        await SynchronizeCustomerPaymentSourceDimensionsAsync(
+                            payment, input: null, producer, cancellationToken);
+                    var result = await _sourceDimensions.ValidateAndFreezeAsync(
+                        producer, payment.Id, payment.PaymentDate, lines,
+                        requireCurrentBudgetEvidence: false,
+                        cancellationToken);
+                    if (result.ReadinessWarnings.Any(message =>
+                            message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+                        throw new InvalidOperationException(
+                            "Required Finance dimensions are missing from one or more customer-payment economic lines.");
+                }
             }
             if (_paymentDimensions is not null)
             {

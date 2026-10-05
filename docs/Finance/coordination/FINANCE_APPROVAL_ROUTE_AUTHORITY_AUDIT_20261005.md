@@ -96,6 +96,7 @@ Starter means a repository submission path calls the workflow service for the en
 | Allocation | AllocationRunBatch | G | F3 | Yes | Yes / G outcome | Aligned |
 | Cash/bank | CashTransaction | G | F3 | Yes | Yes / G outcome | Aligned |
 | Cash/bank | BankReconciliation | G | F3 | Yes | Yes / G outcome | Aligned |
+| Cash/bank | CashierTillSession closure | Direct till routes | Finance.CashTills.Closures.Review | No | No; till page only | Confirmed gap: UI self-review hidden and backend self-approval made unconditional; shared workflow/workbench/notification remains to be integrated |
 | Migration | OpeningBalanceBatch | G | F3 | Yes | Yes / G outcome and explicit detail link | Aligned |
 | FX | ExchangeRate | G | F3 | Yes | Yes / G outcome and explicit detail link | Aligned; prior atomic/orphan remediation retained |
 | Fixed assets | FixedAsset | G | F3 | Yes | Yes / G outcome | Aligned |
@@ -106,7 +107,7 @@ Starter means a repository submission path calls the workflow service for the en
 | Fixed assets | AssetVerificationSession | G | F3 | Yes | Yes / G outcome | Aligned |
 | Fixed assets | CapitalProject | G | F3 | Yes | Yes / G outcome | Aligned |
 | Leases | LeaseContract | G | F3 | Yes | Yes / G outcome | Aligned |
-| Banking | BankDepositBatch | BANK | CH1 | Yes | Dedicated / dedicated outcome | Deliberate domain-owned decision |
+| Banking | BankDepositBatch | BANK | CH1 | Yes | Shared workbench / banking-domain outcome | Fixed missing workbench visibility and preserved dedicated banking decision/posting authority |
 | Banking | ReturnedChequeCase | BANK | CH1 | Yes | Dedicated / dedicated outcome | Deliberate domain-owned decision |
 | Master data | BusinessPartner | BP | BP | Yes | Visible / detail action / adapter outcome | Deliberate cross-module ownership |
 
@@ -134,6 +135,8 @@ Starter means a repository submission path calls the workflow service for the en
 | AUTH-09 | DeliveryNote seed/queue entries had no starter | Code/catalogue defect | Fixed: stale seed and queue entry removed; legacy active definitions retire during critical convergence |
 | AUTH-10 | AssetDepreciationSchedule alias had no seed or starter | Code/catalogue defect | Fixed: alias removed; FixedAssetDepreciationRun remains |
 | AUTH-11 | Journal Batch review returned ACCESS_FORBIDDEN for Accounts Officer UAT user | Unresolved runtime evidence | Database authority is consistent. Do not change code without rejected request claims/token or authorization trace. |
+| AUTH-12 | Cashier-till count submission uses direct review routes only; it creates no workflow instance, workbench row, or workflow notification, while the till UI exposed review buttons to a permission-bearing cashier | Code/coverage defect | Immediate SOD fix implemented: self-review decisions are hidden and backend approval is unconditionally independent. Shared workflow/workbench integration remains open as a coherent follow-up. |
+| AUTH-13 | BankDepositBatch created a valid Chief Accountant workflow and role-target notification, but was absent from the shared Finance workbench; its detail page showed decision buttons to the submitting user | Code/catalogue and UI authorization defect | Fixed: workbench allowlist/facts/detail route, domain permission and maker-checker gates, authoritative banking-service outcomes, and submitter button suppression |
 
 ## Journal Batch UAT evidence
 

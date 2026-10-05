@@ -102,6 +102,7 @@ public sealed class FinanceApprovalAuthorityContractTests
             "AllocationRunBatch",
             "CashTransaction",
             "BankReconciliation",
+            "BankDepositBatch",
             "ExchangeRate",
             "OpeningBalanceBatch",
             "FixedAsset",
@@ -218,6 +219,27 @@ public sealed class FinanceApprovalAuthorityContractTests
         rejected.Should().Contain(@"Normalize(""PaymentBatch"")");
         rejected.Should().Contain("PaymentBatchStatus.Cancelled");
         rejected.Should().Contain("AppendReason(item.Notes, reason)");
+    }
+
+    [Fact]
+    public void BankDepositWorkbench_UsesAuthoritativeBankingServiceAndMakerCheckerGuard()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Finance",
+            "FinanceApprovalsController.cs"));
+        var process = ExtractMethod(source, "private async Task<ActionResult<WorkflowExecutionResult>> ProcessApprovalAsync");
+
+        FinanceApprovalsController.IsFinanceEntity("BankDepositBatch").Should().BeTrue();
+        FinanceApprovalsController.ResolveDetailHref("BankDepositBatch", Guid.Empty, null)
+            .Should().Be($"/finance/cash/deposits/{Guid.Empty:D}");
+        process.Should().Contain("RequiresSubmitterApproverSeparation(entityType)");
+        process.Should().Contain("_bankingSettlementService.ApproveDepositAsync");
+        process.Should().Contain("_bankingSettlementService.RejectDepositAsync");
+        process.Should().Contain("FinancePermissions.ApproveBankDeposits");
     }
 
     private static string ExtractMethod(string source, string methodName)

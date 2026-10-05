@@ -510,6 +510,7 @@ export interface BankDeposit {
     notes?: string;
     workflowInstanceId?: string;
     submittedAt?: string;
+    submittedById?: string;
     approvedAt?: string;
     postedAt?: string;
     journalEntryId?: string;
