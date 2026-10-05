@@ -543,7 +543,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
         <TabsContent value="participants" className="pt-4">
-          <ParticipantsPanel eventId={id} open={open} awaitingApproval={awaitingApproval} mailServerSetUp={event.mailServerSetUp} />
+          <ParticipantsPanel
+            eventId={id}
+            open={open}
+            awaitingApproval={awaitingApproval}
+            mailServerSetUp={event.mailServerSetUp}
+            inSeries={!!event.recurrenceSeriesId}
+          />
         </TabsContent>
         <TabsContent value="attendance" className="pt-4">
           {/* Lane 2d: a register once the event has started, never for a cancelled one — as the server rules. */}

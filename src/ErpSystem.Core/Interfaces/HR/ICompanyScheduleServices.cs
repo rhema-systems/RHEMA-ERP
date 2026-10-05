@@ -109,9 +109,14 @@ public interface ICompanyEventService
     /// <summary>A guest's role, whether they are required, their needs, and an outside guest's details (C-22).</summary>
     Task<EventParticipantDto> UpdateParticipantAsync(UpdateEventParticipantDto updateDto, CancellationToken cancellationToken = default);
 
-    /// <summary>Records a guest's answer — accepted, declined or tentative — on the event in the route (F-11).</summary>
-    Task<bool> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);
-    Task<bool> RemoveParticipantAsync(Guid participantId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records a guest's answer — accepted, declined or tentative — on the event in the route (F-11); on a series, for
+    /// this and following dates or every date when asked (lane 2f-2a).
+    /// </summary>
+    Task<EventSeriesGuestResultDto> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);
+
+    /// <summary>Uninvites a guest — from this date, or on a series from this and following dates or every date (lane 2f-2a).</summary>
+    Task<EventSeriesGuestResultDto> RemoveParticipantAsync(Guid participantId, SeriesScope scope = SeriesScope.ThisOccurrence, CancellationToken cancellationToken = default);
 
     // Attendance operations
     Task<EventAttendanceDto> MarkAttendanceAsync(MarkEventAttendanceDto markDto, Guid markedById, CancellationToken cancellationToken = default);

@@ -145,9 +145,19 @@ public class CompanyEventService : ICompanyEventService
     /// Whether the mail server took the email within the wait (lane 2e-2, R4-6.3) — the email's own result, which the
     /// module used to ignore. False with no address, no mail server, a refusal or no answer in ten seconds.
     /// </returns>
-    private async Task<bool> SendEventEmailAsync(
+    private Task<bool> SendEventEmailAsync(
         Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description,
-        EmailAttachmentDto? calendarFile = null)
+        EmailAttachmentDto? calendarFile = null) =>
+        SendEventEmailWithFilesAsync(tenantId, eventKey, toEmail, tokens, description,
+            calendarFile is null ? null : new[] { calendarFile });
+
+    /// <summary>
+    /// <see cref="SendEventEmailAsync"/> with any number of calendar files — a series email carries one per date
+    /// (lane 2f-2a, D-12: the user's ruling).
+    /// </summary>
+    private async Task<bool> SendEventEmailWithFilesAsync(
+        Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description,
+        IReadOnlyList<EmailAttachmentDto>? calendarFiles)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) return false;
 
@@ -160,7 +170,7 @@ public class CompanyEventService : ICompanyEventService
             // (cross-module #40) and are counted as not taken.
             var send = _templatedEmail.SendForTenantAsync(
                 tenantId, CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens,
-                calendarFile is null ? null : new[] { calendarFile });
+                calendarFiles is { Count: > 0 } ? calendarFiles : null);
 
             if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) == send)
                 return await send;
@@ -1126,8 +1136,8 @@ public class CompanyEventService : ICompanyEventService
     /// approval are approved together: the first of them goes to the engine, and its decision covers the rest
     /// (the user's ruling).</para>
     ///
-    /// <para>Guests are each occurrence's own, so the new dates start with none; 2f-2's series scope invites a guest
-    /// to them.</para>
+    /// <para>Lane 2f-2a (the user's ruling): the latest occurrence's guests are put on the new dates and invited once
+    /// each, listing them — or with the approval, when the new dates need one. Their answers start afresh.</para>
     /// </remarks>
     public async Task<EventSeriesResultDto> ExtendSeriesAsync(Guid eventId, ExtendEventSeriesDto dto, CancellationToken cancellationToken = default)
     {
@@ -1163,12 +1173,29 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Series of {EventNumber} extended by {Count} occurrence(s), to {Total}", ev.EventNumber, made.Count, total);
 
-        // The user's ruling: approved once for what was added — the first new occurrence asks, its decision covers the rest.
+        // Lane 2f-2a (the user's ruling): the latest occurrence's guests are invited to the new dates — whatever they
+        // answered for that one date — bar a leaver (F-35).
+        var guests = await TenantGuests(tenantId)
+            .Where(p => p.EventId == template.Id)
+            .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
+            .ToListAsync(cancellationToken);
+        foreach (var occurrence in made)
+            foreach (var guest in guests)
+                await _participantRepository.AddAsync(CopyGuest(guest, occurrence.Id));
+        if (guests.Count > 0)
+            await SaveRefusingDuplicateAsync(GuestIndex, "A guest was added to one of the new dates at the same moment. Look again.", cancellationToken);
+
+        // The user's ruling: approved once for what was added — the first new occurrence asks, its decision covers the rest,
+        // and its approval sends the guests' invitations (F-33). Otherwise one invitation per guest now.
+        CompanyEventNoticeResultDto? told = null;
         if (made[0].RequiresApproval) await StartApprovalAsync(made[0], cancellationToken);
+        else if (guests.Count > 0) told = await InviteWaitingAcrossAsync(made, cancellationToken);
 
         var notes = await DayOffNotesAsync(tenantId, made.Select(m => (m.Id, m.StartDate, m.EndDate)).ToList(), cancellationToken);
         return new EventSeriesResultDto
         {
+            Guests = guests.Count,
+            Told = told,
             Occurrences = made.Select(m => new EventSeriesOccurrenceDto
             {
                 Id = m.Id, EventNumber = m.EventNumber, OccurrenceNumber = m.OccurrenceNumber ?? 0,
@@ -1193,6 +1220,7 @@ public class CompanyEventService : ICompanyEventService
         if (e.RecurrenceSeriesId is not { } seriesId) return [];
         var waiting = await _eventRepository.GetQueryable()
             .Include(x => x.Organizer)
+            .Include(x => x.SiteLocation) // their invitations' calendar files name the site (lane 2f-2a)
             .Where(x => x.TenantId == e.TenantId && x.RecurrenceSeriesId == seriesId && x.Id != e.Id
                         && x.RequiresApproval && x.ApprovalDate == null && !x.IsCancelled
                         && x.Status != EventStatus.Cancelled && x.Status != EventStatus.Completed)
@@ -1225,6 +1253,312 @@ public class CompanyEventService : ICompanyEventService
                 throw new InvalidOperationException(
                     $"{e.EventName} is approved with its series: {verb} {other.EventNumber} (occurrence {other.OccurrenceNumber}), "
                     + "and the decision covers this occurrence too.");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2f-2a — guests and answers across a series (D-12)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The dates of <paramref name="e"/>'s series a series action reaches, in date order — and how many more the scope
+    /// covered and left alone because they have started, been completed or been cancelled (D-12: a series action never
+    /// changes a past or completed occurrence).
+    /// </summary>
+    /// <remarks>
+    /// "This and following" is by date, as a calendar reads it, from this occurrence on. Each date comes with its
+    /// organiser and site, which its calendar file names. <paramref name="e"/> is the tracked instance the context
+    /// returns again.
+    /// </remarks>
+    private async Task<(List<CompanyEvent> Open, int Closed)> SeriesTargetsAsync(
+        CompanyEvent e, SeriesScope scope, CancellationToken cancellationToken)
+    {
+        if (scope == SeriesScope.ThisOccurrence || e.RecurrenceSeriesId is not { } seriesId)
+            return (new List<CompanyEvent> { e }, 0);
+
+        var members = await _eventRepository.GetQueryable()
+            .Include(x => x.Organizer)
+            .Include(x => x.SiteLocation)
+            .Where(x => x.TenantId == e.TenantId && x.RecurrenceSeriesId == seriesId)
+            .ToListAsync(cancellationToken);
+        var covered = members
+            .Where(x => scope == SeriesScope.WholeSeries
+                        || x.StartDate.Date > e.StartDate.Date
+                        || (x.StartDate.Date == e.StartDate.Date && (x.OccurrenceNumber ?? 0) >= (e.OccurrenceNumber ?? 0)))
+            .OrderBy(x => x.StartDate).ThenBy(x => x.OccurrenceNumber)
+            .ToList();
+        var now = DateTime.UtcNow;
+        var open = covered.Where(x => !CompanyEventRules.IsClosed(x) && EventWindow.Of(x).Start > now).ToList();
+        return (open, covered.Count - open.Count);
+    }
+
+    /// <summary>"from this date on" / "in the series" — how a refusal names the scope.</summary>
+    private static string ScopeWords(SeriesScope scope) =>
+        scope == SeriesScope.WholeSeries ? "in the series" : "from this date on";
+
+    /// <summary>The same guest's rows: an employee by who they are, an outside guest by address, in any case.</summary>
+    private static System.Linq.Expressions.Expression<Func<EventParticipant, bool>> SamePerson(Guid? employeeId, string? address)
+    {
+        if (employeeId is { } id) return p => p.EmployeeId == id;
+        var lower = (address ?? string.Empty).ToLower();
+        return p => p.EmployeeId == null && p.ExternalParticipantEmail != null && p.ExternalParticipantEmail.ToLower() == lower;
+    }
+
+    /// <summary>One person, however many dates they are on — what a series action sends one notice to.</summary>
+    private static string PersonKey(EventParticipant p) =>
+        p.EmployeeId is { } id ? $"e:{id}" : $"x:{(p.ExternalParticipantEmail ?? p.Id.ToString()).ToLowerInvariant()}";
+
+    /// <summary>A guest on another date of the series: who they are and how they take part, not yet invited.</summary>
+    private static EventParticipant CopyGuest(EventParticipant from, Guid eventId) => new()
+    {
+        TenantId = from.TenantId,
+        EventId = eventId,
+        EmployeeId = from.EmployeeId,
+        ExternalParticipantName = from.ExternalParticipantName,
+        ExternalParticipantEmail = from.ExternalParticipantEmail,
+        ExternalParticipantOrganization = from.ExternalParticipantOrganization,
+        Role = from.Role,
+        IsRequired = from.IsRequired,
+        SpecialRequirements = from.SpecialRequirements,
+        InvitationStatus = InvitationStatus.NotSent,
+    };
+
+    /// <summary>"Monday 3 August 2028, 09:00 – 10:00" — a date as a series email lists it.</summary>
+    private static string SeriesDateLine(CompanyEvent e)
+    {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        var days = e.StartDate.ToString("dddd d MMMM yyyy", culture)
+                   + (e.EndDate.Date != e.StartDate.Date ? " – " + e.EndDate.ToString("dddd d MMMM yyyy", culture) : string.Empty);
+        return !e.IsAllDayEvent && e.StartTime is { } st && e.EndTime is { } et
+            ? $@"{days}, {st:hh\:mm} – {et:hh\:mm}"
+            : $"{days}, all day";
+    }
+
+    /// <summary>
+    /// The dates a series email lists, each with its event number — built here, every value encoded, and emitted raw
+    /// (<c>{{{SeriesDates}}}</c>, declared HTML on the catalogue).
+    /// </summary>
+    private static string SeriesDatesHtml(IEnumerable<CompanyEvent> events) =>
+        "<ul style='margin:0.5rem 0 1rem;padding-left:1.25rem'>"
+        + string.Concat(events.Select(e =>
+            $"<li>{System.Net.WebUtility.HtmlEncode(SeriesDateLine(e))} ({System.Net.WebUtility.HtmlEncode(e.EventNumber)})</li>"))
+        + "</ul>";
+
+    /// <summary>
+    /// Sends one guest ONE invitation to several dates (the user's ruling: one notice per guest per series action) —
+    /// by email, listing the dates with a calendar entry for each (none for a postponed one), and in the app — and marks
+    /// each of their rows sent once it reached them (lane 2e-2).
+    /// </summary>
+    /// <remarks>As <see cref="SendInvitationAsync"/>: a leaver is never invited (F-35); inviting oneself counts as
+    /// reached and tells nobody. Counted once per person, not per date.</remarks>
+    /// <param name="rows">The guest's rows, one per date, in date order, each with its event.</param>
+    private async Task<bool> InviteToSeriesAsync(
+        IReadOnlyList<(CompanyEvent Ev, EventParticipant Guest)> rows, CompanyEventNoticeResultDto tally,
+        CancellationToken cancellationToken)
+    {
+        var (first, guest) = rows[0];
+        if (guest.Employee is { IsActive: false }) return false;
+        tally.Issued++;
+
+        var reached = guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync(cancellationToken);
+        if (!reached)
+        {
+            var name = guest.Employee is not null
+                ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
+                : guest.ExternalParticipantName ?? "Colleague";
+            var tokens = EventTokens(first, name);
+            tokens["IsRequired"] = guest.IsRequired ? "true" : null;
+            tokens["SpecialRequirements"] = guest.SpecialRequirements;
+            tokens["SeriesDates"] = SeriesDatesHtml(rows.Select(r => r.Ev));
+            tokens["DateCount"] = rows.Count.ToString();
+            tokens["SeriesPattern"] = first.RecurrencePattern is { } pattern ? CompanyEventSeries.Describe(pattern) : null;
+
+            var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
+            var files = new List<EmailAttachmentDto>();
+            if (!string.IsNullOrWhiteSpace(address))
+                foreach (var (ev, row) in rows.Where(r => r.Ev.Status != EventStatus.Postponed))
+                    files.Add(CalendarFileFor(ev, HrCalendarMethod.Request, await CalendarOrganizerAsync(ev, cancellationToken),
+                        address, name, row.IsRequired));
+            var emailed = await SendEventEmailWithFilesAsync(
+                first.TenantId, CompanyScheduleEmailCatalog.Events.EventSeriesInvitation, address, tokens, "series invitation", files);
+            if (emailed) tally.Emailed++;
+            else if (!string.IsNullOrWhiteSpace(address)) tally.EmailsNotTaken++;
+
+            var inApp = guest.EmployeeId is { } employeeId
+                && (await _notices.TellAsync(first, CompanyScheduleNotices.SeriesInvited, CompanyScheduleNotices.ToGuest, [employeeId],
+                    new Dictionary<string, object> { ["Count"] = rows.Count.ToString() }, cancellationToken: cancellationToken))
+                    .Contains(employeeId);
+            if (inApp) tally.ToldInApp++;
+            reached = emailed || inApp;
+        }
+
+        if (!reached)
+        {
+            _logger.LogInformation("The series invitation to {Count} date(s) of {EventName} reached nobody for {Guest}: left not delivered.",
+                rows.Count, first.EventName, GuestName(guest));
+            return false;
+        }
+        tally.Reached++;
+        var sentAt = DateTime.UtcNow;
+        foreach (var (_, row) in rows)
+        {
+            // An answer already given stands, as for a single date.
+            if (row.InvitationStatus == InvitationStatus.NotSent) row.InvitationStatus = InvitationStatus.Sent;
+            row.InvitationSentDate = sentAt;
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    /// <summary>
+    /// Tells one guest ONCE that several dates changed for them together (the user's ruling) — by the series email,
+    /// listing the dates with each one's updated calendar entry or its cancellation, and in the app. Never of their own
+    /// act, and not a leaver.
+    /// </summary>
+    /// <param name="rows">The guest's rows, one per date, in date order, each with its event (its sequence already raised).</param>
+    /// <param name="title">The change in a few words ("No longer invited").</param>
+    /// <param name="summary">The change in a sentence.</param>
+    private async Task<CompanyEventNoticeResultDto> TellSeriesChangeAsync(
+        IReadOnlyList<(CompanyEvent Ev, EventParticipant Guest)> rows, HrCalendarMethod method, string title, string summary,
+        string? reason, bool nothingRequired, CancellationToken cancellationToken)
+    {
+        var (first, guest) = rows[0];
+        var tally = new CompanyEventNoticeResultDto { MailServerSetUp = await MailServerSetUpAsync(first.TenantId, cancellationToken) };
+        if (guest.Employee is { IsActive: false }) return tally;
+        if (guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync(cancellationToken)) return tally;
+        tally.Issued = 1;
+
+        var name = guest.Employee is not null
+            ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
+            : guest.ExternalParticipantName ?? "Colleague";
+        var tokens = EventTokens(first, name);
+        tokens["SeriesDates"] = SeriesDatesHtml(rows.Select(r => r.Ev));
+        tokens["DateCount"] = rows.Count.ToString();
+        tokens["ChangeTitle"] = title;
+        tokens["ChangeSummary"] = summary;
+        tokens["Reason"] = reason;
+        tokens["NothingRequired"] = nothingRequired ? "true" : null;
+
+        var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
+        var files = new List<EmailAttachmentDto>();
+        if (!string.IsNullOrWhiteSpace(address))
+            foreach (var (ev, row) in rows)
+                files.Add(CalendarFileFor(ev, method, await CalendarOrganizerAsync(ev, cancellationToken), address, name, row.IsRequired));
+        var emailed = await SendEventEmailWithFilesAsync(
+            first.TenantId, CompanyScheduleEmailCatalog.Events.EventSeriesChanged, address, tokens, "series changed", files);
+        if (emailed) tally.Emailed = 1;
+        else if (!string.IsNullOrWhiteSpace(address)) tally.EmailsNotTaken = 1;
+
+        var inApp = guest.EmployeeId is { } employeeId
+            && (await _notices.TellAsync(first, CompanyScheduleNotices.SeriesChanged, CompanyScheduleNotices.ToGuest, [employeeId],
+                new Dictionary<string, object> { ["What"] = title, ["Count"] = rows.Count.ToString() }, cancellationToken: cancellationToken))
+                .Contains(employeeId);
+        if (inApp) tally.ToldInApp = 1;
+        tally.Reached = emailed || inApp ? 1 : 0;
+        return tally;
+    }
+
+    /// <summary>
+    /// Sends the invitations not yet delivered on several dates of a series at once — ONE per guest (the user's ruling):
+    /// the single-date invitation to a guest waiting on one date, the series invitation to one waiting on several. Used
+    /// when an approval covers a series, and for the dates an extension adds.
+    /// </summary>
+    private async Task<CompanyEventNoticeResultDto> InviteWaitingAcrossAsync(
+        IReadOnlyList<CompanyEvent> events, CancellationToken cancellationToken)
+    {
+        var tenantId = events[0].TenantId;
+        var byId = events.ToDictionary(e => e.Id);
+        var ids = byId.Keys.ToList();
+        var waiting = await TenantGuests(tenantId)
+            .Where(p => ids.Contains(p.EventId) && p.InvitationStatus == InvitationStatus.NotSent)
+            .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
+            .ToListAsync(cancellationToken);
+
+        var result = new CompanyEventNoticeResultDto { MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken) };
+        foreach (var person in waiting.GroupBy(PersonKey))
+        {
+            var rows = person.Select(p => (Ev: byId[p.EventId], Guest: p))
+                .OrderBy(r => r.Ev.StartDate).ThenBy(r => r.Ev.OccurrenceNumber).ToList();
+            if (rows.Count == 1) await InviteAsync(rows[0].Ev, rows[0].Guest, result, cancellationToken);
+            else await InviteToSeriesAsync(rows, result, cancellationToken);
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Adds a guest to several dates of a series at once (lane 2f-2a, D-12): every date the scope reaches that is still to
+    /// come and that they are not already on, then ONE invitation for the dates that are not awaiting approval — those
+    /// wait for it (F-33).
+    /// </summary>
+    private async Task<EventParticipantDto> AddSeriesGuestAsync(
+        CompanyEvent ev, CreateEventParticipantDto createDto, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var (targets, closed) = await SeriesTargetsAsync(ev, createDto.Scope, cancellationToken);
+        if (targets.Count == 0)
+            throw new InvalidOperationException(
+                $"No date of {ev.EventName} {ScopeWords(createDto.Scope)} is still to come, so nobody can be invited to it.");
+
+        var guest = createDto.ToEntity();
+        if (guest.EmployeeId == Guid.Empty) guest.EmployeeId = null;
+        guest.TenantId = tenantId;
+        // The guest's own checks, once: an outside guest's name and address, a leaver refused (F-35). A date they are
+        // already on is passed over below, not refused.
+        await CheckGuestAsync(targets[0], guest, isNew: true, cancellationToken, refuseTwice: false);
+        var who = guest.EmployeeId is { } employeeId
+            ? (await FindEmployeeAsync(employeeId, tenantId, cancellationToken))?.Name ?? "That employee"
+            : guest.ExternalParticipantName ?? guest.ExternalParticipantEmail ?? "That guest";
+
+        var targetIds = targets.Select(t => t.Id).ToList();
+        var already = (await TenantGuests(tenantId)
+                .Where(p => targetIds.Contains(p.EventId))
+                .Where(SamePerson(guest.EmployeeId, guest.ExternalParticipantEmail))
+                .Select(p => p.EventId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+        var dates = targets.Where(t => !already.Contains(t.Id)).ToList();
+        if (dates.Count == 0)
+            throw new InvalidOperationException(
+                $"{who} is already invited to every date of {ev.EventName} {ScopeWords(createDto.Scope)} still to come.");
+
+        var added = new List<EventParticipant>();
+        foreach (var date in dates)
+        {
+            var row = CopyGuest(guest, date.Id);
+            await _participantRepository.AddAsync(row);
+            added.Add(row);
+        }
+        await SaveRefusingDuplicateAsync(GuestIndex, $"{who} was invited to one of these dates of {ev.EventName} at the same moment. Look again.",
+            cancellationToken);
+
+        var addedIds = added.Select(a => a.Id).ToList();
+        var saved = await TenantGuests(tenantId).Where(p => addedIds.Contains(p.Id)).ToListAsync(cancellationToken);
+        var byId = dates.ToDictionary(d => d.Id);
+        var rows = saved.Select(p => (Ev: byId[p.EventId], Guest: p))
+            .OrderBy(r => r.Ev.StartDate).ThenBy(r => r.Ev.OccurrenceNumber).ToList();
+        _logger.LogInformation("Guest {Guest} invited to {Count} date(s) of {EventName} ({Scope})",
+            who, rows.Count, ev.EventName, createDto.Scope);
+
+        // F-33: a date awaiting approval invites nobody yet; its approval sends the invitation.
+        var now = rows.Where(r => !CompanyEventRules.IsAwaitingApproval(r.Ev)).ToList();
+        var result = new EventSeriesGuestResultDto
+        {
+            EventNumbers = rows.Select(r => r.Ev.EventNumber).ToList(),
+            Skipped = already.Count,
+            Closed = closed,
+            Waiting = rows.Count - now.Count,
+        };
+        if (now.Count > 0)
+        {
+            var told = new CompanyEventNoticeResultDto { MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken) };
+            if (now.Count == 1) await InviteAsync(now[0].Ev, now[0].Guest, told, cancellationToken);
+            else await InviteToSeriesAsync(now, told, cancellationToken);
+            result.Told = told;
+        }
+
+        // The answer is this date's row when it was added, else the first date's.
+        var shown = rows.FirstOrDefault(r => r.Ev.Id == ev.Id).Guest ?? rows[0].Guest;
+        var dto = (await TenantGuests(tenantId).FirstAsync(p => p.Id == shown.Id, cancellationToken)).ToDto();
+        dto.Series = result;
+        return dto;
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1636,8 +1970,11 @@ public class CompanyEventService : ICompanyEventService
         // Lane 2e-1: approved at last — the invitations that waited go (F-33), and the organiser is told.
         if (outcome == WorkflowOutcome.Approved && entity.ApprovalDate != null)
         {
-            var invited = await InviteWaitingGuestsAsync(entity, cancellationToken);
-            foreach (var occurrence in covered) invited.Add(await InviteWaitingGuestsAsync(occurrence, cancellationToken));
+            // Lane 2f-2a: across a series, ONE invitation per guest for every date the approval covers (the user's
+            // ruling) — it was one per date.
+            var invited = covered.Count > 0
+                ? await InviteWaitingAcrossAsync([entity, .. covered], cancellationToken)
+                : await InviteWaitingGuestsAsync(entity, cancellationToken);
             await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventApproved, CompanyScheduleNotices.Approved,
                 tokens =>
                 {
@@ -2143,7 +2480,10 @@ public class CompanyEventService : ICompanyEventService
     /// Checks a guest (lane 2d): an outside guest needs a name and an address; a new employee guest must be
     /// this tenant's and still employed (F-35); nobody is invited twice — by employee, or by address.
     /// </summary>
-    private async Task CheckGuestAsync(CompanyEvent e, EventParticipant guest, bool isNew, CancellationToken cancellationToken)
+    /// <param name="refuseTwice">False for a series add (lane 2f-2a): a date the guest is already on is passed over
+    /// there, not refused.</param>
+    private async Task CheckGuestAsync(
+        CompanyEvent e, EventParticipant guest, bool isNew, CancellationToken cancellationToken, bool refuseTwice = true)
     {
         var name = guest.ExternalParticipantName;
         var email = guest.ExternalParticipantEmail;
@@ -2164,11 +2504,12 @@ public class CompanyEventService : ICompanyEventService
             // An employee guest is fixed once invited: uninvite and invite the other person instead.
             if (!isNew) return;
             var person = await RequireActiveEmployeeAsync(employeeId, e.TenantId, "guest", cancellationToken);
-            if (await others.AnyAsync(p => p.EmployeeId == employeeId, cancellationToken))
+            if (refuseTwice && await others.AnyAsync(p => p.EmployeeId == employeeId, cancellationToken))
                 throw new InvalidOperationException($"{person.Name} is already invited to {e.EventName}.");
             return;
         }
 
+        if (!refuseTwice) return;
         var address = email!.ToLower();
         var taken = await others
             .Where(p => p.EmployeeId == null && p.ExternalParticipantEmail != null && p.ExternalParticipantEmail.ToLower() == address)
@@ -2268,6 +2609,9 @@ public class CompanyEventService : ICompanyEventService
     {
         var tenantId = GetTenantId();
         var ev = await GetOwnedEventAsync(createDto.EventId, cancellationToken);
+        // Lane 2f-2a (D-12): this and following dates, or every date — each still to come.
+        if (createDto.Scope != SeriesScope.ThisOccurrence && ev.RecurrenceSeriesId is not null)
+            return await AddSeriesGuestAsync(ev, createDto, tenantId, cancellationToken);
         if (CompanyEventRules.IsClosed(ev))
             throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}, so nobody more can be invited.");
 
@@ -2343,10 +2687,13 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <remarks>
-    /// F-11: only accepted, declined or tentative is an answer, and only from a guest of the event in the
-    /// route. A cancelled or completed event's invitations are closed.
+    /// <para>F-11: only accepted, declined or tentative is an answer, and only from a guest of the event in the
+    /// route. A cancelled or completed event's invitations are closed.</para>
+    ///
+    /// <para>Lane 2f-2a (D-12): on a series, the same answer for this guest's invitations to this and following dates,
+    /// or every date — each still to come; a date they are not invited to is passed over.</para>
     /// </remarks>
-    public async Task<bool> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default)
+    public async Task<EventSeriesGuestResultDto> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default)
     {
         if (!CompanyEventRules.IsAnswer(responseDto.Response))
             throw new InvalidOperationException("Record the answer as accepted, declined or tentative.");
@@ -2356,31 +2703,72 @@ public class CompanyEventService : ICompanyEventService
                 .FirstOrDefaultAsync(p => p.Id == responseDto.ParticipantId && p.EventId == eventId, cancellationToken)
             ?? throw new ArgumentException("That guest is not on this event's list.");
         var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        var comments = CompanyEventRules.Clean(responseDto.ResponseComments);
+
+        if (responseDto.Scope != SeriesScope.ThisOccurrence && ev.RecurrenceSeriesId is not null)
+        {
+            var (targets, closed) = await SeriesTargetsAsync(ev, responseDto.Scope, cancellationToken);
+            var ids = targets.Select(t => t.Id).ToList();
+            var rows = await TenantGuests(tenantId)
+                .Where(p => ids.Contains(p.EventId))
+                .Where(SamePerson(guest.EmployeeId, guest.ExternalParticipantEmail))
+                .ToListAsync(cancellationToken);
+            if (rows.Count == 0)
+                throw new InvalidOperationException(
+                    $"{GuestName(guest)} is not invited to any date of {ev.EventName} {ScopeWords(responseDto.Scope)} still to come.");
+
+            var answeredAt = DateTime.UtcNow;
+            foreach (var row in rows)
+            {
+                row.InvitationStatus = responseDto.Response;
+                row.ResponseDate = answeredAt;
+                row.ResponseComments = comments;
+            }
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            var byId = targets.ToDictionary(t => t.Id);
+            _logger.LogInformation("{Guest} answered {Answer} for {Count} date(s) of {EventName}",
+                GuestName(guest), responseDto.Response, rows.Count, ev.EventName);
+            return new EventSeriesGuestResultDto
+            {
+                EventNumbers = rows.Select(r => byId[r.EventId]).OrderBy(e => e.StartDate).ThenBy(e => e.OccurrenceNumber)
+                    .Select(e => e.EventNumber).ToList(),
+                Skipped = targets.Count - rows.Count,
+                Closed = closed,
+            };
+        }
+
         if (CompanyEventRules.IsClosed(ev))
             throw new InvalidOperationException(
                 $"{ev.EventName} is {ClosedState(ev)}, so its invitations can no longer be answered.");
 
         guest.InvitationStatus = responseDto.Response;
         guest.ResponseDate = DateTime.UtcNow;
-        guest.ResponseComments = CompanyEventRules.Clean(responseDto.ResponseComments);
+        guest.ResponseComments = comments;
 
         await _participantRepository.UpdateAsync(guest);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("{Guest} answered {Answer} for {EventNumber}", GuestName(guest), responseDto.Response, ev.EventNumber);
-        return true;
+        return new EventSeriesGuestResultDto { EventNumbers = [ev.EventNumber] };
     }
 
     /// <remarks>
-    /// Organiser work, on Write (lane 2d) — it needed Admin. Not from a cancelled or completed event, whose
-    /// guest list is its record.
+    /// <para>Organiser work, on Write (lane 2d) — it needed Admin. Not from a cancelled or completed event, whose
+    /// guest list is its record.</para>
+    ///
+    /// <para>Lane 2f-2a (D-12): on a series, this guest off this and following dates, or every date — each still to come
+    /// — and told ONCE, listing the dates, with each date's calendar entry cancelled (the user's ruling).</para>
     /// </remarks>
-    public async Task<bool> RemoveParticipantAsync(Guid participantId, CancellationToken cancellationToken = default)
+    public async Task<EventSeriesGuestResultDto> RemoveParticipantAsync(
+        Guid participantId, SeriesScope scope = SeriesScope.ThisOccurrence, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var guest = await TenantGuests(tenantId).FirstOrDefaultAsync(p => p.Id == participantId, cancellationToken)
             ?? throw new ArgumentException("That guest was not found.");
         var ev = await GetOwnedEventAsync(guest.EventId, cancellationToken);
+        if (scope != SeriesScope.ThisOccurrence && ev.RecurrenceSeriesId is not null)
+            return await RemoveSeriesGuestAsync(ev, guest, scope, tenantId, cancellationToken);
         if (CompanyEventRules.IsClosed(ev))
             throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}; its guest list is part of its record.");
 
@@ -2394,7 +2782,52 @@ public class CompanyEventService : ICompanyEventService
 
         // Lane 2e-1: a guest who was invited hears they no longer are (one still waiting for approval never heard).
         if (guest.InvitationStatus != InvitationStatus.NotSent) await TellRemovedGuestAsync(ev, guest, cancellationToken);
-        return true;
+        return new EventSeriesGuestResultDto { EventNumbers = [ev.EventNumber] };
+    }
+
+    /// <summary>
+    /// Takes a guest off several dates of a series at once (lane 2f-2a, D-12): every date the scope reaches that is still
+    /// to come and that they are on. Told ONCE (the user's ruling): the single-date email when only one date had invited
+    /// them, the series email otherwise — a date still waiting for approval never invited them, so it is not mentioned.
+    /// </summary>
+    private async Task<EventSeriesGuestResultDto> RemoveSeriesGuestAsync(
+        CompanyEvent ev, EventParticipant guest, SeriesScope scope, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var (targets, closed) = await SeriesTargetsAsync(ev, scope, cancellationToken);
+        var byId = targets.ToDictionary(t => t.Id);
+        var ids = byId.Keys.ToList();
+        var rows = (await TenantGuests(tenantId)
+                .Where(p => ids.Contains(p.EventId))
+                .Where(SamePerson(guest.EmployeeId, guest.ExternalParticipantEmail))
+                .ToListAsync(cancellationToken))
+            .Select(p => (Ev: byId[p.EventId], Guest: p))
+            .OrderBy(r => r.Ev.StartDate).ThenBy(r => r.Ev.OccurrenceNumber)
+            .ToList();
+        if (rows.Count == 0)
+            throw new InvalidOperationException(
+                $"{GuestName(guest)} is not invited to any date of {ev.EventName} {ScopeWords(scope)} still to come.");
+
+        // Lane 2e-3 (D-14): each date that invited them sends its cancellation, which must outrank the entry they hold.
+        var invited = rows.Where(r => r.Guest.InvitationStatus != InvitationStatus.NotSent).ToList();
+        foreach (var (date, _) in invited) date.CalendarSequence++;
+        foreach (var (_, row) in rows) await _participantRepository.DeleteAsync(row);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Guest {Guest} removed from {Count} date(s) of {EventName} ({Scope})",
+            GuestName(guest), rows.Count, ev.EventName, scope);
+
+        var result = new EventSeriesGuestResultDto
+        {
+            EventNumbers = rows.Select(r => r.Ev.EventNumber).ToList(),
+            Skipped = targets.Count - rows.Count,
+            Closed = closed,
+        };
+        if (invited.Count == 1)
+            await TellRemovedGuestAsync(invited[0].Ev, invited[0].Guest, cancellationToken);
+        else if (invited.Count > 1)
+            result.Told = await TellSeriesChangeAsync(invited, HrCalendarMethod.Cancel, "No longer invited",
+                $"You have been taken off the guest list for these dates of {ev.EventName}.", reason: null, nothingRequired: true,
+                cancellationToken);
+        return result;
     }
 
     #endregion

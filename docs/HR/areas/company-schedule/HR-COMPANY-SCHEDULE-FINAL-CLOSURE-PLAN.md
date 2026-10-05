@@ -37,8 +37,9 @@ has not started (the user: "don't start the actual development yet").
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
    issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
-   2f-1, a recurring event as a series (no migration). **Next: 2f-2, the series scope choice and the two series
-   notices (lane 2 State, the 2f split).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   2f-1, a recurring event as a series, and 2f-2a, guests and answers across a series (neither has a migration).
+   **Next: 2f-2b, edit, move and cancel with a series scope, and its three defect fixes (lane 2 State, the 2f-2
+   split).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -313,7 +314,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e and 2f-1 built and proved (570/570 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2f-2 next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e, 2f-1 and 2f-2a built and proved (619/619 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2f-2b next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -934,10 +935,11 @@ change.
       Dates are counted from the first, so a monthly rule on a day a month lacks falls on that month's
       last day; an occurrence on a public holiday or a company-wide closure is generated and flagged on
       its page.
-- [ ] A scope choice — "this occurrence / this and following / the whole series" — on adding a guest,
+- [ ] *◐ 2f-2a: adding and removing a guest (and the desk's answer); editing, rescheduling and cancelling are 2f-2b's.* A scope choice — "this occurrence / this and following / the whole series" — on adding a guest,
       removing a guest, editing, rescheduling (the following move by the same offset) and cancelling.
       **A series action never changes an occurrence that is past or completed.**
-- [ ] A guest added with series scope gets **one** invitation listing the dates (a new catalogue entry,
+- [x] *✅ 2f-2a at the desk, with a calendar file per date and one notice per guest per action (the user's ruling);
+      the D-8 reply door is lane 7's.* A guest added with series scope gets **one** invitation listing the dates (a new catalogue entry,
       `EventSeriesInvitation`), and answers each date or all at once — through the desk door and the
       D-8 reply door alike. Reminders and the RSVP chase stay per occurrence. If D-14 is taken, each
       occurrence carries its own calendar entry.
@@ -1105,8 +1107,131 @@ built, proved twice and handed over on its own:
     - the scope choice on guests, edit, move and cancel, never touching a past or completed occurrence;
     - the two series notices;
     - answering per date or for the series at the desk. The D-8 reply door is lane 7's.
+
+    *Source check (2026-10-05, at HEAD 34cbccc83):*
+    - **Approving a series sends N invitations.** It invites each covered occurrence's waiting guests one occurrence
+      at a time, so a guest on five waiting dates gets five invitations.
+    - **Cancelling or deleting occurrence 1 strands a series awaiting approval.** That occurrence carries the
+      approval, and cancelling or deleting it withdraws the approval on the engine. The rest are left waiting with
+      nothing under way, and with a definition published nothing can decide them.
+    - **Extending ignores a series move.** It anchors on occurrence 1's original date, so after a "this and
+      following" move it would continue on the old timing.
+    - **Moving an approved series would start one approval per date.** Each move clears its occurrence's approval
+      and starts a fresh one.
+    - **The email renderer** lists dates through a raw `{{{token}}}` that the application builds, declared `IsHtml`
+      on the descriptor (the template editor checks it). A guest's rows across a series are matched by employee, or
+      by an outside guest's address.
+
+    *Rulings by the user (2026-10-05, all as recommended):*
+    - **An edit with series scope copies only what that edit changed;** a difference set on one date on purpose is
+      kept.
+    - **Extending invites the latest occurrence's guests to the new dates:** one series invitation each, or waiting
+      for approval.
+    - **Two slices:**
+      - **2f-2a** ✅ (2026-10-05; built and proved, below): guests and answers with scope; the series invitation,
+        including the approval's and the extension's;
+      - **2f-2b:** edit, move and cancel with scope; the approval passed on when its occurrence is cancelled or
+        deleted; extending after a series move; one approval for a moved series.
+
+    The four findings above are fixed as defects: the first in 2f-2a, the other three in 2f-2b. Removing a guest
+    with series scope needs the series-changed email, so **both templates come in 2f-2a** (52), and 2f-2b adds its
+    kinds of change to the same email.
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2f-2a — what was built (2026-10-05): guests and answers across a series (D-12).*
+- **No migration.** `SeriesScope` (`ThisOccurrence`, `ThisAndFollowing`, `WholeSeries`) is asked for, never stored.
+- **Which dates** (`SeriesTargetsAsync`):
+  - "This and following" is by date, as a calendar reads it, from the occurrence acted on;
+  - a date that has started, been completed or been cancelled is never touched, and is counted as left alone;
+  - "this date only", or any action on a single event, is the date alone, as before.
+- **Adding a guest** with a series scope (`POST events/{id}/participants`, `scope`):
+  - the guest's own checks run once: an outside guest's name and address, a leaver refused;
+  - a date they are already on is passed over, not refused;
+  - every date added and none left is refused with a sentence;
+  - the dates awaiting approval wait for it (F-33).
+- **Answering at the desk** with a scope (`participants/respond`, `scope`): the same answer on that person's
+  invitations to the chosen dates still to come. A date they are not on is passed over; none at all is refused.
+- **Taking a guest off** with a scope (`DELETE participants/{id}?scope=`): off every chosen date still to come that
+  they are on. Each date that had invited them raises its calendar sequence and sends a cancellation.
+- **Told once per guest per action (the user's ruling):**
+  - several dates: one email listing them, with a calendar file per date, and one notice in the app on the first;
+  - one date: the single-date email, as before;
+  - a date that never invited them is not mentioned;
+  - the person is matched across dates by employee, or an outside guest by address.
+- **The two emails** (52 templates): `EventSeriesInvitation` and `EventSeriesChanged`. The date list is a raw
+  `{{{SeriesDates}}}` built by the application, every value encoded, and declared `IsHtml` on the catalogue.
+  `EventSeriesChanged` carries a title, a sentence, a reason and whether nothing is required, so 2f-2b's moved,
+  changed and cancelled reuse it.
+- **Two in-app topics** (15): `SeriesInvited.Guest` and `SeriesChanged.Guest`, seeded on first use as before.
+- **The approval (finding 1):** a decision covering a series invites each waiting guest once for all its dates
+  (`InviteWaitingAcrossAsync`). It was one invitation per date.
+- **Extending (the user's ruling):**
+  - the latest live occurrence's guests are put on the new dates, whatever they answered for that date, bar a
+    leaver;
+  - they are invited once each, listing the new dates, or with the approval when the new dates need one;
+  - the answer says how many were carried, and who the invitations reached.
+- **The answers** say what was done: the dates by number, those passed over, those left alone, those waiting, and
+  who the one notice reached. Respond and remove now answer that instead of a message and a 204.
+- **Screens:**
+  - the guest dialog asks "Which dates" on a series, this date by default;
+  - each guest row has "Answer for several dates…" and "Take off several dates…" (`SeriesGuestDialog`, new);
+  - the toasts list the dates and the reach;
+  - the extend dialog and toast say the latest date's guests are invited.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2f-2a: **619/619 on two clean passes**, the blocking watcher beside both: no
+  memory-grant wait. The longest wait each pass (about 42 s) was the suite's own notice withdrawal at its clean-up,
+  now a scan for 100 events, holding the notification service's old-notice clean-up behind it — the harness's cost.
+  No live `CSF-` event, series row or mail-server row was left. 2f-2a has **49 assertions**:
+  - **With no mail server (UAT as it is), in the app:**
+    - B added to every date from the second: on all four in date order, Sent on each, one notice for the four;
+    - adding B again from the third: refused, already on every date;
+    - A from the third: the third and fourth, told once and reaching nobody (no login, no mail server);
+    - A on every date: the two missing, the rest passed over;
+    - with the first date cancelled and the second moved into the past (the run's own row, by SQL), an outside guest
+      added to every date reaches the last two, two left alone;
+    - B accepts every date at the desk: the two still to come, the others as they were;
+    - A declines this and following, and an answer with no scope is for its own date alone;
+    - B off this and following: off the last two, still on the first two, one "No longer invited … 2 dates" notice
+      and no single-date one;
+    - A off every date: told once, reaching nobody; an outside guest never reached is taken off and told nothing;
+    - answering from a started date for following dates they are on none of: refused;
+    - a scope on a single event is that event alone.
+  - **Through the sink:**
+    - added to three dates: one email, the series invitation, listing the three numbers, with three REQUEST files
+      (each date's own UID and time), and each date Sent;
+    - taken off two dates: one "No longer invited" email with two CANCEL files at SEQUENCE 1;
+    - a scope reaching one date sends the single-date invitation with one file;
+    - a series awaiting approval: the guest is on all three dates and waits; the approval (through UAT's real
+      definition) sends one series invitation with three files;
+    - extending by two from the first date carries the latest date's two guests (a decline included, not the
+      first date's own guest), invites each once with a file per new date, and starts their answers afresh.
+- **Suites changed:**
+  - `run-final-review.mjs`: the topic count is 15 (2e-1's check);
+  - `tools/mail-sink.mjs`: `calendarsOf` (every calendar file of a mail) and `htmlOf`;
+  - `tools/probe-new-templates.mjs`: the two series emails, 52;
+  - `hr-templates/run-lane-n.mjs`: `TOTAL` 52, and B7's ready-made-HTML list gains the two series emails'
+    `SeriesDates`. Its first run failed only B7, on exactly that.
+- **Regression:**
+  - the round-4 net **209/209**;
+  - `hr-recruitment/run-round4-d` **58/58**;
+  - the templates probe **30/30**: 52 listed, both new emails at their shipped wording with described tokens, each
+    previewing with no problem and no token left unfilled;
+  - `run-lane-n` **109/115**, the six section-J failures of #40, as at 2e-3.
+- **The API log:** no request answered 500. Its ERR lines are the known kinds:
+  - notifications with no mail server to send through;
+  - the sink's "bounce" addresses;
+  - `run-lane-n`'s own test send through its sink;
+  - master's identity sweep;
+  - payroll's profile foreign key on minted fixtures (#23);
+  - 2d's duplicate-key race proofs.
+
+  None comes from the series code. Two 500s came afterwards, from switching off `run-lane-n`'s two no-email HR
+  logins through `PUT /api/User` (#42); they were switched off by SQL instead.
+- **After the runs:** every harness login is off (0 active); no company-event notice to anyone real is live; the R4D
+  requisition's approval notices to md.tdc, managing.director, hr.head and hr.officer were withdrawn twice (#36),
+  0 live. The helpdesk's SLA notices at the API's start are that module's own.
 
 *2f-1 — what was built (2026-10-05): a recurring event is a series (D-2, D-12, C-14).*
 - **No migration.** `RecurrenceSeriesId` and `OccurrenceNumber` came with lane 0, and `OriginalStartDate` with 2a.
@@ -2476,3 +2601,29 @@ built API, so no web host and no seeders).
 
   Next: 2f-2, the series scope choice on guests, edit, move and cancel, and the two series notices
   (`EventSeriesInvitation`, `EventSeriesChanged`: 52 templates).
+- **2026-10-05, later** — **2f-1 committed** (`34cbccc83`). **2f-2 source-checked** at that HEAD (lane 2 State). Four
+  defects found:
+  - approving a series sent one invitation per date;
+  - cancelling or deleting occurrence 1 strands a series awaiting approval;
+  - extending ignores a series move;
+  - moving an approved series would start one approval per date.
+
+  Three rulings taken, all as recommended: an edit with series scope copies only what it changed; extending invites
+  the latest date's guests; 2f-2 is split into 2f-2a (guests and answers) and 2f-2b (edit, move, cancel). Both series
+  emails come in 2f-2a, which removing a guest from several dates needs.
+- **2026-10-05, later** — **Lane 2, slice 2f-2a built and proved**: guests and answers across a series (D-12) (lane 2
+  State). No migration.
+  - **Built:**
+    - a guest added to, answered for and taken off this and following dates or every date, never a date that has
+      started, been completed or been cancelled;
+    - one notice per guest per action: the series invitation and the series-changed email (52 templates), with a
+      calendar file per date, and two in-app topics (15);
+    - the series' approval invites each waiting guest once (the first defect);
+    - extending carries the latest date's guests and invites them once.
+  - **Results:** `run-final-review.mjs` scored 619/619 on two clean passes, with 49 checks in 2f-2a, half through the
+    sink; no memory-grant wait. The round-4 net was 209/209, recruitment 58/58, the templates probe 30/30 and
+    `run-lane-n` 109/115 (section J, #40) once its ready-made-HTML list named the two new emails. No request
+    answered 500 in the runs.
+  - **Harness cost noted:** the suite's notice withdrawal now scans for 100 events and takes about 42 s.
+
+  Next: 2f-2b, edit, move and cancel with a series scope, and the other three defects.

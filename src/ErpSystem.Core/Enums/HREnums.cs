@@ -8001,6 +8001,23 @@ public enum RecurrencePattern
     Weekdays = 7
 }
 
+/// <summary>
+/// Which dates of a recurring event's series an action reaches (company-schedule final closure, lane 2f-2, D-12) —
+/// adding or removing a guest, recording an answer. Asked for, never stored. A series action never reaches a date that
+/// has started, been completed or been cancelled.
+/// </summary>
+public enum SeriesScope
+{
+    [Description("This date only")]
+    ThisOccurrence = 0,
+
+    [Description("This and following dates")]
+    ThisAndFollowing = 1,
+
+    [Description("Every date in the series")]
+    WholeSeries = 2
+}
+
 public enum RegularizationType
 {
     [Description("Missing Check-In")]

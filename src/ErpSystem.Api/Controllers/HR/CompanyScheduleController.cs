@@ -266,14 +266,14 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<EventParticipantDto>>> GetParticipants(Guid eventId)
         => Ok(await _eventService.GetParticipantsAsync(eventId));
 
-    /// <summary>Records a guest's answer. Only accepted, declined or tentative, from a guest of this event (F-11).</summary>
+    /// <summary>
+    /// Records a guest's answer. Only accepted, declined or tentative, from a guest of this event (F-11). On a series,
+    /// <c>scope</c> records it for this and following dates, or every date (lane 2f-2a); the answer lists them.
+    /// </summary>
     [HttpPost("events/{eventId:guid}/participants/respond")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> RespondToInvitation(Guid eventId, [FromBody] RespondToEventInvitationDto dto)
-    {
-        await _eventService.RespondToInvitationAsync(eventId, dto);
-        return Ok(new { message = "Invitation response recorded" });
-    }
+    public async Task<ActionResult<EventSeriesGuestResultDto>> RespondToInvitation(Guid eventId, [FromBody] RespondToEventInvitationDto dto)
+        => Ok(await _eventService.RespondToInvitationAsync(eventId, dto));
 
     /// <summary>
     /// Corrects a guest: their role, whether they are required, their needs, and an outside guest's name,
@@ -365,14 +365,15 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<CompanyScheduleReminderRunDto>> RunDueReminders(CancellationToken ct)
         => Ok(await _eventService.RunDueRemindersNowAsync(ct));
 
-    /// <summary>Uninvites a guest — organiser work, on Write (lane 2d); it needed Admin.</summary>
+    /// <summary>
+    /// Uninvites a guest — organiser work, on Write (lane 2d); it needed Admin. On a series, <c>?scope=</c>
+    /// ThisAndFollowing or WholeSeries takes them off those dates still to come (lane 2f-2a); the answer lists them.
+    /// </summary>
     [HttpDelete("participants/{participantId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> RemoveParticipant(Guid participantId)
-    {
-        await _eventService.RemoveParticipantAsync(participantId);
-        return NoContent();
-    }
+    public async Task<ActionResult<EventSeriesGuestResultDto>> RemoveParticipant(
+        Guid participantId, [FromQuery] SeriesScope scope = SeriesScope.ThisOccurrence)
+        => Ok(await _eventService.RemoveParticipantAsync(participantId, scope));
 
     #endregion
 

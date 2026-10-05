@@ -21,6 +21,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
 import type { CompanyEventDetail } from '@/types/hr/company-schedule';
+import { describeReach } from './noticeReach';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 
@@ -55,6 +56,12 @@ export function EventSeriesCard({ event, open }: { event: CompanyEventDetail; op
         title: `Series extended by ${r.occurrences.length}`,
         description: [
           r.occurrences.map((o) => o.eventNumber).join(', ') + '.',
+          // Lane 2f-2a (the user's ruling): the latest date's guests are on the new dates, invited once each.
+          ...(r.guests > 0
+            ? [r.told
+                ? describeReach(r.told, `${r.guests} guest(s) invited to the new dates`)
+                : `${r.guests} guest(s) put on the new dates; their invitations go when the new dates are approved.`]
+            : []),
           ...r.warnings.map((w) => `⚠ ${w}`),
         ].join(' '),
       });
@@ -135,8 +142,8 @@ export function EventSeriesCard({ event, open }: { event: CompanyEventDetail; op
             <DialogTitle>Extend the series</DialogTitle>
             <DialogDescription>
               More occurrences after the last, on the same rule, copied from the latest occurrence. Give how many more,
-              or the date to run until — one, not both. The series can hold {room} more (52 in all). New dates start
-              with no guests.
+              or the date to run until — one, not both. The series can hold {room} more (52 in all). The latest date's
+              guests are invited to the new dates, once each.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4">

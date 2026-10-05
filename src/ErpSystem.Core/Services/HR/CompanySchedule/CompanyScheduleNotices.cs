@@ -22,8 +22,9 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// the topic path queues rows with no delivery result, would lose the catalogue's wording, and cannot carry an
 /// attachment (the calendar invite, D-14). So the topics are seeded with email off, and the caller sends the email.</para>
 ///
-/// <para><b>Thirteen topics since lane 2e-3</b> (the overdue task). A tenant seeded with twelve gets the thirteenth the
-/// next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds whatever key is missing.</para>
+/// <para><b>Fifteen topics since lane 2f-2a</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a).
+/// A tenant seeded with fewer gets the rest the next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds
+/// whatever key is missing.</para>
 ///
 /// <para><b>Who.</b> The employees given, through the active logins linked to them; an employee with no login is told
 /// by email alone. <b>Nobody is told of their own act</b> — the signed-in user is left out — except of a reminder or a
@@ -61,6 +62,9 @@ public sealed class CompanyScheduleNotices
     public const string NotApproved = "NotApproved";
     public const string TaskAssigned = "TaskAssigned";
     public const string TaskOverdue = "TaskOverdue";
+    // Lane 2f-2a (D-12): one notice per guest per series action, raised on the first date it covers.
+    public const string SeriesInvited = "SeriesInvited";
+    public const string SeriesChanged = "SeriesChanged";
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -238,6 +242,14 @@ public sealed class CompanyScheduleNotices
             "Sent in the app, once, to the employee a task is given to when it passes its due date unfinished (lane 2e-3), with the overdue email. Again only if the due date moves or the task passes to someone new.",
             "Overdue: a task for {{EventName}}",
             "{{Task}} was due {{DueOn}} and is not yet done. For {{EventNumber}}, {{When}}."),
+        new(SeriesInvited, ToGuest, "Company events: invited to several dates (guest)",
+            "Sent in the app, once, to an employee guest invited to several dates of a recurring event at once (lane 2f-2a), with the series invitation email, which lists the dates.",
+            "You are invited: {{EventName}}, {{Count}} dates",
+            "From {{When}}. The dates are on your schedule; the email lists them."),
+        new(SeriesChanged, ToGuest, "Company events: several dates changed (guest)",
+            "Sent in the app, once, to an employee guest when several dates of a recurring event change for them together (lane 2f-2a: taken off the guest list), with the series email, which lists the dates.",
+            "{{What}}: {{EventName}}, {{Count}} dates",
+            "From {{When}}. The email lists the dates."),
     };
 
     /// <summary>Seeds the topics a tenant does not have yet. Every notice calls it; once per tenant per scope.</summary>

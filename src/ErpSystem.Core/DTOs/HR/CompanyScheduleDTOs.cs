@@ -255,6 +255,36 @@ public class EventSeriesResultDto
 
     /// <summary>"EVT-… (Tuesday, 1 July 2026) falls on a public holiday: Republic Day" — flagged, not skipped.</summary>
     public List<string> Warnings { get; set; } = new();
+
+    /// <summary>
+    /// Lane 2f-2a (the user's ruling): how many of the latest occurrence's guests were put on the new dates — invited
+    /// now, or with the approval when the new dates need one.
+    /// </summary>
+    public int Guests { get; set; }
+
+    /// <summary>Who the series invitations reached; null when they wait for approval or there were no guests.</summary>
+    public CompanyEventNoticeResultDto? Told { get; set; }
+}
+
+/// <summary>
+/// What a guest action with a series scope did (lane 2f-2a, D-12): adding a guest, taking one off, recording an answer.
+/// </summary>
+public class EventSeriesGuestResultDto
+{
+    /// <summary>The dates acted on, by event number, in date order.</summary>
+    public List<string> EventNumbers { get; set; } = new();
+
+    /// <summary>Dates the scope covered with nothing to do: already invited (adding), or not invited (removing, answering).</summary>
+    public int Skipped { get; set; }
+
+    /// <summary>Dates the scope covered and left alone because they have started, been completed or been cancelled.</summary>
+    public int Closed { get; set; }
+
+    /// <summary>Dates added whose invitation waits for the series' approval (F-33).</summary>
+    public int Waiting { get; set; }
+
+    /// <summary>Who the one notice reached; null when nothing was sent.</summary>
+    public CompanyEventNoticeResultDto? Told { get; set; }
 }
 
 /// <summary>
@@ -697,6 +727,9 @@ public class EventParticipantDto : BaseDto
     public DateTime? ResponseDate { get; set; }
     public string? ResponseComments { get; set; }
     public string? SpecialRequirements { get; set; }
+
+    /// <summary>Lane 2f-2a: when the guest was added with a series scope, what that did across the dates.</summary>
+    public EventSeriesGuestResultDto? Series { get; set; }
 }
 
 /// <summary>
@@ -726,6 +759,9 @@ public class CreateEventParticipantDto : CreateDtoBase
 
     [MaxLength(1000)]
     public string? SpecialRequirements { get; set; }
+
+    /// <summary>Lane 2f-2a (D-12): on a recurring event, this date only (the default), this and following, or every date.</summary>
+    public SeriesScope Scope { get; set; }
 }
 
 /// <summary>
@@ -769,6 +805,12 @@ public class RespondToEventInvitationDto
 
     [MaxLength(1000)]
     public string? ResponseComments { get; set; }
+
+    /// <summary>
+    /// Lane 2f-2a (D-12): on a recurring event, the answer for this date only (the default), or for this guest's
+    /// invitations to this and following dates, or every date.
+    /// </summary>
+    public SeriesScope Scope { get; set; }
 }
 
 #endregion

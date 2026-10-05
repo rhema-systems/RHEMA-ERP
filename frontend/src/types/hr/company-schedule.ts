@@ -42,6 +42,20 @@ export const RECURRENCE_PATTERN_LABELS: Record<RecurrencePattern, string> = {
   Annually: 'Every year',
 };
 
+/**
+ * Which dates of a series a guest action reaches (lane 2f-2a, D-12). Never a date that has started, been completed or
+ * been cancelled — the server passes those over.
+ */
+export type SeriesScope = 'ThisOccurrence' | 'ThisAndFollowing' | 'WholeSeries';
+
+export const SERIES_SCOPE_LABELS: Record<SeriesScope, string> = {
+  ThisOccurrence: 'This date only',
+  ThisAndFollowing: 'This and following dates',
+  WholeSeries: 'Every date in the series',
+};
+
+export const SERIES_SCOPES: SeriesScope[] = ['ThisOccurrence', 'ThisAndFollowing', 'WholeSeries'];
+
 export type EventLocationType = 'OnSite' | 'OffSite' | 'Virtual' | 'Hybrid';
 
 export type ParticipantScope = 'AllStaff' | 'Department' | 'Selected' | 'ManagementOnly' | 'ExternalOnly';
@@ -342,6 +356,23 @@ export interface ExtendEventSeries {
 export interface EventSeriesResult {
   occurrences: EventSeriesOccurrence[];
   warnings: string[];
+  /** Lane 2f-2a: the latest date's guests put on the new dates. */
+  guests: number;
+  /** Who their invitations reached; null when they wait for approval or there were none. */
+  told?: CompanyEventNoticeResult | null;
+}
+
+/** What a guest action with a series scope did (lane 2f-2a): add, remove, or an answer. */
+export interface EventSeriesGuestResult {
+  /** The dates acted on, in date order. */
+  eventNumbers: string[];
+  /** Dates passed over: already invited (adding), or not invited (removing, answering). */
+  skipped: number;
+  /** Dates left alone: started, completed or cancelled. */
+  closed: number;
+  /** Dates added whose invitation waits for the approval. */
+  waiting: number;
+  told?: CompanyEventNoticeResult | null;
 }
 
 /**
@@ -537,6 +568,8 @@ export interface EventParticipant extends AuditFields {
   responseDate?: string | null;
   responseComments?: string | null;
   specialRequirements?: string | null;
+  /** Lane 2f-2a: on an add with a series scope, what it did across the dates. */
+  series?: EventSeriesGuestResult | null;
 }
 
 /** Either `employeeId` (internal) or the three external fields — never both. */
@@ -549,6 +582,8 @@ export interface CreateEventParticipant {
   role: ParticipantRole;
   isRequired: boolean;
   specialRequirements?: string | null;
+  /** Lane 2f-2a: on a recurring event, which dates (this one only when absent). */
+  scope?: SeriesScope;
 }
 
 /**
@@ -569,6 +604,8 @@ export interface RespondToEventInvitation {
   participantId: string;
   response: InvitationStatus;
   responseComments?: string | null;
+  /** Lane 2f-2a: on a recurring event, the answer for which dates (this one only when absent). */
+  scope?: SeriesScope;
 }
 
 // ── Attendance ────────────────────────────────────────────────────────────────

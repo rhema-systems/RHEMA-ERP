@@ -301,7 +301,7 @@ was off.
 
 Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
 template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
-**50 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one). Since this lane a tenant can reword any of them at **Administration → HR Settings →
+**52 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two). Since this lane a tenant can reword any of them at **Administration → HR Settings →
 Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
 and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
 is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
@@ -381,6 +381,8 @@ every render, and the escaped form would have printed their markup as text.
 | `CompanySchedule/EventGuestRemoved` | Event Guest Removed | email | a guest who was invited is taken off the guest list (lane 2e-1) | signed in | **Enforced** |
 | `CompanySchedule/EventTaskAssigned` | Event Task Assigned | email | a task on an event is added for somebody, or passed to somebody new (lane 2e-1, F-34) | signed in | **Enforced** |
 | `CompanySchedule/EventTaskOverdue` | Event Task Overdue | email | the hourly sweep finds an open task past its due date, **once** — again only if the due date moves or the task passes to someone new; to the assignee (lane 2e-3, F-34) | background (sweep), or signed in (HR's run-now) | **Enforced** |
+| `CompanySchedule/EventSeriesInvitation` | Event Series Invitation | email | a guest is invited to several dates of a recurring event at once — added with a series scope, invited by the series' approval, or carried onto the dates an extension adds; **one** per guest, listing the dates, a calendar file per date (lane 2f-2a, D-12) | signed in | **Enforced** |
+| `CompanySchedule/EventSeriesChanged` | Event Series Changed | email | several dates of a recurring event change for a guest together — taken off the guest list with a series scope (lane 2f-2a); moved, changed or cancelled from lane 2f-2b; **one** per guest, listing the dates, each date's calendar update or cancellation | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
 | `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
 | `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |

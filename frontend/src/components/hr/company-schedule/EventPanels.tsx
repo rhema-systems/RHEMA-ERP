@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { z } from 'zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
@@ -23,6 +24,8 @@ import {
   EVENT_TASK_SETTABLE_STATUSES,
   INVITATION_ANSWERS,
   PARTICIPANT_ROLES,
+  SERIES_SCOPE_LABELS,
+  SERIES_SCOPES,
   TASK_PRIORITIES,
 } from '@/types/hr/company-schedule';
 import type {
@@ -30,7 +33,10 @@ import type {
   EventAttendance,
   EventParticipant,
   EventTask,
+  SeriesScope,
 } from '@/types/hr/company-schedule';
+import { SeriesGuestDialog, describeSeriesGuest } from './SeriesGuestDialog';
+import type { SeriesGuestAction } from './SeriesGuestDialog';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const opts = (v: readonly string[]) => v.map((x) => ({ value: x, label: spaced(x) }));
@@ -53,6 +59,8 @@ const participantSchema = z
     role: z.string().min(1, 'Role is required'),
     isRequired: z.boolean(),
     specialRequirements: z.string().max(1000).optional().or(z.literal('')),
+    // Lane 2f-2a: on a recurring event, which dates the guest is invited to.
+    scope: z.string(),
   })
   .refine((v) => !!v.employeeId || !!v.externalParticipantName?.trim(), {
     message: 'Pick an employee, or name a guest from outside',
@@ -78,17 +86,22 @@ const emptyParticipant: ParticipantForm = {
   role: 'Attendee',
   isRequired: true,
   specialRequirements: '',
+  scope: 'ThisOccurrence',
 };
 
 /**
  * The guest list (lane 2d). Guests are corrected in place (C-22) and removed on Write. A cancelled or
  * completed event's list is its record: no adds, edits, removals or answers — the server refuses them too.
+ *
+ * On a recurring event (lane 2f-2a, D-12) a guest can be invited to this and following dates or every date, and
+ * answered for or taken off several dates at once — each told once, listing the dates.
  */
 export function ParticipantsPanel({
   eventId,
   open,
   awaitingApproval = false,
   mailServerSetUp = true,
+  inSeries = false,
 }: {
   eventId: string;
   open: boolean;
@@ -96,8 +109,11 @@ export function ParticipantsPanel({
   awaitingApproval?: boolean;
   /** Lane 2e-2: why an invitation reached nobody, for the toast. */
   mailServerSetUp?: boolean;
+  /** Lane 2f-2a: the event is one date of a series, so guest actions can reach other dates. */
+  inSeries?: boolean;
 }) {
   const queryClient = useQueryClient();
+  const [seriesAction, setSeriesAction] = useState<SeriesGuestAction | null>(null);
   const key = ['hr', 'company-schedule', 'events', eventId, 'participants'];
   // Lane 2e-2 (R4-6.3): an invitation is Sent only once it reached the guest — by an email the mail server took,
   // or in the app. Not yet sent is either waiting for the approval or not delivered.
@@ -106,12 +122,18 @@ export function ParticipantsPanel({
   }, and they have no login to be told in the app. Send it again from Invitations and reminders once that is fixed.`;
 
   return (
+    <>
     <ResourceCollectionTab<EventParticipant, ParticipantForm>
       parentId={eventId}
       title="participants"
       singular="participant"
       queryKey={key}
-      invalidateKeys={[['hr', 'company-schedule', 'events', eventId, 'detail']]}
+      // Lane 2f-2a: an add with a series scope puts the guest on other dates too.
+      invalidateKeys={
+        inSeries
+          ? [['hr', 'company-schedule', 'events']]
+          : [['hr', 'company-schedule', 'events', eventId, 'detail']]
+      }
       readOnly={!open}
       dialogHint={
         awaitingApproval
@@ -119,6 +141,9 @@ export function ParticipantsPanel({
           : 'Invite an employee, or a guest from outside with their email address — the invitation goes there.'
       }
       savedDescription={(saved, editing) => {
+        // Lane 2f-2a: added to several dates — which, which were passed over, and who the one invitation reached.
+        const series = (saved as EventParticipant | undefined)?.series;
+        if (!editing && series) return `Invited to ${describeSeriesGuest(series, 'already invited')}`;
         if ((saved as EventParticipant | undefined)?.invitationStatus !== 'NotSent') return null;
         if (awaitingApproval) return editing ? null : 'Added. The invitation goes when the event is approved.';
         // Added — or corrected (a new outside address re-sends it) — and it reached nobody.
@@ -137,6 +162,7 @@ export function ParticipantsPanel({
           role: v.role as EventParticipant['role'],
           isRequired: v.isRequired,
           specialRequirements: orNull(v.specialRequirements),
+          scope: inSeries ? (v.scope as SeriesScope) : undefined,
         })
       }
       update={(_id, participantId, v) =>
@@ -176,18 +202,36 @@ export function ParticipantsPanel({
         },
         { header: 'Responded', cell: (p) => p.responseDate?.slice(0, 10) ?? '—' },
       ]}
-      actions={INVITATION_ANSWERS.map((response) => ({
-        label: `Record ${response.toLowerCase()}`,
-        visible: (p: EventParticipant) => open && p.invitationStatus !== response,
-        run: async (p: EventParticipant) => {
-          await companyEventService.respondToInvitation(eventId, {
-            participantId: p.id,
-            response,
-            responseComments: null,
-          });
-          await queryClient.invalidateQueries({ queryKey: key });
-        },
-      }))}
+      actions={[
+        ...INVITATION_ANSWERS.map((response) => ({
+          label: `Record ${response.toLowerCase()}`,
+          visible: (p: EventParticipant) => open && p.invitationStatus !== response,
+          run: async (p: EventParticipant) => {
+            await companyEventService.respondToInvitation(eventId, {
+              participantId: p.id,
+              response,
+              responseComments: null,
+            });
+            await queryClient.invalidateQueries({ queryKey: key });
+          },
+        })),
+        // Lane 2f-2a: the same guest on several dates at once, told once.
+        ...(inSeries
+          ? [
+              {
+                label: 'Answer for several dates…',
+                visible: () => open,
+                run: async (p: EventParticipant) => setSeriesAction({ mode: 'answer', guest: p }),
+              },
+              {
+                label: 'Take off several dates…',
+                visible: () => open,
+                destructive: true,
+                run: async (p: EventParticipant) => setSeriesAction({ mode: 'remove', guest: p }),
+              },
+            ]
+          : []),
+      ]}
       schema={participantSchema}
       emptyForm={emptyParticipant}
       toForm={(p) => ({
@@ -198,6 +242,7 @@ export function ParticipantsPanel({
         role: p.role,
         isRequired: p.isRequired,
         specialRequirements: p.specialRequirements ?? '',
+        scope: 'ThisOccurrence',
       })}
       renderFields={(form, editing) => {
         // An employee guest stays who they are: uninvite and invite the other person instead.
@@ -229,10 +274,26 @@ export function ParticipantsPanel({
               <SwitchField form={form} name="isRequired" label="Attendance required" />
             </FieldRow>
             <TextareaField form={form} name="specialRequirements" label="Special requirements" />
+            {inSeries && !editing && (
+              <>
+                <SelectField
+                  form={form}
+                  name="scope"
+                  label="Which dates"
+                  options={SERIES_SCOPES.map((s) => ({ value: s, label: SERIES_SCOPE_LABELS[s] }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A date that has started, been completed or been cancelled is passed over, as is one they are already
+                  on. They are invited once, listing the dates.
+                </p>
+              </>
+            )}
           </>
         );
       }}
     />
+    <SeriesGuestDialog eventId={eventId} action={seriesAction} onClose={() => setSeriesAction(null)} />
+    </>
   );
 }
 

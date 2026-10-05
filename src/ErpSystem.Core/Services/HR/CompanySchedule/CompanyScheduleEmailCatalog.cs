@@ -61,6 +61,18 @@ public static class CompanyScheduleEmailCatalog
 
         /// <summary>Sent once, by the hourly sweep, to the assignee of a task past its due date (lane 2e-3, F-34).</summary>
         public const string EventTaskOverdue = "EventTaskOverdue";
+
+        /// <summary>
+        /// Sent once to a guest invited to several dates of a recurring event at once, listing them, each with its
+        /// calendar entry (lane 2f-2a, D-12: the user's ruling, one notice per guest per series action).
+        /// </summary>
+        public const string EventSeriesInvitation = "EventSeriesInvitation";
+
+        /// <summary>
+        /// Sent once to a guest when several dates of a recurring event change together for them — taken off the guest
+        /// list (lane 2f-2a); moved, changed or cancelled (lane 2f-2b) — listing the dates.
+        /// </summary>
+        public const string EventSeriesChanged = "EventSeriesChanged";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -381,8 +393,92 @@ public static class CompanyScheduleEmailCatalog
             }).ToList(),
         });
 
+        // ── 12. Invited to a series (lane 2f-2a, D-12) ─────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventSeriesInvitation,
+            Name = "Event Series Invitation",
+            Category = "Invitation",
+            Description =
+                "Sent once to a guest invited to several dates of a recurring event at once — added to the series, "
+                + "invited when the series is approved, or carried onto the dates a series is extended by. It lists "
+                + "the dates, and each date's calendar entry is attached. A single date is invited with Event "
+                + "Invitation.",
+            DefaultSubject = "{{EventName}} — {{DateCount}} dates from {{EventDate}}",
+            DefaultHtmlBody = Shell(BlueGradient, "You are invited",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>You have been invited to <strong>{{EventName}}</strong>{{#if SeriesPattern}}, {{SeriesPattern}}{{/if}}, on these
+  {{DateCount}} dates{{#if IsRequired}}, and your attendance is required{{/if}}:</p>
+  {{{SeriesDates}}}
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    {{#if VenueName}}<div><strong>Where:</strong> {{VenueName}}</div>{{/if}}
+    {{#if OnlineMeetingLink}}<div style='margin-top:0.25rem'><strong>Join:</strong> <a href='{{OnlineMeetingLink}}'>{{OnlineMeetingLink}}</a></div>{{/if}}
+    {{#if OrganizerName}}<div style='margin-top:0.25rem;color:#6b7280;font-size:0.875rem'>Organised by {{OrganizerName}}</div>{{/if}}
+  </div>
+  {{#if Description}}<p>{{Description}}</p>{{/if}}
+  {{#if RsvpDeadline}}<p style='background:#fef3c7;border-left:3px solid #d97706;padding:0.75rem'>
+    Please say for each date whether you can attend. The first answer is needed by <strong>{{RsvpDeadline}}</strong>.
+  </p>{{/if}}
+  {{#if SpecialRequirements}}<p style='color:#6b7280;font-size:0.875rem'>{{SpecialRequirements}}</p>{{/if}}
+  <p style='color:#6b7280;font-size:0.875rem'>Each date's calendar entry is attached.</p>"),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                SeriesDatesToken(),
+                T("DateCount", "How many dates the invitation is for.", "4"),
+                T("SeriesPattern", "How the event repeats; hidden when it is not known.", "every week"),
+                T("IsRequired", "Truthy when attendance is required rather than optional.", "true"),
+                T("Description", "The event's description; the paragraph is hidden when empty.", "Weekly operations stand-up."),
+                T("RsvpDeadline", "The first date's reply-by date; the block is hidden when the event asks for no answer.", "Friday, 10 October 2026"),
+                T("SpecialRequirements", "Anything recorded against this guest; hidden when empty.", "Please bring the weekly figures."),
+            }).ToList(),
+        });
+
+        // ── 13. A series changed for a guest (lanes 2f-2a, 2f-2b, D-12) ────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventSeriesChanged,
+            Name = "Event Series Changed",
+            Category = "Change",
+            Description =
+                "Sent once to a guest when several dates of a recurring event change for them together, listing the "
+                + "dates: taken off the guest list (lane 2f-2a); and, from lane 2f-2b, moved, changed or cancelled. "
+                + "Each date's updated calendar entry, or its cancellation, is attached. A single date's change uses the "
+                + "single-event email.",
+            DefaultSubject = "{{ChangeTitle}}: {{EventName}} — {{DateCount}} dates",
+            DefaultHtmlBody = Shell(AmberGradient, "{{ChangeTitle}}",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>{{ChangeSummary}}</p>
+  {{{SeriesDates}}}
+  {{#if Reason}}<p><strong>Why:</strong> {{Reason}}</p>{{/if}}
+  {{#if NothingRequired}}<p style='color:#6b7280;font-size:0.875rem'>Nothing is required of you; please remove these dates from your diary.</p>{{/if}}
+  <p style='color:#6b7280;font-size:0.875rem'>Each date's calendar entry is attached, to update your calendar.</p>"),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                SeriesDatesToken(),
+                T("DateCount", "How many dates changed for this guest.", "3"),
+                T("ChangeTitle", "The change in a few words: No longer invited, Moved, Changed or Cancelled.", "No longer invited"),
+                T("ChangeSummary", "The change in a sentence, naming the event.", "You have been taken off the guest list for these dates of Weekly Operations Stand-up."),
+                T("Reason", "Why, when one was given; hidden otherwise.", "The meeting is moving to Tuesdays."),
+                T("NothingRequired", "Truthy when the guest need do nothing but clear their diary (taken off the list, cancelled).", "true"),
+            }).ToList(),
+        });
+
         return list;
     }
+
+    /// <summary>
+    /// The list of a series' dates, built by the application (each date and time, and its event number) and emitted
+    /// RAW — <c>{{{SeriesDates}}}</c> — so it is declared HTML for the template editor's check.
+    /// </summary>
+    private static EmailTokenDescriptor SeriesDatesToken() => new(
+        "SeriesDates",
+        "The dates, as a list the system builds: each date and time, and its event number. Use it raw: {{{SeriesDates}}}.",
+        "<ul><li>Monday, 6 October 2026, 09:00 – 10:00 (EVT-2026-00051)</li><li>Monday, 13 October 2026, 09:00 – 10:00 (EVT-2026-00052)</li></ul>")
+    {
+        IsHtml = true,
+    };
 }
 
 /// <summary>DI-registered wrapper exposing the static <see cref="CompanyScheduleEmailCatalog"/>.</summary>

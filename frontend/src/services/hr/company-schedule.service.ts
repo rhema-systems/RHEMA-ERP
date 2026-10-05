@@ -15,8 +15,10 @@ import type {
   CompanyEventDetail,
   CompanyEventNoticeResult,
   EventAnnouncementPreview,
+  EventSeriesGuestResult,
   EventSeriesResult,
   ExtendEventSeries,
+  SeriesScope,
   EventAudiencePreview,
   EventVisibility,
   ParticipantScope,
@@ -237,8 +239,8 @@ class CompanyEventService {
    * Records an invitation response. This is the HR desk doing it on the participant's behalf —
    * it is gated on HR.Company.Write, not on being that participant.
    */
-  respondToInvitation(eventId: string, data: RespondToEventInvitation): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/events/${eventId}/participants/respond`, data);
+  respondToInvitation(eventId: string, data: RespondToEventInvitation): Promise<EventSeriesGuestResult> {
+    return apiService.post<EventSeriesGuestResult>(`${this.baseUrl}/events/${eventId}/participants/respond`, data);
   }
 
   /** Corrects a guest — role, required, needs, an outside guest's details (C-22). */
@@ -249,9 +251,13 @@ class CompanyEventService {
     });
   }
 
-  /** Uninvites a guest — on Write since lane 2d. */
-  removeParticipant(participantId: string): Promise<void> {
-    return apiService.delete<void>(`${this.baseUrl}/participants/${participantId}`);
+  /**
+   * Uninvites a guest — on Write since lane 2d. On a recurring event, `scope` takes them off this and following
+   * dates, or every date still to come (lane 2f-2a).
+   */
+  removeParticipant(participantId: string, scope?: SeriesScope): Promise<EventSeriesGuestResult> {
+    const query = scope && scope !== 'ThisOccurrence' ? `?scope=${scope}` : '';
+    return apiService.delete<EventSeriesGuestResult>(`${this.baseUrl}/participants/${participantId}${query}`);
   }
 
   // ── attendance ────────────────────────────────────────────────────────────
