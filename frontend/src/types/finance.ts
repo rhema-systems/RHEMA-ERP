@@ -85,6 +85,7 @@ export interface ExchangeRate {
   baseCurrencyCode: string;
   targetCurrencyCode: string;
   rate: number;
+  inverseRate?: number;
   currentExchangeRate?: number;
   effectiveDate: string;
   expiryDate?: string;

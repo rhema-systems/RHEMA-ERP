@@ -8,7 +8,7 @@ vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'invoice-1' }), useR
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: mocks.permission }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast: mocks.toast }) }));
 vi.mock('@/contexts/TenantContext', () => ({ useTenant: () => ({ currentTenant: { name: 'Test', code: 'TEST' } }) }));
-vi.mock('@/services/ar-service', () => ({ arService: { getInvoice: mocks.get, submitInvoiceForApproval: mocks.submit, postInvoice: mocks.post } }));
+vi.mock('@/services/ar-service', () => ({ arService: { getInvoice: mocks.get, submitInvoiceForApproval: mocks.submit, postInvoice: mocks.post, deleteInvoice: vi.fn() } }));
 vi.mock('@/services/workflow-api.service', () => ({ workflowApiService: { getWorkflowEntitySummary: mocks.summary } }));
 vi.mock('@/components/finance/ar/ArInvoicePrintDocument', () => ({ ArInvoicePrintDocument: () => null, printArInvoiceDocument: vi.fn() }));
 vi.mock('@/components/finance/ar/ArInvoicePrintDocument.module.css', () => ({ default: { screenRoot: 'screenRoot' } }));

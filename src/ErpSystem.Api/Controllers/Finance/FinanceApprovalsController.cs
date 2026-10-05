@@ -45,6 +45,8 @@ public class FinanceApprovalsController : ControllerBase
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
+        Normalize("DeltaAdjustmentJournal"),
+        Normalize("JournalBatch"),
         Normalize("RecurringJournalTemplate"),
         Normalize("RecurringJournalOccurrence"),
         Normalize("RecurringJournalOccurrenceWaiver"),
@@ -53,10 +55,8 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("VendorInvoice"),
         Normalize("VendorPayment"),
         Normalize("PaymentBatch"),
-        Normalize("SupplierReturn"),
         Normalize("Quote"),
         Normalize("SalesOrder"),
-        Normalize("DeliveryNote"),
         Normalize("Invoice"),
         Normalize("ReturnOrder"),
         Normalize("CreditNote"),
@@ -77,7 +77,6 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("ExchangeRate"),
         Normalize("OpeningBalanceBatch"),
         Normalize("FixedAsset"),
-        Normalize("AssetDepreciationSchedule"),
         Normalize("FixedAssetDepreciationRun"),
         Normalize("AssetValuation"),
         Normalize("AssetTransfer"),
@@ -426,6 +425,36 @@ public class FinanceApprovalsController : ControllerBase
                 continue;
             }
 
+            if (IsJournalBatch(entityType))
+            {
+                if (instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var batch = await _db.JournalBatches.AsNoTracking().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId &&
+                    item.Id == instance.EntityId &&
+                    !item.IsDeleted &&
+                    item.ApprovalStatus == JournalBatchApprovalStatus.PendingApproval &&
+                    item.WorkflowInstanceId == instance.Id &&
+                    item.CreatedById != currentUserId.Value &&
+                    item.SubmittedByUserId != currentUserId.Value,
+                    cancellationToken);
+                if (batch == null ||
+                    !await _workflowService.CanUserApproveAsync("JournalBatch", batch.Id, currentUserId.Value))
+                    continue;
+
+                var batchApproval = await MapApprovalAsync(
+                    approval,
+                    canApprove: false,
+                    canReject: false,
+                    approveDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    rejectDisabledReason: "Open the journal batch to decide every journal at this review stage.",
+                    cancellationToken);
+                batchApproval.DecisionOnDetailPage = true;
+                results.Add(batchApproval);
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -542,6 +571,11 @@ public class FinanceApprovalsController : ControllerBase
         if (!IsFinanceEntity(entityType))
         {
             return BadRequest("This approval is not a finance workflow approval.");
+        }
+        if (IsJournalBatch(entityType))
+        {
+            return BadRequest(
+                "Journal batch decisions must be completed from the journal batch so every journal receives a governed decision.");
         }
 
         var roleSet = new HashSet<string>(_currentUserService.Roles ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -1147,7 +1181,7 @@ public class FinanceApprovalsController : ControllerBase
                 item.CurrencyCode);
         }
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             var item = await _db.JournalEntries.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.JournalEntryNumber, item.Description, item.PostingStatus, item.EntryDate, item.TotalDebitAmount, item.PrimaryCurrency ?? "GHS");
@@ -1222,12 +1256,6 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.Set<PaymentBatch>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.BatchNumber, item.Description, item.Status.ToString(), item.BatchDate, item.TotalAmount, null);
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            var item = await _db.SupplierReturns.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            return item == null ? FinanceApprovalFacts.Empty : new(item.ReturnNumber, item.VendorName, item.Status.ToString(), item.ReturnDate, item.TotalAmount, item.CurrencyCode);
         }
 
         if (key == Normalize("CustomerPayment"))
@@ -1376,7 +1404,7 @@ public class FinanceApprovalsController : ControllerBase
             };
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             var item = await _db.FixedAssetDepreciationRuns
                 .AsNoTracking()
@@ -1448,7 +1476,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Approved", "Approved", userId, cancellationToken: cancellationToken);
             return;
@@ -1728,12 +1756,6 @@ public class FinanceApprovalsController : ControllerBase
                 item.ApprovedById = userId;
                 item.ApprovedDate = now;
             }, cancellationToken);
-            return;
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Approved, cancellationToken);
             return;
         }
 
@@ -2055,7 +2077,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
@@ -2150,7 +2172,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Rejected", "Rejected", rejectionReason: reason, cancellationToken: cancellationToken);
             return;
@@ -2335,9 +2357,15 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("SupplierReturn"))
+        if (key == Normalize("PaymentBatch"))
         {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Rejected, cancellationToken);
+            await UpdateIfFoundAsync(_db.Set<PaymentBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = PaymentBatchStatus.Cancelled;
+                item.ApprovedById = null;
+                item.ApprovedDate = null;
+                item.Notes = AppendReason(item.Notes, reason);
+            }, cancellationToken);
             return;
         }
 
@@ -2633,7 +2661,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
@@ -3090,6 +3118,9 @@ public class FinanceApprovalsController : ControllerBase
     private static bool IsBusinessPartner(string? entityType)
         => Normalize(entityType) == "BUSINESSPARTNER";
 
+    private static bool IsJournalBatch(string? entityType)
+        => Normalize(entityType) == "JOURNALBATCH";
+
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
 
@@ -3113,6 +3144,8 @@ public class FinanceApprovalsController : ControllerBase
             "RECURRINGJOURNALTEMPLATE" => $"/finance/recurring-journals/{entityId:D}",
             "RECURRINGJOURNALOCCURRENCE" or "RECURRINGJOURNALOCCURRENCEWAIVER" =>
                 "/finance/recurring-journals",
+            "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
+            "EXCHANGERATE" => "/finance/exchange-rates",
             _ => "/finance/approvals"
         };
     }
@@ -3122,6 +3155,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         return key is "EXCHANGERATE"
             or "FINANCEBUDGETOVERRIDE"
+            or "JOURNALBATCH"
             or "VENDORPAYMENT"
             or "PAYMENTBATCH"
             or "OPENINGBALANCEBATCH"
@@ -3263,6 +3297,7 @@ public class FinanceApprovalsController : ControllerBase
             "BANKRECONCILIATION" => "Bank Reconciliation",
             "CHEQUE" => "Cheque",
             "EXCHANGERATE" => "Exchange Rate",
+            "JOURNALBATCH" => "Journal Batch",
             "FIXEDASSET" => "Fixed Asset",
             "FIXEDASSETDEPRECIATIONRUN" => "Depreciation Run",
             "ASSETDEPRECIATIONSCHEDULE" => "Depreciation",

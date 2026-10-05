@@ -219,6 +219,121 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     }
 
     [Fact]
+    public async Task ImportAssetsFromExcelAsync_WithHistoricalOpeningValuesAndNoAsOfDate_RejectsRow()
+    {
+        SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
+        await using var stream = CreateOpeningWorkbook(new OpeningAssetRow
+        {
+            AssetCode = "FA-OPEN-NODATE",
+            Name = "Opening Asset Missing Date",
+            Location = "Head Office",
+            CategoryCode = "COMP-HW",
+            BookCode = "IFRS",
+            PurchasePrice = 30000m,
+            AccumulatedDepreciation = 6000m,
+            NetBookValue = 24000m
+        });
+
+        var result = await _sut.ImportAssetsFromExcelAsync(stream, "assets.xlsx", dryRun: true);
+
+        result.Errors.Should().ContainSingle(error =>
+            error.Field == "Opening As Of Date" &&
+            error.Error.Contains("real Excel date"));
+        (await _dbContext.FixedAssets.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ImportAssetsFromExcelAsync_WithExcelZeroAsOfDate_RejectsRowInsteadOfImporting1899Date()
+    {
+        SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
+        await using var stream = CreateOpeningWorkbook(new OpeningAssetRow
+        {
+            AssetCode = "FA-OPEN-ZERODATE",
+            Name = "Opening Asset Zero Date",
+            Location = "Head Office",
+            CategoryCode = "COMP-HW",
+            BookCode = "IFRS",
+            PurchasePrice = 30000m,
+            AccumulatedDepreciation = 6000m,
+            NetBookValue = 24000m,
+            OpeningAsOfDateSerial = 0d
+        });
+
+        var result = await _sut.ImportAssetsFromExcelAsync(stream, "assets.xlsx", dryRun: true);
+
+        result.Errors.Should().ContainSingle(error =>
+            error.Field == "Opening As Of Date" &&
+            error.Error.Contains("not blank or zero"));
+        (await _dbContext.FixedAssets.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task GenerateImportTemplateAsync_PreservesOpeningAsOfDateFormatAndInstructions()
+    {
+        SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
+        var bytes = await _sut.GenerateImportTemplateAsync();
+
+        using var stream = new MemoryStream(bytes);
+        using var workbook = new XLWorkbook(stream);
+        var assets = workbook.Worksheet("Assets");
+        var instructions = workbook.Worksheet("Instructions");
+
+        assets.Cell(2, 14).Style.DateFormat.Format.Should().Be("yyyy-mm-dd");
+        instructions.Cell(9, 2).GetString().Should().Contain("never blank or zero");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_UnpostedImportedDraft_AllowsCorrectedReimportOfSameAssetCode()
+    {
+        SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
+        await using (var original = CreateOpeningWorkbook(new OpeningAssetRow
+        {
+            AssetCode = "FA-OPEN-REIMPORT",
+            Name = "Correctable Opening Asset",
+            Location = "Head Office",
+            CategoryCode = "COMP-HW",
+            BookCode = "IFRS",
+            PurchasePrice = 30000m,
+            AccumulatedDepreciation = 6000m,
+            NetBookValue = 24000m,
+            OpeningAsOfDate = new DateTime(2026, 9, 30)
+        }))
+        {
+            (await _sut.ImportAssetsFromExcelAsync(original, "original.xlsx")).Errors.Should().BeEmpty();
+        }
+
+        var imported = await _dbContext.FixedAssets.SingleAsync(asset => asset.AssetCode == "FA-OPEN-REIMPORT");
+        await _sut.DeleteAsync(imported.Id);
+
+        (await _dbContext.FixedAssets.AnyAsync(asset => asset.AssetCode == "FA-OPEN-REIMPORT")).Should().BeFalse();
+
+        await using var corrected = CreateOpeningWorkbook(new OpeningAssetRow
+        {
+            AssetCode = "FA-OPEN-REIMPORT",
+            Name = "Correctable Opening Asset",
+            Location = "Head Office",
+            CategoryCode = "COMP-HW",
+            BookCode = "IFRS",
+            PurchasePrice = 30000m,
+            AccumulatedDepreciation = 6000m,
+            NetBookValue = 24000m,
+            OpeningAsOfDate = new DateTime(2026, 10, 4)
+        });
+
+        var result = await _sut.ImportAssetsFromExcelAsync(corrected, "corrected.xlsx");
+
+        result.Errors.Should().BeEmpty();
+        result.SuccessfulAssetCodes.Should().ContainSingle("FA-OPEN-REIMPORT");
+        var replacement = await _dbContext.FixedAssetBookValues
+            .SingleAsync(value => value.FixedAsset.AssetCode == "FA-OPEN-REIMPORT");
+        replacement.OpeningAsOfDate.Should().Be(new DateTime(2026, 10, 4));
+    }
+
+    [Fact]
     public async Task ImportAssetsFromExcelAsync_WithRepeatedRowsPerBook_CreatesSeparateBookValuesForOneAsset()
     {
         SeedCategory("COMP-HW");
@@ -411,7 +526,10 @@ public sealed class FixedAssetServiceImportTests : IDisposable
                 worksheet.Cell(rowNumber, 10).Value = row.TaxAmount;
                 SetCellValue(worksheet.Cell(rowNumber, 11), row.AccumulatedDepreciation);
                 SetCellValue(worksheet.Cell(rowNumber, 12), row.NetBookValue);
-                SetCellValue(worksheet.Cell(rowNumber, 13), row.OpeningAsOfDate);
+                if (row.OpeningAsOfDateSerial.HasValue)
+                    worksheet.Cell(rowNumber, 13).Value = row.OpeningAsOfDateSerial.Value;
+                else
+                    SetCellValue(worksheet.Cell(rowNumber, 13), row.OpeningAsOfDate);
                 SetCellValue(worksheet.Cell(rowNumber, 14), row.OpeningYtdDepreciation);
                 SetCellValue(worksheet.Cell(rowNumber, 15), row.RemainingUsefulLifeMonths);
                 worksheet.Cell(rowNumber, 16).Value = row.UsefulLifeMonths;
@@ -466,6 +584,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
         public decimal? AccumulatedDepreciation { get; init; }
         public decimal? NetBookValue { get; init; }
         public DateTime? OpeningAsOfDate { get; init; }
+        public double? OpeningAsOfDateSerial { get; init; }
         public decimal? OpeningYtdDepreciation { get; init; }
         public int? RemainingUsefulLifeMonths { get; init; }
         public int UsefulLifeMonths { get; init; } = 36;

@@ -1980,12 +1980,14 @@ public class FinanceDataSeeder
             NewAccount("4930", "Gain on Disposal of Fixed Assets", AccountType.Revenue, "Other Income", "Asset Disposals", false, false),
             NewAccount("4935", "Impairment Reversal Income", AccountType.Revenue, "Other Income", "Asset Impairment", false, false),
             NewAccount("4940", "Write-off Recoveries", AccountType.Revenue, "Other Income", "Recoveries", false, false),
+            NewAccount("4950", "Invoice and Cash Rounding Gain", AccountType.Revenue, "Other Income", "Rounding Adjustments", false, false, allowDirectPosting: true),
             NewAccount("5010", "Purchase Return Cost Variance", AccountType.Expense, "Cost of Sales", "Purchase Returns", false, false, true),
             NewAccount("6310", "Loss on Disposal of Fixed Assets", AccountType.Expense, "Other Expenses", "Asset Disposals", false, false),
             NewAccount("6320", "Asset Revaluation Loss", AccountType.Expense, "Other Expenses", "Asset Revaluation", false, false),
             NewAccount("6330", "Asset Impairment Loss", AccountType.Expense, "Other Expenses", "Asset Impairment", false, false),
             NewAccount("6610", "Lease Interest Expense", AccountType.Expense, "Finance Costs", "Lease Accounting", false, false),
-            NewAccount("6700", "Inventory and Receivable Write-off Expense", AccountType.Expense, "Other Expenses", "Write-offs", false, false, true)
+            NewAccount("6700", "Inventory and Receivable Write-off Expense", AccountType.Expense, "Other Expenses", "Write-offs", false, false, true),
+            NewAccount("6710", "Invoice and Cash Rounding Loss", AccountType.Expense, "Other Expenses", "Rounding Adjustments", false, false, allowDirectPosting: true)
         };
 
         Account NewAccount(
@@ -1996,7 +1998,8 @@ public class FinanceDataSeeder
             string subCategory,
             bool control,
             bool multiCurrency,
-            bool budgetTracking = false) => new()
+            bool budgetTracking = false,
+            bool allowDirectPosting = false) => new()
         {
             Id = Guid.Parse($"00000005-{code}-0000-0000-000000000001"),
             TenantId = tenantId,
@@ -2013,7 +2016,7 @@ public class FinanceDataSeeder
             IsIFRSClassified = true,
             IsBaseClassified = true,
             IsLocalClassified = true,
-            AllowDirectPosting = false,
+            AllowDirectPosting = allowDirectPosting,
             IsControlAccount = control,
             IsSystemAccount = true,
             BudgetTrackingEnabled = budgetTracking,
@@ -2671,6 +2674,8 @@ public class FinanceDataSeeder
             LeaseInterestExpenseAccountId = Guid.Parse("00000005-6610-0000-0000-000000000001"),
             WriteOffExpenseAccountId = Guid.Parse("00000005-6700-0000-0000-000000000001"),
             WriteOffRecoveryAccountId = Guid.Parse("00000005-4940-0000-0000-000000000001"),
+            InvoiceRoundingGainAccountId = Guid.Parse("00000005-4950-0000-0000-000000000001"),
+            InvoiceRoundingLossAccountId = Guid.Parse("00000005-6710-0000-0000-000000000001"),
             CreatedAt = baseDate,
             CreatedBy = "System"
         };
@@ -2808,6 +2813,14 @@ public class FinanceDataSeeder
                 () => settings.WriteOffRecoveryAccountId,
                 value => settings.WriteOffRecoveryAccountId = value,
                 "00000005-4940-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.InvoiceRoundingGainAccountId,
+                value => settings.InvoiceRoundingGainAccountId = value,
+                "00000005-4950-0000-0000-000000000001");
+            updated |= SetMissing(
+                () => settings.InvoiceRoundingLossAccountId,
+                value => settings.InvoiceRoundingLossAccountId = value,
+                "00000005-6710-0000-0000-000000000001");
 
             if (!settings.UnrealizedFxGainAccountId.HasValue)
             {
@@ -2894,27 +2907,8 @@ public class FinanceDataSeeder
         var purchaseGetfund = await GetOrCreateTaxAsync(tenantId, "GETFUND-PUR", "GETFund Levy on Purchases", 2.5m, TaxApplicability.Purchases, TaxCategory.Levy, true, baseDate, systemUserId);
         var purchaseVat = await GetOrCreateTaxAsync(tenantId, "VAT-STD-PUR", "Input VAT (Standard)", 15.0m, TaxApplicability.Purchases, TaxCategory.Standard, true, baseDate, systemUserId);
 
-        var taxPayableAccountId = Guid.Parse("00000005-2200-0000-0000-000000000001");
-        var taxReceivableAccountId = Guid.Parse("00000005-1130-0000-0000-000000000001");
-        var inputVatReceivableAccountId = Guid.Parse("00000005-1140-0000-0000-000000000001");
-        foreach (var outputTax in new[] { nhil, getfund, vatStd })
-        {
-            outputTax.TaxPayableAccountId ??= taxPayableAccountId;
-        }
-        foreach (var purchaseWht in new[] { whtServices, whtGoods, whtWorks })
-        {
-            // Preserve tenant overrides. These are baseline defaults only for installations that
-            // have not yet mapped a statutory control account.
-            purchaseWht.TaxPayableAccountId ??= taxPayableAccountId;
-        }
-        whtReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
-        vatWithholdingReceivable.TaxReceivableAccountId ??= taxReceivableAccountId;
-        foreach (var purchaseTax in new[] { purchaseNhil, purchaseGetfund, purchaseVat })
-        {
-            purchaseTax.TaxReceivableAccountId ??= inputVatReceivableAccountId;
-        }
-
         await _context.SaveChangesAsync();
+        await new FinanceTaxAccountProvisioningSeeder(_context, _logger).SeedAsync(tenantId);
 
         // 2. Create Tax Groups
         

@@ -5,8 +5,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Account } from '@/types/finance';
+import { RecurringJournalAccountCombobox } from './recurring-journal-account-combobox';
 import {
   newEditableRecurringJournalLine,
   formatRecurringJournalAmount,
@@ -36,7 +36,7 @@ export function RecurringJournalLineGrid({ accounts, currencyCode, lines, onChan
         </tr></thead>
         <tbody>{lines.map((line, index) => <tr className="border-t" key={line.key}>
           <td className="p-3 align-top text-muted-foreground">{index + 1}</td>
-          <td className="p-3 align-top"><Label className="sr-only">Line {index + 1} posting account</Label><Select value={line.accountId} onValueChange={accountId => update(line.key, { accountId })}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map(account => <SelectItem key={account.id} value={account.id}>{account.accountCode} · {account.accountName}</SelectItem>)}</SelectContent></Select></td>
+          <td className="p-3 align-top"><Label className="sr-only">Line {index + 1} posting account</Label><RecurringJournalAccountCombobox accounts={accounts} value={line.accountId} lineNumber={index + 1} onChange={accountId => update(line.key, { accountId })} /></td>
           <td className="p-3 align-top"><Label className="sr-only" htmlFor={`line-description-${line.key}`}>Line {index + 1} description</Label><Input id={`line-description-${line.key}`} value={line.description} onChange={event => update(line.key, { description: event.target.value })} placeholder="Line description" /></td>
           <td className="p-3 align-top"><Label className="sr-only" htmlFor={`line-debit-${line.key}`}>Line {index + 1} debit</Label><Input className="text-right" id={`line-debit-${line.key}`} type="number" min="0" step="0.01" value={line.debitAmount} onChange={event => update(line.key, { debitAmount: event.target.value, creditAmount: event.target.value ? '' : line.creditAmount })} placeholder="0.00" /></td>
           <td className="p-3 align-top"><Label className="sr-only" htmlFor={`line-credit-${line.key}`}>Line {index + 1} credit</Label><Input className="text-right" id={`line-credit-${line.key}`} type="number" min="0" step="0.01" value={line.creditAmount} onChange={event => update(line.key, { creditAmount: event.target.value, debitAmount: event.target.value ? '' : line.debitAmount })} placeholder="0.00" /></td>

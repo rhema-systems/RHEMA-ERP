@@ -44,12 +44,15 @@ import type {
 } from '@/types/finance';
 
 /**
- * Returns the exchange-rate snapshot exactly as supplied by the Finance API.
- * The API's `rate` is the value persisted and later validated by the posting engine;
- * callers must not infer direction from its magnitude or substitute `inverseRate`.
+ * Returns the transaction-to-functional multiplier validated by Finance posting.
+ * Rate maintenance stores the quotation as functional currency per foreign currency
+ * and persists its reciprocal as `inverseRate`; invoice and posting DTOs carry that
+ * reciprocal multiplier.
  */
-export function resolvePostingExchangeRate(rate: Pick<ExchangeRate, 'rate' | 'currentExchangeRate'>): number {
-  const resolvedRate = Number(rate.rate ?? rate.currentExchangeRate);
+export function resolvePostingExchangeRate(
+  rate: Pick<ExchangeRate, 'rate' | 'inverseRate' | 'currentExchangeRate'>
+): number {
+  const resolvedRate = Number(rate.inverseRate ?? rate.currentExchangeRate ?? rate.rate);
   if (!Number.isFinite(resolvedRate) || resolvedRate <= 0) {
     throw new Error('Finance API returned an invalid exchange-rate snapshot.');
   }

@@ -11,7 +11,8 @@ import {
     FileText,
     DollarSign,
     Ban,
-    CheckCircle
+    CheckCircle,
+    Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -45,6 +46,8 @@ import { workflowApiService } from '@/services/workflow-api.service';
 import type { WorkflowEntitySummaryDto } from '@/types/workflow';
 import { getWorkflowVisibility } from '@/components/workflow/workflowVisibility';
 import { vendorInvoiceStatusLabel } from '@/lib/vendor-invoice-status';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import type { VendorInvoice } from '@/types/ap';
 
 export default function VendorInvoicesPage() {
     const router = useRouter();
@@ -59,6 +62,7 @@ export default function VendorInvoicesPage() {
     const [statusFilter, setStatusFilter] = useState<string>('');
     const { hasPermission, hasAnyPermission } = useAuth();
     const [workflowSummaryMap, setWorkflowSummaryMap] = useState<Record<string, WorkflowEntitySummaryDto>>({});
+    const [invoiceToDelete, setInvoiceToDelete] = useState<VendorInvoice | null>(null);
 
     const { data: invoicesData, isLoading } = useQuery({
         queryKey: ['vendor-invoices', page, pageSize, debouncedSearchTerm, statusFilter, openingBalanceOnly],
@@ -134,6 +138,17 @@ export default function VendorInvoicesPage() {
                     </ToastAction>
                 ) : undefined,
             });
+        },
+    });
+
+    const deleteInvoiceMutation = useMutation({
+        mutationFn: (id: string) => accountsPayableService.deleteInvoice(id),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            toast({ title: 'Draft invoice deleted', description: 'The vendor invoice draft was removed.' });
+        },
+        onError: (error: any) => {
+            toast({ title: 'Unable to delete invoice', description: error.message || 'The draft invoice could not be deleted.', variant: 'destructive' });
         },
     });
 
@@ -305,6 +320,11 @@ export default function VendorInvoicesPage() {
                                                                 <FileText className="mr-2 h-4 w-4" /> Edit Invoice
                                                             </DropdownMenuItem>
                                                         )}
+                                                        {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.Delete', 'Finance.AP.Invoices.Write']) && (
+                                                            <DropdownMenuItem className="text-red-600" onClick={() => setInvoiceToDelete(invoice)}>
+                                                                <Trash2 className="mr-2 h-4 w-4" /> Delete Draft
+                                                            </DropdownMenuItem>
+                                                        )}
                                                         {invoice.status === 'Draft' && !invoice.purchaseOrderId && getWorkflowVisibility({ summary: workflowSummaryMap[invoice.id] }).known && hasAnyPermission(['Finance.AP.Invoices.SubmitForApproval', 'Finance.AP.Invoices.Approve']) && (
                                                             <DropdownMenuItem disabled={submitInvoiceMutation.isPending} onClick={() => submitInvoiceMutation.mutate(invoice.id)}>
                                                                 <CheckCircle className="mr-2 h-4 w-4" /> {getWorkflowVisibility({ summary: workflowSummaryMap[invoice.id] }).direct ? (invoice.isOpeningBalance ? 'Complete' : 'Post') : 'Submit for Approval'}
@@ -370,6 +390,21 @@ export default function VendorInvoicesPage() {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmationDialog
+                open={invoiceToDelete !== null}
+                onOpenChange={(open) => !open && setInvoiceToDelete(null)}
+                title="Delete draft vendor invoice?"
+                description={invoiceToDelete ? `${invoiceToDelete.invoiceNumber} will be permanently removed. Posted or submitted invoices cannot be deleted.` : undefined}
+                confirmText="Delete draft"
+                variant="destructive"
+                isLoading={deleteInvoiceMutation.isPending}
+                onConfirm={async () => {
+                    if (!invoiceToDelete) return false;
+                    await deleteInvoiceMutation.mutateAsync(invoiceToDelete.id);
+                    setInvoiceToDelete(null);
+                }}
+                maxWidth="500px"
+            />
         </div>
     );
 }

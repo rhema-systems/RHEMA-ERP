@@ -60,6 +60,8 @@ export default function ExchangeRatesPage() {
     const [rateLoadError, setRateLoadError] = useState<string | null>(null);
     const [rateReloadToken, setRateReloadToken] = useState(0);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+    const [isCreatingRate, setIsCreatingRate] = useState(false);
+    const [isUpdatingRate, setIsUpdatingRate] = useState(false);
     const [isBulkUploadOpen, setIsBulkUploadOpen] = useState(false);
     const [bulkUploadFile, setBulkUploadFile] = useState<File | null>(null);
     const [bulkUploadErrors, setBulkUploadErrors] = useState<string[]>([]);
@@ -118,6 +120,8 @@ export default function ExchangeRatesPage() {
     });
 
     const handleCreate = async () => {
+        if (isCreatingRate) return;
+        setIsCreatingRate(true);
         try {
             const newRate = await financeService.createExchangeRate({
             baseCurrencyCode: formData.baseCurrencyCode,
@@ -137,11 +141,14 @@ export default function ExchangeRatesPage() {
             resetForm();
         } catch (error) {
             toast({ title: 'Unable to create rate', description: error instanceof Error ? error.message : 'Please review the rate details.', variant: 'destructive' });
+        } finally {
+            setIsCreatingRate(false);
         }
     };
 
     const handleUpdate = async () => {
-        if (!editingRate) return;
+        if (!editingRate || isUpdatingRate) return;
+        setIsUpdatingRate(true);
         try {
             const updated = await financeService.updateExchangeRate(editingRate.id, {
                 baseCurrencyCode: formData.baseCurrencyCode,
@@ -159,6 +166,8 @@ export default function ExchangeRatesPage() {
             resetForm();
         } catch (error) {
             toast({ title: 'Unable to update rate', description: error instanceof Error ? error.message : 'Please review the rate details.', variant: 'destructive' });
+        } finally {
+            setIsUpdatingRate(false);
         }
     };
 
@@ -175,12 +184,24 @@ export default function ExchangeRatesPage() {
         });
     };
 
+    const handleCreateDialogOpenChange = (open: boolean) => {
+        if (isCreatingRate && !open) return;
+        setIsCreateDialogOpen(open);
+        if (!open) resetForm();
+    };
+
+    const closeEditDialog = () => {
+        if (isUpdatingRate) return;
+        setEditingRate(null);
+        resetForm();
+    };
+
     const openEditDialog = (rate: ExchangeRate) => {
         setEditingRate(rate);
         setFormData({
             baseCurrencyCode: rate.baseCurrencyCode,
             targetCurrencyCode: rate.targetCurrencyCode,
-            rate: rate.inverseRate.toString(),
+            rate: (rate.inverseRate ?? (rate.rate > 0 ? 1 / rate.rate : 0)).toString(),
             effectiveDate: rate.effectiveDate.split('T')[0],
             rateType: rate.rateType,
             quoteSide: rate.quoteSide || 'Mid',
@@ -452,7 +473,7 @@ export default function ExchangeRatesPage() {
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
-                    <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+                    <Dialog open={isCreateDialogOpen} onOpenChange={handleCreateDialogOpenChange}>
                         <DialogTrigger asChild>
                             <Button
                                 disabled={isLoadingRates || Boolean(rateLoadError)}
@@ -590,10 +611,13 @@ export default function ExchangeRatesPage() {
                                 </div>
                             </div>
                             <DialogFooter className="border-t px-6 py-4">
-                                <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>
+                                <Button type="button" variant="outline" onClick={() => handleCreateDialogOpenChange(false)} disabled={isCreatingRate}>
                                     Cancel
                                 </Button>
-                                <Button onClick={handleCreate}>Create Rate</Button>
+                                <Button type="button" onClick={handleCreate} disabled={isCreatingRate}>
+                                    {isCreatingRate && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {isCreatingRate ? 'Creating Rate…' : 'Create Rate'}
+                                </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
@@ -765,7 +789,9 @@ export default function ExchangeRatesPage() {
                                 {!isLoadingRates && !rateLoadError && filteredRates.map((rate) => (
                                     <tr key={rate.id} className="border-b hover:bg-muted/50">
                                         <td className="p-4 font-mono font-semibold">{rate.targetCurrencyCode}/{rate.baseCurrencyCode}</td>
-                                        <td className="p-4 text-right font-mono">{rate.inverseRate.toFixed(4)}</td>
+                                        <td className="p-4 text-right font-mono">
+                                            {(rate.inverseRate ?? (rate.rate > 0 ? 1 / rate.rate : 0)).toFixed(4)}
+                                        </td>
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
                                         <td className="p-4">{rate.expiryDate ? formatDate(rate.expiryDate) : 'Open-ended'}</td>
                                         <td className="p-4">
@@ -786,7 +812,12 @@ export default function ExchangeRatesPage() {
                                             {rate.sourceReference && <div className="text-xs">Ref: {rate.sourceReference}</div>}
                                         </td>
                                         <td className="p-4 text-right">
-                                            <Dialog>
+                                            <Dialog
+                                                open={editingRate?.id === rate.id}
+                                                onOpenChange={(open) => {
+                                                    if (!open) closeEditDialog();
+                                                }}
+                                            >
                                                 <DialogTrigger asChild>
                                                     <Button
                                                         variant="ghost"
@@ -904,10 +935,13 @@ export default function ExchangeRatesPage() {
                                                         </div>
                                                     </div>
                                                     <DialogFooter className="border-t px-6 py-4">
-                                                        <Button variant="outline" onClick={() => setEditingRate(null)}>
+                                                        <Button type="button" variant="outline" onClick={closeEditDialog} disabled={isUpdatingRate}>
                                                             Cancel
                                                         </Button>
-                                                        <Button onClick={handleUpdate}>Update Rate</Button>
+                                                        <Button type="button" onClick={handleUpdate} disabled={isUpdatingRate}>
+                                                            {isUpdatingRate && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                            {isUpdatingRate ? 'Updating Rate…' : 'Update Rate'}
+                                                        </Button>
                                                     </DialogFooter>
                                                 </DialogContent>
                                             </Dialog>

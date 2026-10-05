@@ -979,7 +979,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         worksheet.Range(2, 6, 2, 7).Style.DateFormat.Format = "yyyy-mm-dd";
         worksheet.Cell(2, 14).Style.DateFormat.Format = "yyyy-mm-dd";
-        worksheet.Range(2, 9, 2, 15).Style.NumberFormat.Format = "#,##0.00";
+        worksheet.Range(2, 9, 2, 13).Style.NumberFormat.Format = "#,##0.00";
+        worksheet.Cell(2, 15).Style.NumberFormat.Format = "#,##0.00";
         worksheet.SheetView.FreezeRows(1);
 
         var instructions = workbook.Worksheets.Add("Instructions");
@@ -998,7 +999,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         instructions.Cell(8, 1).Value = "Book Code";
         instructions.Cell(8, 2).Value = "Optional. Leave blank or use ALL_ACTIVE_BOOKS to import the same values to all active books; use IFRS, LOCAL_STATUTORY, or MANAGEMENT for book-specific rows.";
         instructions.Cell(9, 1).Value = "Opening values";
-        instructions.Cell(9, 2).Value = "Accumulated Depreciation and Net Book Value are optional, but if both are supplied NBV must equal acquisition cost less accumulated depreciation.";
+        instructions.Cell(9, 2).Value = "Accumulated Depreciation, Net Book Value, YTD Depreciation and Remaining Useful Life are historical opening values. If any is supplied, Opening As Of Date is required and must be a real Excel date (never blank or zero). If accumulated depreciation and NBV are both supplied, NBV must equal acquisition cost less accumulated depreciation.";
         instructions.Cell(10, 1).Value = "Repeated asset codes";
         instructions.Cell(10, 2).Value = "Allowed only for book-specific rows. Master data must match across rows for the same asset code.";
         instructions.ColumnsUsed().AdjustToContents();
@@ -1221,6 +1222,34 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         if (data.RemainingUsefulLifeMonths.HasValue && data.RemainingUsefulLifeMonths.Value <= 0)
             errors.Add(new BulkImportErrorDto { RowNumber = rowNumber, AssetCode = data.AssetCode, Field = "Remaining Useful Life", Error = "Must be greater than 0" });
 
+        var hasHistoricalOpeningValues =
+            data.AccumulatedDepreciation.HasValue ||
+            data.NetBookValue.HasValue ||
+            data.OpeningYtdDepreciation.HasValue ||
+            data.RemainingUsefulLifeMonths.HasValue;
+        if (hasHistoricalOpeningValues && !data.OpeningAsOfDate.HasValue)
+        {
+            errors.Add(new BulkImportErrorDto
+            {
+                RowNumber = rowNumber,
+                AssetCode = data.AssetCode,
+                Field = "Opening As Of Date",
+                Error = "Required when historical opening values are supplied; enter a real Excel date, not blank or zero"
+            });
+        }
+        else if (data.OpeningAsOfDate.HasValue &&
+                 data.PlacedInServiceDate.HasValue &&
+                 data.OpeningAsOfDate.Value.Date < data.PlacedInServiceDate.Value.Date)
+        {
+            errors.Add(new BulkImportErrorDto
+            {
+                RowNumber = rowNumber,
+                AssetCode = data.AssetCode,
+                Field = "Opening As Of Date",
+                Error = "Cannot be before the placed-in-service date"
+            });
+        }
+
         if (data.UsefulLifeMonths.HasValue && data.RemainingUsefulLifeMonths.HasValue && data.RemainingUsefulLifeMonths.Value > data.UsefulLifeMonths.Value)
             errors.Add(new BulkImportErrorDto { RowNumber = rowNumber, AssetCode = data.AssetCode, Field = "Remaining Useful Life", Error = "Cannot exceed useful life" });
 
@@ -1270,10 +1299,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         var cell = worksheet.Cell(row, column);
         if (cell.TryGetValue<DateTime>(out var dateValue))
-            return dateValue.Date;
+            return dateValue.Year < 1900 ? null : dateValue.Date;
 
         if (cell.TryGetValue<double>(out var serial))
         {
+            if (serial <= 0)
+                return null;
             try
             {
                 return DateTime.FromOADate(serial).Date;
@@ -1289,6 +1320,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out serial))
         {
+            if (serial <= 0)
+                return null;
             try
             {
                 return DateTime.FromOADate(serial).Date;

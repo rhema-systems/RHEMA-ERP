@@ -15,7 +15,8 @@ import {
     FileText,
     CheckCircle,
     Loader2,
-    RefreshCw
+    RefreshCw,
+    Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -51,6 +52,7 @@ import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { InvoiceDistribution } from '@/components/finance/ap/InvoiceDistribution';
 import { getFinancePostingErrorPresentation } from '@/lib/finance/posting-error';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -60,6 +62,7 @@ export default function VendorInvoiceDetailsPage() {
     const queryClient = useQueryClient();
     const { hasPermission, hasAnyPermission } = useAuth();
     const { currentTenant, currentTenantCode } = useTenant();
+    const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
     const { summary: workflowSummary, visibility: workflowVisibility, error: workflowError, refresh: refreshWorkflow } =
         useWorkflowSummary({ entityType: 'VendorInvoice', entityId: id });
 
@@ -91,6 +94,19 @@ export default function VendorInvoiceDetailsPage() {
                 description: error.message || 'Failed to void vendor invoice',
                 variant: 'destructive',
             });
+        },
+    });
+
+    const deleteInvoiceMutation = useMutation({
+        mutationFn: () => accountsPayableService.deleteInvoice(id),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            queryClient.removeQueries({ queryKey: ['vendor-invoice', id] });
+            toast({ title: 'Draft invoice deleted', description: 'The vendor invoice draft was removed.' });
+            router.push('/finance/ap/invoices');
+        },
+        onError: (error: any) => {
+            toast({ title: 'Unable to delete invoice', description: error.message || 'The draft invoice could not be deleted.', variant: 'destructive' });
         },
     });
 
@@ -244,6 +260,11 @@ export default function VendorInvoiceDetailsPage() {
                     {invoice.status === 'Draft' &&
                         hasAnyPermission(['Finance.AP.Invoices.Edit', 'Finance.AP.Invoices.Write']) &&
                         <Button variant="outline" size="sm" onClick={() => router.push(`/finance/ap/invoices/${invoice.id}/edit`)}>Edit invoice</Button>}
+                    {invoice.status === 'Draft' && hasAnyPermission(['Finance.AP.Invoices.Delete', 'Finance.AP.Invoices.Write']) && (
+                        <Button variant="destructive" size="sm" onClick={() => setShowDeleteConfirmation(true)}>
+                            <Trash2 className="mr-2 h-4 w-4" /> Delete draft
+                        </Button>
+                    )}
                     <InvoiceDistribution invoiceId={invoice.id} />
                     <Button variant="outline" size="sm" onClick={printApInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
@@ -464,6 +485,17 @@ export default function VendorInvoiceDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmationDialog
+                open={showDeleteConfirmation}
+                onOpenChange={setShowDeleteConfirmation}
+                title="Delete draft vendor invoice?"
+                description={`${invoice.invoiceNumber} will be permanently removed. Posted or submitted invoices cannot be deleted.`}
+                confirmText="Delete draft"
+                variant="destructive"
+                isLoading={deleteInvoiceMutation.isPending}
+                onConfirm={async () => { try { await deleteInvoiceMutation.mutateAsync(); } catch { return false; } }}
+                maxWidth="500px"
+            />
             </div>
             <ApInvoicePrintDocument
                 invoice={invoice}

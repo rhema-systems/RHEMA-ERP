@@ -3171,11 +3171,42 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException($"Liquidity account code '{normalizedCode}' already exists.");
         }
-        if (!await _context.Accounts.AnyAsync(
-                item => item.TenantId == tenantId && item.Id == glAccountId && item.IsActive,
-                cancellationToken))
+        var glAccount = await _context.Accounts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == glAccountId && !item.IsDeleted,
+                cancellationToken);
+        if (glAccount == null || !glAccount.IsActive)
         {
             throw new InvalidOperationException("Select an active GL control account belonging to this tenant.");
+        }
+
+        var glCurrency = NormalizeCurrency(glAccount.CurrencyCode);
+        if (!glCurrency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!glAccount.IsMultiCurrency)
+            {
+                throw new InvalidOperationException(
+                    $"GL account '{glAccount.AccountNumber}' only accepts {glCurrency} and cannot support a {normalizedCurrency} liquidity account.");
+            }
+
+            var now = DateTime.UtcNow;
+            var hasCurrencyLink = await _context.AccountCurrencyLinks
+                .AsNoTracking()
+                .AnyAsync(link =>
+                    link.TenantId == tenantId &&
+                    link.AccountId == glAccountId &&
+                    link.LinkedCurrencyCode == normalizedCurrency &&
+                    link.IsActive &&
+                    !link.IsDeleted &&
+                    link.EffectiveDate <= now &&
+                    (!link.EffectiveEndDate.HasValue || link.EffectiveEndDate.Value > now),
+                    cancellationToken);
+            if (!hasCurrencyLink)
+            {
+                throw new InvalidOperationException(
+                    $"GL account '{glAccount.AccountNumber}' does not have an active {normalizedCurrency} currency link.");
+            }
         }
         if (type == LiquidityAccountType.Bank && !bankAccountId.HasValue)
         {
@@ -3193,6 +3224,15 @@ public sealed class BankingSettlementService : IBankingSettlementService
             if (!bank.Currency.Equals(normalizedCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("The liquidity account and bank account currencies must match.");
+            }
+            if (!bank.GLAccountId.HasValue)
+            {
+                throw new InvalidOperationException("The linked bank account must have a GL account mapping.");
+            }
+            if (bank.GLAccountId.Value != glAccountId)
+            {
+                throw new InvalidOperationException(
+                    "The bank liquidity account must use the GL account mapped to the selected bank account master.");
             }
         }
     }

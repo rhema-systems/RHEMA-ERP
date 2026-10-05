@@ -427,6 +427,8 @@
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalAutomaticReversalTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalMultilineTests.cs" />
+    <Compile Include="Services\Finance\RecurringJournalDefinitionValidationTests.cs" />
+    <Compile Include="Services\Finance\RecurringJournalWorkflowReconciliationTests.cs" />
     <Compile Include="Services\Finance\FinanceReportAutomationTests.cs" />
     <!-- Keep FR-AR-009 in the default Finance regression suite. This project disables
          implicit compile items, so omitting the explicit entry would silently build the
@@ -434,6 +436,7 @@
     <Compile Include="Services\Finance\ArCollectionFollowUpServiceTests.cs" />
     <Compile Include="Services\Finance\SupplierDebitNoteFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
+    <Compile Include="Services\Finance\FinanceApprovalAuthorityContractTests.cs" />
     <Compile Include="Services\Finance\ExchangeRateScheduleLifecycleTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\HR\PayrollJournalPostingTransactionTests.cs" />

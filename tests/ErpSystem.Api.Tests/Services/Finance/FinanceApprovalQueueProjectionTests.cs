@@ -82,6 +82,47 @@ public sealed class FinanceApprovalQueueProjectionTests
 
     [Fact]
     [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Exchange_rate_should_appear_for_the_current_stage_role_and_link_to_rate_management()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var accountsOfficerId = Guid.NewGuid();
+        _ = AddApprovalGraph(
+            db,
+            tenantId,
+            WorkflowInstanceStatus.InProgress,
+            WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "ExchangeRate",
+            initiatorId: makerId,
+            approverRole: "Accounts Officer");
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var accountsOfficer = CreateQueueController(
+            db, tenantId, accountsOfficerId, new[] { "Accounts Officer" });
+        var response = await accountsOfficer.GetPending(CancellationToken.None);
+        var rows = ((OkObjectResult)response.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+
+        rows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(row =>
+            row.EntityType == "ExchangeRate" &&
+            row.DetailHref == "/finance/exchange-rates" &&
+            row.CanApprove && row.CanReject);
+
+        var laterStage = CreateQueueController(
+            db, tenantId, Guid.NewGuid(), new[] { "Finance Manager" });
+        var laterResponse = await laterStage.GetPending(CancellationToken.None);
+        var laterRows = ((OkObjectResult)laterResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        laterRows.Should().BeEmpty("later-stage approvers receive the request only after the current stage completes");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
     public async Task Capital_project_submitter_cannot_action_assigned_approval_but_independent_checker_can()
     {
         await using var db = CreateContext();
@@ -132,6 +173,71 @@ public sealed class FinanceApprovalQueueProjectionTests
             .Which;
         checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(
             row => row.EntityType == "CapitalProject" && row.CanApprove && row.CanReject);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Journal_batch_should_be_visible_only_to_checker_and_require_detail_page_decisions()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var approvalId = AddApprovalGraph(db, tenantId,
+            WorkflowInstanceStatus.InProgress, WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "JournalBatch", initiatorId: makerId,
+            approverRole: "Financial Controller");
+        var instance = db.WorkflowApprovals.Local.Single(item => item.Id == approvalId)
+            .StepInstance.WorkflowInstance;
+        db.JournalBatches.Add(new JournalBatch
+        {
+            Id = instance.EntityId,
+            TenantId = tenantId,
+            BatchNumber = "JB-2026-00001",
+            Description = "Independent batch review",
+            FiscalPeriodId = Guid.NewGuid(),
+            AccountingBookId = Guid.NewGuid(),
+            BookClassification = "BASE",
+            ControlCurrencyCode = "GHS",
+            ExpectedDebitTotal = 1_000m,
+            ApprovalRequired = true,
+            ApprovalStatus = JournalBatchApprovalStatus.PendingApproval,
+            PostingStatus = JournalBatchPostingStatus.NotReady,
+            ReversalStatus = JournalBatchReversalStatus.NotReversed,
+            WorkflowInstanceId = instance.Id,
+            CreatedById = makerId,
+            SubmittedByUserId = makerId,
+            SubmittedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var maker = CreateQueueController(db, tenantId, makerId);
+        var makerResponse = await maker.GetPending(CancellationToken.None);
+        var makerRows = ((OkObjectResult)makerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        makerRows.Should().BeEmpty();
+
+        var checker = CreateQueueController(db, tenantId, checkerId);
+        var checkerResponse = await checker.GetPending(CancellationToken.None);
+        var checkerRows = ((OkObjectResult)checkerResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        checkerRows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(
+            row => row.EntityType == "JournalBatch" &&
+                   row.DocumentType == "Journal Batch" &&
+                   row.DecisionOnDetailPage &&
+                   row.DetailHref == $"/finance/journal-batches/{instance.EntityId:D}" &&
+                   !row.CanApprove &&
+                   !row.CanReject);
+
+        var bypass = await checker.Approve(
+            approvalId,
+            new FinanceApprovalsController.FinanceApprovalActionRequest { Comments = "Bypass item decisions" },
+            CancellationToken.None);
+        bypass.Result.Should().BeOfType<BadRequestObjectResult>();
     }
 
     [Fact]
@@ -429,12 +535,15 @@ public sealed class FinanceApprovalQueueProjectionTests
             NullLogger<FinanceApprovalsController>.Instance);
 
     private static FinanceApprovalsController CreateQueueController(
-        ApplicationDbContext db, Guid tenantId, Guid userId)
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid userId,
+        IReadOnlyCollection<string>? roles = null)
     {
         var user = new Mock<ICurrentUserService>();
         user.SetupGet(value => value.UserId).Returns(userId.ToString());
         user.SetupGet(value => value.TenantId).Returns(tenantId);
-        user.SetupGet(value => value.Roles).Returns(new[] { "Financial Controller" });
+        user.SetupGet(value => value.Roles).Returns(roles ?? new[] { "Financial Controller" });
         var authorization = new Mock<IAuthorizationService>();
         authorization.Setup(value => value.AuthorizeAsync(
                 It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
@@ -448,6 +557,8 @@ public sealed class FinanceApprovalQueueProjectionTests
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookInitialization", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookApplicabilityPolicy", It.IsAny<Guid>(), userId))
+            .ReturnsAsync(true);
+        workflow.Setup(value => value.CanUserApproveAsync("JournalBatch", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         var display = new Mock<IWorkflowEntityDisplayService>();
         display.Setup(value => value.GetEntityDisplayInfoAsync(It.IsAny<string>(), It.IsAny<Guid>()))

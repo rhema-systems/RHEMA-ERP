@@ -278,16 +278,19 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 CreatedDate = now
             };
 
-            await _unitOfWork.Repository<ExchangeRate>().AddAsync(rate);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            return await ExecuteWorkflowSubmissionAtomicallyAsync(async () =>
+            {
+                await _unitOfWork.Repository<ExchangeRate>().AddAsync(rate);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Exchange rate {Base}/{Target} @ {Rate} created by {User}",
-                rate.BaseCurrencyCode, rate.TargetCurrencyCode, rate.Rate, UserName);
+                _logger.LogInformation("Exchange rate {Base}/{Target} @ {Rate} created by {User}",
+                    rate.BaseCurrencyCode, rate.TargetCurrencyCode, rate.Rate, UserName);
 
-            await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateCreated, rate, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
-            await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
+                await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateCreated, rate, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
+                await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
 
-            return MapToDto(rate);
+                return MapToDto(rate);
+            }, cancellationToken);
         }
 
         public async Task<ExchangeRateDto> UpdateExchangeRateAsync(Guid id, UpdateExchangeRateDto dto, CancellationToken cancellationToken = default)
@@ -341,30 +344,33 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
 
             var before = BuildRateAuditSnapshot(rate);
 
-            rate.Rate = dto.Rate;
-            rate.InverseRate = 1 / dto.Rate;
-            rate.EndDate = expiryDate;
-            rate.RateType = rateType;
-            rate.QuoteSide = quoteSide;
-            rate.RateSource = dto.RateSource ?? "Manual Entry";
-            rate.APIResponseMetadata = dto.SourceReference;
-            rate.IsActive = dto.IsActive;
-            rate.ApprovalStatus = approvalStatus;
-            rate.ApprovalDate = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? DateTime.UtcNow : null;
-            rate.ApprovedByUserId = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? CurrentUserId : null;
-            rate.ModifiedDate = DateTime.UtcNow;
-            rate.ModifiedByUserId = CurrentUserId;
+            return await ExecuteWorkflowSubmissionAtomicallyAsync(async () =>
+            {
+                rate.Rate = dto.Rate;
+                rate.InverseRate = 1 / dto.Rate;
+                rate.EndDate = expiryDate;
+                rate.RateType = rateType;
+                rate.QuoteSide = quoteSide;
+                rate.RateSource = dto.RateSource ?? "Manual Entry";
+                rate.APIResponseMetadata = dto.SourceReference;
+                rate.IsActive = dto.IsActive;
+                rate.ApprovalStatus = approvalStatus;
+                rate.ApprovalDate = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? DateTime.UtcNow : null;
+                rate.ApprovedByUserId = approvalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved ? CurrentUserId : null;
+                rate.ModifiedDate = DateTime.UtcNow;
+                rate.ModifiedByUserId = CurrentUserId;
 
-            await _unitOfWork.Repository<ExchangeRate>().UpdateAsync(rate);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _unitOfWork.Repository<ExchangeRate>().UpdateAsync(rate);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Exchange rate {Base}/{Target} updated by {User}",
-                rate.BaseCurrencyCode, rate.TargetCurrencyCode, UserName);
+                _logger.LogInformation("Exchange rate {Base}/{Target} updated by {User}",
+                    rate.BaseCurrencyCode, rate.TargetCurrencyCode, UserName);
 
-            await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateUpdated, rate, beforeValues: before, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
-            await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
+                await RecordExchangeRateAuditAsync(FinanceAuditEvents.ExchangeRateUpdated, rate, beforeValues: before, afterValues: BuildRateAuditSnapshot(rate), cancellationToken: cancellationToken);
+                await StartExchangeRateWorkflowIfRequiredAsync(rate, requestedApprovalStatus, cancellationToken);
 
-            return MapToDto(rate);
+                return MapToDto(rate);
+            }, cancellationToken);
         }
 
         public async Task DeleteExchangeRateAsync(Guid id, CancellationToken cancellationToken = default)
@@ -478,7 +484,7 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     $"No exchange rates were imported because validation failed: {string.Join("; ", errors)}");
             }
 
-            if (createdRates.Count > 0)
+            return await ExecuteWorkflowSubmissionAtomicallyAsync<IReadOnlyList<ExchangeRateDto>>(async () =>
             {
                 foreach (var rate in createdRates)
                 {
@@ -486,31 +492,16 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 }
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-                var workflowErrors = new List<string>();
                 foreach (var rate in createdRates)
                 {
-                    try
-                    {
-                        await StartExchangeRateWorkflowIfRequiredAsync(rate, RateApprovalStatus.Pending, cancellationToken);
-                    }
-                    catch (Exception ex)
-                    {
-                        workflowErrors.Add($"{rate.BaseCurrencyCode}/{rate.TargetCurrencyCode} {rate.EffectiveDate:yyyy-MM-dd}: {ex.Message}");
-                    }
+                    await StartExchangeRateWorkflowIfRequiredAsync(rate, RateApprovalStatus.Pending, cancellationToken);
                 }
 
                 _logger.LogInformation("{Count} exchange rates bulk uploaded by {User}",
                     createdRates.Count, UserName);
 
-                if (workflowErrors.Count > 0)
-                {
-                    throw new InvalidOperationException(
-                        "The rows were validated and retained as governed submissions, but one or more approval workflows could not start. " +
-                        $"Affected rows were marked Rejected: {string.Join("; ", workflowErrors)}");
-                }
-            }
-
-            return createdRates.Select(MapToDto).ToList();
+                return createdRates.Select(MapToDto).ToList();
+            }, cancellationToken);
         }
 
         private async Task ValidateCurrencyPairAsync(
@@ -959,6 +950,35 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     requestedApprovalStatus
                 },
                 cancellationToken: cancellationToken);
+        }
+
+        private async Task<T> ExecuteWorkflowSubmissionAtomicallyAsync<T>(
+            Func<Task<T>> operation,
+            CancellationToken cancellationToken)
+        {
+            if (_workflowService == null || _unitOfWork.HasActiveTransaction)
+            {
+                return await operation();
+            }
+
+            return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+            {
+                await _unitOfWork.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    var result = await operation();
+                    await _unitOfWork.CommitAsync(cancellationToken);
+                    return result;
+                }
+                catch
+                {
+                    if (_unitOfWork.HasActiveTransaction)
+                    {
+                        await _unitOfWork.RollbackAsync(CancellationToken.None);
+                    }
+                    throw;
+                }
+            }, cancellationToken);
         }
 
         private async Task RecordExchangeRateAuditAsync(

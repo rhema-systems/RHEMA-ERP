@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
+import { DeleteFixedAssetDraftButton } from '@/components/finance/fixed-assets/DeleteFixedAssetDraftButton';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import type { FixedAsset, FixedAssetStatus } from '@/types/fixed-assets';
 
@@ -241,16 +242,23 @@ export default function FixedAssetRegisterPage() {
                     <TableCell>{getStatusBadge(asset.status)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">{lifecycle.label}</TableCell>
                     <TableCell className="text-right">
-                      <Link href={`/finance/fixed-assets/register/${asset.id}/edit`}>
-                        <Button variant="outline" size="sm" aria-label={`${lifecycle.action}: ${asset.name}`}>
-                          {asset.status === 'Active' || asset.status === 'Disposed' || asset.status === 'WrittenOff' ? (
-                            <Edit className="mr-2 h-4 w-4" />
-                          ) : (
-                            <ArrowRight className="mr-2 h-4 w-4" />
-                          )}
-                          {lifecycle.action}
-                        </Button>
-                      </Link>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/finance/fixed-assets/register/${asset.id}/edit`}>
+                          <Button variant="outline" size="sm" aria-label={`${lifecycle.action}: ${asset.name}`}>
+                            {asset.status === 'Active' || asset.status === 'Disposed' || asset.status === 'WrittenOff' ? (
+                              <Edit className="mr-2 h-4 w-4" />
+                            ) : (
+                              <ArrowRight className="mr-2 h-4 w-4" />
+                            )}
+                            {lifecycle.action}
+                          </Button>
+                        </Link>
+                        <DeleteFixedAssetDraftButton
+                          asset={asset}
+                          compact
+                          onDeleted={() => setAssets(current => current.filter(candidate => candidate.id !== asset.id))}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                   );
