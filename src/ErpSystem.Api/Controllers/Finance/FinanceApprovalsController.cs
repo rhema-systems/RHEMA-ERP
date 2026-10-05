@@ -72,6 +72,7 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
+        Normalize("BankDepositBatch"),
         // Exchange-rate changes already use the Finance workflow and outcome handlers below.
         // Keep them in this allowlist so assigned reviewers can actually see and action them.
         Normalize("ExchangeRate"),
@@ -102,6 +103,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IVendorPaymentService? _vendorPaymentService;
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly ILeaseAccountingService? _leaseAccountingService;
+    private readonly IBankingSettlementService? _bankingSettlementService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -119,7 +121,8 @@ public class FinanceApprovalsController : ControllerBase
         IProcurementInvoicePaymentSodService? invoicePaymentSod = null,
         IVendorPaymentService? vendorPaymentService = null,
         IFinanceBudgetControlService? budgetControl = null,
-        ILeaseAccountingService? leaseAccountingService = null)
+        ILeaseAccountingService? leaseAccountingService = null,
+        IBankingSettlementService? bankingSettlementService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -137,6 +140,7 @@ public class FinanceApprovalsController : ControllerBase
         _vendorPaymentService = vendorPaymentService;
         _budgetControl = budgetControl;
         _leaseAccountingService = leaseAccountingService;
+        _bankingSettlementService = bankingSettlementService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -169,6 +173,8 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.WorkflowApprove)).Succeeded;
         var canApproveApPayments = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
+        var canApproveBankDeposits = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveBankDeposits)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
         var canApproveBookTransitions = (await _authorizationService
@@ -503,22 +509,28 @@ public class FinanceApprovalsController : ControllerBase
                     }
                 }
             }
+            var isBankDepositApproval = Normalize(entityType) == Normalize("BankDepositBatch");
+            var bankDepositPermissionBlocked = isBankDepositApproval && !canApproveBankDeposits;
+            var bankDepositPermissionReason = bankDepositPermissionBlocked
+                ? $"Your roles do not include {FinancePermissions.ApproveBankDeposits}."
+                : null;
             var approveDisabledReason = GetActionDisabledReason(
                 "approve",
                 FinancePermissions.WorkflowApprove,
                 canApproveByPermission,
-                submitterApprovalBlocked || paymentSodBlocked,
-                paymentSodReason);
+                submitterApprovalBlocked || paymentSodBlocked || bankDepositPermissionBlocked,
+                paymentSodReason ?? bankDepositPermissionReason);
             var rejectDisabledReason = GetActionDisabledReason(
                 "reject",
                 FinancePermissions.WorkflowReject,
                 canRejectByPermission,
-                submitterApprovalBlocked);
+                submitterApprovalBlocked || bankDepositPermissionBlocked,
+                bankDepositPermissionReason);
 
             results.Add(await MapApprovalAsync(
                 approval,
-                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked,
-                canRejectByPermission && !submitterApprovalBlocked,
+                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked && !bankDepositPermissionBlocked,
+                canRejectByPermission && !submitterApprovalBlocked && !bankDepositPermissionBlocked,
                 approveDisabledReason,
                 rejectDisabledReason,
                 cancellationToken));
@@ -627,6 +639,15 @@ public class FinanceApprovalsController : ControllerBase
                 detail: $"Your roles do not include {FinancePermissions.ApproveApPayments}.");
         }
 
+        if (Normalize(entityType) == Normalize("BankDepositBatch") &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveBankDeposits)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Bank deposit approval not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveBankDeposits}.");
+        }
+
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
             Normalize(entityType) == Normalize("VendorPayment"))
         {
@@ -717,6 +738,39 @@ public class FinanceApprovalsController : ControllerBase
             {
                 return UnprocessableEntity(new { code = exception.Code, message = exception.Message });
             }
+        }
+
+        // Bank-deposit approval owns dimension revalidation, workflow progression, approval
+        // evidence, and optional posting. Route workbench decisions through that domain service;
+        // a generic workflow transition would complete the task without moving the deposit.
+        if (Normalize(entityType) == Normalize("BankDepositBatch"))
+        {
+            if (_bankingSettlementService == null)
+                return Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Bank deposit approval unavailable",
+                    detail: "The authoritative banking settlement service is unavailable.");
+
+            var deposit = string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase)
+                ? await _bankingSettlementService.ApproveDepositAsync(instance.EntityId, comments, cancellationToken)
+                : await _bankingSettlementService.RejectDepositAsync(instance.EntityId, comments, cancellationToken);
+            return Ok(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = deposit.Status is BankDepositStatus.Approved or BankDepositStatus.Posted
+                    ? WorkflowInstanceStatus.Completed
+                    : deposit.Status == BankDepositStatus.Rejected
+                        ? WorkflowInstanceStatus.Failed
+                        : WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = deposit.WorkflowInstanceId,
+                Message = deposit.Status switch
+                {
+                    BankDepositStatus.Posted => "Bank deposit approved and posted.",
+                    BankDepositStatus.Approved => "Bank deposit approved.",
+                    BankDepositStatus.Rejected => "Bank deposit rejected.",
+                    _ => "Bank deposit approval step recorded."
+                }
+            });
         }
 
         Guid? invoicePaymentSodControlEventId = null;
@@ -1336,6 +1390,22 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.Set<BankReconciliation>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new($"REC-{item.ReconciliationDate:yyyyMMdd}", null, item.Status.ToString(), item.ReconciliationDate, item.StatementBalance, null);
+        }
+
+        if (key == Normalize("BankDepositBatch"))
+        {
+            var item = await _db.BankDepositBatches.AsNoTracking()
+                .Include(x => x.BankAccount)
+                .FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted, cancellationToken);
+            return item == null
+                ? FinanceApprovalFacts.Empty
+                : new(
+                    item.DepositNumber,
+                    $"{item.BankAccount.AccountName} - {item.DepositReference}",
+                    item.Status.ToString(),
+                    item.SubmittedAt ?? item.DepositDate,
+                    item.NetAmount,
+                    item.Currency);
         }
 
         if (key == Normalize("ExchangeRate"))
@@ -3146,6 +3216,7 @@ public class FinanceApprovalsController : ControllerBase
                 "/finance/recurring-journals",
             "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
             "EXCHANGERATE" => "/finance/exchange-rates",
+            "BANKDEPOSITBATCH" => $"/finance/cash/deposits/{entityId:D}",
             _ => "/finance/approvals"
         };
     }
@@ -3164,6 +3235,7 @@ public class FinanceApprovalsController : ControllerBase
             or "ASSETDEPRECIATIONSCHEDULE"
             or "ASSETVALUATION"
             or "CAPITALPROJECT"
+            or "BANKDEPOSITBATCH"
             or "RECURRINGJOURNALTEMPLATE"
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";
@@ -3248,7 +3320,7 @@ public class FinanceApprovalsController : ControllerBase
             return "Unit Accounting";
         }
 
-        if (new[] { "CASHTRANSACTION", "BANKRECONCILIATION", "CHEQUE" }.Contains(key))
+        if (new[] { "CASHTRANSACTION", "BANKRECONCILIATION", "BANKDEPOSITBATCH", "CHEQUE" }.Contains(key))
         {
             return "Cash Management";
         }
@@ -3295,6 +3367,7 @@ public class FinanceApprovalsController : ControllerBase
             "ALLOCATIONRULE" => "Allocation",
             "CASHTRANSACTION" => "Bank Transaction",
             "BANKRECONCILIATION" => "Bank Reconciliation",
+            "BANKDEPOSITBATCH" => "Bank Deposit",
             "CHEQUE" => "Cheque",
             "EXCHANGERATE" => "Exchange Rate",
             "JOURNALBATCH" => "Journal Batch",

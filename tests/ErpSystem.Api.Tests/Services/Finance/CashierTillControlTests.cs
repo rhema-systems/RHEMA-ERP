@@ -78,6 +78,13 @@ public sealed class CashierTillControlTests
         submitted.VarianceAmount.Should().Be(-10m);
         submitted.CustodyEntryCount.Should().Be(2);
 
+        // The legacy tenant flag must never turn a physical-cash maker into their own checker.
+        // Preserve the setting for compatibility, but prove the custody boundary is unconditional.
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.RequireIndependentCashTillClosure = false;
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
         var selfApproval = () => cashier.ApproveClosureAsync(opened.Id, new ReviewCashierTillSessionDto
         {
             RowVersion = submitted.RowVersion,

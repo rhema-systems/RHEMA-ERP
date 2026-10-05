@@ -21,6 +21,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { isIndependentTillReviewer } from '@/lib/finance/cashier-till-access';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { CashierTillSession, LiquidityAccount } from '@/types/cash-management';
 
@@ -35,7 +36,7 @@ const errorMessage = (error: unknown, fallback: string) =>
     error instanceof Error ? error.message : fallback;
 
 export default function CashierTillSessionsPage() {
-    const { hasPermission } = useAuth();
+    const { user, hasPermission } = useAuth();
     const canOperate = hasPermission('Finance.CashTills.Operate');
     const canReview = hasPermission('Finance.CashTills.Closures.Review');
     const canReopen = hasPermission('Finance.CashTills.Sessions.Reopen');
@@ -88,6 +89,12 @@ export default function CashierTillSessionsPage() {
     const openExpected = sessions
         .filter(item => item.status === 'Open')
         .reduce((sum, item) => sum + item.expectedClosingAmount, 0);
+    const isOwnSelectedSession = Boolean(
+        selected && user?.id && selected.cashierUserId.toLowerCase() === user.id.toLowerCase(),
+    );
+    const canReviewSelected = Boolean(
+        selected && canReview && isIndependentTillReviewer(user?.id, selected.cashierUserId),
+    );
 
     const run = async (operation: () => Promise<CashierTillSession>, success: string) => {
         setBusy(true);
@@ -267,7 +274,7 @@ export default function CashierTillSessionsPage() {
                                     <div className="space-y-4 rounded-lg border p-4">
                                         <div className="grid gap-3 sm:grid-cols-3"><div><div className="text-xs text-muted-foreground">Counted</div><div className="font-semibold">{money(selected.countedClosingAmount, selected.currency)}</div></div><div><div className="text-xs text-muted-foreground">Variance</div><div className="font-semibold">{money(selected.varianceAmount, selected.currency)}</div></div><div><div className="text-xs text-muted-foreground">Threshold</div><div className="font-semibold">{money(selected.varianceApprovalThresholdAmount, selected.currency)}</div></div></div>
                                         {selected.varianceReason && <div className="rounded bg-muted p-3 text-sm"><strong>Cashier explanation:</strong> {selected.varianceReason}</div>}
-                                        {canReview ? <><div className="space-y-2"><Label>Reviewer comments</Label><Textarea value={reviewComments} onChange={event => setReviewComments(event.target.value)} placeholder="Record evidence checked and disposition." /></div><div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void run(() => cashManagementDataService.approveCashierTillClosure(selected.id, reviewComments, selected.rowVersion), 'Till closure approved.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve closure</Button><Button variant="outline" disabled={busy || !reviewComments.trim()} onClick={() => void run(() => cashManagementDataService.returnCashierTillForRecount(selected.id, reviewComments, selected.rowVersion), 'Till returned for recount.')}><RotateCcw className="mr-2 h-4 w-4" />Return for recount</Button></div></> : <p className="text-sm text-muted-foreground">A user with till-closure review permission must complete this session.</p>}
+                                        {canReviewSelected ? <><div className="space-y-2"><Label>Reviewer comments</Label><Textarea value={reviewComments} onChange={event => setReviewComments(event.target.value)} placeholder="Record evidence checked and disposition." /></div><div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void run(() => cashManagementDataService.approveCashierTillClosure(selected.id, reviewComments, selected.rowVersion), 'Till closure approved.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve closure</Button><Button variant="outline" disabled={busy || !reviewComments.trim()} onClick={() => void run(() => cashManagementDataService.returnCashierTillForRecount(selected.id, reviewComments, selected.rowVersion), 'Till returned for recount.')}><RotateCcw className="mr-2 h-4 w-4" />Return for recount</Button></div></> : isOwnSelectedSession ? <p className="text-sm text-muted-foreground">Awaiting a different authorized checker. You cannot review your own till closure.</p> : <p className="text-sm text-muted-foreground">A different user with till-closure review permission must complete this session.</p>}
                                     </div>
                                 )}
 

@@ -10,6 +10,7 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -110,6 +111,72 @@ public sealed partial class ArReceiptPostingMigrationTests
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArReceiptPosted && a.TenantId == tenantId)).Should().Be(1);
         (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ArAccount.Id)).ClosingBalance.Should().Be(-100m);
         (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.BankGlAccount.Id)).ClosingBalance.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARReceiptPosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task AllocatedArReceipt_ShouldUseSettlementEvidenceWithoutEmptySourceLineRegistration()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedArReceiptAsync(db, tenantId);
+        var sourceDimensions = new Mock<IFinanceSourceDimensionService>();
+        sourceDimensions.Setup(service => service.GetPostingDimensionsAsync(
+                It.IsAny<FinancePostingProducerContext>(),
+                fixture.Payment.Id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>());
+        var paymentDimensions = new Mock<IFinancePaymentDimensionAdapter>();
+        paymentDimensions.Setup(service => service.SynchronizeCustomerPaymentAsync(
+                fixture.Payment.Id,
+                It.IsAny<FinancePostingProducerContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinanceSettlementDimensionComponentDto>());
+        paymentDimensions.Setup(service => service.ValidateAndFreezeCustomerPaymentAsync(
+                fixture.Payment.Id,
+                It.IsAny<FinancePostingProducerContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinanceSettlementDimensionComponentDto>());
+        paymentDimensions.Setup(service => service.GetCustomerPaymentAsync(
+                fixture.Payment.Id,
+                It.IsAny<FinancePostingProducerContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinanceSettlementDimensionComponentDto>());
+        var (service, _) = CreateService(
+            db,
+            tenantId,
+            sourceDimensions: sourceDimensions.Object,
+            paymentDimensions: paymentDimensions.Object);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+
+        result.JournalEntryId.Should().NotBeNull();
+        sourceDimensions.Verify(service => service.SynchronizeDraftAsync(
+            It.IsAny<FinancePostingProducerContext>(),
+            fixture.Payment.Id,
+            It.IsAny<DateTime>(),
+            It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(),
+            It.IsAny<FinanceSourceDocumentDimensionInputDto?>(),
+            It.IsAny<bool>(),
+            It.IsAny<string?>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        sourceDimensions.Verify(service => service.ValidateAndFreezeAsync(
+            It.IsAny<FinancePostingProducerContext>(),
+            fixture.Payment.Id,
+            It.IsAny<DateTime>(),
+            It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(),
+            It.IsAny<bool>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+        paymentDimensions.Verify(service => service.SynchronizeCustomerPaymentAsync(
+            fixture.Payment.Id,
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        paymentDimensions.Verify(service => service.ValidateAndFreezeCustomerPaymentAsync(
+            fixture.Payment.Id,
+            It.IsAny<FinancePostingProducerContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -1053,7 +1120,9 @@ public sealed partial class ArReceiptPostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         IFxAccountingService? fxAccountingService = null,
-        IExchangeRateService? exchangeRateService = null)
+        IExchangeRateService? exchangeRateService = null,
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        IFinancePaymentDimensionAdapter? paymentDimensions = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -1097,6 +1166,8 @@ public sealed partial class ArReceiptPostingMigrationTests
             auditService,
             fxAccountingService: fxAccountingService,
             exchangeRateService: exchangeRateService,
+            sourceDimensions: sourceDimensions,
+            paymentDimensions: paymentDimensions,
             sourceBookAuthority: new FinanceSourceBookAuthorityService(db, currentUser.Object));
 
         return (service, subledgerPostingMock);

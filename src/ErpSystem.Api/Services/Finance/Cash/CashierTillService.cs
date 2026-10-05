@@ -289,8 +289,10 @@ public sealed class CashierTillService : ICashierTillService
             throw new InvalidOperationException("Only a submitted till count can be approved.");
         }
         SetRowVersion(session, dto.RowVersion);
-        var settings = await GetSettingsAsync(cancellationToken);
-        if (settings.RequireIndependentCashTillClosure && session.CashierUserId == UserId)
+        // A till closure is always a maker-checker decision. The historical tenant switch cannot
+        // weaken this custody boundary: permission to review is not authority to approve cash held
+        // and counted by the same user.
+        if (session.CashierUserId == UserId)
         {
             throw new UnauthorizedAccessException("The cashier cannot approve their own till closure.");
         }

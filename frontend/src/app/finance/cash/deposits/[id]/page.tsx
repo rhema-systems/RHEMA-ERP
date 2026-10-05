@@ -20,13 +20,14 @@ import {
     toFinancePostingDimensionValues,
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
+import { isIndependentBankDepositReviewer } from '@/lib/finance/bank-deposit-access';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
 import { useAuth } from '@/hooks/use-auth';
 
 export default function BankDepositDetailPage() {
     const params = useParams<{ id: string }>();
-    const { hasPermission } = useAuth();
+    const { user, hasPermission } = useAuth();
     const [deposit, setDeposit] = useState<BankDeposit | null>(null);
     const [loading, setLoading] = useState(true);
     const [working, setWorking] = useState(false);
@@ -164,6 +165,11 @@ export default function BankDepositDetailPage() {
     const canApproveDeposit = hasPermission('Finance.Banking.Deposits.Approve');
     const canPostDeposit = hasPermission('Finance.Workflow.PostAfterApproval');
     const canConfirmDeposit = hasPermission('Finance.Banking.Deposits.Confirm');
+    const isOwnSubmission = Boolean(
+        user?.id && deposit.submittedById && user.id.toLowerCase() === deposit.submittedById.toLowerCase(),
+    );
+    const canReviewDeposit = canApproveDeposit &&
+        isIndependentBankDepositReviewer(user?.id, deposit.submittedById);
 
     return (
         <div className="space-y-6 p-6">
@@ -182,12 +188,17 @@ export default function BankDepositDetailPage() {
                             }, 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>}
                         </>
                     )}
-                    {submitted && canApproveDeposit && (
+                    {submitted && canReviewDeposit && (
                         <>
                             <Button disabled={working} onClick={() => void run(() => cashManagementDataService.approveBankDeposit(deposit.id), 'Deposit approved and posted.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button>
                             <Button variant="outline" disabled={working} onClick={() => { const comments = window.prompt('What needs to be corrected?'); if (comments) void run(() => cashManagementDataService.returnBankDeposit(deposit.id, comments), 'Deposit returned for changes.'); }}><RotateCcw className="mr-2 h-4 w-4" />Return</Button>
                             <Button variant="destructive" disabled={working} onClick={() => { const reason = window.prompt('Rejection reason'); if (reason) void run(() => cashManagementDataService.rejectBankDeposit(deposit.id, reason), 'Deposit rejected.'); }}><XCircle className="mr-2 h-4 w-4" />Reject</Button>
                         </>
+                    )}
+                    {submitted && isOwnSubmission && (
+                        <span className="self-center text-sm text-muted-foreground">
+                            Awaiting the assigned Chief Accountant. You cannot review your own deposit.
+                        </span>
                     )}
                     {deposit.status === 'Approved' && canPostDeposit && (
                         <Button disabled={working} onClick={() => void run(() => cashManagementDataService.postBankDeposit(deposit.id), 'Deposit posted to the bank control account.')}><Landmark className="mr-2 h-4 w-4" />Post deposit</Button>
