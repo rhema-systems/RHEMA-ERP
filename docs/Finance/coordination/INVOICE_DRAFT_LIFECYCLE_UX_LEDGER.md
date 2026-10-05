@@ -46,4 +46,13 @@ pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 
 ## Integration outcome
 
-Ready for cycle consolidation.
+Integrated in PR #352; follow-up UAT regression correction recorded below.
+
+## 2026-10-05 UAT regression correction
+
+- Commit `f34a61617` normalizes nullable optional AP draft fields before Zod validation and reports the exact failing field path/message instead of a generic hidden-validation toast.
+- AP create/update now evicts the inactive paginated invoice-list cache before redirecting, preventing a stale list from painting after navigation.
+- Invoice exchange-rate resolution now uses the API's transaction-to-functional `inverseRate`, matching server validation and posting semantics.
+- Foreign-currency AR and AP forms retain the governed read-only approved rate and now provide a direct **Manage exchange rates** link.
+- Null tax-treatment values no longer coerce to numeric zero during AP edit hydration.
+- Verification: 13 AP invoice form tests passed; 21 exchange-rate/tax tests passed; all changed frontend files passed ESLint.

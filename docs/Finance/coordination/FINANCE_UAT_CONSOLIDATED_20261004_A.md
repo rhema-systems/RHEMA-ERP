@@ -3,12 +3,12 @@ integration_cycle: FIN-UAT-2026-10-04-A
 integration_status: integrated
 integration_decision: include
 candidate_branch: codex/finance-uat-remediation-20261004
-candidate_head: 641cfcf4d
+candidate_head: f34a61617
 base_commit: 407e78bc36897c99e5493a3aef55fa8c08fe19cc
 target_ref: origin/master
 migration_status: none
-verification_status: focused-passed-browser-uat-pending
-integration_commit: 641cfcf4d
+verification_status: regression-focused-passed-browser-uat-pending
+integration_commit: f34a61617
 pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 ---
 
@@ -24,7 +24,7 @@ Integrate the independently implemented Finance UAT remediations into one review
 - Integration worktree: `.w/fin-uat-remediation-20261004`
 - Integration branch: `codex/finance-uat-remediation-20261004`
 - Exact integration base: `407e78bc36897c99e5493a3aef55fa8c08fe19cc` (`origin/master` at integration start)
-- Product-code integration head: `641cfcf4d`
+- Product-code integration head: `f34a61617`
 - No database migration was added or applied.
 - No deployment or merge was performed.
 
@@ -53,7 +53,18 @@ The liquidity-account candidate overlapped a Finance banking test file changed o
 - Frontend: full TypeScript check still reports 90 repository-baseline diagnostics; zero diagnostics are in files changed by this cycle.
 - Backend: 153 focused API/service/seeding tests passed.
 - Focused post-correction tax readiness test: 3 tests passed; changed component passed ESLint.
+- Post-UAT regression correction `f34a61617`: 34 focused frontend tests passed across AP invoice entry, exchange-rate entry/resolution, and tax normalization; all changed frontend files passed ESLint.
+- The new critical ExchangeRate workflow provisioning regression passed in an isolated output directory while the UAT API kept its normal build output locked.
+- Full frontend type-check remains a repository-baseline failure and exhausted the Node heap after reporting unrelated diagnostics; no remaining diagnostic referenced a file changed by the regression correction.
 - `git diff --check origin/master...HEAD` passed.
+
+## Candidate audit after UAT regression
+
+- Re-ran `scripts/finance/Get-FinanceUatConsolidationCandidates.ps1` for `FIN-UAT-2026-10-04-A`.
+- Every isolated Finance UAT candidate branch has zero patch-unique commits relative to the PR branch.
+- Journal Batch commits `72665ddd6` and `2b143c117` are patch-equivalent to integrated commits `04e15673d` and `fcf8c0061`.
+- The liquidity candidate is represented by conflict-adjusted commits `37e041df6` and `d48446fdb`; its original branch tip is intentionally not merged wholesale because that branch also contains older unrelated work.
+- Dirty primary and historical worktrees remain outside this cycle and were not swept into the PR.
 
 ## Remaining verification
 

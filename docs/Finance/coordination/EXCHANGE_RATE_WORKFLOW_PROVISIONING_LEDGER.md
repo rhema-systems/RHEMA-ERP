@@ -62,4 +62,12 @@ The user authorized implementation and local commits. Push, PR creation, deploym
 
 ## Integration outcome
 
-Pending consolidated integration.
+Integrated in PR #352; follow-up UAT regression correction recorded below.
+
+## 2026-10-05 UAT regression correction
+
+- UAT proved the first integration still depended on the optional broad workflow-seeding startup flag, so an existing tenant could continue to receive `Workflow entity type 'ExchangeRate' is not configured`.
+- Commit `f34a61617` adds an idempotent critical Finance startup provisioner for ExchangeRate that runs after successful database initialization independently of the optional broad workflow catalogue flag.
+- Existing deliberate tenant workflow configuration remains preserved; no auto-approval path was introduced.
+- Focused regression `SeedCriticalFinanceWorkflowDefinitionsAsync_ShouldProvisionExchangeRateWithoutOptionalWorkflowFlag` passed, 1/1, from an isolated build output because the local UAT API process held the normal API DLL open.
+- API restart is required once to execute the new startup provisioner for the local UAT tenant.
