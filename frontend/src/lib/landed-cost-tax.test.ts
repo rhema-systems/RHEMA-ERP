@@ -14,5 +14,6 @@ describe('landed-cost draft tax review', () => {
     expect(landedCostTaxReviewPending([{ taxTreatment: 'Standard' }])).toBe(false);
     expect(invoiceTaxTreatment('PendingReview')).toBe(5);
     expect(invoiceTaxTreatment(undefined)).toBeUndefined();
+    expect(invoiceTaxTreatment(null)).toBeUndefined();
   });
 });

@@ -2,8 +2,8 @@ const treatments: Record<string, number> = {
   Standard: 1, Exempt: 2, ZeroRated: 3, OutOfScope: 4, NonTaxable: 4, PendingReview: 5,
 };
 
-export function invoiceTaxTreatment(value?: string | number): number | undefined {
-  if (value === undefined) return undefined;
+export function invoiceTaxTreatment(value?: string | number | null): number | undefined {
+  if (value === undefined || value === null || value === '') return undefined;
   return typeof value === 'number' ? value : treatments[value] ?? Number(value);
 }
 

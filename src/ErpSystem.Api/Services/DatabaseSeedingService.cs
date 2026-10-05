@@ -36,6 +36,7 @@ namespace ErpSystem.Web.Services
         Task SeedWorkflowDefinitionsAsync();
         /// <summary>HR's own approval workflows (HR and leave) and no other module's. Idempotent.</summary>
         Task SeedHrWorkflowDefinitionsAsync();
+        Task SeedCriticalFinanceWorkflowDefinitionsAsync();
         Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedEstateAcquisitionLandBankParcelsAsync();
         Task SeedTestUsersAsync();
@@ -477,6 +478,28 @@ namespace ErpSystem.Web.Services
             await EnsureFinancePermissionAssignmentsAsync();
             _logger.LogInformation("Ensuring finance workflows are seeded...");
             await EnsureFinanceWorkflowsSeededAsync();
+        }
+
+        public async Task SeedCriticalFinanceWorkflowDefinitionsAsync()
+        {
+            try
+            {
+                var exchangeRateSpec = GetFinanceWorkflowSeedSpecs()
+                    .Single(spec => spec.EntityCode == "ExchangeRate");
+                var tenants = await _context.Tenants
+                    .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureFinanceWorkflowSpecSeededAsync(tenant.Id, exchangeRateSpec);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed critical finance workflows");
+                throw;
+            }
         }
 
         /// <summary>

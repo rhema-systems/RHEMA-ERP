@@ -100,6 +100,50 @@ public partial class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public async Task SeedCriticalFinanceWorkflowDefinitionsAsync_ShouldProvisionExchangeRateWithoutOptionalWorkflowFlag()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Critical Finance Workflow Tenant",
+            Code = "CFW",
+            Status = TenantStatus.Active,
+            ContactEmail = "critical-finance-workflow@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+
+        await service.SeedCriticalFinanceWorkflowDefinitionsAsync();
+
+        var definition = await context.WorkflowDefinitions
+            .Include(item => item.EntityType)
+            .Include(item => item.Steps)
+            .SingleAsync(item => item.TenantId == tenant.Id && item.EntityType.Code == "ExchangeRate");
+        definition.IsActive.Should().BeTrue();
+        definition.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Published);
+        definition.Steps
+            .Where(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted)
+            .OrderBy(step => step.Order)
+            .Select(step => step.Name)
+            .Should().Equal(
+                "Accounts Officer Review",
+                "Finance Manager Approval",
+                "Financial Controller Final Approval");
+        (await context.WorkflowDefinitions.CountAsync(item => item.TenantId == tenant.Id))
+            .Should().Be(1);
+    }
+
+    [Fact]
     public async Task EnsureFinanceWorkflowsSeededAsync_ShouldCreateMissingAndPreserveExistingPaymentDefinitions()
     {
         await using var context = CreateContext();

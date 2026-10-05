@@ -180,7 +180,7 @@ export default function ExchangeRatesPage() {
         setFormData({
             baseCurrencyCode: rate.baseCurrencyCode,
             targetCurrencyCode: rate.targetCurrencyCode,
-            rate: rate.inverseRate.toString(),
+            rate: (rate.inverseRate ?? (rate.rate > 0 ? 1 / rate.rate : 0)).toString(),
             effectiveDate: rate.effectiveDate.split('T')[0],
             rateType: rate.rateType,
             quoteSide: rate.quoteSide || 'Mid',
@@ -765,7 +765,9 @@ export default function ExchangeRatesPage() {
                                 {!isLoadingRates && !rateLoadError && filteredRates.map((rate) => (
                                     <tr key={rate.id} className="border-b hover:bg-muted/50">
                                         <td className="p-4 font-mono font-semibold">{rate.targetCurrencyCode}/{rate.baseCurrencyCode}</td>
-                                        <td className="p-4 text-right font-mono">{rate.inverseRate.toFixed(4)}</td>
+                                        <td className="p-4 text-right font-mono">
+                                            {(rate.inverseRate ?? (rate.rate > 0 ? 1 / rate.rate : 0)).toFixed(4)}
+                                        </td>
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
                                         <td className="p-4">{rate.expiryDate ? formatDate(rate.expiryDate) : 'Open-ended'}</td>
                                         <td className="p-4">

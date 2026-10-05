@@ -1042,6 +1042,24 @@ if (!skipStartupInitialization)
 
     if (databaseInitializationSucceeded)
     {
+        app.Logger.LogInformation("Starting critical Finance workflow provisioning...");
+        try
+        {
+            await SeedCriticalFinanceWorkflowDefinitionsAsync(app);
+            app.Logger.LogInformation("Critical Finance workflow provisioning completed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Critical Finance workflow provisioning failed");
+            if (failFastOnDatabaseInitializationError)
+            {
+                throw;
+            }
+        }
+    }
+
+    if (databaseInitializationSucceeded)
+    {
         app.Logger.LogInformation("Starting baseline payment-term seeding...");
         try
         {
@@ -1233,6 +1251,13 @@ async Task SeedWorkflowDefinitionsAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
     await seedingService.SeedWorkflowDefinitionsAsync();
+}
+
+async Task SeedCriticalFinanceWorkflowDefinitionsAsync(WebApplication app)
+{
+    using var scope = app.Services.CreateScope();
+    var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+    await seedingService.SeedCriticalFinanceWorkflowDefinitionsAsync();
 }
 
 async Task SeedPaymentTermBaselineAsync(WebApplication app)

@@ -5,12 +5,13 @@ import { VendorInvoiceFormPage } from '@/components/finance/ap/VendorInvoiceForm
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 
-const { queryData, toast, push, refresh, invalidateQueries, dimensionPanel } = vi.hoisted(() => ({
+const { queryData, toast, push, refresh, invalidateQueries, removeQueries, dimensionPanel } = vi.hoisted(() => ({
   queryData: {} as Record<string, unknown>,
   toast: vi.fn(),
   push: vi.fn(),
   refresh: vi.fn(),
   invalidateQueries: vi.fn().mockResolvedValue(undefined),
+  removeQueries: vi.fn(),
   dimensionPanel: vi.fn(),
 }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, refresh, back: vi.fn() }), useSearchParams: () => new URLSearchParams() }));
@@ -18,7 +19,7 @@ vi.mock('@/contexts/TenantContext', () => ({ useTenant: () => ({ currentTenantCo
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('@tanstack/react-query', () => ({
   useQuery: ({ queryKey, enabled }: { queryKey: string[]; enabled?: boolean }) => ({ data: enabled === false ? undefined : queryData[queryKey[0]], isLoading: false, isFetching: false, error: null }),
-  useQueryClient: () => ({ invalidateQueries }),
+  useQueryClient: () => ({ invalidateQueries, removeQueries }),
 }));
 vi.mock('@/components/finance/dimensions/source-document-dimension-panel', () => ({ SourceDocumentDimensionPanel: (props: unknown) => { dimensionPanel(props); return <div />; } }));
 vi.mock('@/services/financeCommonService', () => ({ paymentTermService: { getByApplicableTo: vi.fn().mockResolvedValue([]) } }));
@@ -95,6 +96,40 @@ describe('new AP invoice visible supplier defaults', () => {
     expect(request.financeDimensions?.lines).toEqual([]);
   });
 
+  it('normalizes nullable optional fields when editing an existing draft', async () => {
+    queryData['vendor-invoice'] = {
+      id: 'invoice', invoiceNumber: 'AP-NULL-001', businessPartnerId: 'supplier',
+      status: 'Draft', invoiceDate: '2026-09-01', dueDate: '2026-10-01',
+      currencyCode: 'GHS', exchangeRate: 1, exchangeRateId: null,
+      isOpeningBalance: false, paymentTermsDays: 30, matchingType: 'None',
+      applySupplierWithholdingDefaults: false,
+      acceptedSupplyKind: null, acceptedSupplySourceId: null,
+      withholdingSupplyCategory: null,
+      lineItems: [{
+        id: '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8',
+        lineItemType: 'Expense',
+        glAccountId: 'expense',
+        budgetEntryId: null,
+        inventoryItemId: null,
+        warehouseId: null,
+        purchaseOrderItemId: null,
+        description: 'Existing draft service',
+        quantity: 1,
+        unitPrice: 100,
+        taxTreatment: null,
+        unit: null,
+      }],
+    };
+
+    render(<VendorInvoiceFormPage editInvoiceId="invoice" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => expect(accountsPayableService.updateInvoice).toHaveBeenCalled());
+    expect(toast).not.toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Review the highlighted invoice fields',
+    }));
+  });
+
   it('preserves a QS service certificate source and line identity while exposing expense and budget coding', async () => {
     const lineId = '2d7b93c1-8f53-4d9c-b594-d76c43e2f0c8';
     queryData['vendor-invoice'] = {
@@ -152,6 +187,7 @@ describe('new AP invoice visible supplier defaults', () => {
     expect(screen.getAllByText('VAT Five').length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('button', { name: 'Record Invoice' }));
     await waitFor(() => expect(accountsPayableService.createInvoice).toHaveBeenCalled());
+    expect(removeQueries).toHaveBeenCalledWith({ queryKey: ['vendor-invoices'] });
     const request = vi.mocked(accountsPayableService.createInvoice).mock.calls[0][0];
     expect(request.applyBusinessPartnerDefaults).toBe(true);
     expect(request.expenseAccountId).toBe('expense');

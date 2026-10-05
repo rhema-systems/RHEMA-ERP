@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, useFieldArray, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -945,10 +946,15 @@ export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
                                     aria-readonly="true"
                                     {...form.register('exchangeRate')}
                                 />
-                                <span className="text-[11px] text-muted-foreground block mt-1">
-                                    1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
-                                    {' · approved rate locked to this invoice'}
-                                </span>
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                    <span>
+                                        1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
+                                        {' · approved rate locked to this invoice'}
+                                    </span>
+                                    <Button asChild type="button" variant="link" size="sm" className="h-auto p-0 text-xs">
+                                        <Link href="/finance/exchange-rates">Manage exchange rates</Link>
+                                    </Button>
+                                </div>
                             </div>
                         )}
 
