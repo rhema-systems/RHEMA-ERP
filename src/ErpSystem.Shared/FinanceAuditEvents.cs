@@ -123,6 +123,7 @@ public static class FinanceAuditEvents
 
     public const string BudgetScenarioCreated = "Finance.BudgetScenario.Created";
     public const string BudgetScenarioUpdated = "Finance.BudgetScenario.Updated";
+    public const string BudgetScenarioDeleted = "Finance.BudgetScenario.Deleted";
     public const string BudgetScenarioOpened = "Finance.BudgetScenario.OpenedForCollection";
     public const string BudgetScenarioSubmitted = "Finance.BudgetScenario.SubmittedForApproval";
     public const string BudgetScenarioApproved = "Finance.BudgetScenario.Approved";

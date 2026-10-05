@@ -1,14 +1,15 @@
-# Finance budgeting scenario and return-management gaps - 2026-10-05
+# Finance budgeting hybrid scope and unused-Draft lifecycle - 2026-10-05
 
 ## Objective and scope
 
-Assess safe edit/delete management for genuinely unused Draft budget scenarios and reconcile the Budget Return training flow with the current scenario-control-dimension implementation.
+Implement governed hybrid account-segment + Finance-dimension Budget Return scope, then implement safe edit/delete management for genuinely unused Draft budget scenarios.
 
 ## Branch and worktree
 
 - Branch: `codex/finance-uat-remediation-20261004`
 - Worktree: `.w/fin-uat-remediation-20261004`
 - Investigation starting commit: `e1c25df65`
+- Implementation base commit: `5389fe6bcb28db3a37f7a21fe41fee93b3fc9909`
 - Pull request: no PR creation, update, or push is authorized for this workstream yet.
 
 ## Product decisions and evidence
@@ -31,13 +32,44 @@ Assess safe edit/delete management for genuinely unused Draft budget scenarios a
 
 ## Changed files
 
-- This coordination ledger only. No budgeting product code has changed.
+- `src/ErpSystem.Core/Entities/Finance/BudgetScenario.cs`
+  - Adds scenario-owned `BudgetScenarioControlSegment` declarations.
+- `src/ErpSystem.Core/DTOs/Finance/BudgetDtos.cs`
+  - Carries segment structure metadata and editable Draft structure fields through API contracts.
+- `src/ErpSystem.Core/Interfaces/Finance/IBudgetService.cs`
+  - Requires the scenario row version for deletion.
+- `src/ErpSystem.Data/ApplicationDbContext.cs`
+  - Maps scenario segment controls and changes Budget Return uniqueness to the combined segment + dimension grain.
+- `src/ErpSystem.Data/Migrations/20261005225306_AddBudgetScenarioSegmentControls.cs` and designer/snapshot
+  - Creates the control table, backfills declarations from existing segment-scoped returns, and replaces the two over-restrictive indexes with one combined unique index.
+- `src/ErpSystem.Api/Services/Finance/Budget/BudgetService.cs`
+  - Validates tenant-owned active lookup segments, requires configured segment/dimension selections, maps both independently, records full structure-change audit evidence, and enforces the unused-Draft dependency guard.
+  - Soft-deletes eligible Drafts and their grain declarations with optimistic concurrency.
+- `src/ErpSystem.Api/Services/Finance/Budget/BudgetService.Revisions.cs`
+  - Copies segment declarations into immutable revision successors and preserves both return scope values.
+- `src/ErpSystem.Api/Controllers/Finance/BudgetController.cs`
+  - Documents and exposes row-version-protected unused-Draft deletion.
+- `src/ErpSystem.Shared/FinanceAuditEvents.cs`
+  - Adds the budget-scenario deletion audit event.
+- `frontend/src/types/budget.ts` and `frontend/src/services/finance/budget-data.service.ts`
+  - Align client contracts and row-version deletion.
+- `frontend/src/app/finance/budgeting/scenarios/page.tsx`
+  - Lets scenario creators declare governed account-segment structures separately from Finance dimensions.
+- `frontend/src/app/finance/budgeting/scenarios/[id]/page.tsx`
+  - Restores Segment Type -> Segment Value before the separate Distribution Dimension -> Dimension Value selection.
+  - Shows Edit/Delete only for a permissioned Draft with no returned rows; the server remains authoritative.
+- `tests/ErpSystem.Api.Tests/Services/Finance/BudgetServiceHardeningTests.cs`
+  - Adds hybrid-scope, combined-grain, unused-Draft edit/delete, and dependency-lock regressions.
+- `tests/ErpSystem.Api.Tests/Controllers/Finance/FinanceControllerSecurityTests.cs`
+  - Pins update/delete to `Finance.Budgeting.Write` / `MaintainBudgets`.
 
 ## Migrations and application state
 
-- Unknown until the edit/delete and segment/dimension product decisions are implemented.
-- No migration has been created or applied.
-- No UAT data has been changed.
+- New migration: `20261005225306_AddBudgetScenarioSegmentControls`.
+- Migration status: created and SQL-script validated, deliberately **not applied**.
+- Compatibility: existing non-deleted returns with `SegmentValueId` backfill their scenario/segment-structure declarations.
+- The combined unique return key is `(TenantId, BudgetScenarioId, SegmentValueId, DistributionDimensionValueId)` when at least one scope value is present. This permits the same `COMPANY` value across different departmental distributions while still rejecting an exact duplicate responsibility scope.
+- No UAT or local database data was changed.
 
 ## Verification evidence
 
@@ -45,18 +77,25 @@ Assess safe edit/delete management for genuinely unused Draft budget scenarios a
 - Inspected the Create Budget Return dialog in `frontend/src/app/finance/budgeting/scenarios/[id]/page.tsx`.
 - Inspected `BudgetService.CreateReturnAsync` validation and persistence behavior.
 - Inspected budget hardening tests proving the current required distribution control is a scenario Finance dimension value.
+- `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj -c Release --no-restore`: passed with 0 errors (baseline warnings remain).
+- `dotnet test ... --filter FullyQualifiedName~BudgetServiceHardeningTests`: 28 passed, 0 failed.
+- `dotnet test ... --filter FullyQualifiedName~CriticalFinanceActions_ShouldMapToExpectedPermissions`: 92 passed, 0 failed.
+- Changed-file ESLint for both scenario pages, the budget service, and budget types: passed.
+- `npm run type-check`: repository-wide baseline remains red on unrelated existing development, portal, HR, inventory, reporting, and test fixture errors; no error references the changed budgeting files.
+- Migration SQL generated idempotently from immediate predecessor `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`; isolated script contains only the intended control table, legacy backfill, and combined-index operations.
+- `git diff --check`: passed (only Windows line-ending notices).
+- Broader `FinanceControllerSecurityTests` run: 134 passed and 2 unrelated existing diagnostics failed:
+  - `VendorInvoiceService.ReceiptAccounts.cs` contains an existing `Guid.Empty` tenant fallback.
+  - `CurrenciesController.GetActive` maps to existing composite policy `Finance.Policy.ProjectCurrencyLookup`, which the broad registry assertion does not recognize.
 
 ## Remaining work
 
-- Inspect scenario update/delete routes, permissions, entity dependencies, and UI actions.
-- Decide whether `SegmentValueId` is an active business axis or deprecated legacy residue.
-- Define how a scenario declares its governed account-segment axes; the current scenario snapshots Finance control dimensions but not segment structures.
-- Restore the missing segment structure/value selection contract and tests without conflating it with the Finance distribution dimension.
-- Align the training guide and UI/API contract to the hybrid segment + dimension model.
-- Add backend authorization/dependency tests and frontend visibility/selection tests before implementation.
+- Commit the verified local implementation to `codex/finance-uat-remediation-20261004`.
+- Do not apply the migration until separately authorized; after application, manually verify create/edit/delete and return distribution against a disposable/local test tenant before UAT.
+- The current downstream model supports one account `SegmentValueId` plus one distribution dimension per return. Scenarios may govern multiple eligible segment structures, but a single return selects one structure/value. Supporting multiple account segment values on one return would require a separate normalized return-scope collection and is outside this authorized change.
+- A repository-wide TypeScript cleanup and the two unrelated Finance security diagnostics remain separate workstreams.
 
 ## Authorization boundaries
 
-- Read-only investigation and documentation are authorized.
-- The earlier request to implement Draft edit/delete authorizes local implementation and tests once the dependency contract is confirmed.
+- Local implementation, tests, migration authoring, documentation, and local commit are authorized.
 - Do not push, create or update a PR, deploy, restart services, apply a migration, or mutate UAT data without separate authorization.

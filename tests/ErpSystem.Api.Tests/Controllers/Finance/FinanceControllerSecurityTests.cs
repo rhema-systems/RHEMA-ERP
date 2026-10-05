@@ -178,6 +178,8 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(FiscalPeriodController), "RequestPeriodReopen", FinancePermissions.ReopenAccountingPeriods)]
     [InlineData(typeof(FiscalPeriodController), "ReviewPeriodReopen", FinancePermissions.ApproveAccountingPeriodReopens)]
     [InlineData(typeof(BudgetController), "GetReturns", FinancePermissions.AssignBudgetReturns)]
+    [InlineData(typeof(BudgetController), "UpdateScenario", FinancePermissions.MaintainBudgets)]
+    [InlineData(typeof(BudgetController), "DeleteScenario", FinancePermissions.MaintainBudgets)]
     [InlineData(typeof(BudgetController), "UpdateReturn", FinancePermissions.AssignBudgetReturns)]
     [InlineData(typeof(BudgetController), "BulkSaveEntries", FinancePermissions.EditBudgetReturns)]
     [InlineData(typeof(BudgetController), "SubmitReturn", FinancePermissions.SubmitBudgetReturns)]
