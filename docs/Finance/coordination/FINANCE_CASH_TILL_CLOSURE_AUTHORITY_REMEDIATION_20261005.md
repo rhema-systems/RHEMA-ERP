@@ -9,7 +9,7 @@ Close the observed cashier-till maker/checker UI gap, verify the backend segrega
 - Branch: `codex/finance-uat-remediation-20261004`
 - Worktree: `.w/fin-uat-remediation-20261004`
 - Exact starting commit: `121f051149c1bdcf4d7385521c08c31db9fe88c8`
-- Pull request: #353 (follow-up to externally merged #352)
+- Pull request: #356 (follow-up to merged #353; the remediation chain began at #352)
 
 ## Evidence and classification
 
@@ -87,4 +87,4 @@ There is currently no dedicated till-closure workflow instance, shared Finance a
 
 ## Authorization boundaries
 
-Push/update of PR #353 is authorized. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
+Push/update of PR #356 is authorized. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
