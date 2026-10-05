@@ -56,6 +56,8 @@ public class CompanyEventService : ICompanyEventService
     /// <summary>The company's days off — public holidays and company-wide closures — an occurrence is flagged on (lane 2f-1).</summary>
     private readonly IHrWorkingDayCalculator _workingDays;
     private readonly IHrClosureCalendar _closureCalendar;
+    // Lane 3b-1: a linked booking's approval and its booker, when an event cancels or moves it.
+    private readonly RoomBookingDesk _bookingDesk;
 
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
@@ -74,10 +76,12 @@ public class CompanyEventService : ICompanyEventService
         IHrAnnouncementService announcements,
         CompanyScheduleNotices notices,
         IHrWorkingDayCalculator workingDays,
-        IHrClosureCalendar closureCalendar)
+        IHrClosureCalendar closureCalendar,
+        RoomBookingDesk bookingDesk)
     {
         _workingDays = workingDays;
         _closureCalendar = closureCalendar;
+        _bookingDesk = bookingDesk;
         _notices = notices;
         _audience = audience;
         _announcements = announcements;
@@ -911,6 +915,7 @@ public class CompanyEventService : ICompanyEventService
             await CancelLinkedBookingsAsync(existing, $"{existing.EventNumber} was cancelled: {reason}", cancellationToken);
             await _eventRepository.UpdateAsync(existing);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await FlushBookingOutcomesAsync(cancellationToken);
             _logger.LogInformation("Drill event {EventNumber} cancelled: {Reason}", existing.EventNumber, reason);
             await NotifyParticipantsAsync(existing, CompanyScheduleEmailCatalog.Events.EventCancelled,
                 tokens => { tokens["CancellationReason"] = reason; return tokens; },
@@ -934,6 +939,7 @@ public class CompanyEventService : ICompanyEventService
             }
             await _eventRepository.UpdateAsync(existing);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await FlushBookingOutcomesAsync(cancellationToken);
             if (moved is not null)
             {
                 _logger.LogInformation("Drill event {EventNumber} moved to {Day:yyyy-MM-dd}", existing.EventNumber, day);
@@ -1215,7 +1221,31 @@ public class CompanyEventService : ICompanyEventService
         var now = DateTime.UtcNow;
         foreach (var b in linked)
             RoomBookingRules.Cancel(b, reason.Length > 1000 ? reason[..1000] : reason, now);
+        // Lane 3b-1: their approvals withdrawn and their bookers told — after the act's own save.
+        _bookingsCancelled.AddRange(linked);
         return linked.Select(b => b.BookingNumber).ToList();
+    }
+
+    // Lane 3b-1 (F-34, D-10): the bookings an act cancelled with its event, or sent back for approval by moving them —
+    // their approvals withdrawn or started and their bookers told after the act's own save (FlushBookingOutcomesAsync), so
+    // nobody hears of a change that did not save.
+    private readonly List<RoomBooking> _bookingsCancelled = new();
+    private readonly List<RoomBooking> _bookingsToReapprove = new();
+
+    /// <summary>Does what <see cref="_bookingsCancelled"/> and <see cref="_bookingsToReapprove"/> wait for. Call after the save.</summary>
+    private async Task FlushBookingOutcomesAsync(CancellationToken cancellationToken)
+    {
+        var cancelled = _bookingsCancelled.ToList();
+        var reapprove = _bookingsToReapprove.ToList();
+        _bookingsCancelled.Clear();
+        _bookingsToReapprove.Clear();
+        foreach (var b in cancelled)
+        {
+            await _bookingDesk.WithdrawApprovalAsync(b, b.CancellationReason ?? "Cancelled with its event.");
+            await _bookingDesk.TellCancelledAsync(b, notApproved: false, cancellationToken);
+        }
+        foreach (var b in reapprove)
+            await _bookingDesk.StartApprovalAsync(b, cancellationToken);
     }
 
     /// <summary>
@@ -1273,6 +1303,8 @@ public class CompanyEventService : ICompanyEventService
                 b.ApprovedBy = null;
                 b.ApprovalDate = null;
                 b.Status = BookingStatus.Tentative;
+                // Lane 3b-1 (D-10): approved afresh, for the new time — started after the act's own save.
+                _bookingsToReapprove.Add(b);
             }
         }
         return linked.Select(b => b.BookingNumber).ToList();
@@ -2135,6 +2167,7 @@ public class CompanyEventService : ICompanyEventService
             }
         }
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
         _logger.LogInformation("Company event series edited from {EventNumber}: {Count} date(s) ({Scope}), {Fields}",
             acted.EventNumber, applied.Count, dto.SeriesScope, string.Join(", ", changed.Select(c => c.Name)));
 
@@ -2231,6 +2264,7 @@ public class CompanyEventService : ICompanyEventService
         if (moved.Count == 0)
             throw new InvalidOperationException($"Every date chosen of {acted.EventName} is already there. Choose a different time.");
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
         _logger.LogInformation("Company event series moved from {EventNumber}: {Count} date(s) ({Scope}) by {Days} day(s)",
             acted.EventNumber, moved.Count, dto.SeriesScope, shift.Days);
 
@@ -2292,6 +2326,7 @@ public class CompanyEventService : ICompanyEventService
             await _eventRepository.UpdateAsync(target);
         }
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
         _logger.LogInformation("Company event series cancelled from {EventNumber}: {Count} date(s) ({Scope}), {Bookings} room booking(s) with them",
             acted.EventNumber, targets.Count, dto.SeriesScope, bookings.Count);
 
@@ -2766,6 +2801,7 @@ public class CompanyEventService : ICompanyEventService
 
         var outcome = await ApplyEditAsync(entity, updateDto, tenantId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
         var moving = outcome.Moving;
         var moved = outcome.Moved;
 
@@ -2877,6 +2913,7 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
 
         _logger.LogInformation("Company event {EventNumber} rejection: {Outcome}, {Bookings} room booking(s) cancelled",
             entity.EventNumber, outcome, change.BookingsCancelled.Count);
@@ -2931,6 +2968,7 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
 
         _logger.LogInformation("Company event cancelled: {EventNumber}, {Bookings} room booking(s) with it",
             entity.EventNumber, bookings.Count);
@@ -2992,6 +3030,7 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Company event rescheduled: {EventNumber}; {Bookings} room booking(s) moved, {Answers} answer(s) reset",
@@ -3044,6 +3083,7 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await FlushBookingOutcomesAsync(cancellationToken);
         // Lane 2f-2b (finding 2): when it carried the series' approval, the approval passes to the next date waiting.
         if (await CancelApprovalAsync(entity, "The event was deleted.") && entity.RecurrenceSeriesId is { } seriesId)
             await PassSeriesApprovalOnAsync(entity.TenantId, seriesId, cancellationToken);
@@ -4135,17 +4175,21 @@ public class MeetingRoomService : IMeetingRoomService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<MeetingRoomService> _logger;
+    // Lane 3b-1 (D-18): the bookings a retired room cancels — their approvals withdrawn, their bookers told.
+    private readonly RoomBookingDesk _bookingDesk;
 
     public MeetingRoomService(
         IMeetingRoomRepository roomRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<MeetingRoomService> logger)
+        ILogger<MeetingRoomService> logger,
+        RoomBookingDesk bookingDesk)
     {
         _roomRepository = roomRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _bookingDesk = bookingDesk;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -4316,6 +4360,13 @@ public class MeetingRoomService : IMeetingRoomService
 
         _logger.LogInformation("Meeting room updated: {RoomCode}; {Cancelled} future booking(s) cancelled", entity.RoomCode, future.Count);
 
+        // Lane 3b-1 (D-18, "tell their bookers"): after the save — nothing left to approve, and each booker hears.
+        foreach (var booking in future)
+        {
+            await _bookingDesk.WithdrawApprovalAsync(booking, reason);
+            await _bookingDesk.TellCancelledAsync(booking, notApproved: false, cancellationToken);
+        }
+
         // ⚠ F-46: re-read, untracked, so a changed site answers with its own name, not the old one's.
         return (await TenantRooms(tenantId).AsNoTracking().FirstAsync(r => r.Id == entity.Id, cancellationToken)).ToDto();
     }
@@ -4436,19 +4487,23 @@ public class RoomBookingService : IRoomBookingService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<RoomBookingService> _logger;
+    // Lane 3b-1: the booking's approval on the engine (D-10), and telling its booker (F-34).
+    private readonly RoomBookingDesk _desk;
 
     public RoomBookingService(
         IRoomBookingRepository bookingRepository,
         IMeetingRoomRepository roomRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<RoomBookingService> logger)
+        ILogger<RoomBookingService> logger,
+        RoomBookingDesk desk)
     {
         _bookingRepository = bookingRepository;
         _roomRepository = roomRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _desk = desk;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -4780,6 +4835,10 @@ public class RoomBookingService : IRoomBookingService
 
         _logger.LogInformation("Room booking created: {BookingNumber}", entity.BookingNumber);
 
+        // Lane 3b-1 (D-10): a room that needs approval — the booking waits, and its approval starts now.
+        if (entity.Status == BookingStatus.Tentative)
+            await _desk.StartApprovalAsync(entity, cancellationToken);
+
         // Re-read so roomName and bookedByName are resolved — see the note on
         // CompanyEventService.CreateAsync.
         return await GetByIdAsync(entity.Id, cancellationToken);
@@ -4809,6 +4868,7 @@ public class RoomBookingService : IRoomBookingService
         EnforceRoomRules(room, start, end, RoomBookingRules.SeatsNeeded(updateDto.ExpectedAttendees, entity.Event));
 
         var moved = RoomBookingRules.AsUtc(entity.StartDateTime) != start || RoomBookingRules.AsUtc(entity.EndDateTime) != end;
+        var reapprove = false;
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
             if (moved)
@@ -4826,12 +4886,17 @@ public class RoomBookingService : IRoomBookingService
                 entity.ApprovedBy = null;
                 entity.ApprovalDate = null;
                 entity.Status = BookingStatus.Tentative;
+                reapprove = true;
             }
             // Saved by tracking (ExecuteInTransactionAsync saves): UpdateAsync would mark the loaded room, people and
             // event modified too.
         }, cancellationToken);
 
         _logger.LogInformation("Room booking updated: {BookingNumber}", entity.BookingNumber);
+
+        // Lane 3b-1 (D-10): the approval was for the old time — a fresh one starts.
+        if (reapprove)
+            await _desk.StartApprovalAsync(entity, cancellationToken);
 
         // ⚠ F-46: answer with what was saved, re-read.
         return await GetByIdAsync(entity.Id, cancellationToken);
@@ -4847,16 +4912,45 @@ public class RoomBookingService : IRoomBookingService
         var entity = await GetOwnedAsync(bookingId, cancellationToken);
         Refuse(RoomBookingRules.RefuseApproving(entity, approvedById));
 
-        entity.ApprovedById = approvedById;
-        entity.ApprovalDate = DateTime.UtcNow;
-        entity.Status = BookingStatus.Confirmed;
+        // Lane 3b-1 (D-10): through the engine when an approval is under way, the approve tier when none is. A definition
+        // with another stage to go leaves it Tentative.
+        var outcome = await _desk.DecideAsync(entity, "Approve", null);
+        _desk.ApplyOutcome(entity, outcome, approvedById);
 
         // Saved by tracking: UpdateAsync would mark the loaded room, people and event modified too.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Room booking approved: {BookingNumber}", entity.BookingNumber);
+        _logger.LogInformation("Room booking {BookingNumber} approval: {Outcome}", entity.BookingNumber, outcome);
+
+        // F-34: approved at last — the booker hears.
+        if (entity.Status == BookingStatus.Confirmed)
+            await _desk.TellApprovedAsync(entity,
+                string.IsNullOrWhiteSpace(_currentUserProvider.FullName) ? null : _currentUserProvider.FullName, cancellationToken);
 
         return true;
+    }
+
+    /// <remarks>
+    /// Lane 3b-1 (D-10): not approving a booking cancels it, "Not approved: …", and its booker is told why — as an event
+    /// not approved is cancelled. The same guards as approval: Tentative, and never by the booker.
+    /// </remarks>
+    public async Task<RoomBookingDto> RejectBookingAsync(Guid bookingId, Guid rejectedById, string reason, CancellationToken cancellationToken = default)
+    {
+        var why = CompanyEventRules.Clean(reason)
+                  ?? throw new InvalidOperationException("Say why the booking is not approved — its booker is told.");
+        var entity = await GetOwnedAsync(bookingId, cancellationToken);
+        Refuse(RoomBookingRules.RefuseApproving(entity, rejectedById, "decide on"));
+
+        var outcome = await _desk.DecideAsync(entity, "Reject", why);
+        _desk.ApplyOutcome(entity, outcome, rejectedById, why);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Room booking {BookingNumber} rejection: {Outcome}", entity.BookingNumber, outcome);
+
+        if (entity.IsCancelled)
+            await _desk.TellCancelledAsync(entity, notApproved: true, cancellationToken);
+
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     /// <remarks>Lane 3a (F-8): not once cancelled, completed or marked a no-show, and with a reason.</remarks>
@@ -4874,6 +4968,10 @@ public class RoomBookingService : IRoomBookingService
 
         _logger.LogInformation("Room booking cancelled: {BookingNumber}", entity.BookingNumber);
 
+        // Lane 3b-1: nothing left to approve, and the booker hears — unless they cancelled it themselves.
+        await _desk.WithdrawApprovalAsync(entity, $"The booking was cancelled: {reason}");
+        await _desk.TellCancelledAsync(entity, notApproved: false, cancellationToken);
+
         return true;
     }
 
@@ -4883,6 +4981,8 @@ public class RoomBookingService : IRoomBookingService
 
         await _bookingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Lane 3b-1: an approval still under way is withdrawn — there is nothing left to approve.
+        await _desk.WithdrawApprovalAsync(entity, "The booking was deleted.");
 
         _logger.LogInformation("Room booking deleted: {Id}", id);
 

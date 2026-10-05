@@ -22,7 +22,8 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// the topic path queues rows with no delivery result, would lose the catalogue's wording, and cannot carry an
 /// attachment (the calendar invite, D-14). So the topics are seeded with email off, and the caller sends the email.</para>
 ///
-/// <para><b>Fifteen topics since lane 2f-2a</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a).
+/// <para><b>Eighteen topics since lane 3b-1</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a; a
+/// room booking approved, not approved, cancelled — to its booker — at 3b-1).
 /// A tenant seeded with fewer gets the rest the next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds
 /// whatever key is missing.</para>
 ///
@@ -47,6 +48,8 @@ public sealed class CompanyScheduleNotices
     public const string ToGuest = "Guest";
     public const string ToOrganiser = "Organiser";
     public const string ToAssignee = "Assignee";
+    /// <summary>Lane 3b-1: whoever booked a meeting room.</summary>
+    public const string ToBooker = "Booker";
     private const string RecipientsKey = "RecipientUserIds";
 
     // ---- the notices (the middle of the topic key) ----
@@ -65,6 +68,10 @@ public sealed class CompanyScheduleNotices
     // Lane 2f-2a (D-12): one notice per guest per series action, raised on the first date it covers.
     public const string SeriesInvited = "SeriesInvited";
     public const string SeriesChanged = "SeriesChanged";
+    // Lane 3b-1 (F-34, the user's ruling: every outcome told): a room booking's, to its booker.
+    public const string BookingApproved = "BookingApproved";
+    public const string BookingNotApproved = "BookingNotApproved";
+    public const string BookingCancelled = "BookingCancelled";
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -123,10 +130,41 @@ public sealed class CompanyScheduleNotices
     /// delivered). Empty when it could not be raised. The handlers write the rows in this scope and log their own
     /// failures, so this is who it was raised to, not a read-back of the rows.
     /// </returns>
-    public async Task<IReadOnlySet<Guid>> TellAsync(
+    public Task<IReadOnlySet<Guid>> TellAsync(
         CompanyEvent e, string notice, string audience, IEnumerable<Guid> employeeIds,
         IReadOnlyDictionary<string, object>? data = null, bool actorToo = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        // The event's id is every notice's entity: the suites' teardowns find an event's notices by it.
+        RaiseAsync(e.TenantId, e.Id, e.EventNumber, notice, audience, employeeIds, new Dictionary<string, object>
+        {
+            ["EventName"] = e.EventName,
+            ["EventNumber"] = e.EventNumber,
+            ["When"] = CompanyEventRules.Describe(EventWindow.Of(e)),
+            ["ActionPath"] = audience == ToGuest ? GuestLink(e) : EventLink(e),
+        }, data, actorToo, cancellationToken);
+
+    /// <summary>
+    /// Tells a room booking's booker of its outcome in the app (lane 3b-1, F-34) — never of their own act. The booking's
+    /// id is the notice's entity. The link opens the booking.
+    /// </summary>
+    public Task<IReadOnlySet<Guid>> TellBookerAsync(
+        RoomBooking b, string roomName, string notice, IReadOnlyDictionary<string, object>? data = null,
+        CancellationToken cancellationToken = default) =>
+        RaiseAsync(b.TenantId, b.Id, b.BookingNumber, notice, ToBooker, [b.BookedById], new Dictionary<string, object>
+        {
+            ["BookingNumber"] = b.BookingNumber,
+            ["RoomName"] = roomName,
+            ["When"] = RoomBookingRules.Describe(RoomBookingRules.AsUtc(b.StartDateTime), RoomBookingRules.AsUtc(b.EndDateTime)),
+            ["ActionPath"] = BookingLink(b),
+        }, data, actorToo: false, cancellationToken);
+
+    /// <summary>The booking's page.</summary>
+    public static string BookingLink(RoomBooking b) => $"/hr/company-schedule/bookings/{b.Id}";
+
+    private async Task<IReadOnlySet<Guid>> RaiseAsync(
+        Guid tenantId, Guid entityId, string reference, string notice, string audience, IEnumerable<Guid> employeeIds,
+        Dictionary<string, object> tokens, IReadOnlyDictionary<string, object>? data, bool actorToo,
+        CancellationToken cancellationToken)
     {
         var none = new HashSet<Guid>();
         try
@@ -136,7 +174,7 @@ public sealed class CompanyScheduleNotices
 
             var actor = ActorUserId;
             var logins = (await _userManager.Users
-                    .Where(u => u.TenantId == e.TenantId && u.IsActive && u.EmployeeId != null && ids.Contains(u.EmployeeId.Value))
+                    .Where(u => u.TenantId == tenantId && u.IsActive && u.EmployeeId != null && ids.Contains(u.EmployeeId.Value))
                     .Select(u => new { u.Id, EmployeeId = u.EmployeeId!.Value })
                     .ToListAsync(cancellationToken))
                 .Where(u => actorToo || u.Id != actor)
@@ -144,28 +182,20 @@ public sealed class CompanyScheduleNotices
             var users = logins.Select(u => u.Id).Distinct().ToList();
             if (users.Count == 0) return none;
 
-            await EnsureTopicsAsync(e.TenantId, cancellationToken);
+            await EnsureTopicsAsync(tenantId, cancellationToken);
 
-            var tokens = new Dictionary<string, object>
-            {
-                ["EventName"] = e.EventName,
-                ["EventNumber"] = e.EventNumber,
-                ["When"] = CompanyEventRules.Describe(EventWindow.Of(e)),
-                ["ActionPath"] = audience == ToGuest ? GuestLink(e) : EventLink(e),
-                [RecipientsKey] = users,
-            };
+            tokens[RecipientsKey] = users;
             if (data is not null)
                 foreach (var (key, value) in data)
                     tokens[key] = value;
 
             await _appEventBus.PublishAsync(new EntityActivityEvent
             {
-                TenantId = e.TenantId,
+                TenantId = tenantId,
                 EntityType = TopicEntityType,
                 Activity = notice,
                 Audience = audience,
-                // The event's id is every notice's entity: the suites' teardowns find an event's notices by it.
-                EntityId = e.Id,
+                EntityId = entityId,
                 TriggeredByUserId = actor,
                 Data = tokens,
             }, cancellationToken);
@@ -173,8 +203,8 @@ public sealed class CompanyScheduleNotices
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Company schedule notice {Notice} to the {Audience} of {EventNumber} could not be raised",
-                notice, audience, e.EventNumber);
+            _logger.LogWarning(ex, "Company schedule notice {Notice} to the {Audience} of {Reference} could not be raised",
+                notice, audience, reference);
             return none;
         }
     }
@@ -250,6 +280,18 @@ public sealed class CompanyScheduleNotices
             "Sent in the app, once, to an employee guest when several dates of a recurring event change for them together (lane 2f-2a: taken off the guest list), with the series email, which lists the dates.",
             "{{What}}: {{EventName}}, {{Count}} dates",
             "From {{When}}. The email lists the dates."),
+        new(BookingApproved, ToBooker, "Room bookings: approved (booker)",
+            "Sent in the app to whoever booked a room that needs approval, when the booking is approved at its last stage (lane 3b-1), with the approval email.",
+            "Approved: {{RoomName}}",
+            "{{BookingNumber}} — {{When}}. The room is yours."),
+        new(BookingNotApproved, ToBooker, "Room bookings: not approved (booker)",
+            "Sent in the app to whoever booked a room when the booking is not approved, and so cancelled (lane 3b-1). The email says why.",
+            "Not approved: {{RoomName}}",
+            "{{BookingNumber}} — {{When}} — was not approved, and the room is released. The email says why."),
+        new(BookingCancelled, ToBooker, "Room bookings: cancelled (booker)",
+            "Sent in the app to whoever booked a room when the booking is cancelled by somebody else — by the desk, with the event it was for, or because the room was taken out of use (lane 3b-1). The email says why.",
+            "Cancelled: {{RoomName}}",
+            "{{BookingNumber}} — {{When}} — has been cancelled, and the room is released. The email says why."),
     };
 
     /// <summary>Seeds the topics a tenant does not have yet. Every notice calls it; once per tenant per scope.</summary>

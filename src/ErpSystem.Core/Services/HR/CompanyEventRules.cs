@@ -491,11 +491,11 @@ public static class RoomBookingRules
     /// Approval: a Tentative booking, not cancelled — whether or not its room still needs approval, so a booking made
     /// before that switch was turned off is not stranded (the review). Never by the person who booked it (D-10).
     /// </summary>
-    public static string? RefuseApproving(RoomBooking b, Guid approverEmployeeId) =>
+    public static string? RefuseApproving(RoomBooking b, Guid approverEmployeeId, string verb = "approve") =>
         b.IsCancelled || b.Status != BookingStatus.Tentative
             ? $"{b.BookingNumber} is {Word(b)}, not awaiting approval."
         : b.BookedById == approverEmployeeId
-            ? $"You booked {b.BookingNumber}, so somebody else must approve it."
+            ? $"You booked {b.BookingNumber}, so somebody else must {verb} it."
         : null;
 
     /// <summary>Cancelling: not once cancelled, completed or marked a no-show.</summary>

@@ -41,8 +41,8 @@ has not started (the user: "don't start the actual development yet").
    export and dashboard (2g-1) and the event-against-event clash rule (2g-2), and 2h, files through the upload gate
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
    **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
-   rules and guards, built and proved (no migration). Next 3b: approval on the engine, the booking notices, the hourly
-   lapse and completion, no-show.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   rules and guards, and 3b-1, approval on the engine and the booker told, built and proved (no migration; UAT has the
+   real Room Booking Approval). Next 3b-2: the hourly lapse and completion, and no-show.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -318,7 +318,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a built and proved (820/820 ×2; round-4 net 212/212); 3b next | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a and 3b-1 built and proved (851/851 ×2; round-4 net 212/212); 3b-2 next | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2408,7 +2408,7 @@ closes lane 2.*
 
 - [x] *✅ 3a; the create checks deleted rooms' codes too.* Room update validates the site and the code's uniqueness (deleted rooms included, R4-12.1); a
       blank code is regenerated.
-- [ ] *◐ 3a: listed, offered and cancelled, deletion refused with history; the bookers are told from 3b.* **Retiring a room per D-18** (F-49): deactivating or deleting a room with future bookings offers
+- [x] *✅ 3a: listed, offered and cancelled, deletion refused with history; ✅ 3b-1: the bookers told.* **Retiring a room per D-18** (F-49): deactivating or deleting a room with future bookings offers
       "cancel these N bookings and tell their bookers"; deletion is refused once the room has any
       booking history — deactivate instead.
 - [x] *✅ 3a; every room and booking list read is tenant-scoped in its query (F-30).* Availability: tenant-scoped; `MaxBookingDurationHours` and `AdvanceBookingDays` applied; active
@@ -2420,14 +2420,15 @@ closes lane 2.*
       transaction) around the clash check and the write.
 - [x] *✅ 3a; a no-show is refused too.* Booking update refused on a cancelled or completed booking; moving an approved booking's window
       on an approval-required room returns it to Tentative and clears the approval.
-- [ ] *◐ 3a: the guards, and never the booker; the engine is 3b.* **Approve:** Tentative and not cancelled — *review: the first draft also required the room to
+- [x] *✅ 3a: the guards, and never the booker; ✅ 3b-1: on the engine, with Not approve (which cancels) beside it.* **Approve:** Tentative and not cancelled — *review: the first draft also required the room to
       need approval, which strands bookings made before that switch was turned off*; on the engine per
       D-10. **Cancel:** not cancelled or completed.
 - [ ] **(F-48)** The hourly sweep lapses a Tentative booking whose start has passed — cancelled with
       "Not approved before it started", the booker told.
 - [ ] `Completed` by the hourly sweep for past Confirmed bookings; "Mark no-show" for HR on a past
       booking.
-- [ ] **(F-34)** The approver is told a booking awaits them (or the engine inbox, D-10); the booker is
+- [ ] *◐ 3b-1: the approver through the engine (inbox and notice, linked to the booking page); the booker of approved,
+      not approved and cancelled any way, in the app and by email; lapsed and no-show come with 3b-2.* **(F-34)** The approver is told a booking awaits them (or the engine inbox, D-10); the booker is
       told when it is approved, cancelled, lapsed or marked no-show — in-app and email.
 - [x] *✅ 3a (`RoomBookingRules.AsUtc`, on the way in and out).* **(F-50)** Booking instants read back as UTC (`DateTime.SpecifyKind`), as the reminder stamps
       already are.
@@ -2496,6 +2497,66 @@ beyond 2a's linked bookings moving and cancelling with their event and 2g-1's bo
   A|C|Gate|Moving|Notify|Diary …") are removed too; the recruitment suite's 26 ("R4D Board meeting…", "R4D
   Declined…") stay — its interviews refer to them, and that suite owes its own tidy step. Tool:
   `dev-harness/hr-company-schedule/tools/remove-r4d-rooms.mjs` (dry run by default).
+
+*3b rulings by the user (2026-10-05, all as recommended):*
+- **The booker is told of every outcome, in the app and by email:** approved, not approved, cancelled any way (by the
+  desk, with its event, by retiring the room, or lapsing unapproved at its start), marked a no-show. Completion is
+  silent; nobody is told of their own act. Three emails (approved, cancelled, no-show) and four in-app topics.
+- **No-show:** any confirmed booking whose start has passed, including one the sweep has completed; no undo; the
+  booker is told.
+- **A real "Room booking approval" definition** (the HR desk, the booker barred): the seeder seeds it, and a tool
+  publishes it on UAT once. No UAT room needs approval yet.
+- **Two slices:** 3b-1, approval on the engine (approve, a new Reject, re-approval after a move) and the booker notices
+  on every path; 3b-2, the hourly lapse and completion, and no-show.
+
+*3b-1 — what was built (2026-10-05): a booking's approval on the engine, and its booker told (D-10, F-34; C-8).*
+- **No migration.** Two emails (54 templates), three in-app topics (18).
+- **`RoomBookingDesk`** (`Services/HR/CompanySchedule`, scoped): what the booking, room and event services share — the
+  approval on the engine (start, decide, withdraw) and telling the booker (in the app and by email, raced against ten
+  seconds; never of their own act; never failing the act).
+- **The engine, as for events (lane 2b):** `RoomBooking` in the entity-type catalogue, the inbox display (the room and
+  day, linked to the booking page), the routing context, and `RoomBookingWorkflowStatusAdapter` (Approved → Confirmed;
+  Rejected → cancelled "Not approved: …"; Pending and Recalled → Tentative). The seeder seeds "Room Booking Approval"
+  (HR and TenantAdmin, the initiator barred).
+  - a booking of a room that needs approval starts its approval at creation; a confirmed one that moves — by its own
+    edit, or with its event — waits again with a fresh one;
+  - **Approve** decides through the engine when an approval is under way, the approve tier (`HR.Company.Approve`) when
+    none is; a definition with another stage leaves it Tentative;
+  - **Not approve** (new, `POST bookings/{id}/reject`, Write): a reason; never the booker; cancels it;
+  - cancelling, deleting, retiring the room or cancelling its event withdraws an approval still under way.
+- **The booker told** (the user's ruling): approved; not approved; cancelled by somebody else — the desk, with its
+  event, or by retiring its room (D-18's "tell their bookers"). Emails "Room Booking Approved" and "Room Booking
+  Cancelled" (the latter worded "not approved" or "cancelled", with the reason); topics `BookingApproved`,
+  `BookingNotApproved`, `BookingCancelled` to the `Booker`. The notice links to the booking page — until 3c gives staff
+  their own.
+  - ⚠ An event act that cancels or moves bookings queues them and tells their bookers after its own save
+    (`FlushBookingOutcomesAsync`, on all ten paths that call `CancelLinkedBookingsAsync` or `MoveAsync`), so nobody hears
+    of a change that did not save.
+- **Screens:** the booking page's "Not approve" with a reason; the approval's toast says when another stage is still to
+  come; the retirement dialog says the bookers are told.
+- **UAT, once, on the user's ruling:** "Room Booking Approval" published by `tools/publish-room-booking-definition.mjs`
+  (`29417732-…`; HR and TenantAdmin, the initiator barred; a second run does nothing). No UAT room needs approval.
+
+*Proof (UAT, API in Staging):*
+- **Before the definition:** `run-final-review.mjs`, 3b-1 in its no-definition mode — **36/36**: a booking waits with
+  nothing under way and the approve tier approves it; the booker told, in the app and by email; then the run's own
+  definition naming B. (That run's one failure was 2e-1's topic count, 15 → 18, corrected.)
+- **With the real definition:** blocks 1a–3b-1 **851/851 on two clean passes**, the blocking watcher silent. 3b-1 has
+  **31 assertions** in this mode, its mail through the run's own sink:
+  - **the engine:** an approval under way, which B can approve; the booker refused; B approves — Confirmed, by B, the
+    approval complete; the approver told with a link to the booking page; the booker told in the app and by email;
+  - **not approved:** the booker refused; a blank reason refused; cancelled "Not approved: …", the approval finished,
+    the booker told with the reason;
+  - **moved:** Tentative again with a fresh approval;
+  - **cancelled:** by the desk — approval withdrawn, the booker told with the reason; by the booker — told nothing;
+    with its event — the booker told; by retiring its room — told it was taken out of use.
+- **Regression:** the round-4 net **212/212**; recruitment **59/59**; the templates probe **36/36** (the two new emails);
+  `run-lane-n` **109/115**, the six section-J failures of #40, its TOTAL 54.
+- **The API log:** no request answered 500; no approval failed to start or withdraw, and no booker notice failed. The
+  ERR lines are the known kinds (payroll's foreign key on minted fixtures, #23; the unique indexes' race proofs).
+- **After the runs:** every RoomBooking approval the runs started is finished (5 completed, 8 cancelled); no
+  company-schedule notice to a real login is live; every harness login is off (the no-email one by SQL, #42); the R4D
+  requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 *3a — what was built (2026-10-05): the rules and guards (F-6, F-7, F-8, F-15, F-30, F-46, F-47, F-49, F-50, F-58; C-28,
 C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
@@ -3200,3 +3261,19 @@ built API, so no web host and no seeders).
 
   Next: 3b — approval on the workflow engine, the booking notices (in-app and email), the hourly lapse and completion,
   no-show.
+- **2026-10-05, later** — **3a committed** (`3fa2eb07a`). **3b's four rulings taken**, all as recommended (lane 3 State):
+  the booker told of every outcome, in the app and by email; no-show from the start, no undo; a real Room Booking
+  Approval, seeded and published on UAT once; two slices. **Lane 3, slice 3b-1 built and proved**: a booking's approval
+  on the engine and its booker told (lane 3 State). No migration.
+  - **Built:**
+    - `RoomBookingDesk`, shared by the booking, room and event services;
+    - RoomBooking on the engine — catalogue, display, context, adapter, the seeder's definition — with Approve on it,
+      a new Not approve, and re-approval after a move;
+    - the booker told on every path but their own act, in the app and by email (two emails, 54 templates; three
+      topics, 18); an event's act tells after its save;
+    - UAT's real "Room Booking Approval" published once.
+  - **Results:** 3b-1 36/36 before the definition; then `run-final-review.mjs` 851/851 on two clean passes, 31 checks
+    in 3b-1; the blocking watcher silent. The round-4 net was 212/212, recruitment 59/59, the templates probe 36/36 and
+    `run-lane-n` 109/115 (section J, #40). No request answered 500.
+
+  Next: 3b-2 — the hourly lapse of an unapproved booking at its start and the completion of past ones, and no-show.

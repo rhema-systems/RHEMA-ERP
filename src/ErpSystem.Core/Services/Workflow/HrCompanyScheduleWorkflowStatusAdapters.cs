@@ -80,3 +80,68 @@ public sealed class CompanyEventWorkflowStatusAdapter : IWorkflowStatusAdapter
         => entity as CompanyEvent
            ?? throw new InvalidOperationException("Expected a CompanyEvent entity.");
 }
+
+/// <summary>
+/// The workflow status adapter for a room booking that needs approval (company-schedule final closure, lane 3b-1 —
+/// decision D-10, as for events). Auto-discovered, as the event's is.
+/// </summary>
+/// <remarks>
+/// <para><b>Tentative is awaiting approval.</b> A booking of a room that needs approval is created Tentative and its
+/// approval starts then; Approved makes it Confirmed; a stage passed with more to come, or a recall, leaves it
+/// Tentative.</para>
+///
+/// <para><b>A booking not approved is cancelled</b>, "Not approved: …", as an event is: a booking has no other state for
+/// "this will not happen", and the room is released.</para>
+///
+/// <para>⚠ The <c>userId</c> handed in is the approver's EMPLOYEE id: <c>ApprovedById</c> is an Employee foreign key.</para>
+/// </remarks>
+public sealed class RoomBookingWorkflowStatusAdapter : IWorkflowStatusAdapter
+{
+    public IReadOnlyCollection<string> EntityTypes { get; } = new[]
+    {
+        "RoomBooking",
+        "Room Booking",
+        "ROOM_BOOKING",
+    };
+
+    public void ApplySubmitOutcome(object entity, WorkflowOutcome outcome, Guid? userId)
+        => Apply(Require(entity), outcome, userId, reason: null);
+
+    public void ApplyApprovalOutcome(object entity, WorkflowOutcome outcome, Guid? userId, string? rejectionReason = null)
+        => Apply(Require(entity), outcome, userId, rejectionReason);
+
+    public void ApplyRecallOutcome(object entity, Guid? userId, string? reason = null)
+        => Apply(Require(entity), WorkflowOutcome.Recalled, userId, reason);
+
+    private static void Apply(RoomBooking b, WorkflowOutcome outcome, Guid? userId, string? reason)
+    {
+        switch (outcome)
+        {
+            case WorkflowOutcome.Approved:
+                b.ApprovedById = userId;
+                b.ApprovalDate = DateTime.UtcNow;
+                b.Status = BookingStatus.Confirmed;
+                break;
+
+            case WorkflowOutcome.Rejected:
+                b.ApprovedById = null;
+                b.ApprovedBy = null;
+                b.ApprovalDate = null;
+                var why = string.IsNullOrWhiteSpace(reason) ? "Not approved." : $"Not approved: {reason.Trim()}";
+                ErpSystem.Core.Services.HR.RoomBookingRules.Cancel(b, why.Length > 1000 ? why[..1000] : why, DateTime.UtcNow);
+                break;
+
+            default:
+                // Pending (submitted, or a stage passed with more to come) and Recalled: awaiting approval.
+                b.ApprovedById = null;
+                b.ApprovedBy = null;
+                b.ApprovalDate = null;
+                if (b.Status == BookingStatus.Confirmed) b.Status = BookingStatus.Tentative;
+                break;
+        }
+    }
+
+    private static RoomBooking Require(object entity)
+        => entity as RoomBooking
+           ?? throw new InvalidOperationException("Expected a RoomBooking entity.");
+}

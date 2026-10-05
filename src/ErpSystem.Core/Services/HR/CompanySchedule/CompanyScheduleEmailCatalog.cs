@@ -73,6 +73,18 @@ public static class CompanyScheduleEmailCatalog
         /// list (lane 2f-2a); moved, changed or cancelled (lane 2f-2b) — listing the dates.
         /// </summary>
         public const string EventSeriesChanged = "EventSeriesChanged";
+
+        /// <summary>
+        /// Sent to the booker when a booking that needed approval is approved, at its last stage (lane 3b-1, F-34: the
+        /// user's ruling, every outcome told).
+        /// </summary>
+        public const string BookingApproved = "BookingApproved";
+
+        /// <summary>
+        /// Sent to the booker when a booking is cancelled any way — by the desk, with its event, by retiring its room — or
+        /// not approved, with the reason (lane 3b-1, F-34). Never for their own act.
+        /// </summary>
+        public const string BookingCancelled = "BookingCancelled";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -465,8 +477,77 @@ public static class CompanyScheduleEmailCatalog
             }).ToList(),
         });
 
+        // ── 14. A room booking approved (lane 3b-1) ────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.BookingApproved,
+            Name = "Room Booking Approved",
+            Category = "Booking",
+            Description =
+                "Sent to whoever booked a meeting room that needs approval, when the booking is approved at its last "
+                + "stage (lane 3b-1, F-34). Until then the booking is tentative and holds the room.",
+            DefaultSubject = "Approved: {{RoomName}} on {{BookingDate}}",
+            DefaultHtmlBody = Shell(BlueGradient, "Booking approved",
+                @"  <p>Hi <strong>{{BookerName}}</strong>,</p>
+  <p>Your booking of <strong>{{RoomName}}</strong> has been approved{{#if ApprovedBy}} by {{ApprovedBy}}{{/if}}. The room is yours.</p>" +
+                BookingBlock),
+            Tokens = BookingTokens().Concat(new[]
+            {
+                T("ApprovedBy", "Who gave the final approval; hidden when it is not known.", "Efua Asante"),
+            }).ToList(),
+        });
+
+        // ── 15. A room booking cancelled, or not approved (lane 3b-1) ──────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.BookingCancelled,
+            Name = "Room Booking Cancelled",
+            Category = "Booking",
+            Description =
+                "Sent to whoever booked a meeting room when the booking is cancelled any way — by the desk, with the "
+                + "event it was for, or because the room was taken out of use — or is not approved, with the reason "
+                + "(lane 3b-1, F-34). Nobody is told of their own act.",
+            DefaultSubject = "{{CancelTitle}}: {{RoomName}} on {{BookingDate}}",
+            DefaultHtmlBody = Shell(GreyGradient, "{{CancelTitle}}",
+                @"  <p>Hi <strong>{{BookerName}}</strong>,</p>
+  <p>Your booking of <strong>{{RoomName}}</strong> {{CancelSentence}}, and the room is released.</p>" +
+                BookingBlock + @"
+  {{#if CancellationReason}}<p><strong>Why:</strong> {{CancellationReason}}</p>{{/if}}"),
+            Tokens = BookingTokens().Concat(new[]
+            {
+                T("CancelTitle", "The outcome in a few words: Booking cancelled, or Booking not approved.", "Booking cancelled"),
+                T("CancelSentence", "The outcome as the middle of a sentence: has been cancelled, or was not approved.", "has been cancelled"),
+                T("CancellationReason", "Why; hidden when none was recorded.", "Boardroom was taken out of use."),
+            }).ToList(),
+        });
+
         return list;
     }
+
+    /// <summary>A booking's room, day, time and purpose (lane 3b-1).</summary>
+    private const string BookingBlock = @"
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:1rem;margin:1rem 0'>
+    <div style='font-size:1.125rem;font-weight:700;color:#111827'>{{RoomName}}</div>
+    <div style='color:#6b7280;font-size:0.875rem;margin-top:0.25rem'>{{BookingNumber}}</div>
+    <div style='margin-top:0.75rem'><strong>When:</strong> {{BookingDate}}, {{BookingTime}}</div>
+    {{#if Purpose}}<div style='margin-top:0.25rem'><strong>For:</strong> {{Purpose}}</div>{{/if}}
+    {{#if EventName}}<div style='margin-top:0.25rem;color:#6b7280;font-size:0.875rem'>Booked for {{EventName}}</div>{{/if}}
+  </div>";
+
+    /// <summary>The tokens every booking email carries (lane 3b-1).</summary>
+    private static List<EmailTokenDescriptor> BookingTokens() => new()
+    {
+        T("BookerName", "Who booked the room, to whom the email is addressed.", "Ama Serwaa"),
+        T("BookingNumber", "The booking's reference.", "BK-2026-00042"),
+        T("RoomName", "The room booked.", "Boardroom"),
+        T("BookingDate", "The day of the booking.", "Tuesday, 14 October 2026"),
+        T("BookingTime", "The hours booked.", "09:00 – 11:00"),
+        T("Purpose", "What the room is for; hidden when blank.", "Management committee"),
+        T("EventName", "The event the booking is for; hidden when it is for none.", "Q4 Management Review"),
+        T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+    };
 
     /// <summary>
     /// The list of a series' dates, built by the application (each date and time, and its event number) and emitted

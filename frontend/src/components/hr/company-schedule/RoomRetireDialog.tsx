@@ -142,7 +142,7 @@ export function RoomRetireDialog({
               <DialogDescription>
                 {future.length === 0
                   ? 'Nobody will be able to book it. It has no bookings still to come.'
-                  : `Nobody will be able to book it. It has ${plural(future.length)} still to come, which will be cancelled with the reason that the room was taken out of use:`}
+                  : `Nobody will be able to book it. It has ${plural(future.length)} still to come, which will be cancelled — the reason, that the room was taken out of use — and their bookers told:`}
               </DialogDescription>
             </DialogHeader>
             {future.length > 0 && <FutureList bookings={future} />}

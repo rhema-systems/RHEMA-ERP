@@ -588,6 +588,10 @@ namespace ErpSystem.Web.Services
                     // Company-schedule final closure, lane 2b (D-10). The approval starts when the event is
                     // created — events have no draft — and CompanyEventService refuses the organiser as approver.
                     ("COMPANY_EVENT", "Company Event", "Company Event Approval", "A company event that needs approval: Draft -> PendingApproval (HR) -> Approved.", hrDesk),
+                    // Company-schedule final closure, lane 3b-1 (D-10; the user's ruling: seeded, and published on UAT
+                    // once by a tool). The approval starts when a booking of a room needing it is made — Tentative —
+                    // and RoomBookingService refuses the booker as approver.
+                    ("ROOM_BOOKING", "Room Booking", "Room Booking Approval", "A booking of a meeting room that needs approval: Draft -> PendingApproval (HR) -> Approved.", hrDesk),
                     // Round 3, lane S. A pay change is an executive decision; the service applies it
                     // to HR and to payroll the moment the engine says Approved.
                     ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
@@ -605,6 +609,8 @@ namespace ErpSystem.Web.Services
                     // Company-schedule D-10: whoever creates an event does not approve it either. The organiser
                     // (who may be somebody else, D-11) is refused by the service.
                     "COMPANY_EVENT",
+                    // Lane 3b-1: whoever makes a booking does not approve it.
+                    "ROOM_BOOKING",
                 };
 
                 foreach (var tenant in tenants)

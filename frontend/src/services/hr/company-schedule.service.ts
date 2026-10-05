@@ -491,6 +491,11 @@ class RoomBookingService {
     return apiService.post<void>(`${this.baseUrl}/bookings/${id}/approve`);
   }
 
+  /** Not approved (lane 3b-1): the booking is cancelled, and its booker told why. A reason is required. */
+  reject(id: string, comments: string): Promise<RoomBooking> {
+    return apiService.post<RoomBooking>(`${this.baseUrl}/bookings/${id}/reject`, { comments });
+  }
+
   cancel(id: string, cancellationReason: string): Promise<void> {
     const body: CancelRoomBooking = { bookingId: id, cancellationReason };
     return apiService.post<void>(`${this.baseUrl}/bookings/${id}/cancel`, body);

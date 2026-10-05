@@ -787,6 +787,20 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(new { message = "Booking approved" });
     }
 
+    /// <summary>
+    /// Not approved (lane 3b-1, D-10): the booking is cancelled, "Not approved: …", and its booker told why. Decided through
+    /// the engine when an approval is under way, the approve tier otherwise; never by the booker.
+    /// </summary>
+    [HttpPost("bookings/{id:guid}/reject")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingDto>> RejectBooking(Guid id, [FromBody] EventDecisionDto dto)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var rejectedById, "Rejecting a room booking");
+        if (ctx != null) return ctx;
+
+        return Ok(await _bookingService.RejectBookingAsync(id, rejectedById, dto.Comments ?? string.Empty));
+    }
+
     [HttpPost("bookings/{id:guid}/cancel")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> CancelBooking(Guid id, [FromBody] CancelRoomBookingDto dto)

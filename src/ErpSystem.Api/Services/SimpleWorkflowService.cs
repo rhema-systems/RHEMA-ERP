@@ -1574,6 +1574,23 @@ public class SimpleWorkflowService : IWorkflowService
             context["status"] = companyEvent.Status.ToString();
         }
 
+        // Company-schedule final closure, lane 3b-1 (D-10): what a booking's definition could route on — the room, who
+        // booked it, how many, and whether it is for an event. ⚠ As for events, conditional routing does not route yet (#3).
+        if (IsEntityType(entityTypeRecord, "ROOM_BOOKING", "RoomBooking", "Room Booking"))
+        {
+            var booking = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.CompanySchedule.RoomBooking>()
+                .FirstOrDefaultAsync(b => b.Id == entityId)
+                ?? throw new InvalidOperationException("Room booking not found");
+
+            context["bookingNumber"] = booking.BookingNumber;
+            context["roomId"] = booking.RoomId;
+            context["bookedById"] = booking.BookedById;
+            context["expectedAttendees"] = booking.ExpectedAttendees;
+            context["startDateTime"] = booking.StartDateTime;
+            context["hasEvent"] = booking.EventId != null;
+            context["status"] = booking.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_OVERTIME_REQUEST", "StaffOvertimeRequest", "Overtime Request"))
         {
             var overtime = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffOvertimeRequest>()

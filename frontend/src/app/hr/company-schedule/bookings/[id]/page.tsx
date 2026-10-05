@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, Loader2, Save, Trash2, XCircle } from 'lucide-react';
+import { Ban, CheckCircle2, Loader2, Save, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useAuth } from '@/hooks/use-auth';
@@ -138,9 +138,29 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     mutationFn: () => roomBookingService.approve(id),
     onSuccess: async () => {
       await refresh();
-      toast({ title: 'Booking approved' });
+      const after = await roomBookingService.getById(id).catch(() => null);
+      toast({
+        title: after?.status === 'Confirmed' ? 'Booking approved' : 'Approval recorded',
+        description: after?.status === 'Confirmed'
+          ? 'The booker is told.'
+          : 'Another approval stage is still to come.',
+      });
     },
     onError: fail('Could not approve the booking'),
+  });
+
+  // Lane 3b-1 (D-10): not approving cancels the booking, and its booker is told why.
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const reject = useMutation({
+    mutationFn: () => roomBookingService.reject(id, rejectReason.trim()),
+    onSuccess: async () => {
+      await refresh();
+      setRejectOpen(false);
+      setRejectReason('');
+      toast({ title: 'Booking not approved', description: 'It is cancelled, and the booker is told why.' });
+    },
+    onError: fail('Could not record the decision'),
   });
 
   const cancel = useMutation({
@@ -215,9 +235,14 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
         actions={
           <div className="flex items-center gap-2">
             {booking.status === 'Tentative' && open && !mine && (
-              <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
-              </Button>
+              <>
+                <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
+                </Button>
+                <Button variant="outline" onClick={() => setRejectOpen(true)}>
+                  <Ban className="mr-2 h-4 w-4" /> Not approve
+                </Button>
+              </>
             )}
             {open && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
@@ -320,6 +345,32 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
             >
               {cancel.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Cancel booking
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Not approve this booking</DialogTitle>
+            <DialogDescription>
+              It is cancelled and the room released. {booking.bookedByName} is told, with your reason.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reject-reason">Reason</Label>
+            <Textarea id="reject-reason" rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>Back</Button>
+            <Button
+              variant="destructive"
+              disabled={!rejectReason.trim() || reject.isPending}
+              onClick={() => reject.mutate()}
+            >
+              {reject.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Not approve
             </Button>
           </DialogFooter>
         </DialogContent>

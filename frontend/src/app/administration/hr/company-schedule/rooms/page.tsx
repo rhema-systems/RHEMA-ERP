@@ -95,7 +95,7 @@ export default function MeetingRoomsPage() {
       toast({
         title: 'Room deactivated',
         description: cancelFutureBookings
-          ? `"${room.roomName}" can no longer be booked, and its bookings still to come were cancelled.`
+          ? `"${room.roomName}" can no longer be booked; its bookings still to come were cancelled and their bookers told.`
           : `"${room.roomName}" can no longer be booked.`,
       });
       setRetire(null);

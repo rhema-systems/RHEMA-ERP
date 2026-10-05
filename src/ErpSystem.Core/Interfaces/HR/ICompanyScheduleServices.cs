@@ -217,6 +217,9 @@ public interface IRoomBookingService
     Task<RoomBookingDto> CreateAsync(CreateRoomBookingDto createDto, Guid bookedById, CancellationToken cancellationToken = default);
     Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default);
+
+    /// <summary>Not approved: the booking is cancelled, "Not approved: …", and its booker told why (lane 3b-1, D-10).</summary>
+    Task<RoomBookingDto> RejectBookingAsync(Guid bookingId, Guid rejectedById, string reason, CancellationToken cancellationToken = default);
     Task<bool> CancelBookingAsync(CancelRoomBookingDto cancelDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

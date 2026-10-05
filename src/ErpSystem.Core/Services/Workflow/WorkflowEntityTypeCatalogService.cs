@@ -40,6 +40,8 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("RemoteWorkRequest", "Human Resources", "HR remote and work-from-home requests", "House", "#8B5CF6", 79),
             // Company-schedule final closure, lane 2b (D-10). Grepped first: no other module uses the key.
             new("CompanyEvent", "Human Resources", "HR company events that need approval", "CalendarCheck", "#0EA5E9", 79),
+            // Company-schedule final closure, lane 3b-1 (D-10). Grepped first: no other module uses the key.
+            new("RoomBooking", "Human Resources", "Meeting room bookings of rooms that need approval", "DoorOpen", "#0EA5E9", 79),
             new("ConsultantTimesheet", "Human Resources", "Consultant timesheet submission and approval", "FileClock", "#0D9488", 79),
             new("AppraisalTemplate", "Human Resources", "HR appraisal form templates submitted for HR sign-off", "ClipboardCheck", "#7C3AED", 79),
             new("SalaryReviewProposal", "Human Resources", "Merit increase and bonus proposals raised from appraisal outcomes", "BadgeDollarSign", "#16A34A", 79),
