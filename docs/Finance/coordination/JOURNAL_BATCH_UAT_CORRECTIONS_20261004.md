@@ -74,3 +74,11 @@ pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 
 - Authorized: local implementation, focused tests, lint, and coordination documentation.
 - Not authorized: push, pull request creation, merge, deployment, database migration/application, or production/UAT data repair.
+
+## 2026-10-05 post-integration approval authorization audit
+
+- UAT observed ACCESS_FORBIDDEN when accounts.officer submitted a complete journal-batch review, even though the batch appeared in that user's approval workbench and the detail page exposed the review controls.
+- The intended contract is unambiguous: the first workflow stage includes Accounts Officer, ReviewStage requires Finance.JournalBatches.Approve, and the Accounts Officer baseline role includes that permission.
+- A read-only check of the exact API database, `RHEMAERP_BOOKV2_UAT_20260922`, confirmed that Accounts Officer is granted `Finance.JournalBatches.Approve`, `Finance.Workflow.Approve`, and `Finance.Workflow.Reject`.
+- This is not an intended role restriction and is a remediation candidate. The generic ACCESS_FORBIDDEN response can originate either in permission middleware or in the workflow-assignment guard, so the next UAT pass must capture the failing request, authenticated claims, and current workflow step to distinguish stale authorization context from workflow-state drift.
+- No database or deployment mutation was performed.

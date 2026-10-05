@@ -71,3 +71,14 @@ Integrated in PR #352; follow-up UAT regression correction recorded below.
 - Existing deliberate tenant workflow configuration remains preserved; no auto-approval path was introduced.
 - Focused regression `SeedCriticalFinanceWorkflowDefinitionsAsync_ShouldProvisionExchangeRateWithoutOptionalWorkflowFlag` passed, 1/1, from an isolated build output because the local UAT API process held the normal API DLL open.
 - API restart is required once to execute the new startup provisioner for the local UAT tenant.
+
+## 2026-10-05 orphan-submission hardening
+
+- Root cause confirmed: create, update, and bulk-upload paths persisted pending exchange-rate rows before workflow start. A thrown missing-definition error bypassed the prior unsuccessful-result compensation and left an invisible pending record that then blocked retry as a duplicate.
+- Completed remediation makes business mutation, audit, and workflow creation one transaction; any thrown or unsuccessful workflow start rolls back the submission. Bulk upload now remains all-or-nothing through workflow creation.
+- Startup reconciliation identifies pending ExchangeRate rows with no workflow history and starts the missing workflow as the durable original creator. It never reopens rows that have any active or terminal workflow history and skips rows without a trustworthy initiator.
+- The Finance workbench now links ExchangeRate approvals to /finance/exchange-rates.
+- Focused verification passed 7 tests: orphan reconciliation (2), rollback contract, workbench projection, workflow approval gating, approved-schedule preservation, and bulk all-or-nothing validation.
+- Follow-up implementation commit: `b9ff2e302` (`fix(finance): make exchange-rate workflow submission atomic`); local only and not yet pushed to PR #352.
+- A read-only check of `RHEMAERP_BOOKV2_UAT_20260922` found the ExchangeRate entity type and one active definition but no workflow instances at the time of inspection.
+- No direct database mutation, API restart, push, or deployment was performed by this task.

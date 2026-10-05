@@ -67,3 +67,15 @@ The user authorized implementation and commits. No push, PR creation, deployment
 ## Integration outcome
 
 Ready for the consolidated Finance UAT candidate; not yet integrated.
+
+## 2026-10-05 post-integration approval-workbench audit
+
+- UAT reports that submitted recurring journals do not appear in any user's approval workbench.
+- The workbench already recognizes RecurringJournalTemplate, RecurringJournalOccurrence, and RecurringJournalOccurrenceWaiver, resolves their display facts, and links them back to the recurring-journal workspace.
+- The provisioning path is incomplete: ordinary startup currently guarantees only the ExchangeRate Finance workflow, while recurring-journal workflow definitions are installed only when optional broad workflow seeding is enabled.
+- Template submission persists PendingApproval before starting its workflow. A missing-definition exception therefore leaves an orphaned pending template with no workflow instance or approval rows, so no role can see it in a workbench.
+- Generated occurrences catch the same missing-definition failure and become SubmissionFailed; they also cannot appear as pending approvals until provisioning succeeds and generation retry runs.
+- A read-only check of the exact API database, `RHEMAERP_BOOKV2_UAT_20260922`, confirmed that all three recurring entity types/definitions are absent while one template is already in `PendingApproval`. This is a concrete orphaned submission, not a workbench display-only problem.
+- The direct recurring-journal approve/reject endpoints require `Finance.JournalEntries.Approve`, while the first workflow stage includes Accounts Officer and Senior Accountant; the generic Finance workbench instead uses `Finance.Workflow.Approve`/`Reject`. This route-to-role mismatch must be resolved by the broader Finance authority audit.
+- Required remediation: make all three recurring-journal definitions critical/idempotent startup dependencies, make template submission atomic, reconcile only truly orphaned pending templates, and safely retry workflow creation for SubmissionFailed occurrences without reopening terminal workflow history.
+- No implementation or database mutation was performed for this newly identified workstream in this audit.
