@@ -80,7 +80,8 @@ public enum CashierTillSessionStatus
 {
     Open = 1,
     PendingReview = 2,
-    Closed = 3
+    Closed = 3,
+    Cancelled = 4
 }
 
 public enum BankDepositStatus

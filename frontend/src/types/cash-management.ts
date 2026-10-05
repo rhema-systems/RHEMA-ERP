@@ -383,7 +383,7 @@ export interface LiquidityAccountEntry {
     rowVersion: string;
 }
 
-export type CashierTillSessionStatus = 'Open' | 'PendingReview' | 'Closed';
+export type CashierTillSessionStatus = 'Open' | 'PendingReview' | 'Closed' | 'Cancelled';
 
 export interface CashierTillCountLine {
     id: string;
@@ -442,6 +442,11 @@ export interface CashierTillSession {
     reviewedById?: string;
     reviewComments?: string;
     closedAt?: string;
+    cancelledAt?: string;
+    cancelledById?: string;
+    cancellationReason?: string;
+    openingDetailsMutable: boolean;
+    openingDetailsLockReason?: string;
     correctsSessionId?: string;
     correctionReason?: string;
     countLines: CashierTillCountLine[];

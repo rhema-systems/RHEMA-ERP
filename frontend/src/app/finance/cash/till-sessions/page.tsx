@@ -4,11 +4,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
     ArrowLeft,
+    Ban,
     CheckCircle2,
     ClipboardCheck,
     Loader2,
     RefreshCw,
     RotateCcw,
+    Save,
     Send,
     WalletCards,
 } from 'lucide-react';
@@ -21,7 +23,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
-import { isIndependentTillReviewer } from '@/lib/finance/cashier-till-access';
+import { canManageUnusedTill, isIndependentTillReviewer } from '@/lib/finance/cashier-till-access';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { CashierTillSession, LiquidityAccount } from '@/types/cash-management';
 
@@ -56,6 +58,10 @@ export default function CashierTillSessionsPage() {
     const [varianceReason, setVarianceReason] = useState('');
     const [reviewComments, setReviewComments] = useState('');
     const [correctionReason, setCorrectionReason] = useState('');
+    const [editOpeningFloat, setEditOpeningFloat] = useState('0');
+    const [editOpeningNotes, setEditOpeningNotes] = useState('');
+    const [editOpeningEvidence, setEditOpeningEvidence] = useState<File | null>(null);
+    const [cancellationReason, setCancellationReason] = useState('');
 
     const load = useCallback(async (preferredId?: string) => {
         const [sessionRows, accountRows] = await Promise.all([
@@ -79,6 +85,14 @@ export default function CashierTillSessionsPage() {
             .finally(() => setLoading(false));
     }, [load]);
 
+    useEffect(() => {
+        if (!selected) return;
+        setEditOpeningFloat(String(selected.openingFloatAmount));
+        setEditOpeningNotes(selected.openingNotes || '');
+        setEditOpeningEvidence(null);
+        setCancellationReason('');
+    }, [selected?.id, selected?.openingFloatAmount, selected?.openingNotes]);
+
     const countedAmount = useMemo(
         () => denominations.reduce((sum, denomination) =>
             sum + denomination * Math.max(0, counts[String(denomination)] || 0), 0),
@@ -94,6 +108,14 @@ export default function CashierTillSessionsPage() {
     );
     const canReviewSelected = Boolean(
         selected && canReview && isIndependentTillReviewer(user?.id, selected.cashierUserId),
+    );
+    const canManageSelected = Boolean(
+        selected && canManageUnusedTill(
+            user?.id,
+            selected.cashierUserId,
+            canOperate,
+            selected.openingDetailsMutable,
+        ),
     );
 
     const run = async (operation: () => Promise<CashierTillSession>, success: string) => {
@@ -170,6 +192,41 @@ export default function CashierTillSessionsPage() {
         }
     };
 
+    const saveOpeningDetails = async () => {
+        if (!selected) return;
+        const amount = Number(editOpeningFloat);
+        if (!Number.isFinite(amount) || amount < 0) return toast.error('Enter a valid opening float.');
+        setBusy(true);
+        try {
+            const openingEvidenceFileId = editOpeningEvidence
+                ? await cashManagementDataService.uploadBankingEvidence(editOpeningEvidence)
+                : selected.openingEvidenceFileId;
+            const result = await cashManagementDataService.updateCashierTillOpening(selected.id, {
+                openingFloatAmount: amount,
+                openingNotes: editOpeningNotes.trim() || undefined,
+                openingEvidenceFileId,
+                rowVersion: selected.rowVersion,
+            });
+            setSelected(result);
+            await load(result.id);
+            toast.success('Unused till opening details updated.');
+        } catch (error) {
+            toast.error(errorMessage(error, 'Could not update the till opening details.'));
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const cancelSession = async () => {
+        if (!selected) return;
+        const reason = cancellationReason.trim();
+        if (reason.length < 10) return toast.error('Enter a cancellation reason of at least 10 characters.');
+        await run(
+            () => cashManagementDataService.cancelCashierTillSession(selected.id, reason, selected.rowVersion),
+            'Unused till session cancelled. Its audit record has been retained.',
+        );
+    };
+
     const selectSession = async (id: string) => {
         setBusy(true);
         try {
@@ -178,6 +235,7 @@ export default function CashierTillSessionsPage() {
             setVarianceReason('');
             setReviewComments('');
             setCorrectionReason('');
+            setCancellationReason('');
         } catch (error) {
             toast.error(errorMessage(error, 'Could not load the till session.'));
         } finally {
@@ -236,7 +294,7 @@ export default function CashierTillSessionsPage() {
                                     <td className="p-3"><div className="font-medium text-primary">{item.sessionNumber}</div><div className="text-xs text-muted-foreground">{new Date(item.businessDate).toLocaleDateString()}</div></td>
                                     <td className="p-3"><div>{item.tillName}</div><div className="text-xs text-muted-foreground">{item.cashierName}</div></td>
                                     <td className="p-3 text-right">{money(item.expectedClosingAmount, item.currency)}</td>
-                                    <td className={`p-3 text-right ${item.varianceAmount < 0 ? 'text-red-600' : item.varianceAmount > 0 ? 'text-amber-600' : ''}`}>{item.status === 'Open' ? '—' : money(item.varianceAmount, item.currency)}</td>
+                                    <td className={`p-3 text-right ${item.varianceAmount < 0 ? 'text-red-600' : item.varianceAmount > 0 ? 'text-amber-600' : ''}`}>{item.status === 'Open' || item.status === 'Cancelled' ? '—' : money(item.varianceAmount, item.currency)}</td>
                                     <td className="p-3"><Badge variant={item.status === 'Closed' ? 'default' : item.status === 'PendingReview' ? 'secondary' : 'outline'}>{item.status}</Badge></td>
                                 </tr>
                             ))}</tbody></table></div>
@@ -257,7 +315,22 @@ export default function CashierTillSessionsPage() {
                                 </div>
                                 <div className="text-sm text-muted-foreground">Custody entries: {selected.custodyEntryCount} · Opened {new Date(selected.openedAt).toLocaleString()} by {selected.cashierName}</div>
 
-                                {selected.status === 'Open' && canOperate && (
+                                {selected.status === 'Open' && isOwnSelectedSession && canOperate && (
+                                    <div className="space-y-4 rounded-lg border p-4">
+                                        <div><h3 className="font-semibold">Manage unused session</h3><p className="text-sm text-muted-foreground">Till, cashier, business date, currency, session number, and opening time cannot be changed.</p></div>
+                                        {canManageSelected ? <>
+                                            <div className="grid gap-3 sm:grid-cols-2">
+                                                <div className="space-y-2"><Label>Opening float ({selected.currency})</Label><Input type="number" min="0" step="0.01" value={editOpeningFloat} onChange={event => setEditOpeningFloat(event.target.value)} /></div>
+                                                <div className="space-y-2"><Label>Replace opening evidence</Label><Input type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={event => setEditOpeningEvidence(event.target.files?.[0] || null)} /></div>
+                                            </div>
+                                            <div className="space-y-2"><Label>Opening notes</Label><Textarea value={editOpeningNotes} onChange={event => setEditOpeningNotes(event.target.value)} placeholder="Float source, handover reference, or custody note" /></div>
+                                            <Button variant="outline" disabled={busy} onClick={() => void saveOpeningDetails()}>{busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Save opening details</Button>
+                                            <div className="border-t pt-4"><div className="space-y-2"><Label>Cancellation reason (minimum 10 characters)</Label><Textarea value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} placeholder="Explain why this unused custody session must be cancelled." /></div><Button className="mt-3" variant="destructive" disabled={busy || cancellationReason.trim().length < 10} onClick={() => void cancelSession()}><Ban className="mr-2 h-4 w-4" />Cancel unused session</Button></div>
+                                        </> : <p className="text-sm text-muted-foreground">{selected.openingDetailsLockReason || 'This session is no longer eligible for opening-detail changes or cancellation.'}</p>}
+                                    </div>
+                                )}
+
+                                {selected.status === 'Open' && canOperate && isOwnSelectedSession && (
                                     <div className="space-y-4 rounded-lg border p-4">
                                         <div><h3 className="font-semibold">Denomination count</h3><p className="text-sm text-muted-foreground">The server calculates counted cash and freezes activity at submission.</p></div>
                                         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">{denominations.map(denomination => (
@@ -280,6 +353,10 @@ export default function CashierTillSessionsPage() {
 
                                 {selected.status === 'Closed' && (
                                     <div className="space-y-4 rounded-lg border p-4"><div className="flex items-center gap-2 font-semibold text-emerald-700"><CheckCircle2 className="h-5 w-5" />Independently closed</div><div className="text-sm">Counted {money(selected.countedClosingAmount, selected.currency)} · variance {money(selected.varianceAmount, selected.currency)}</div>{selected.reviewComments && <div className="rounded bg-muted p-3 text-sm"><strong>Review:</strong> {selected.reviewComments}</div>}{canReopen && <><div className="space-y-2"><Label>Correction reason (minimum 20 characters)</Label><Textarea value={correctionReason} onChange={event => setCorrectionReason(event.target.value)} placeholder="Explain why a linked correction session is required." /></div><Button variant="outline" disabled={busy || correctionReason.trim().length < 20} onClick={() => void run(() => cashManagementDataService.reopenCashierTillAsCorrection(selected.id, correctionReason, selected.rowVersion), 'Linked correction session opened.')}><RotateCcw className="mr-2 h-4 w-4" />Open correction session</Button></>}</div>
+                                )}
+
+                                {selected.status === 'Cancelled' && (
+                                    <div className="space-y-2 rounded-lg border p-4"><div className="flex items-center gap-2 font-semibold text-muted-foreground"><Ban className="h-5 w-5" />Cancelled before activity</div><div className="text-sm">{selected.cancellationReason}</div>{selected.cancelledAt && <div className="text-xs text-muted-foreground">Cancelled {new Date(selected.cancelledAt).toLocaleString()}</div>}</div>
                                 )}
 
                                 {selected.custodyEntries.length > 0 && <div className="space-y-2"><h3 className="font-semibold">Canonical custody activity</h3><div className="max-h-64 overflow-auto rounded border"><table className="w-full text-xs"><thead className="sticky top-0 bg-background text-left"><tr><th className="p-2">Recorded</th><th className="p-2">Entry / source</th><th className="p-2 text-right">Movement</th></tr></thead><tbody>{selected.custodyEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-2">{new Date(entry.recordedAt).toLocaleString()}</td><td className="p-2"><div>{entry.entryNumber}</div><div className="text-muted-foreground">{entry.sourceDocumentType} · {entry.referenceNumber || entry.sourceDocumentId}</div></td><td className={`p-2 text-right ${entry.signedAmount < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{money(entry.signedAmount, selected.currency)}</td></tr>)}</tbody></table></div></div>}

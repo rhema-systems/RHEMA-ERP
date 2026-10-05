@@ -79,6 +79,29 @@ class CashManagementDataService {
         return apiService.post<CashierTillSession>('/finance/cashier-tills/sessions', dto);
     }
 
+    async updateCashierTillOpening(id: string, dto: {
+        openingFloatAmount: number;
+        openingNotes?: string;
+        openingEvidenceFileId?: string;
+        rowVersion: string;
+    }): Promise<CashierTillSession> {
+        return apiService.put<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/opening-details`,
+            dto,
+        );
+    }
+
+    async cancelCashierTillSession(
+        id: string,
+        reason: string,
+        rowVersion: string,
+    ): Promise<CashierTillSession> {
+        return apiService.post<CashierTillSession>(
+            `/finance/cashier-tills/sessions/${id}/cancel`,
+            { reason, rowVersion },
+        );
+    }
+
     async submitCashierTillCount(id: string, dto: {
         countLines: Array<{ denomination: number; quantity: number }>;
         varianceReason?: string;

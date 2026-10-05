@@ -192,6 +192,12 @@ public class CashierTillSession : TenantEntity
 
     public DateTime? ClosedAt { get; set; }
 
+    public DateTime? CancelledAt { get; set; }
+    public Guid? CancelledById { get; set; }
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
     /// <summary>
     /// A correction/reopen never mutates the closed source. It creates a linked replacement
     /// session, retaining the original count and approval evidence for audit.
