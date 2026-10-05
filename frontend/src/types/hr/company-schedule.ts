@@ -536,6 +536,35 @@ export interface CompanyEventSearch {
   pageSize?: number;
 }
 
+/** What the event form asks before saving (lane 2g-2, C-15). The event being edited and its series are left out. */
+export interface EventClashQuery {
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  endTime?: string | null;
+  isAllDayEvent: boolean;
+  scope: ParticipantScope;
+  visibility: EventVisibility;
+  organizationUnitId?: string | null;
+  /** None: online, or the whole company — every site. */
+  locationId?: string | null;
+  excludeId?: string | null;
+  seriesId?: string | null;
+}
+
+/** An event the one being saved would clash with (lane 2g-2, C-15). */
+export interface EventClash {
+  eventId: string;
+  eventNumber: string;
+  eventName: string;
+  when: string;
+  audience: string;
+  siteName?: string | null;
+  /** The save would be refused: both for the whole company, or both for the same unit. Otherwise a warning. */
+  refused: boolean;
+  message: string;
+}
+
 /** The bookings register's search (lane 2g-1). */
 export interface RoomBookingSearch {
   text?: string;
@@ -600,6 +629,8 @@ export interface CompanyEventChange {
   told?: CompanyEventNoticeResult | null;
   /** Lane 2f-2b: a move or cancellation with a series scope. */
   series?: EventSeriesChangeResult | null;
+  /** Lane 2g-2: another event at the same time and place that did not stop the move. */
+  warnings?: string[];
 }
 
 export interface CompleteEvent {

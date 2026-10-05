@@ -763,6 +763,109 @@ public class CompanyEventService : ICompanyEventService
             }));
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2g-2 — event against event (C-15: the user's rulings, as D-9)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The live events of this tenant that clash with <paramref name="e"/> by <see cref="CompanyEventRules.ClashOf"/> —
+    /// refusals first — leaving out itself and its own series (a series' dates never clash with each other).
+    /// </summary>
+    /// <remarks>
+    /// The database narrows to the live events whose days touch <paramref name="e"/>'s and whose site could be the same;
+    /// the rule decides the rest. <paramref name="e"/> may be unsaved, or changed in memory and not yet saved.
+    /// </remarks>
+    private async Task<List<(CompanyEvent Other, EventClash Kind)>> ClashesOfAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        if (!CompanyEventRules.IsLive(e)) return [];
+        var first = e.StartDate.Date;
+        var last = e.EndDate.Date;
+        var query = _eventRepository.GetQueryable().AsNoTracking()
+            .Include(x => x.SiteLocation)
+            .Include(x => x.OrganizationUnit)
+            .Where(x => x.TenantId == e.TenantId && x.Id != e.Id && !x.IsCancelled
+                        && x.Status != EventStatus.Cancelled && x.Status != EventStatus.Completed && x.Status != EventStatus.Postponed
+                        && x.StartDate <= last && x.EndDate >= first);
+        if (e.RecurrenceSeriesId is { } seriesId) query = query.Where(x => x.RecurrenceSeriesId != seriesId);
+        if (e.LocationId is { } site) query = query.Where(x => x.LocationId == null || x.LocationId == site);
+
+        return (await query.ToListAsync(cancellationToken))
+            .Select(x => (Other: x, Kind: CompanyEventRules.ClashOf(e, x)))
+            .Where(c => c.Kind != EventClash.None)
+            .OrderByDescending(c => c.Kind).ThenBy(c => c.Other.StartDate).ThenBy(c => c.Other.StartTime)
+            .ToList();
+    }
+
+    /// <summary>The sentence a clash answers with — a refusal says what to do about it; a warning what to check.</summary>
+    private static string ClashMessage(CompanyEvent e, CompanyEvent other, EventClash kind)
+    {
+        var otherNamed = $"{other.EventNumber} {other.EventName} ({CompanyEventRules.Describe(EventWindow.Of(other))})";
+        var place = e.LocationId is { } site && other.LocationId == site
+            ? $"at {other.SiteLocation?.Name ?? "the same site"}"
+            : "and one of them is for every site";
+        if (kind == EventClash.Refused)
+        {
+            var forWhom = CompanyEventRules.AudienceRuleOf(other)?.TargetType == HrAudienceTargetType.AllEmployees
+                ? "the whole company"
+                : other.OrganizationUnit?.Name ?? "the same unit";
+            return $"{e.EventName} ({CompanyEventRules.Describe(EventWindow.Of(e))}) would clash with {otherNamed}: both are for "
+                   + $"{forWhom}, at the same time, {place}. Move one of them, or change who it is for.";
+        }
+        return $"{otherNamed} is at the same time, {place}, for: "
+               + $"{CompanyEventRules.DescribeAudience(other, other.OrganizationUnit?.Name)}. Check the same people are not needed at both.";
+    }
+
+    /// <summary>Refuses an event that would clash with another the server does not allow beside it (C-15), naming it.</summary>
+    private async Task RefuseClashAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        var refused = (await ClashesOfAsync(e, cancellationToken)).FirstOrDefault(c => c.Kind == EventClash.Refused);
+        if (refused.Other is { } other)
+            throw new InvalidOperationException(ClashMessage(e, other, EventClash.Refused));
+    }
+
+    /// <summary>The overlaps the server allows, as warnings for the save's answer (C-15) — named by date for a series.</summary>
+    private async Task<List<string>> ClashWarningsAsync(CompanyEvent e, bool nameTheDate, CancellationToken cancellationToken) =>
+        (await ClashesOfAsync(e, cancellationToken))
+            .Where(c => c.Kind == EventClash.Warning)
+            .Select(c => (nameTheDate ? $"{e.EventNumber}, {SeriesDateLine(e)}: " : string.Empty) + ClashMessage(e, c.Other, EventClash.Warning))
+            .ToList();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<EventClashDto>> FindClashesAsync(EventClashQueryDto query, CancellationToken cancellationToken = default)
+    {
+        var allDay = query.IsAllDayEvent || query.StartTime is null || query.EndTime is null;
+        var probe = new CompanyEvent
+        {
+            Id = query.ExcludeId ?? Guid.Empty,
+            TenantId = GetTenantId(),
+            EventName = "This event",
+            StartDate = query.StartDate.Date,
+            StartTime = allDay ? null : query.StartTime,
+            EndDate = query.EndDate.Date < query.StartDate.Date ? query.StartDate.Date : query.EndDate.Date,
+            EndTime = allDay ? null : query.EndTime,
+            IsAllDayEvent = allDay,
+            Scope = query.Scope,
+            Visibility = query.Visibility,
+            OrganizationUnitId = query.OrganizationUnitId,
+            LocationId = query.LocationId,
+            RecurrenceSeriesId = query.SeriesId,
+            Status = EventStatus.Scheduled,
+        };
+        return (await ClashesOfAsync(probe, cancellationToken))
+            .Select(c => new EventClashDto
+            {
+                EventId = c.Other.Id,
+                EventNumber = c.Other.EventNumber,
+                EventName = c.Other.EventName,
+                When = CompanyEventRules.Describe(EventWindow.Of(c.Other)),
+                Audience = CompanyEventRules.DescribeAudience(c.Other, c.Other.OrganizationUnit?.Name),
+                SiteName = c.Other.SiteLocation?.Name,
+                Refused = c.Kind == EventClash.Refused,
+                Message = ClashMessage(probe, c.Other, c.Kind),
+            })
+            .ToList();
+    }
+
     /// <remarks>
     /// ⚠ By OVERLAP (lane 2a): every event that touches the range. The repository's read wanted the
     /// event to fit inside it, so a conference running into the range from the day before was missing.
@@ -1323,12 +1426,27 @@ public class CompanyEventService : ICompanyEventService
 
         var made = new List<CompanyEvent>();
         for (var index = last; index < total; index++)
+            made.Add(NewOccurrence(template, CompanyEventSeries.DateAt(pattern, anchor, index) + shift, index + 1));
+
+        // Lane 2g-2 (C-15): a new date the server would refuse beside another refuses the extension, named — before a
+        // number is taken.
+        foreach (var occurrence in made)
         {
-            var occurrence = NewOccurrence(template, CompanyEventSeries.DateAt(pattern, anchor, index) + shift, index + 1);
+            try
+            {
+                await RefuseClashAsync(occurrence, cancellationToken);
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException($"Occurrence {occurrence.OccurrenceNumber}, {SeriesDateLine(occurrence)}: {ex.Message}", ex);
+            }
+        }
+
+        foreach (var occurrence in made)
+        {
             occurrence.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
             StampCreator(occurrence);
             await _eventRepository.AddAsync(occurrence);
-            made.Add(occurrence);
         }
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Series of {EventNumber} extended by {Count} occurrence(s), to {Total}", ev.EventNumber, made.Count, total);
@@ -1352,6 +1470,9 @@ public class CompanyEventService : ICompanyEventService
         else if (guests.Count > 0) told = await InviteWaitingAcrossAsync(made, cancellationToken);
 
         var notes = await DayOffNotesAsync(tenantId, made.Select(m => (m.Id, m.StartDate, m.EndDate)).ToList(), cancellationToken);
+        var warnings = DayOffWarnings(made, notes);
+        // Lane 2g-2 (C-15): an overlap the server allows is said, by date.
+        foreach (var occurrence in made) warnings.AddRange(await ClashWarningsAsync(occurrence, true, cancellationToken));
         return new EventSeriesResultDto
         {
             Guests = guests.Count,
@@ -1362,7 +1483,7 @@ public class CompanyEventService : ICompanyEventService
                 StartDate = m.StartDate, StartTime = m.StartTime, EndDate = m.EndDate, Status = m.Status,
                 DayOffNote = notes.GetValueOrDefault(m.Id),
             }).ToList(),
-            Warnings = DayOffWarnings(made, notes),
+            Warnings = warnings,
         };
     }
 
@@ -1926,6 +2047,9 @@ public class CompanyEventService : ICompanyEventService
             Told = anyTold,
         };
         if (await AudienceWarningAsync(acted, cancellationToken) is { } warning) updated.Warnings.Add(warning);
+        // Lane 2g-2 (C-15): an overlap the server allows is said, by date.
+        foreach (var (ev, _) in applied.Where(a => a.Outcome.ClashChecked))
+            updated.Warnings.AddRange(await ClashWarningsAsync(ev, true, cancellationToken));
         return updated;
     }
 
@@ -1960,6 +2084,8 @@ public class CompanyEventService : ICompanyEventService
             {
                 if (dto.NewRsvpDeadline is { } deadline) target.RsvpDeadline = start + (deadline - dto.NewStartDate.Date);
                 ValidateWindow(target, requested);
+                // Lane 2g-2 (C-15): its new time must not clash where the server refuses it.
+                await RefuseClashAsync(target, cancellationToken);
                 moved.Add((target, await MoveAsync(target, before, reason, cancellationToken)));
             }
             catch (InvalidOperationException ex)
@@ -1984,6 +2110,8 @@ public class CompanyEventService : ICompanyEventService
             await StartApprovalAsync(asks, cancellationToken);
 
         var anyTold = told.Issued > 0 ? told : null;
+        var warnings = new List<string>();
+        foreach (var (ev, _) in moved) warnings.AddRange(await ClashWarningsAsync(ev, true, cancellationToken));
         return new CompanyEventChangeDto
         {
             Event = await GetByIdAsync(acted.Id, cancellationToken),
@@ -1997,6 +2125,8 @@ public class CompanyEventService : ICompanyEventService
                 Closed = closed,
                 Told = anyTold,
             },
+            // Lane 2g-2 (C-15): an overlap the server allows is said, by date.
+            Warnings = warnings,
         };
     }
 
@@ -2339,19 +2469,30 @@ public class CompanyEventService : ICompanyEventService
             entity.RecurrenceDetails = null;
         }
 
-        entity.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
         entity.Status = EventStatus.Scheduled;
-        StampCreator(entity);
-        await _eventRepository.AddAsync(entity);
-
         var series = new List<CompanyEvent> { entity };
         for (var index = 1; index < occurrences; index++)
+            series.Add(NewOccurrence(entity, CompanyEventSeries.DateAt(entity.RecurrencePattern!.Value, entity.StartDate, index), index + 1));
+
+        // Lane 2g-2 (C-15): a clash the server does not allow refuses the event — any date of a series, named — before a
+        // number is taken.
+        foreach (var occurrence in series)
         {
-            var occurrence = NewOccurrence(entity, CompanyEventSeries.DateAt(entity.RecurrencePattern!.Value, entity.StartDate, index), index + 1);
+            try
+            {
+                await RefuseClashAsync(occurrence, cancellationToken);
+            }
+            catch (InvalidOperationException ex) when (series.Count > 1)
+            {
+                throw new InvalidOperationException($"Occurrence {occurrence.OccurrenceNumber}, {SeriesDateLine(occurrence)}: {ex.Message}", ex);
+            }
+        }
+
+        foreach (var occurrence in series)
+        {
             occurrence.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
             StampCreator(occurrence);
             await _eventRepository.AddAsync(occurrence);
-            series.Add(occurrence);
         }
         // One save: a series is made whole or not at all.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2373,11 +2514,18 @@ public class CompanyEventService : ICompanyEventService
         // D-12: an occurrence on a day the company does not work is made and flagged, not skipped.
         created.Warnings.AddRange(DayOffWarnings(series,
             await DayOffNotesAsync(tenantId, series.Select(s => (s.Id, s.StartDate, s.EndDate)).ToList(), cancellationToken)));
+        // Lane 2g-2 (C-15): an overlap the server allows is said.
+        foreach (var occurrence in series)
+            created.Warnings.AddRange(await ClashWarningsAsync(occurrence, series.Count > 1, cancellationToken));
         return created;
     }
 
-    /// <summary>What an edit did to one event — applied, not yet saved, nobody told (lane 2f-2b).</summary>
-    private sealed record EditOutcome(bool Moving, CompanyEventChangeDto? Moved, bool PostponedNow, (string What, string? SiteName)? Changed);
+    /// <summary>
+    /// What an edit did to one event — applied, not yet saved, nobody told (lane 2f-2b). <paramref name="ClashChecked"/>:
+    /// it changed what a clash depends on (lane 2g-2), so its allowed overlaps are worth saying.
+    /// </summary>
+    private sealed record EditOutcome(
+        bool Moving, CompanyEventChangeDto? Moved, bool PostponedNow, (string What, string? SiteName)? Changed, bool ClashChecked = false);
 
     /// <summary>
     /// Applies an edit to one event — its checks, a move when the window changes, and what its guests would hear of —
@@ -2404,6 +2552,9 @@ public class CompanyEventService : ICompanyEventService
         var venueBefore = entity.VenueName;
         var linkBefore = entity.OnlineMeetingLink;
         var siteBefore = entity.LocationId;
+        // Lane 2g-2 (C-15): what a clash depends on — besides the window — before the edit.
+        var audienceBefore = (entity.Scope, entity.Visibility, entity.OrganizationUnitId);
+        var liveBefore = CompanyEventRules.IsLive(entity);
 
         if (moving && string.IsNullOrWhiteSpace(updateDto.RescheduleReason))
             throw new InvalidOperationException(
@@ -2414,6 +2565,13 @@ public class CompanyEventService : ICompanyEventService
         if (updateDto.Status is { } status && status != entity.Status) ApplyStatus(entity, status);
 
         await ValidateAsync(entity, moving ? requested : before, tenantId, organiserChanged, cancellationToken);
+
+        // Lane 2g-2 (C-15): only an edit that changes what a clash depends on is checked — an event already beside another
+        // (made before the rule) can still have its description corrected.
+        var clashChecked = moving || siteBefore != entity.LocationId
+                           || audienceBefore != (entity.Scope, entity.Visibility, entity.OrganizationUnitId)
+                           || (!liveBefore && CompanyEventRules.IsLive(entity));
+        if (clashChecked) await RefuseClashAsync(entity, cancellationToken);
 
         // ⚠ An edit that changes the window is a reschedule (F-37, R4-7.1): it used to write the dates
         // straight in, so nothing kept the original, the status stayed, and nobody was told.
@@ -2433,7 +2591,7 @@ public class CompanyEventService : ICompanyEventService
         if (postponedNow || changed is not null) entity.CalendarSequence++;
 
         await _eventRepository.UpdateAsync(entity);
-        return new EditOutcome(moving, moved, postponedNow, changed);
+        return new EditOutcome(moving, moved, postponedNow, changed, clashChecked);
     }
 
     /// <summary>Tells one event's guests what an edit did (lane 2e-1, 2e-2) — those <paramref name="filter"/> lets through.</summary>
@@ -2489,6 +2647,8 @@ public class CompanyEventService : ICompanyEventService
         var updated = await GetByIdAsync(entity.Id, cancellationToken);
         updated.Told = told;
         if (await AudienceWarningAsync(entity, cancellationToken) is { } warning) updated.Warnings.Add(warning);
+        // Lane 2g-2 (C-15): an overlap the server allows is said.
+        if (outcome.ClashChecked) updated.Warnings.AddRange(await ClashWarningsAsync(entity, false, cancellationToken));
         return updated;
     }
 
@@ -2691,6 +2851,8 @@ public class CompanyEventService : ICompanyEventService
         // window check refuses the move without it.
         if (rescheduleDto.NewRsvpDeadline is { } newDeadline) entity.RsvpDeadline = newDeadline;
         ValidateWindow(entity, requested);
+        // Lane 2g-2 (C-15): its new time must not clash where the server refuses it — checked before its rooms move.
+        await RefuseClashAsync(entity, cancellationToken);
 
         var change = await MoveAsync(entity, before, rescheduleDto.RescheduleReason.Trim(), cancellationToken);
 
@@ -2708,6 +2870,8 @@ public class CompanyEventService : ICompanyEventService
         if (change.ApprovalCleared) await StartApprovalAsync(entity, cancellationToken);
 
         change.Event = await GetByIdAsync(entity.Id, cancellationToken);
+        // Lane 2g-2 (C-15): an overlap the server allows is said.
+        change.Warnings = await ClashWarningsAsync(entity, false, cancellationToken);
         return change;
     }
 

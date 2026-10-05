@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useForm, type UseFormReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -25,6 +26,7 @@ import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { companyEventService } from '@/services/hr/company-schedule.service';
+import { useDebounce } from '@/hooks/use-debounce';
 import {
   EVENT_CATEGORIES_FOR_NEW,
   EVENT_EDITABLE_STATUSES,
@@ -39,6 +41,7 @@ import {
 import type {
   CompanyEvent,
   CreateCompanyEvent,
+  EventClashQuery,
   EventStatus,
   EventVisibility,
   ParticipantScope,
@@ -578,6 +581,22 @@ export function EventFormFields({
             />
           </FieldRow>
           <AudienceLine scope={scope} visibility={form.watch('visibility')} unitId={form.watch('organizationUnitId')} />
+          <ClashLine
+            query={{
+              startDate: form.watch('startDate'),
+              startTime: isAllDay ? null : form.watch('startTime') || null,
+              endDate: form.watch('endDate') || form.watch('startDate'),
+              endTime: isAllDay ? null : form.watch('endTime') || null,
+              isAllDayEvent: isAllDay,
+              scope: scope as ParticipantScope,
+              visibility: form.watch('visibility') as EventVisibility,
+              organizationUnitId: form.watch('organizationUnitId') || null,
+              locationId: form.watch('locationId') || null,
+              excludeId: event?.id ?? null,
+              seriesId: event?.recurrenceSeriesId ?? null,
+            }}
+            repeats={mode === 'create' && isRecurring}
+          />
           <SwitchField form={form} name="requiresRsvp" label="Requires RSVP" />
           {requiresRsvp && (
             <DateTimeField form={form} name="rsvpDeadline" label="RSVP deadline" />
@@ -658,6 +677,40 @@ function AudienceLine({ scope, visibility, unitId }: { scope: string; visibility
         )}
       </p>
       {data.warning && <p className="text-amber-700 dark:text-amber-300">⚠ {data.warning}</p>}
+    </div>
+  );
+}
+
+/**
+ * The events these dates, this audience and this site would clash with, before saving (lane 2g-2, C-15: the user's
+ * rulings). Refused — both for the whole company, or both for the same unit, at the same time and place — in red: the
+ * save will say no. Any other overlap with an event for more than its guests in amber: HR decides.
+ */
+function ClashLine({ query, repeats }: { query: EventClashQuery; repeats: boolean }) {
+  // A short pause while the dates are typed. ⚠ Debounced as a string: the query object is new on every render, and
+  // debouncing the object itself would set state every 400 ms for ever.
+  const debouncedKey = useDebounce(JSON.stringify(query), 400);
+  const debounced = useMemo(() => JSON.parse(debouncedKey) as EventClashQuery, [debouncedKey]);
+  const ready = !!debounced.startDate && !!debounced.scope && !!debounced.visibility;
+  const { data } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'events', 'clashes', debounced],
+    queryFn: () => companyEventService.findClashes(debounced),
+    enabled: ready,
+  });
+  if (!data?.length) return null;
+  const refused = data.filter((c) => c.refused);
+  const warned = data.filter((c) => !c.refused);
+  return (
+    <div className="space-y-2 rounded-md border p-3 text-sm">
+      {refused.map((c) => (
+        <p key={c.eventId} className="text-destructive">✕ {c.message}</p>
+      ))}
+      {warned.map((c) => (
+        <p key={c.eventId} className="text-amber-700 dark:text-amber-300">⚠ {c.message}</p>
+      ))}
+      {repeats && (
+        <p className="text-xs text-muted-foreground">This checks the first date; every date of the series is checked when you save.</p>
+      )}
     </div>
   );
 }

@@ -21,6 +21,14 @@ public readonly record struct EventWindow(
         && (AllDay || (StartTime == other.StartTime && EndTime == other.EndTime));
 }
 
+/// <summary>How two events clash (lane 2g-2, C-15): not at all, a warning shown before saving, or refused.</summary>
+public enum EventClash
+{
+    None = 0,
+    Warning = 1,
+    Refused = 2,
+}
+
 /// <summary>
 /// The rules an event's dates, status and approval follow (company-schedule final closure, lane 2a) —
 /// pure, so the service, the diary source and the harness read the same answers.
@@ -57,6 +65,52 @@ public static class CompanyEventRules
         !IsClosed(e)
         && (e.Status is EventStatus.Confirmed or EventStatus.InProgress
             || (!IsAwaitingApproval(e) && e.Status is EventStatus.Scheduled or EventStatus.Rescheduled));
+
+    // ── Event against event (lane 2g-2, C-15: the user's rulings, as D-9) ────────────────────────────
+
+    /// <summary>Going ahead: not cancelled, completed or postponed. One awaiting approval counts — it may go ahead.</summary>
+    public static bool IsLive(CompanyEvent e) => !IsClosed(e) && e.Status != EventStatus.Postponed;
+
+    /// <summary>
+    /// In the same place: the same site, or either with no site — online, or for the whole company (the user's ruling).
+    /// Two events at different sites at once are in different places.
+    /// </summary>
+    public static bool SamePlace(CompanyEvent a, CompanyEvent b) =>
+        a.LocationId is null || b.LocationId is null || a.LocationId == b.LocationId;
+
+    /// <summary>
+    /// At the same time: their days overlap and, when both are timed, so do their hours — a multi-day event holds its
+    /// hours on each of its days, as the diaries read it (<see cref="DailyWindows"/>). An all-day or untimed event holds
+    /// the whole day.
+    /// </summary>
+    public static bool SameTime(CompanyEvent a, CompanyEvent b)
+    {
+        if (a.StartDate.Date > b.EndDate.Date || b.StartDate.Date > a.EndDate.Date) return false;
+        var aTimed = !a.IsAllDayEvent && a.StartTime.HasValue && a.EndTime.HasValue;
+        var bTimed = !b.IsAllDayEvent && b.StartTime.HasValue && b.EndTime.HasValue;
+        return !aTimed || !bTimed || (a.StartTime < b.EndTime && b.StartTime < a.EndTime);
+    }
+
+    /// <summary>
+    /// Whether two events clash (C-15), and how hard. Both live, in the same place, at the same time, and at least one
+    /// for more than its guest list — two guest-list meetings are the diaries' business, not this rule's. <b>Refused</b>
+    /// when both are for the whole company, or both for the same unit (their audience as <see cref="AudienceRuleOf"/>
+    /// reads it, so a private event is for its guests whatever its scope). <b>A warning</b> otherwise — a whole-company
+    /// event against a unit's, say: HR decides.
+    /// </summary>
+    public static EventClash ClashOf(CompanyEvent a, CompanyEvent b)
+    {
+        if (!IsLive(a) || !IsLive(b) || !SamePlace(a, b) || !SameTime(a, b)) return EventClash.None;
+        var ra = AudienceRuleOf(a);
+        var rb = AudienceRuleOf(b);
+        if (ra is null && rb is null) return EventClash.None;
+        if (ra is { TargetType: HrAudienceTargetType.AllEmployees } && rb is { TargetType: HrAudienceTargetType.AllEmployees })
+            return EventClash.Refused;
+        if (ra is { TargetType: HrAudienceTargetType.OrganizationUnit } && rb is { TargetType: HrAudienceTargetType.OrganizationUnit }
+            && ra.TargetId == rb.TargetId)
+            return EventClash.Refused;
+        return EventClash.Warning;
+    }
 
     /// <summary>
     /// Who an event is for, beyond its guest list and organiser, as an audience rule (lane 2c, D-16) — or

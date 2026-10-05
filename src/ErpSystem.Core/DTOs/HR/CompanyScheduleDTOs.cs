@@ -335,6 +335,47 @@ public class CompanyEventSearchDto
     public int PageSize { get; set; } = 25;
 }
 
+/// <summary>
+/// What the event form asks before saving (lane 2g-2, C-15): the events this one would clash with, refused or warned of.
+/// The event being edited, and its own series, are left out.
+/// </summary>
+public class EventClashQueryDto
+{
+    [Required]
+    public DateTime StartDate { get; set; }
+    public TimeSpan? StartTime { get; set; }
+    [Required]
+    public DateTime EndDate { get; set; }
+    public TimeSpan? EndTime { get; set; }
+    public bool IsAllDayEvent { get; set; }
+    public ParticipantScope Scope { get; set; }
+    public EventVisibility Visibility { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    /// <summary>The site; none means online or the whole company, which is every site.</summary>
+    public Guid? LocationId { get; set; }
+    /// <summary>The event being edited.</summary>
+    public Guid? ExcludeId { get; set; }
+    /// <summary>Its series: a series' dates do not clash with each other.</summary>
+    public Guid? SeriesId { get; set; }
+}
+
+/// <summary>An event another would clash with (lane 2g-2, C-15), and what the server would do about it.</summary>
+public class EventClashDto
+{
+    public Guid EventId { get; set; }
+    public string EventNumber { get; set; } = string.Empty;
+    public string EventName { get; set; } = string.Empty;
+    /// <summary>"14 October 2026, 09:00–10:00".</summary>
+    public string When { get; set; } = string.Empty;
+    /// <summary>"Everyone", "Finance and the units beneath it", "Management — …".</summary>
+    public string Audience { get; set; } = string.Empty;
+    public string? SiteName { get; set; }
+    /// <summary>The save would be refused (both for the whole company, or both for the same unit); otherwise a warning.</summary>
+    public bool Refused { get; set; }
+    /// <summary>The sentence the server answers with.</summary>
+    public string Message { get; set; } = string.Empty;
+}
+
 /// <summary>The bookings register's search (lane 2g-1, D-9; C-25), as the events'.</summary>
 public class RoomBookingSearchDto
 {
@@ -749,6 +790,9 @@ public class CompanyEventChangeDto
 
     /// <summary>Lane 2f-2b: a move or a cancellation with a series scope — the dates it changed, and who was told.</summary>
     public EventSeriesChangeResultDto? Series { get; set; }
+
+    /// <summary>Lane 2g-2 (C-15): what a move should know that did not stop it — another event at the same time and place.</summary>
+    public List<string> Warnings { get; set; } = new();
 }
 
 /// <summary>

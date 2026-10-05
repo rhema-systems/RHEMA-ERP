@@ -4,6 +4,8 @@ import type { HrAnnouncement } from './announcements.service';
 import type {
   CompanyEventSearch,
   CompanyScheduleDashboard,
+  EventClash,
+  EventClashQuery,
   RoomBookingSearch,
 } from '@/types/hr/company-schedule';
 import type {
@@ -161,6 +163,11 @@ class CompanyEventService {
   exportCsv(search: CompanyEventSearch): Promise<void> {
     const { page: _page, pageSize: _size, ...filters } = search;
     return saveCsv(`${this.baseUrl}/events/export`, filters, `company-events-${today()}.csv`);
+  }
+
+  /** The events these dates, this audience and this site would clash with, before saving (lane 2g-2, C-15). */
+  findClashes(query: EventClashQuery): Promise<EventClash[]> {
+    return apiService.get<EventClash[]>(`${this.baseUrl}/events/clashes`, { ...query });
   }
 
   /** The landing page in one read (lane 2g-1). */

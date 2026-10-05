@@ -27,6 +27,12 @@ public interface ICompanyEventService
     Task<byte[]> ExportCsvAsync(CompanyEventSearchDto search, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// The live events an event with these dates, audience and site would clash with (lane 2g-2, C-15) — each refused or
+    /// warned of — for the form to show before saving.
+    /// </summary>
+    Task<IReadOnlyList<EventClashDto>> FindClashesAsync(EventClashQueryDto query, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Creates an event. The organiser is <see cref="CreateCompanyEventDto.OrganizerId"/> when given,
     /// otherwise <paramref name="callerEmployeeId"/>; the caller is recorded as the creator either way (D-11).
     /// </summary>

@@ -37,9 +37,9 @@ has not started (the user: "don't start the actual development yet").
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
    issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
-   2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b; none has a migration), and 2g-1, the
-   registers' search, paging, export and the dashboard. **Next: 2g-2, the event-against-event clash rule (C-15, as
-   ruled in lane 2 State's 2g); then 2h.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b), and 2g, the registers' search, paging,
+   export and dashboard (2g-1) and the event-against-event clash rule (2g-2) — none with a migration. **Next: 2h,
+   attachments on the upload gate (C-18, F-54) and the drill's event (C-51); it closes lane 2.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -314,7 +314,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2f and 2g-1 built and proved (679/679 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2g-2 next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2g built and proved (718/718 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2h next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -1007,7 +1007,9 @@ change.
       events/export` and `GET bookings/export` answering `text/csv` for the same filters (the
       `LeavesController` export precedent); `GET CompanySchedule/dashboard` — the landing's four lists
       and counts in one read. The two registers move onto them with page controls and a date filter.
-- [ ] (D-9, C-15) `GET events/clashes?start&end&excludeId&scope&unit&site` listing the live events
+- [x] *✅ 2g-2, as the user ruled: refused only whole-company against whole-company or a unit against the same unit, in
+      the same place (the same site, or either with no site); audiences as `AudienceRuleOf` reads them; a series' every
+      date; extend too.* (D-9, C-15) `GET events/clashes?start&end&excludeId&scope&unit&site` listing the live events
       that overlap; create, update-with-dates and reschedule refuse an AllStaff-against-AllStaff (or
       same-unit Department) overlap on the same site or company-wide, with a sentence naming the
       other event; the form shows the rest as warnings before save.
@@ -1139,7 +1141,7 @@ built, proved twice and handed over on its own:
     The four findings above are fixed as defects: the first in 2f-2a, the other three in 2f-2b. Removing a guest
     with series scope needs the series-changed email, so **both templates come in 2f-2a** (52), and 2f-2b adds its
     kinds of change to the same email.
-- **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
+- **2g** ✅ search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
   *Source check (2026-10-05, at HEAD after 2f-2b):*
   - **The registers:** both load every row (`GET events`, `GET bookings`) and filter, sort and page nothing on the
     server. 2f-1's series filter is in the browser too.
@@ -1158,13 +1160,90 @@ built, proved twice and handed over on its own:
     events at different sites at once are allowed.
   - **Export** on the register's own read permission (`HR.Company.Read`), as the leave register's is.
   - **Two slices:** 2g-1 ✅ (2026-10-05; built and proved, below), search, paging, the date filter, CSV export and
-    the one-read dashboard, with both registers moved onto them; 2g-2, the clash rule, the clashes check, and the
-    form's warnings before save.
+    the one-read dashboard, with both registers moved onto them; 2g-2 ✅ (2026-10-05; built and proved, below), the
+    clash rule, the clashes check, and the form's warnings before save. **2g is done.**
 
   *Applied without a ruling (stated here):* a clash counts live events only, not cancelled, completed or postponed
   ones, and includes those awaiting approval. On a series every date is checked; a refused date refuses the
   action, named, as 2f-2b's refusals do.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2g-2 — what was built (2026-10-05): event against event (D-9; C-15).*
+- **No migration.**
+- **The rule** (`CompanyEventRules.ClashOf`, pure; `EventClash` None, Warning, Refused). Two events clash when:
+  - both are live: not cancelled, completed or postponed; one awaiting approval counts;
+  - they are in the same place: the same site, or either with no site (the user's ruling);
+  - they are at the same time: their days overlap and, when both are timed, their hours. A multi-day event holds its
+    hours on each of its days, as the diaries read it; an all-day or untimed event holds the whole day;
+  - at least one is for more than its guest list. Two guest-list meetings are the people diaries' business.
+
+  **Refused** when both are for the whole company, or both for the same unit. **Warned of** otherwise. "For" is the
+  audience as `AudienceRuleOf` reads it: visibility narrows, scope widens, so a private event is for its guests
+  whatever its scope.
+- **Where it is checked** (`RefuseClashAsync`; the candidates are the live events whose days touch, at a site that
+  could be the same, leaving out the event itself and its own series):
+  - **create:** every date of a series, before an event number is taken; a refused date is named ("Occurrence 2,
+    …");
+  - **extend:** every new date, the same way;
+  - **edit:** only when the edit changes what a clash depends on — the window, the site, the audience (scope,
+    visibility, unit), or bringing the event back to live. An event already beside another, from before the rule, can
+    still have its description corrected;
+  - **reschedule:** before its rooms move; a series move checks every date and refuses all, named, as 2f-2b's
+    refusals do.
+
+  Each refusal names the other event, its time, whom both are for and where, and says what to do.
+- **Warnings:** the overlaps the server allows come back as warnings on the create, the edit, the extension and the
+  move (`CompanyEventChangeDto.Warnings`, new), named by date for a series.
+- **`GET events/clashes`** (`EventClashQueryDto`, Read): the events a proposed window, audience and site would clash
+  with, each refused or warned of, with the save's own sentence. The event being edited and its series are left out.
+- **The form:** under "Who it is for" the event form shows them as the dates are typed — refused in red, warnings in
+  amber. A new recurring event's line says only its first date is checked there, and every date on saving. The
+  reschedule toast carries the warnings.
+  - ⚠ **Caught before the build:** the form's check debounced its query object, which is new on every render, so it
+    would have set state every 400 ms for ever. It debounces a string key.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2g-2: **718/718 on two clean passes**, first time, the blocking watcher beside
+  both and silent. The clash queries ask for at most 5 MB and run in under 10 ms. No live `CSF-` event or mail-server
+  row was left. 2g-2 has **39 assertions**, in a window 100
+  days past the others and checked empty of live events:
+  - **whole company:**
+    - a second event at the same time and site is refused, naming the first;
+    - at another site it is allowed, with nothing to warn of;
+    - with no site (online) it is refused;
+    - one starting as the first ends is allowed;
+  - **a unit:**
+    - beside a whole-company event it is allowed, with a warning naming it;
+    - a second event for the same unit is refused, naming the first;
+    - another unit's is allowed and warned of;
+    - a private event is allowed and warned of;
+  - **what counts:**
+    - a cancelled event does not count; one awaiting approval does;
+    - a three-day event holds its hours each day, but not the hours between;
+    - an all-day event holds the whole day;
+  - **moves and edits:**
+    - a move onto another's time is refused, naming it, as is a move onto a day with one awaiting approval;
+    - an edit taking an event to the same site is refused;
+    - an edit making a private event public is refused;
+    - a description-only edit of an event already beside another is allowed;
+  - **a series:**
+    - a weekly series whose second date lands on the event is refused, naming "Occurrence 2", and none of its dates
+      is made;
+    - extending onto it is refused, naming "Occurrence 3";
+    - moving a series onto it is refused with nothing moved, and the series stays where it was;
+  - **the form's check:** the whole-company event refused; the unit's and the private one warned of; the one after not
+    listed. Each comes with the save's sentence, and the event being edited is left out.
+- **The suites the new refusal could have broken:** none puts two whole-company or same-unit events at the same time
+  and place. The round-4 net's events are guest-list or management events, 2c's whole-company events fall on separate
+  days, and scenario 110's are on different days.
+- **Regression:** the round-4 net **209/209**; `hr-recruitment/run-round4-d` **58/58**; the templates probe **30/30**;
+  `run-lane-n` **109/115**, the six section-J failures of #40, its fixture tenant removed.
+- **The API log:** no request answered 500, and no query timed out. Its ERR lines are the known kinds: notifications
+  with no mail server, the sink's bounces and `run-lane-n`'s test send, master's identity sweep, payroll's foreign
+  key on minted fixtures (#23), and the race proofs.
+- **After the runs:** every harness login is off (the no-email one by SQL, #42). No company-event notice to anyone real
+  is live. The R4D requisition's approval notices to md.tdc, managing.director, hr.head and hr.officer were withdrawn
+  twice, 0 live.
 
 *2g-1 — what was built (2026-10-05): the registers' search, paging, export, and the dashboard (D-9; C-10…C-13, C-25).*
 - **No migration.**
@@ -2842,3 +2921,16 @@ built API, so no web host and no seeders).
     No request answered 500, and no query timed out.
 
   Next: 2g-2, the clash rule (C-15), the clashes check and the form's warnings before save.
+- **2026-10-05, later** — **2g-1 committed** (`cb5a16cab`). **Lane 2, slice 2g-2 built and proved**: event against
+  event (D-9; C-15) (lane 2 State). No migration. **2g is done.**
+  - **Built:**
+    - the rule as the user ruled it: refused only whole-company against whole-company or a unit against the same unit,
+      in the same place (the same site, or either with no site), and warned of otherwise;
+    - checked on create (a series' every date, before a number is taken), extend, edit (only when it changes what a
+      clash depends on) and reschedule (a series too);
+    - `GET events/clashes` and the form's red and amber lines before save.
+  - **Results:** `run-final-review.mjs` scored 718/718 on two clean passes, with 39 checks in 2g-2, first time; the
+    blocking watcher was silent. The round-4 net was 209/209, recruitment 58/58, the templates probe 30/30 and
+    `run-lane-n` 109/115 (section J, #40). No request answered 500, and no query timed out.
+
+  Next: 2h, attachments on the upload gate (C-18, F-54) and the drill's event (C-51). It closes lane 2.

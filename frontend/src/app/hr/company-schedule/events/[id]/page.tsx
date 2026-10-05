@@ -257,7 +257,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
       setRescheduleOpen(false);
       toast({
         title: change.series ? 'Dates moved' : 'Event rescheduled',
-        description: [seriesLine(change), describeChange(change)].filter(Boolean).join(' ') || undefined,
+        description:
+          [seriesLine(change), describeChange(change), ...(change.warnings ?? []).map((w) => `⚠ ${w}`)]
+            .filter(Boolean).join(' ') || undefined,
       });
     },
     onError: fail('Could not reschedule the event'),

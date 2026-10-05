@@ -152,6 +152,18 @@ public class CompanyScheduleController : HrControllerBase
         [FromQuery] Guid? organizationUnitId)
         => Ok(await _eventService.PreviewAudienceAsync(scope, visibility, organizationUnitId));
 
+    /// <summary>
+    /// The live events these dates, this audience and this site would clash with (lane 2g-2, C-15), each refused or
+    /// warned of — what the form shows before saving. Saves nothing.
+    /// </summary>
+    [HttpGet("events/clashes")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IReadOnlyList<EventClashDto>>> FindEventClashes([FromQuery] EventClashQueryDto query, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.FindClashesAsync(query, ct));
+    }
+
     /// <summary>What announcing the event on the intranet would say, and to how many; saves nothing (lane 2c).</summary>
     [HttpGet("events/{id:guid}/announcement")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
