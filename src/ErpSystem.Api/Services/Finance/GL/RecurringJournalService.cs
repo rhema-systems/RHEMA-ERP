@@ -170,33 +170,58 @@ public sealed class RecurringJournalService : IRecurringJournalService
 
     public async Task<RecurringJournalTemplateDto> SubmitAsync(Guid id, string comment, CancellationToken cancellationToken = default)
     {
-        var template = await LoadAsync(id, includeOccurrences: false, cancellationToken);
-        if (template.Status is not (RecurringJournalStatus.Draft or RecurringJournalStatus.Rejected))
-            throw new InvalidOperationException("Only Draft or Rejected templates can be submitted for activation.");
-        RequireComment(comment, "Submission comment");
-        await ValidatePersistedDefinitionAsync(template, cancellationToken);
-        template.Status = RecurringJournalStatus.PendingApproval;
-        template.SubmittedAt = DateTime.UtcNow;
-        template.SubmittedByUserId = CurrentUserIdRequired();
-        template.ReviewedAt = null;
-        template.ReviewedByUserId = null;
-        template.ReviewComment = null;
-        template.LastFailure = null;
-        Touch(template);
-        await _db.SaveChangesAsync(cancellationToken);
-        var workflowResult = await _workflow.StartApprovalWorkflowAsync(nameof(RecurringJournalTemplate), template.Id);
-        if (!workflowResult.Success)
+        return await ExecuteWorkflowSubmissionAtomicallyAsync(async () =>
         {
-            template.Status = RecurringJournalStatus.Draft;
-            template.SubmittedAt = null;
-            template.SubmittedByUserId = null;
+            var template = await LoadAsync(id, includeOccurrences: false, cancellationToken);
+            if (template.Status is not (RecurringJournalStatus.Draft or RecurringJournalStatus.Rejected))
+                throw new InvalidOperationException("Only Draft or Rejected templates can be submitted for activation.");
+            RequireComment(comment, "Submission comment");
+            await ValidatePersistedDefinitionAsync(template, cancellationToken);
+            template.Status = RecurringJournalStatus.PendingApproval;
+            template.SubmittedAt = DateTime.UtcNow;
+            template.SubmittedByUserId = CurrentUserIdRequired();
+            template.ReviewedAt = null;
+            template.ReviewedByUserId = null;
+            template.ReviewComment = null;
+            template.LastFailure = null;
             Touch(template);
             await _db.SaveChangesAsync(cancellationToken);
-            throw new InvalidOperationException(workflowResult.Message ?? "The recurring-journal approval workflow could not be started.");
-        }
-        await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateSubmitted, template.Id, null,
-            new { template.Status, template.SubmittedAt, template.SubmittedByUserId, workflowResult.WorkflowInstanceId }, comment, cancellationToken);
-        return await RequireMappedAsync(template.Id, cancellationToken);
+            var workflowResult = await _workflow.StartApprovalWorkflowAsync(nameof(RecurringJournalTemplate), template.Id);
+            if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+            {
+                throw new InvalidOperationException(
+                    workflowResult.Message ?? "The recurring-journal approval workflow could not be started.");
+            }
+            await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateSubmitted, template.Id, null,
+                new { template.Status, template.SubmittedAt, template.SubmittedByUserId, workflowResult.WorkflowInstanceId }, comment, cancellationToken);
+            return await RequireMappedAsync(template.Id, cancellationToken);
+        }, cancellationToken);
+    }
+
+    private async Task<T> ExecuteWorkflowSubmissionAtomicallyAsync<T>(
+        Func<Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction != null)
+            return await operation();
+
+        var strategy = _db.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                var result = await operation();
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                _db.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     public async Task<RecurringJournalTemplateDto> ApproveAsync(Guid id, string comment, CancellationToken cancellationToken = default)

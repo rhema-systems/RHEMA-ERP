@@ -1268,6 +1268,16 @@ async Task SeedCriticalFinanceWorkflowDefinitionsAsync(WebApplication app)
         reconciliation.RecoveredCount,
         reconciliation.FailedCount,
         reconciliation.SkippedWithoutInitiatorCount);
+    var recurringReconciliationService = scope.ServiceProvider.GetRequiredService<
+        ErpSystem.Api.Services.Finance.GL.RecurringJournalWorkflowReconciliationService>();
+    var recurringReconciliation = await recurringReconciliationService.ReconcileAsync();
+    app.Logger.LogInformation(
+        "Recurring-journal workflow reconciliation completed: {PendingCount} pending, {OrphanCount} orphaned, {RecoveredCount} recovered, {FailedCount} failed, {SkippedWithoutInitiatorCount} skipped without initiator",
+        recurringReconciliation.PendingCount,
+        recurringReconciliation.OrphanCount,
+        recurringReconciliation.RecoveredCount,
+        recurringReconciliation.FailedCount,
+        recurringReconciliation.SkippedWithoutInitiatorCount);
 }
 
 async Task SeedPaymentTermBaselineAsync(WebApplication app)

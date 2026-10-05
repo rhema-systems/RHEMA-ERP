@@ -484,15 +484,34 @@ namespace ErpSystem.Web.Services
         {
             try
             {
-                var exchangeRateSpec = GetFinanceWorkflowSeedSpecs()
-                    .Single(spec => spec.EntityCode == "ExchangeRate");
+                var criticalEntityCodes = new HashSet<string>(StringComparer.Ordinal)
+                {
+                    "ExchangeRate",
+                    "BudgetRevision",
+                    "RecurringJournalTemplate",
+                    "RecurringJournalOccurrence",
+                    "RecurringJournalOccurrenceWaiver"
+                };
+                var criticalSpecs = GetFinanceWorkflowSeedSpecs()
+                    .Where(spec => criticalEntityCodes.Contains(spec.EntityCode))
+                    .ToList();
+                if (criticalSpecs.Count != criticalEntityCodes.Count)
+                {
+                    var missing = criticalEntityCodes.Except(criticalSpecs.Select(spec => spec.EntityCode));
+                    throw new InvalidOperationException(
+                        $"Critical Finance workflow seed specs are missing: {string.Join(", ", missing)}.");
+                }
                 var tenants = await _context.Tenants
                     .Where(tenant => !tenant.IsDeleted && tenant.Status == TenantStatus.Active)
                     .ToListAsync();
 
                 foreach (var tenant in tenants)
                 {
-                    await EnsureFinanceWorkflowSpecSeededAsync(tenant.Id, exchangeRateSpec);
+                    await RetireStaleDeliveryNoteWorkflowDefinitionsAsync(tenant.Id);
+                    foreach (var spec in criticalSpecs)
+                    {
+                        await EnsureFinanceWorkflowSpecSeededAsync(tenant.Id, spec);
+                    }
                 }
             }
             catch (Exception ex)
@@ -2106,6 +2125,7 @@ namespace ErpSystem.Web.Services
                 {
                     var tenantId = tenant.Id;
                     await RetireQuarantinedSupplierReturnWorkflowDefinitionsAsync(tenantId);
+                    await RetireStaleDeliveryNoteWorkflowDefinitionsAsync(tenantId);
                     await RetireAccountingBookApplicabilityWorkflowDefinitionsAsync(tenantId);
                     var workflowSpecs = GetFinanceWorkflowSeedSpecs();
 
@@ -2227,6 +2247,45 @@ namespace ErpSystem.Web.Services
             _logger.LogInformation(
                 "Retired {WorkflowDefinitionCount} accounting-book applicability workflow definition(s) for tenant {TenantId}; ordinary selection is automatic.",
                 retiredCount, tenantId);
+        }
+
+        private async Task RetireStaleDeliveryNoteWorkflowDefinitionsAsync(Guid tenantId)
+        {
+            // Delivery lifecycle is owned by DeliveryService and has no Finance workflow
+            // submission path. Retire the legacy catalogue entry instead of advertising
+            // approval authority that no transaction can legitimately enter.
+            var definitions = await _context.WorkflowDefinitions
+                .Include(item => item.EntityType)
+                .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive)
+                .ToListAsync();
+            var retiredAt = DateTime.UtcNow;
+            var retiredCount = 0;
+            foreach (var definition in definitions.Where(item =>
+                         item.EntityType != null &&
+                         (WorkflowEntityTypeKeyMatches(item.EntityType.Code, "DeliveryNote") ||
+                          WorkflowEntityTypeKeyMatches(item.EntityType.Name, "DeliveryNote") ||
+                          string.Equals(
+                              item.EntityType.EntityClassName,
+                              typeof(DeliveryNote).FullName,
+                              StringComparison.Ordinal))))
+            {
+                definition.IsActive = false;
+                definition.LifecycleStatus = WorkflowDefinitionLifecycleStatus.Retired;
+                definition.RetiredAt = retiredAt;
+                definition.RetiredById = null;
+                definition.UpdatedAt = retiredAt;
+                definition.UpdatedBy = "System";
+                definition.LastModifiedById = null;
+                retiredCount++;
+            }
+
+            if (retiredCount == 0)
+                return;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation(
+                "Retired {WorkflowDefinitionCount} stale DeliveryNote Finance workflow definition(s) for tenant {TenantId}; delivery lifecycle remains owned by DeliveryService.",
+                retiredCount,
+                tenantId);
         }
 
         private static int RetireQuarantinedSupplierReturnWorkflowDefinitions(
@@ -2587,8 +2646,6 @@ namespace ErpSystem.Web.Services
                     "Customer quotation approval before sending, acceptance, conversion, or expiry."),
                 new("SalesOrder", "Sales Order", typeof(SalesOrder).FullName, "Sales Order Approval",
                     "Sales order approval before confirmation, delivery, invoicing, or cancellation."),
-                new("DeliveryNote", "Delivery", typeof(DeliveryNote).FullName, "Delivery Approval",
-                    "Delivery document approval before shipping, delivery confirmation, or stock issue."),
                 new("Invoice", "Customer Invoice", typeof(Invoice).FullName, "Accounts Receivable Invoice Approval",
                     "Customer invoice approval workflow for controlled finalization, sending, or voiding."),
                 new("ReturnOrder", "Customer Return", typeof(ReturnOrder).FullName, "Customer Return Approval",
@@ -2605,6 +2662,8 @@ namespace ErpSystem.Web.Services
                     "Budget scenario approval before locking, activation, or archival."),
                 new("BudgetReturn", "Budget Return", typeof(BudgetReturn).FullName, "Budget Return Approval",
                     "Department budget worksheet approval workflow before consolidation."),
+                new("BudgetRevision", "Budget Revision", typeof(BudgetRevision).FullName, "Budget Revision Approval",
+                    "Budget revision approval before applying a governed change to the active budget."),
                 new("FinanceBudgetOverride", "Finance Budget Override", typeof(FinanceBudgetOverrideRequest).FullName, "Finance Budget Override Approval",
                     "Independent Finance approval of a precise manual-journal budget shortfall. Approval is bound to the immutable evaluation hash and expires when the journal changes."),
                 new("UnitJournalEntry", "Unit Journal Entry", typeof(UnitJournalEntry).FullName, "Unit Journal Entry Approval",

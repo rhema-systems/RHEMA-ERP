@@ -45,6 +45,7 @@ public class FinanceApprovalsController : ControllerBase
     private static readonly HashSet<string> FinanceWorkflowEntityKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         Normalize("JournalEntry"),
+        Normalize("DeltaAdjustmentJournal"),
         Normalize("JournalBatch"),
         Normalize("RecurringJournalTemplate"),
         Normalize("RecurringJournalOccurrence"),
@@ -54,10 +55,8 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("VendorInvoice"),
         Normalize("VendorPayment"),
         Normalize("PaymentBatch"),
-        Normalize("SupplierReturn"),
         Normalize("Quote"),
         Normalize("SalesOrder"),
-        Normalize("DeliveryNote"),
         Normalize("Invoice"),
         Normalize("ReturnOrder"),
         Normalize("CreditNote"),
@@ -78,7 +77,6 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("ExchangeRate"),
         Normalize("OpeningBalanceBatch"),
         Normalize("FixedAsset"),
-        Normalize("AssetDepreciationSchedule"),
         Normalize("FixedAssetDepreciationRun"),
         Normalize("AssetValuation"),
         Normalize("AssetTransfer"),
@@ -1183,7 +1181,7 @@ public class FinanceApprovalsController : ControllerBase
                 item.CurrencyCode);
         }
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             var item = await _db.JournalEntries.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.JournalEntryNumber, item.Description, item.PostingStatus, item.EntryDate, item.TotalDebitAmount, item.PrimaryCurrency ?? "GHS");
@@ -1258,12 +1256,6 @@ public class FinanceApprovalsController : ControllerBase
         {
             var item = await _db.Set<PaymentBatch>().AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
             return item == null ? FinanceApprovalFacts.Empty : new(item.BatchNumber, item.Description, item.Status.ToString(), item.BatchDate, item.TotalAmount, null);
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            var item = await _db.SupplierReturns.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            return item == null ? FinanceApprovalFacts.Empty : new(item.ReturnNumber, item.VendorName, item.Status.ToString(), item.ReturnDate, item.TotalAmount, item.CurrencyCode);
         }
 
         if (key == Normalize("CustomerPayment"))
@@ -1412,7 +1404,7 @@ public class FinanceApprovalsController : ControllerBase
             };
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             var item = await _db.FixedAssetDepreciationRuns
                 .AsNoTracking()
@@ -1484,7 +1476,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Approved", "Approved", userId, cancellationToken: cancellationToken);
             return;
@@ -1764,12 +1756,6 @@ public class FinanceApprovalsController : ControllerBase
                 item.ApprovedById = userId;
                 item.ApprovedDate = now;
             }, cancellationToken);
-            return;
-        }
-
-        if (key == Normalize("SupplierReturn"))
-        {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Approved, cancellationToken);
             return;
         }
 
@@ -2091,7 +2077,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
@@ -2186,7 +2172,7 @@ public class FinanceApprovalsController : ControllerBase
         var key = Normalize(entityType);
         var now = DateTime.UtcNow;
 
-        if (key == Normalize("JournalEntry"))
+        if (key == Normalize("JournalEntry") || key == Normalize("DeltaAdjustmentJournal"))
         {
             await _journalEntryService.UpdateApprovalStatusAsync(entityId, "Rejected", "Rejected", rejectionReason: reason, cancellationToken: cancellationToken);
             return;
@@ -2371,9 +2357,15 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("SupplierReturn"))
+        if (key == Normalize("PaymentBatch"))
         {
-            await UpdateIfFoundAsync(_db.SupplierReturns, tenantId, entityId, item => item.Status = SupplierReturnStatus.Rejected, cancellationToken);
+            await UpdateIfFoundAsync(_db.Set<PaymentBatch>(), tenantId, entityId, item =>
+            {
+                item.Status = PaymentBatchStatus.Cancelled;
+                item.ApprovedById = null;
+                item.ApprovedDate = null;
+                item.Notes = AppendReason(item.Notes, reason);
+            }, cancellationToken);
             return;
         }
 
@@ -2669,7 +2661,7 @@ public class FinanceApprovalsController : ControllerBase
             return;
         }
 
-        if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
+        if (key == Normalize("FixedAssetDepreciationRun"))
         {
             await UpdateIfFoundAsync(_db.FixedAssetDepreciationRuns, tenantId, entityId, item =>
             {
