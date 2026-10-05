@@ -435,8 +435,19 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="attachments">Attachments ({event.attachments?.length ?? 0})</TabsTrigger>
           {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
-        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} /></TabsContent>
-        <TabsContent value="attendance" className="pt-4"><AttendancePanel eventId={id} /></TabsContent>
+        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} open={open} /></TabsContent>
+        <TabsContent value="attendance" className="pt-4">
+          {/* Lane 2d: a register once the event has started, never for a cancelled one — as the server rules. */}
+          <AttendancePanel
+            eventId={id}
+            markable={started && !event.isCancelled}
+            notMarkable={
+              event.isCancelled
+                ? 'This event was cancelled, so there is no attendance to mark.'
+                : 'Attendance is marked once the event has started.'
+            }
+          />
+        </TabsContent>
         <TabsContent value="tasks" className="pt-4"><TasksPanel eventId={id} /></TabsContent>
         <TabsContent value="attachments" className="pt-4"><AttachmentsPanel eventId={id} /></TabsContent>
         {event.requiresApproval && (

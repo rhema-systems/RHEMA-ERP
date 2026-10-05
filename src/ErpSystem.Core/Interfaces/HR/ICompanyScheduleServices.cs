@@ -89,13 +89,20 @@ public interface ICompanyEventService
 
     Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<EventParticipantDto>> GetParticipantsAsync(Guid eventId, CancellationToken cancellationToken = default);
-    Task<bool> RespondToInvitationAsync(RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);
+    /// <summary>A guest's role, whether they are required, their needs, and an outside guest's details (C-22).</summary>
+    Task<EventParticipantDto> UpdateParticipantAsync(UpdateEventParticipantDto updateDto, CancellationToken cancellationToken = default);
+
+    /// <summary>Records a guest's answer — accepted, declined or tentative — on the event in the route (F-11).</summary>
+    Task<bool> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);
     Task<bool> RemoveParticipantAsync(Guid participantId, CancellationToken cancellationToken = default);
 
     // Attendance operations
     Task<EventAttendanceDto> MarkAttendanceAsync(MarkEventAttendanceDto markDto, Guid markedById, CancellationToken cancellationToken = default);
     Task<IEnumerable<EventAttendanceDto>> GetAttendanceAsync(Guid eventId, CancellationToken cancellationToken = default);
     Task<bool> CheckOutAsync(CheckOutEventDto checkOutDto, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a row from the event's register — a correction (C-21).</summary>
+    Task RemoveAttendanceAsync(Guid eventId, Guid attendanceId, CancellationToken cancellationToken = default);
 
     // Attachment operations
     Task<EventAttachmentDto> AddAttachmentAsync(CreateEventAttachmentDto createDto, CancellationToken cancellationToken = default);

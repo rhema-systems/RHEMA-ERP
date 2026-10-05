@@ -20,8 +20,8 @@ import { companyEventService } from '@/services/hr/company-schedule.service';
 import {
   EVENT_ATTACHMENT_TYPES,
   EVENT_TASK_CATEGORIES,
-  EVENT_TASK_STATUSES,
-  INVITATION_STATUSES,
+  EVENT_TASK_SETTABLE_STATUSES,
+  INVITATION_ANSWERS,
   PARTICIPANT_ROLES,
   TASK_PRIORITIES,
 } from '@/types/hr/company-schedule';
@@ -54,13 +54,18 @@ const participantSchema = z
     isRequired: z.boolean(),
     specialRequirements: z.string().max(1000).optional().or(z.literal('')),
   })
-  .refine((v) => !!v.employeeId || !!v.externalParticipantName, {
-    message: 'Pick an employee, or name an external participant',
+  .refine((v) => !!v.employeeId || !!v.externalParticipantName?.trim(), {
+    message: 'Pick an employee, or name a guest from outside',
     path: ['employeeId'],
   })
-  .refine((v) => !(v.employeeId && v.externalParticipantName), {
-    message: 'A participant is either an employee or an external guest, not both',
-    path: ['externalParticipantName'],
+  .refine(
+    (v) => !(v.employeeId && (v.externalParticipantName || v.externalParticipantEmail || v.externalParticipantOrganization)),
+    { message: 'A guest is either an employee or someone from outside, not both', path: ['externalParticipantName'] },
+  )
+  // Lane 2d: the server refuses an outside guest with no address — the invitation goes to it.
+  .refine((v) => !!v.employeeId || !!v.externalParticipantEmail?.trim(), {
+    message: 'A guest from outside needs an email address — the invitation goes to it',
+    path: ['externalParticipantEmail'],
   });
 
 type ParticipantForm = z.infer<typeof participantSchema>;
@@ -75,7 +80,11 @@ const emptyParticipant: ParticipantForm = {
   specialRequirements: '',
 };
 
-export function ParticipantsPanel({ eventId }: { eventId: string }) {
+/**
+ * The guest list (lane 2d). Guests are corrected in place (C-22) and removed on Write. A cancelled or
+ * completed event's list is its record: no adds, edits, removals or answers — the server refuses them too.
+ */
+export function ParticipantsPanel({ eventId, open }: { eventId: string; open: boolean }) {
   const queryClient = useQueryClient();
   const key = ['hr', 'company-schedule', 'events', eventId, 'participants'];
 
@@ -86,8 +95,9 @@ export function ParticipantsPanel({ eventId }: { eventId: string }) {
       singular="participant"
       queryKey={key}
       invalidateKeys={[['hr', 'company-schedule', 'events', eventId, 'detail']]}
-      dialogHint="Invite an employee, or add an external guest."
-      emptyDescription="Nobody has been invited to this event yet."
+      readOnly={!open}
+      dialogHint="Invite an employee, or a guest from outside with their email address — the invitation goes there."
+      emptyDescription={open ? 'Nobody has been invited to this event yet.' : 'Nobody was invited to this event.'}
       list={(id) => companyEventService.getParticipants(id)}
       create={(id, v) =>
         companyEventService.addParticipant(id, {
@@ -100,9 +110,16 @@ export function ParticipantsPanel({ eventId }: { eventId: string }) {
           specialRequirements: orNull(v.specialRequirements),
         })
       }
-      // The API has no participant update — rows are added and removed, never edited.
-      allowUpdate={false}
-      update={async () => undefined}
+      update={(_id, participantId, v) =>
+        companyEventService.updateParticipant(participantId, {
+          externalParticipantName: orNull(v.externalParticipantName),
+          externalParticipantEmail: orNull(v.externalParticipantEmail),
+          externalParticipantOrganization: orNull(v.externalParticipantOrganization),
+          role: v.role as EventParticipant['role'],
+          isRequired: v.isRequired,
+          specialRequirements: orNull(v.specialRequirements),
+        })
+      }
       remove={(_id, participantId) => companyEventService.removeParticipant(participantId)}
       getId={(p) => p.id}
       columns={[
@@ -116,20 +133,18 @@ export function ParticipantsPanel({ eventId }: { eventId: string }) {
         { header: 'Invitation', cell: (p) => <StatusBadge status={spaced(p.invitationStatus)} /> },
         { header: 'Responded', cell: (p) => p.responseDate?.slice(0, 10) ?? '—' },
       ]}
-      actions={INVITATION_STATUSES.filter((s) => s === 'Accepted' || s === 'Declined' || s === 'Tentative').map(
-        (response) => ({
-          label: `Record ${response.toLowerCase()}`,
-          visible: (p: EventParticipant) => p.invitationStatus !== response,
-          run: async (p: EventParticipant) => {
-            await companyEventService.respondToInvitation(eventId, {
-              participantId: p.id,
-              response,
-              responseComments: null,
-            });
-            await queryClient.invalidateQueries({ queryKey: key });
-          },
-        }),
-      )}
+      actions={INVITATION_ANSWERS.map((response) => ({
+        label: `Record ${response.toLowerCase()}`,
+        visible: (p: EventParticipant) => open && p.invitationStatus !== response,
+        run: async (p: EventParticipant) => {
+          await companyEventService.respondToInvitation(eventId, {
+            participantId: p.id,
+            response,
+            responseComments: null,
+          });
+          await queryClient.invalidateQueries({ queryKey: key });
+        },
+      }))}
       schema={participantSchema}
       emptyForm={emptyParticipant}
       toForm={(p) => ({
@@ -141,22 +156,39 @@ export function ParticipantsPanel({ eventId }: { eventId: string }) {
         isRequired: p.isRequired,
         specialRequirements: p.specialRequirements ?? '',
       })}
-      renderFields={(form) => (
-        <>
-          <EmployeePickerField form={form} name="employeeId" label="Employee" />
-          <p className="text-xs text-muted-foreground">Or add someone from outside the organisation:</p>
-          <FieldRow>
-            <TextField form={form} name="externalParticipantName" label="External name" />
-            <TextField form={form} name="externalParticipantEmail" label="External email" type="email" />
-          </FieldRow>
-          <TextField form={form} name="externalParticipantOrganization" label="External organisation" />
-          <FieldRow>
-            <SelectField form={form} name="role" label="Role" required options={opts(PARTICIPANT_ROLES)} />
-            <SwitchField form={form} name="isRequired" label="Attendance required" />
-          </FieldRow>
-          <TextareaField form={form} name="specialRequirements" label="Special requirements" />
-        </>
-      )}
+      renderFields={(form, editing) => {
+        // An employee guest stays who they are: uninvite and invite the other person instead.
+        const employeeGuest = editing && !!form.watch('employeeId');
+        return (
+          <>
+            {(!editing || employeeGuest) && (
+              <EmployeePickerField form={form} name="employeeId" label="Employee" disabled={editing} />
+            )}
+            {employeeGuest ? (
+              <p className="text-xs text-muted-foreground">
+                To invite someone else instead, remove this guest and invite them.
+              </p>
+            ) : (
+              <>
+                {!editing && <p className="text-xs text-muted-foreground">Or add someone from outside the organisation:</p>}
+                <FieldRow>
+                  <TextField form={form} name="externalParticipantName" label="External name" />
+                  <TextField form={form} name="externalParticipantEmail" label="External email" type="email" />
+                </FieldRow>
+                <TextField form={form} name="externalParticipantOrganization" label="External organisation" />
+                {editing && (
+                  <p className="text-xs text-muted-foreground">A changed email address is sent the invitation.</p>
+                )}
+              </>
+            )}
+            <FieldRow>
+              <SelectField form={form} name="role" label="Role" required options={opts(PARTICIPANT_ROLES)} />
+              <SwitchField form={form} name="isRequired" label="Attendance required" />
+            </FieldRow>
+            <TextareaField form={form} name="specialRequirements" label="Special requirements" />
+          </>
+        );
+      }}
     />
   );
 }
@@ -181,9 +213,32 @@ const emptyAttendance: AttendanceForm = {
   notes: '',
 };
 
-export function AttendancePanel({ eventId }: { eventId: string }) {
+/**
+ * The register (lane 2d). It is taken once the event has started and never for a cancelled one;
+ * editing a row marks it again (F-1: the check-in is kept unless a new one is given), and a wrong row is
+ * removed on Write (C-21).
+ */
+export function AttendancePanel({
+  eventId,
+  markable,
+  notMarkable,
+}: {
+  eventId: string;
+  /** Started and not cancelled — when the server takes a register. */
+  markable: boolean;
+  /** Why not, when it cannot be marked. */
+  notMarkable?: string;
+}) {
   const queryClient = useQueryClient();
   const key = ['hr', 'company-schedule', 'events', eventId, 'attendance'];
+  const mark = (id: string, v: AttendanceForm) =>
+    companyEventService.markAttendance(id, {
+      employeeId: v.employeeId,
+      attended: v.attended,
+      checkInTime: v.attended ? toIsoInstant(v.checkInTime) : null,
+      absenceReason: v.attended ? null : orNull(v.absenceReason),
+      notes: orNull(v.notes),
+    });
 
   return (
     <ResourceCollectionTab<EventAttendance, AttendanceForm>
@@ -191,21 +246,15 @@ export function AttendancePanel({ eventId }: { eventId: string }) {
       title="attendance"
       singular="attendance record"
       queryKey={key}
-      dialogHint="You are recorded as the person who marked it."
-      emptyDescription="No attendance has been marked for this event."
+      invalidateKeys={[['hr', 'company-schedule', 'events', eventId, 'detail']]}
+      dialogHint="You are recorded as the person who marked it. Leave the check-in blank for now, or give the time they arrived."
+      emptyDescription={markable ? 'No attendance has been marked for this event.' : notMarkable}
+      allowCreate={markable}
+      allowUpdate={markable}
       list={(id) => companyEventService.getAttendance(id)}
-      create={(id, v) =>
-        companyEventService.markAttendance(id, {
-          employeeId: v.employeeId,
-          attended: v.attended,
-          checkInTime: toIsoInstant(v.checkInTime),
-          absenceReason: v.attended ? null : orNull(v.absenceReason),
-          notes: orNull(v.notes),
-        })
-      }
-      // Marking again for the same employee is how a record is corrected — there is no PUT.
-      allowUpdate={false}
-      update={async () => undefined}
+      create={mark}
+      update={(id, _attendanceId, v) => mark(id, v)}
+      remove={(id, attendanceId) => companyEventService.removeAttendance(id, attendanceId)}
       getId={(a) => a.id}
       columns={[
         { header: 'Employee', cell: (a) => a.employeeName },
@@ -218,7 +267,7 @@ export function AttendancePanel({ eventId }: { eventId: string }) {
       actions={[
         {
           label: 'Check out',
-          visible: (a) => a.attended && !a.checkOutTime,
+          visible: (a) => markable && a.attended && !!a.checkInTime && !a.checkOutTime,
           run: async (a) => {
             await companyEventService.checkOut(a.id, null);
             await queryClient.invalidateQueries({ queryKey: key });
@@ -234,14 +283,19 @@ export function AttendancePanel({ eventId }: { eventId: string }) {
         absenceReason: a.absenceReason ?? '',
         notes: a.notes ?? '',
       })}
-      renderFields={(form) => {
+      renderFields={(form, editing) => {
         const attended = form.watch('attended');
         return (
           <>
-            <EmployeePickerField form={form} name="employeeId" label="Employee" required />
+            <EmployeePickerField form={form} name="employeeId" label="Employee" required disabled={editing} />
             <SwitchField form={form} name="attended" label="Attended" />
             {attended ? (
-              <DateTimeField form={form} name="checkInTime" label="Check-in time" />
+              <>
+                <DateTimeField form={form} name="checkInTime" label="Check-in time" />
+                <p className="text-xs text-muted-foreground">
+                  On one of the event&apos;s days and not still to come. Blank keeps the time already recorded, or now.
+                </p>
+              </>
             ) : (
               <TextareaField form={form} name="absenceReason" label="Reason for absence" />
             )}
@@ -384,7 +438,16 @@ export function TasksPanel({ eventId }: { eventId: string }) {
         { header: 'Assigned to', cell: (t) => t.assignedToName || '—' },
         { header: 'Due', cell: (t) => t.dueDate?.slice(0, 10) ?? '—' },
         { header: 'Priority', cell: (t) => spaced(t.priority) },
-        { header: 'Status', cell: (t) => <StatusBadge status={spaced(t.status)} /> },
+        {
+          header: 'Status',
+          // Overdue is the server's reading of the due date (lane 2d), shown beside where the task stands.
+          cell: (t) => (
+            <span className="flex flex-wrap gap-1">
+              <StatusBadge status={spaced(t.status)} />
+              {t.isOverdue && <StatusBadge status="Overdue" />}
+            </span>
+          ),
+        },
       ]}
       actions={[
         {
@@ -404,7 +467,8 @@ export function TasksPanel({ eventId }: { eventId: string }) {
         assignedToId: t.assignedToId ?? '',
         dueDate: t.dueDate?.slice(0, 10) ?? '',
         priority: t.priority,
-        status: t.status,
+        // A legacy row stored as Overdue opens as in progress: Overdue is no longer something to set.
+        status: t.status === 'Overdue' ? 'InProgress' : t.status,
       })}
       renderFields={(form, editing) => (
         <>
@@ -418,7 +482,7 @@ export function TasksPanel({ eventId }: { eventId: string }) {
             <DateField form={form} name="dueDate" label="Due date" />
             {/* Status is update-only: a new task is always NotStarted. */}
             {editing && (
-              <SelectField form={form} name="status" label="Status" options={opts(EVENT_TASK_STATUSES)} />
+              <SelectField form={form} name="status" label="Status" options={opts(EVENT_TASK_SETTABLE_STATUSES)} />
             )}
           </FieldRow>
         </>

@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.CompanySchedule;
 using ErpSystem.Core.Services.HR.Extensions;
 using ErpSystem.Shared;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -171,6 +172,8 @@ public class CompanyEventService : ICompanyEventService
         var participants = (await _participantRepository.GetQueryable()
                 .Include(p => p.Employee)
                 .Where(p => p.EventId == ev.Id && p.TenantId == tenantId && !p.IsDeleted)
+                // ⚠ F-35 (lane 2d): a leaver is never invited, chased or reminded.
+                .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
                 .ToListAsync(cancellationToken))
             .Where(p => filter is null || filter(p))
             .ToList();
@@ -1287,99 +1290,265 @@ public class CompanyEventService : ICompanyEventService
         return run;
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Guests and the register (company-schedule final closure, lane 2d)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The F-45 unique indexes — one live guest row and one register row per employee per event.</summary>
+    private const string GuestIndex = "UX_EventParticipant_Tenant_Event_Employee";
+    private const string RegisterIndex = "UX_EventAttendance_Tenant_Event_Employee";
+
+    /// <summary>This tenant's live guests, with their employee — the tenant inside the query (F-30).</summary>
+    private IQueryable<EventParticipant> TenantGuests(Guid tenantId) =>
+        _participantRepository.GetQueryable()
+            .Include(p => p.Employee)
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted);
+
+    /// <summary>This tenant's live register rows, with the person and who marked them.</summary>
+    private IQueryable<EventAttendance> TenantRegister(Guid tenantId) =>
+        _attendanceRepository.GetQueryable()
+            .Include(a => a.Employee)
+            .Include(a => a.MarkedBy)
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted);
+
+    private static string GuestName(EventParticipant p) =>
+        p.Employee is not null ? $"{p.Employee.FirstName} {p.Employee.LastName}".Trim() : p.ExternalParticipantName ?? "The guest";
+
+    private sealed record EmployeeRef(string Name, bool IsActive);
+
+    /// <summary>This tenant's employee, live or not; null when there is none.</summary>
+    private async Task<EmployeeRef?> FindEmployeeAsync(Guid employeeId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var row = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(x => x.Id == employeeId && x.TenantId == tenantId && !x.IsDeleted)
+            .Select(x => new { x.FirstName, x.LastName, x.IsActive })
+            .FirstOrDefaultAsync(cancellationToken);
+        return row is null ? null : new EmployeeRef($"{row.FirstName} {row.LastName}".Trim(), row.IsActive);
+    }
+
+    /// <summary>
+    /// This tenant's employee and still employed — a guest or a task's assignee (F-10, F-35). Refuses as a
+    /// rule (a 422), naming who, rather than failing at the database or storing another tenant's id.
+    /// </summary>
+    private async Task<EmployeeRef> RequireActiveEmployeeAsync(
+        Guid employeeId, Guid tenantId, string who, CancellationToken cancellationToken)
+    {
+        var person = await FindEmployeeAsync(employeeId, tenantId, cancellationToken)
+            ?? throw new InvalidOperationException($"The {who} chosen was not found. Choose the {who} again.");
+        if (!person.IsActive)
+            throw new InvalidOperationException($"{person.Name} is no longer an active employee. Choose someone who is.");
+        return person;
+    }
+
+    /// <summary>
+    /// Saves, answering a refusal by one of the F-45 unique indexes as the sentence it means: two requests
+    /// adding the same person at once both pass the check, and the database refuses the second.
+    /// </summary>
+    private async Task SaveRefusingDuplicateAsync(string index, string refusal, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex) when (ex.GetBaseException() is SqlException { Number: 2601 or 2627 } sql
+                                           && sql.Message.Contains(index, StringComparison.OrdinalIgnoreCase))
+        {
+            // The refused row stays tracked; a later save in this request must not try it again.
+            _unitOfWork.ClearTrackedChanges();
+            throw new InvalidOperationException(refusal);
+        }
+    }
+
+    /// <summary>
+    /// Checks a guest (lane 2d): an outside guest needs a name and an address; a new employee guest must be
+    /// this tenant's and still employed (F-35); nobody is invited twice — by employee, or by address.
+    /// </summary>
+    private async Task CheckGuestAsync(CompanyEvent e, EventParticipant guest, bool isNew, CancellationToken cancellationToken)
+    {
+        var name = guest.ExternalParticipantName;
+        var email = guest.ExternalParticipantEmail;
+        var organisation = guest.ExternalParticipantOrganization;
+        Refuse(CompanyEventRules.NormaliseGuest(guest.EmployeeId, ref name, ref email, ref organisation));
+        guest.ExternalParticipantName = name;
+        guest.ExternalParticipantEmail = email;
+        guest.ExternalParticipantOrganization = organisation;
+        guest.SpecialRequirements = CompanyEventRules.Clean(guest.SpecialRequirements);
+
+        if (!Enum.IsDefined(guest.Role))
+            throw new InvalidOperationException("Choose the guest's role: organiser, presenter, attendee or optional.");
+
+        var others = TenantGuests(e.TenantId).Where(p => p.EventId == e.Id && p.Id != guest.Id);
+
+        if (guest.EmployeeId is { } employeeId)
+        {
+            // An employee guest is fixed once invited: uninvite and invite the other person instead.
+            if (!isNew) return;
+            var person = await RequireActiveEmployeeAsync(employeeId, e.TenantId, "guest", cancellationToken);
+            if (await others.AnyAsync(p => p.EmployeeId == employeeId, cancellationToken))
+                throw new InvalidOperationException($"{person.Name} is already invited to {e.EventName}.");
+            return;
+        }
+
+        var address = email!.ToLower();
+        var taken = await others
+            .Where(p => p.EmployeeId == null && p.ExternalParticipantEmail != null && p.ExternalParticipantEmail.ToLower() == address)
+            .Select(p => p.ExternalParticipantName)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (taken is not null)
+            throw new InvalidOperationException($"{email} is already invited to {e.EventName}, as {taken}.");
+    }
+
+    /// <summary>
+    /// Sends one guest the invitation (round 4, D6). Best-effort: the guest's place on the list is already
+    /// saved, and an unreachable mail server must not undo it.
+    /// </summary>
+    private async Task SendInvitationAsync(CompanyEvent ev, EventParticipant guest)
+    {
+        // ⚠ F-35: a leaver is never invited.
+        if (guest.Employee is { IsActive: false }) return;
+
+        var name = guest.Employee is not null
+            ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
+            : guest.ExternalParticipantName ?? "Colleague";
+        var tokens = EventTokens(ev, name);
+        tokens["IsRequired"] = guest.IsRequired ? "true" : null;
+        tokens["SpecialRequirements"] = guest.SpecialRequirements;
+
+        await SendEventEmailAsync(
+            ev.TenantId,
+            CompanyScheduleEmailCatalog.Events.EventInvitation,
+            guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail,
+            tokens, "event invitation");
+    }
+
+    /// <remarks>
+    /// Lane 2d: no invitation to a cancelled or completed event; an outside guest needs a name and an
+    /// address; a leaver is refused (F-35); nobody twice, by employee or by address.
+    /// </remarks>
     public async Task<EventParticipantDto> AddParticipantAsync(CreateEventParticipantDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
-
-        if (createDto.EmployeeId.HasValue)
-        {
-            var isAlreadyParticipant = await _participantRepository.IsParticipantAsync(createDto.EventId, createDto.EmployeeId.Value);
-            if (isAlreadyParticipant)
-                throw new InvalidOperationException("Employee is already a participant in this event");
-        }
+        var ev = await GetOwnedEventAsync(createDto.EventId, cancellationToken);
+        if (CompanyEventRules.IsClosed(ev))
+            throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}, so nobody more can be invited.");
 
         var entity = createDto.ToEntity();
+        if (entity.EmployeeId == Guid.Empty) entity.EmployeeId = null;
         entity.TenantId = tenantId;
+        await CheckGuestAsync(ev, entity, isNew: true, cancellationToken);
+
         entity.InvitationStatus = InvitationStatus.Sent;
         entity.InvitationSentDate = DateTime.UtcNow;
 
         await _participantRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SaveRefusingDuplicateAsync(GuestIndex, $"That employee is already invited to {ev.EventName}.", cancellationToken);
 
-        entity = await _participantRepository.GetQueryable()
-            .Include(p => p.Employee)
-            .FirstOrDefaultAsync(p => p.Id == entity.Id && p.TenantId == tenantId, cancellationToken);
+        var saved = await TenantGuests(tenantId).FirstAsync(p => p.Id == entity.Id, cancellationToken);
+        _logger.LogInformation("Guest {Guest} invited to {EventNumber}", GuestName(saved), ev.EventNumber);
 
-        _logger.LogInformation("Participant added to event: {EventId}", createDto.EventId);
-
-        // ⚠ Round 4, D6. InvitationSentDate was stamped above long before anything was sent. Now it
-        // is true. Best-effort: the participant row is already committed, and an unreachable mail
-        // server must not undo somebody's place on the invitation list.
-        var invitedTo = await _eventRepository.GetQueryable()
-            .Include(e => e.Organizer)
-            .FirstOrDefaultAsync(e => e.Id == createDto.EventId && e.TenantId == tenantId, cancellationToken);
-        if (invitedTo is not null)
-        {
-            var name = entity!.Employee is not null
-                ? $"{entity.Employee.FirstName} {entity.Employee.LastName}".Trim()
-                : entity.ExternalParticipantName ?? "Colleague";
-            var tokens = EventTokens(invitedTo, name);
-            tokens["IsRequired"] = entity.IsRequired ? "true" : null;
-            tokens["SpecialRequirements"] = entity.SpecialRequirements;
-
-            await SendEventEmailAsync(
-                invitedTo.TenantId,
-                CompanyScheduleEmailCatalog.Events.EventInvitation,
-                entity.Employee?.EmailAddress ?? entity.ExternalParticipantEmail,
-                tokens, "event invitation");
-        }
-
-        return entity!.ToDto();
+        // ⚠ Round 4, D6: InvitationSentDate was stamped long before anything was sent. Now it is true.
+        await SendInvitationAsync(ev, saved);
+        return saved.ToDto();
     }
 
     public async Task<IEnumerable<EventParticipantDto>> GetParticipantsAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         await GetOwnedEventAsync(eventId, cancellationToken);
-        var entities = (await _participantRepository.GetByEventIdAsync(eventId))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var guests = await TenantGuests(tenantId)
+            .Where(p => p.EventId == eventId)
+            .OrderBy(p => p.Role)
+            .ThenBy(p => p.Employee != null ? p.Employee.FirstName : p.ExternalParticipantName)
+            .ToListAsync(cancellationToken);
+        return guests.ToDtoList();
     }
 
-    public async Task<bool> RespondToInvitationAsync(RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    /// <remarks>
+    /// C-22 (D-9): the role, whether they are required, their special requirements, and an outside guest's
+    /// name, address and organisation. An employee guest stays who they are. A corrected address is sent the
+    /// invitation, since the first one went nowhere.
+    /// </remarks>
+    public async Task<EventParticipantDto> UpdateParticipantAsync(UpdateEventParticipantDto updateDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _participantRepository.GetByIdAsync(responseDto.ParticipantId);
+        var guest = await TenantGuests(tenantId).FirstOrDefaultAsync(p => p.Id == updateDto.Id, cancellationToken)
+            ?? throw new ArgumentException("That guest was not found.");
+        var ev = await GetOwnedEventAsync(guest.EventId, cancellationToken);
+        if (CompanyEventRules.IsClosed(ev))
+            throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}; its guest list is part of its record.");
 
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException("Participant not found");
+        var previousAddress = guest.ExternalParticipantEmail;
+        guest.Role = updateDto.Role;
+        guest.IsRequired = updateDto.IsRequired;
+        guest.SpecialRequirements = updateDto.SpecialRequirements;
+        guest.ExternalParticipantName = updateDto.ExternalParticipantName;
+        guest.ExternalParticipantEmail = updateDto.ExternalParticipantEmail;
+        guest.ExternalParticipantOrganization = updateDto.ExternalParticipantOrganization;
+        await CheckGuestAsync(ev, guest, isNew: false, cancellationToken);
 
-        entity.InvitationStatus = responseDto.Response;
-        entity.ResponseDate = DateTime.UtcNow;
-        entity.ResponseComments = responseDto.ResponseComments;
+        var readdressed = guest.EmployeeId is null
+            && !string.Equals(previousAddress, guest.ExternalParticipantEmail, StringComparison.OrdinalIgnoreCase);
+        if (readdressed)
+        {
+            guest.InvitationSentDate = DateTime.UtcNow;
+            if (guest.InvitationStatus == InvitationStatus.NotSent) guest.InvitationStatus = InvitationStatus.Sent;
+        }
 
-        await _participantRepository.UpdateAsync(entity);
+        await _participantRepository.UpdateAsync(guest);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Guest {Guest} of {EventNumber} updated", GuestName(guest), ev.EventNumber);
+
+        if (readdressed) await SendInvitationAsync(ev, guest);
+        return (await TenantGuests(tenantId).FirstAsync(p => p.Id == guest.Id, cancellationToken)).ToDto();
+    }
+
+    /// <remarks>
+    /// F-11: only accepted, declined or tentative is an answer, and only from a guest of the event in the
+    /// route. A cancelled or completed event's invitations are closed.
+    /// </remarks>
+    public async Task<bool> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default)
+    {
+        if (!CompanyEventRules.IsAnswer(responseDto.Response))
+            throw new InvalidOperationException("Record the answer as accepted, declined or tentative.");
+
+        var tenantId = GetTenantId();
+        var guest = await TenantGuests(tenantId)
+                .FirstOrDefaultAsync(p => p.Id == responseDto.ParticipantId && p.EventId == eventId, cancellationToken)
+            ?? throw new ArgumentException("That guest is not on this event's list.");
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        if (CompanyEventRules.IsClosed(ev))
+            throw new InvalidOperationException(
+                $"{ev.EventName} is {ClosedState(ev)}, so its invitations can no longer be answered.");
+
+        guest.InvitationStatus = responseDto.Response;
+        guest.ResponseDate = DateTime.UtcNow;
+        guest.ResponseComments = CompanyEventRules.Clean(responseDto.ResponseComments);
+
+        await _participantRepository.UpdateAsync(guest);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Invitation response recorded: {ParticipantId}", responseDto.ParticipantId);
-
+        _logger.LogInformation("{Guest} answered {Answer} for {EventNumber}", GuestName(guest), responseDto.Response, ev.EventNumber);
         return true;
     }
 
+    /// <remarks>
+    /// Organiser work, on Write (lane 2d) — it needed Admin. Not from a cancelled or completed event, whose
+    /// guest list is its record.
+    /// </remarks>
     public async Task<bool> RemoveParticipantAsync(Guid participantId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _participantRepository.GetByIdAsync(participantId);
+        var guest = await TenantGuests(tenantId).FirstOrDefaultAsync(p => p.Id == participantId, cancellationToken)
+            ?? throw new ArgumentException("That guest was not found.");
+        var ev = await GetOwnedEventAsync(guest.EventId, cancellationToken);
+        if (CompanyEventRules.IsClosed(ev))
+            throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}; its guest list is part of its record.");
 
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException("Participant not found");
-
-        await _participantRepository.DeleteAsync(entity);
+        await _participantRepository.DeleteAsync(guest);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Participant removed: {ParticipantId}", participantId);
-
+        _logger.LogInformation("Guest {Guest} removed from {EventNumber}", GuestName(guest), ev.EventNumber);
         return true;
     }
 
@@ -1387,74 +1556,112 @@ public class CompanyEventService : ICompanyEventService
 
     #region Attendance Operations
 
+    /// <remarks>
+    /// <para>Lane 2d: once the event has started and never on a cancelled one; the check-in on one of its
+    /// days and not still to come. The person must be this tenant's — but may since have left: they still
+    /// attended.</para>
+    ///
+    /// <para>⚠ <b>F-1.</b> Marking again — how the register is corrected — stamped the check-in with the
+    /// moment of the correction, for an absence too. It now keeps the check-in unless a new one is given,
+    /// and an absence carries none.</para>
+    /// </remarks>
     public async Task<EventAttendanceDto> MarkAttendanceAsync(MarkEventAttendanceDto markDto, Guid markedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        await GetOwnedEventAsync(markDto.EventId, cancellationToken);
+        var ev = await GetOwnedEventAsync(markDto.EventId, cancellationToken);
+        var now = DateTime.UtcNow;
+        Refuse(CompanyEventRules.RefuseMarking(ev, now));
 
-        var existingAttendance = await _attendanceRepository.GetByEventAndEmployeeAsync(markDto.EventId, markDto.EmployeeId);
+        var person = await FindEmployeeAsync(markDto.EmployeeId, tenantId, cancellationToken)
+            ?? throw new InvalidOperationException("The employee chosen was not found. Choose them again.");
 
-        if (existingAttendance != null)
+        var row = await TenantRegister(tenantId)
+            .FirstOrDefaultAsync(a => a.EventId == ev.Id && a.EmployeeId == markDto.EmployeeId, cancellationToken);
+        var isNew = row is null;
+        row ??= new EventAttendance { TenantId = tenantId, EventId = ev.Id, EmployeeId = markDto.EmployeeId };
+
+        if (markDto.Attended)
         {
-            if (existingAttendance.TenantId != tenantId)
-                throw new ArgumentException("Attendance record not found");
-
-            existingAttendance.Attended = markDto.Attended;
-            existingAttendance.CheckInTime = markDto.CheckInTime ?? DateTime.UtcNow;
-            existingAttendance.AbsenceReason = markDto.AbsenceReason;
-            existingAttendance.Notes = markDto.Notes;
-            existingAttendance.MarkedById = markedById;
-
-            await _attendanceRepository.UpdateAsync(existingAttendance);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            return existingAttendance.ToDto();
+            var checkIn = markDto.CheckInTime ?? row.CheckInTime ?? now;
+            Refuse(CompanyEventRules.RefuseCheckIn(ev, checkIn, now));
+            if (row.CheckOutTime is { } checkedOut && checkedOut < checkIn)
+                throw new InvalidOperationException(
+                    $"{person.Name} was checked out {CompanyEventRules.Describe(checkedOut)}, before that check-in. "
+                  + "Give the time they arrived, or remove the row and mark it again.");
+            row.CheckInTime = checkIn;
+            row.AbsenceReason = null;
+        }
+        else
+        {
+            row.CheckInTime = null;
+            row.CheckOutTime = null;
+            row.AbsenceReason = CompanyEventRules.Clean(markDto.AbsenceReason);
         }
 
-        var entity = markDto.ToEntity();
-        entity.TenantId = tenantId;
-        entity.MarkedById = markedById;
-        entity.CheckInTime = markDto.CheckInTime ?? (markDto.Attended ? DateTime.UtcNow : null);
+        row.Attended = markDto.Attended;
+        row.Notes = CompanyEventRules.Clean(markDto.Notes);
+        row.MarkedById = markedById;
 
-        await _attendanceRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        if (isNew) await _attendanceRepository.AddAsync(row);
+        else await _attendanceRepository.UpdateAsync(row);
+        await SaveRefusingDuplicateAsync(RegisterIndex,
+            $"{person.Name} is already on {ev.EventName}'s register. Correct that row instead.", cancellationToken);
 
-        entity = await _attendanceRepository.GetQueryable()
-            .Include(a => a.Employee)
-            .Include(a => a.MarkedBy)
-            .FirstOrDefaultAsync(a => a.Id == entity.Id && a.TenantId == tenantId, cancellationToken);
+        _logger.LogInformation("Attendance marked for {EventNumber}: {Employee} {Attended}",
+            ev.EventNumber, person.Name, markDto.Attended ? "present" : "absent");
 
-        _logger.LogInformation("Attendance marked for event: {EventId}, Employee: {EmployeeId}", markDto.EventId, markDto.EmployeeId);
-
-        return entity!.ToDto();
+        return (await TenantRegister(tenantId).FirstAsync(a => a.Id == row.Id, cancellationToken)).ToDto();
     }
 
     public async Task<IEnumerable<EventAttendanceDto>> GetAttendanceAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         await GetOwnedEventAsync(eventId, cancellationToken);
-        var entities = (await _attendanceRepository.GetByEventIdAsync(eventId))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var rows = await TenantRegister(tenantId)
+            .Where(a => a.EventId == eventId)
+            .OrderBy(a => a.Employee.FirstName)
+            .ThenBy(a => a.Employee.LastName)
+            .ToListAsync(cancellationToken);
+        return rows.ToDtoList();
     }
 
+    /// <remarks>Lane 2d: only someone checked in, once, and not on a cancelled event.</remarks>
     public async Task<bool> CheckOutAsync(CheckOutEventDto checkOutDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _attendanceRepository.GetByIdAsync(checkOutDto.AttendanceId);
+        var row = await TenantRegister(tenantId).FirstOrDefaultAsync(a => a.Id == checkOutDto.AttendanceId, cancellationToken)
+            ?? throw new ArgumentException("That attendance record was not found.");
+        var ev = await GetOwnedEventAsync(row.EventId, cancellationToken);
+        if (ev.IsCancelled || ev.Status == EventStatus.Cancelled)
+            throw new InvalidOperationException($"{ev.EventName} was cancelled, so there is nobody to check out.");
 
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException("Attendance record not found");
+        var name = row.Employee is not null ? $"{row.Employee.FirstName} {row.Employee.LastName}".Trim() : "They";
+        var now = DateTime.UtcNow;
+        Refuse(CompanyEventRules.RefuseCheckOut(name, row, now));
 
-        entity.CheckOutTime = DateTime.UtcNow;
-        entity.Notes = checkOutDto.Notes ?? entity.Notes;
+        row.CheckOutTime = now;
+        row.Notes = CompanyEventRules.Clean(checkOutDto.Notes) ?? row.Notes;
 
-        await _attendanceRepository.UpdateAsync(entity);
+        await _attendanceRepository.UpdateAsync(row);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Check-out recorded: {AttendanceId}", checkOutDto.AttendanceId);
-
+        _logger.LogInformation("Check-out recorded for {EventNumber}: {Employee}", ev.EventNumber, name);
         return true;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>C-21 (D-9): a correction to the register, on Write — the row must be this event's.</remarks>
+    public async Task RemoveAttendanceAsync(Guid eventId, Guid attendanceId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var row = await TenantRegister(tenantId)
+                .FirstOrDefaultAsync(a => a.Id == attendanceId && a.EventId == eventId, cancellationToken)
+            ?? throw new ArgumentException("That attendance record is not on this event's register.");
+
+        await _attendanceRepository.DeleteAsync(row);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Attendance row {AttendanceId} removed from event {EventId}", attendanceId, eventId);
     }
 
     #endregion
@@ -1507,89 +1714,143 @@ public class CompanyEventService : ICompanyEventService
 
     #region Task Operations
 
+    /// <summary>This tenant's live tasks, with their assignee — the tenant inside the query (F-30).</summary>
+    private IQueryable<EventTask> TenantTasks(Guid tenantId) =>
+        _taskRepository.GetQueryable()
+            .Include(t => t.AssignedTo)
+            .Where(t => t.TenantId == tenantId && !t.IsDeleted);
+
+    /// <summary>"Book the caterer", cut to a phrase a refusal can quote.</summary>
+    private static string Quote(EventTask t) =>
+        t.TaskDescription.Length <= 60 ? $"\"{t.TaskDescription}\"" : $"\"{t.TaskDescription[..57]}…\"";
+
+    /// <summary>
+    /// Checks a task (lane 2d): a description, a stage and a priority; a new assignee this tenant's and still
+    /// employed (F-10, F-35). An assignee who has since left can stay on a task already theirs.
+    /// </summary>
+    private async Task CheckTaskAsync(EventTask t, Guid? previousAssignee, CancellationToken cancellationToken)
+    {
+        t.TaskDescription = t.TaskDescription?.Trim() ?? string.Empty;
+        if (t.TaskDescription.Length == 0)
+            throw new InvalidOperationException("Describe the task.");
+        if (!Enum.IsDefined(t.Category))
+            throw new InvalidOperationException("Choose the stage: before, during or after the event.");
+        if (!Enum.IsDefined(t.Priority))
+            throw new InvalidOperationException("Choose the priority: critical, high, medium or low.");
+
+        if (t.AssignedToId == Guid.Empty) t.AssignedToId = null;
+        if (t.AssignedToId is { } assignee && assignee != previousAssignee)
+            await RequireActiveEmployeeAsync(assignee, t.TenantId, "assignee", cancellationToken);
+    }
+
     public async Task<EventTaskDto> AddTaskAsync(CreateEventTaskDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
+        var ev = await GetOwnedEventAsync(createDto.EventId, cancellationToken);
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.Status = EventTaskStatus.NotStarted;
+        await CheckTaskAsync(entity, previousAssignee: null, cancellationToken);
 
         await _taskRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        entity = await _taskRepository.GetQueryable()
-            .Include(t => t.AssignedTo)
-            .FirstOrDefaultAsync(t => t.Id == entity.Id && t.TenantId == tenantId, cancellationToken);
-
-        _logger.LogInformation("Task added to event: {EventId}", createDto.EventId);
-
-        return entity!.ToDto();
+        _logger.LogInformation("Task added to {EventNumber}: {TaskId}", ev.EventNumber, entity.Id);
+        return (await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken)).ToDto();
     }
 
     public async Task<IEnumerable<EventTaskDto>> GetTasksAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         await GetOwnedEventAsync(eventId, cancellationToken);
-        var entities = (await _taskRepository.GetByEventIdAsync(eventId))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var tasks = await TenantTasks(tenantId)
+            .Where(t => t.EventId == eventId)
+            .OrderBy(t => t.DueDate)
+            .ThenBy(t => t.Priority)
+            .ToListAsync(cancellationToken);
+        return tasks.ToDtoList();
     }
 
+    /// <remarks>
+    /// <para>⚠ <b>F-12.</b> Completed through the edit had no completion date. It now gets one; a task taken
+    /// back out of Completed loses it and its notes. Overdue is refused: it is worked out from the due date
+    /// on every read.</para>
+    ///
+    /// <para>⚠ <b>F-46.</b> The answer is re-read after the save: it returned the entity with the OLD
+    /// assignee's name after a reassignment.</para>
+    /// </remarks>
     public async Task<EventTaskDto> UpdateTaskAsync(UpdateEventTaskDto updateDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _taskRepository.GetQueryable()
-            .Include(t => t.AssignedTo)
-            .FirstOrDefaultAsync(t => t.Id == updateDto.Id && t.TenantId == tenantId, cancellationToken);
+        var entity = await TenantTasks(tenantId).FirstOrDefaultAsync(t => t.Id == updateDto.Id, cancellationToken)
+            ?? throw new ArgumentException("Task not found");
 
-        if (entity == null)
-            throw new ArgumentException("Task not found");
+        if (!CompanyEventRules.IsSettableTaskStatus(updateDto.Status))
+            throw new InvalidOperationException(updateDto.Status == EventTaskStatus.Overdue
+                ? "Overdue is worked out from the due date. Set where the task stands: not started, in progress, completed or cancelled."
+                : "Choose where the task stands: not started, in progress, completed or cancelled.");
 
+        var previousAssignee = entity.AssignedToId;
         updateDto.UpdateEntity(entity);
+        await CheckTaskAsync(entity, previousAssignee, cancellationToken);
+
+        if (entity.Status == EventTaskStatus.Completed)
+        {
+            entity.CompletionDate ??= DateTime.UtcNow;
+        }
+        else
+        {
+            entity.CompletionDate = null;
+            entity.CompletionNotes = null;
+        }
 
         await _taskRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Event task updated: {TaskId}", updateDto.Id);
-
-        return entity.ToDto();
+        return (await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken)).ToDto();
     }
 
+    /// <remarks>Lane 2d: not twice, and not a cancelled task — reopen it first.</remarks>
     public async Task<bool> CompleteTaskAsync(CompleteEventTaskDto completeDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _taskRepository.GetByIdAsync(completeDto.TaskId);
+        var entity = await TenantTasks(tenantId).FirstOrDefaultAsync(t => t.Id == completeDto.TaskId, cancellationToken)
+            ?? throw new ArgumentException("Task not found");
 
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException("Task not found");
+        switch (entity.Status)
+        {
+            case EventTaskStatus.Completed:
+                throw new InvalidOperationException(entity.CompletionDate is { } done
+                    ? $"{Quote(entity)} was already completed, {CompanyEventRules.Describe(done)}."
+                    : $"{Quote(entity)} is already completed.");
+            case EventTaskStatus.Cancelled:
+                throw new InvalidOperationException(
+                    $"{Quote(entity)} was cancelled. Reopen it — set it in progress — before completing it.");
+        }
 
         entity.Status = EventTaskStatus.Completed;
         entity.CompletionDate = DateTime.UtcNow;
-        entity.CompletionNotes = completeDto.CompletionNotes;
+        entity.CompletionNotes = CompanyEventRules.Clean(completeDto.CompletionNotes);
 
         await _taskRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Event task completed: {TaskId}", completeDto.TaskId);
-
         return true;
     }
 
     public async Task<bool> DeleteTaskAsync(Guid taskId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _taskRepository.GetByIdAsync(taskId);
-
-        if (entity == null || entity.TenantId != tenantId)
-            throw new ArgumentException("Task not found");
+        var entity = await TenantTasks(tenantId).FirstOrDefaultAsync(t => t.Id == taskId, cancellationToken)
+            ?? throw new ArgumentException("Task not found");
 
         await _taskRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Event task deleted: {TaskId}", taskId);
-
         return true;
     }
 

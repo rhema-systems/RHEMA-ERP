@@ -381,6 +381,7 @@ public static class CompanyScheduleMappingExtensions
             DueDate = entity.DueDate,
             Priority = entity.Priority,
             Status = entity.Status,
+            IsOverdue = CompanyEventRules.IsOverdue(entity.Status, entity.DueDate, DateTime.UtcNow),
             CompletionDate = entity.CompletionDate,
             CompletionNotes = entity.CompletionNotes,
             CreatedAt = entity.CreatedAt,

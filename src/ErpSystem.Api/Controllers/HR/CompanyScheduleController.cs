@@ -266,12 +266,26 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<EventParticipantDto>>> GetParticipants(Guid eventId)
         => Ok(await _eventService.GetParticipantsAsync(eventId));
 
+    /// <summary>Records a guest's answer. Only accepted, declined or tentative, from a guest of this event (F-11).</summary>
     [HttpPost("events/{eventId:guid}/participants/respond")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> RespondToInvitation(Guid eventId, [FromBody] RespondToEventInvitationDto dto)
     {
-        await _eventService.RespondToInvitationAsync(dto);
+        await _eventService.RespondToInvitationAsync(eventId, dto);
         return Ok(new { message = "Invitation response recorded" });
+    }
+
+    /// <summary>
+    /// Corrects a guest: their role, whether they are required, their needs, and an outside guest's name,
+    /// address and organisation (lane 2d, C-22).
+    /// </summary>
+    [HttpPut("participants/{participantId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventParticipantDto>> UpdateParticipant(Guid participantId, [FromBody] UpdateEventParticipantDto dto)
+    {
+        if (participantId != dto.Id) return BadRequest("ID mismatch");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.UpdateParticipantAsync(dto));
     }
 
     // =========================================================================
@@ -336,8 +350,9 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<CompanyScheduleReminderRunDto>> RunDueReminders(CancellationToken ct)
         => Ok(await _eventService.RunDueRemindersNowAsync(ct));
 
+    /// <summary>Uninvites a guest — organiser work, on Write (lane 2d); it needed Admin.</summary>
     [HttpDelete("participants/{participantId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> RemoveParticipant(Guid participantId)
     {
         await _eventService.RemoveParticipantAsync(participantId);
@@ -372,6 +387,15 @@ public class CompanyScheduleController : HrControllerBase
         dto.AttendanceId = attendanceId;
         await _eventService.CheckOutAsync(dto);
         return Ok(new { message = "Checked out" });
+    }
+
+    /// <summary>Removes a row from the event's register — a correction, on Write, not an Admin destruction (C-21, D-9).</summary>
+    [HttpDelete("events/{eventId:guid}/attendance/{attendanceId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> RemoveAttendance(Guid eventId, Guid attendanceId)
+    {
+        await _eventService.RemoveAttendanceAsync(eventId, attendanceId);
+        return NoContent();
     }
 
     #endregion

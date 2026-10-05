@@ -35,7 +35,7 @@ has not started (the user: "don't start the actual development yet").
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
-   diaries and the intranet. **Next: 2d, participants, attendance and tasks.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   diaries and the intranet, and 2d, guests, the register and tasks. **Next: 2e, the notices.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -310,7 +310,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2c built and proved (301/301 ×2; round-4 net 208/208); 2d next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d built and proved (387/387 ×2; round-4 net 205/205); 2e next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -901,7 +901,7 @@ change.
 - [x] *✅ 2a (`CompanyEventRules`); a missing date, which bound as 0001-01-01, is refused too.* One window validator for create, update and reschedule (end on or after start; times only when
       not all-day, end time after start time on a same-day event; RSVP deadline on or before the
       start; `SendReminders` ⇒ `ReminderDaysBefore` ≥ 0; `RequiresRsvp` ⇒ a deadline).
-- [ ] *✅ 2a for the event's site, unit and organiser (an active employee); participants and task assignees are 2d.* `EnsureExistsAsync` (tenant-scoped, not deleted, refusing as a rule — a 422, not a "not found")
+- [x] *✅ 2a for the event's site, unit and organiser (an active employee); ✅ 2d for guests (active) and task assignees (active when newly assigned), and the register's employee (this tenant's, a leaver allowed).* `EnsureExistsAsync` (tenant-scoped, not deleted, refusing as a rule — a 422, not a "not found")
       for `LocationId`, `OrganizationUnitId`, participant `EmployeeId` (active), task `AssignedToId`.
 
 **Lifecycle** (*review: two of the first draft's guards contradicted other rules*)
@@ -958,15 +958,15 @@ change.
       onward reach the clash check and the diaries.
 
 **Participants, attendance, tasks**
-- [ ] Participants: an external guest needs a name AND an email; duplicate external email refused; no
+- [ ] *✅ 2d for every rule here but telling the removed person, which is 2e's new notices.* Participants: an external guest needs a name AND an email; duplicate external email refused; no
       adds to a cancelled or completed event; no inactive employee (F-35); replies limited to Accepted /
       Declined / Tentative, on the event in the route (F-11). **Removal moves to `Write`** — uninviting
       is organiser work — and the person is told.
-- [ ] Attendance: the re-mark bug (F-1); no check-out before check-in or twice; none on a cancelled
+- [x] *✅ 2d; the check-in must also fall on one of the event's days and not be still to come.* Attendance: the re-mark bug (F-1); no check-out before check-in or twice; none on a cancelled
       event or **before the event starts**.
-- [ ] Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
+- [ ] *✅ 2d for the completion date, the guard and Overdue on read (`isOverdue`; Overdue refused as a status to set); telling and chasing the assignee is 2e (F-34).* Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
       on read; the assignee is told on assignment and chased by the hourly sweep when overdue (F-34).
-- [ ] (D-9, C-21) `DELETE events/{eventId}/attendance/{attendanceId}` on `Write`; (C-22)
+- [x] *✅ 2d.* (D-9, C-21) `DELETE events/{eventId}/attendance/{attendanceId}` on `Write`; (C-22)
       `PUT participants/{id}` on `Write` — role, required, special requirements, and the external
       guest's name, email and organisation.
 
@@ -983,13 +983,13 @@ change.
       "Chase unanswered now" refuse such an event, as the sweep does (F-33).
 - [ ] New notices: event approved (to the organiser), postponed, changed in time, venue or link,
       participant removed.
-- [ ] Every send skips inactive employees (F-35).
+- [x] *✅ 2d: the shared send loop and the invitation both skip a leaver, and a leaver cannot be invited.* Every send skips inactive employees (F-35).
 - [ ] Calendar invites and external replies per **D-14** (F-36).
 
 **Reads and contracts**
-- [ ] *✅ 2a for events (the repository's nine reads removed; the service's own tenant-scoped query); rooms, bookings, milestones and fiscal are their lanes'.* Range endpoints: overlap semantics; UTC dates throughout the repository; **the tenant filter
+- [ ] *✅ 2a for events (the repository's nine reads removed; the service's own tenant-scoped query); ✅ 2d for guests, the register and tasks (their repositories' custom reads removed); rooms, bookings, milestones and fiscal are their lanes'.* Range endpoints: overlap semantics; UTC dates throughout the repository; **the tenant filter
       inside every repository query** (F-30).
-- [ ] *✅ 2a for events; tasks are 2d, rooms and bookings lane 3.* Update responses re-read after save, as creates do (F-46).
+- [ ] *✅ 2a for events; ✅ 2d for tasks (a reassignment answered with the old assignee's name) and guests; rooms and bookings lane 3.* Update responses re-read after save, as creates do (F-46).
 - [x] *✅ 2a; the server refuses them on create and on a change of category.* (F-44) "Holiday" and "Milestone" leave the category picker (the values kept for old rows), with
       a line pointing to public holidays and milestones.
 - [x] *✅ 2a; the department is refused on the wire (D-5), and the page shows the unit.* `events/department/{id}` → `events/unit/{id}`; the event form's Department picker →
@@ -1038,11 +1038,97 @@ built, proved twice and handed over on its own:
 - **2e** notices:
   - the in-app notices class;
   - delivered vs issued (R4-6.3), F-33;
-  - the new notices;
+  - the new notices, among them a guest removed and a task's assignee told and chased (F-34), both
+    handed on by 2d;
   - calendar invites (D-14, with its migration).
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2d — what was built (2026-10-05): guests, the register and tasks.*
+- **Guests:**
+  - An outside guest needs a name and an email address; the invitation goes to the address.
+  - A guest is an employee or someone from outside, never both.
+  - A new employee guest must be this tenant's and still employed (F-10, F-35): a 422 naming them.
+  - Nobody is invited twice, by employee or by address (in any letter case).
+  - Two requests inviting the same person at once both pass the check; F-45's unique index refuses the
+    second, and the service answers that as the same 422, never a 500.
+  - **Answers (F-11):** only accepted, declined or tentative, and only for a guest of the event in the
+    route (another event's route is a 404).
+  - **Correcting a guest (C-22, `PUT participants/{id}`, Write):** role, required, special
+    requirements, and an outside guest's name, address and organisation. An employee guest stays who
+    they are. A corrected address is sent the invitation, since the first went nowhere.
+  - **Uninviting is on Write** (it needed Admin). Someone uninvited can be invited again.
+  - **A cancelled or completed event's guest list is its record:** no invitation, answer, correction
+    or uninviting.
+  - **F-35, the sends:** the shared send loop (reminders, the RSVP chase, rescheduled, cancelled) and
+    the invitation both skip a leaver.
+- **The register:**
+  - It is taken once the event has started, and never for a cancelled event.
+  - **F-1:** marking someone again, which is how the register is corrected, keeps the check-in unless a
+    new one is given. It used to stamp the moment of the correction, for an absence too. An absence now
+    carries no check-in or check-out.
+  - A check-in must fall on one of the event's days and not be still to come.
+  - Check-out is refused without a check-in, refused twice, and refused while the check-in is still to
+    come.
+  - The person must be this tenant's, but may since have left: they still attended.
+  - **Removing a row (C-21, `DELETE events/{eventId}/attendance/{attendanceId}`, Write)** is a
+    correction, through the row's own event only.
+  - Simultaneous marks of one person: one row; the index's refusal is answered as a 422.
+- **Tasks:**
+  - **Overdue is worked out on read** (`isOverdue`: due before today and still open) and is refused as
+    a status to set. Nothing set the stored Overdue, and the repository's query read the server's
+    local date.
+  - **F-12:** completed through the edit, a task gets its completion date; taken back out of
+    Completed, it loses the date and the notes.
+  - Complete is refused twice, and refused on a cancelled task.
+  - A new assignee must be this tenant's and still employed. An assignee who has since left stays on a
+    task already theirs.
+  - **F-46:** the edit's answer is re-read, so a reassigned task names the new assignee, not the old.
+- **Reads (F-30):** guests, the register and tasks are read on the service's own tenant-scoped queries.
+  Their repositories' custom reads are removed (none filtered by tenant; this service was the only
+  caller).
+- **The screens:**
+  - the guest tab edits guests (the employee locked) and freezes on a closed event;
+  - the register tab marks once the event has started, edits a row by marking it again, removes rows,
+    and offers Check out only where it applies;
+  - the task tab shows Overdue beside the status and no longer offers it as a status.
+- **Left for 2e (notices):** telling a removed guest, and telling and chasing a task's assignee (F-34).
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2d: **387/387 on two clean passes** (passes two and three). 2d has
+  86 assertions:
+  - each guest refusal, and that the refusals wrote nothing;
+  - a leaver refused, then left out of a reminder (three guests reminded, two with C made a leaver);
+  - four simultaneous invitations of one person: each 201 or 422, one row;
+  - answers, corrections (a corrected address re-invited), uninviting on Write, re-inviting;
+  - a cancelled event's list frozen;
+  - the register before the start and on a cancelled event refused;
+  - check-in times refused, F-1 (the check-in kept, the same row), check-out rules, a leaver on the
+    register;
+  - a row removed through its own event only, then marked afresh; four simultaneous marks: one row;
+  - tasks: assignee checks, overdue on read, Overdue refused, the completion date stamped and cleared,
+    the new assignee named, complete twice and on a cancelled task, a leaver kept on their task.
+  - In the API log, the F-45 index refused simultaneous rows 14 times on each table across the three
+    passes, every one answered 422.
+- **Pass one** passed all 386 block assertions. Its clean-up failed one check: its read of published
+  announcements timed out (30 s, a 500), so its two announcements stayed live until pass two swept
+  them. The database stalled from about 09:36:12 to 09:36:58: the shared notification service's bulk
+  clean-up of old notices (`UnifiedNotificationService.cs:1787`) failed twice just before, and its
+  dispatcher's own read timed out in the same window. No company-schedule code was involved; the same
+  read answered in 23–46 ms afterwards. Recorded here, not as a defect, unless it recurs.
+- Regression:
+  - the round-4 net, **205/205**. `run-slice2` is 61: it marked a register a fortnight before its
+    event with a check-in still to come, then checked it out, which is how UAT got its **12 register
+    rows checked out before they checked in** (round-4 residue, R4-2.1; left as they are). It now
+    asserts the refusal;
+  - `hr-recruitment/run-round4-d` (guests and answers on the clash check), **58/58**.
+- `hr-templates/run-lane-nb2` also invites guests and records answers. Its payloads were read against
+  the new rules and fit them; it was not run, since it stands up a mail sink.
+- API log: the one 500 above; otherwise #23, #39 and UAT's missing SMTP settings.
+- Clean-up: nothing of the runs left live (events, announcements). 21 harness logins switched off.
+  `hr.head` and `hr.officer` have 0 live event notices (29 withdrawn each).
+- The screens type-check and lint clean. They are not yet walked in a browser (lane 5).
 
 *2c — what was built (2026-10-05): who an event is for (D-16), the diaries and the intranet.*
 - **One audience rule per event (`CompanyEventRules.AudienceRuleOf`).** The visibility can only narrow
@@ -1724,3 +1810,15 @@ built API, so no web host and no seeders).
   - **No real staff told:** every run notice to `hr.head` and `hr.officer` is withdrawn.
 
   Next: 2d, participants, attendance and tasks.
+- **2026-10-05, later** — **Lane 2, slice 2d built and proved**: guests, the register and tasks (lane 2
+  State). `run-final-review.mjs` scored 387/387 on two clean passes, with 86 checks in 2d. The round-4
+  net was 205/205, and the recruitment clash suite 58/58.
+  - **F-1, F-11, F-12, F-35, C-21 and C-22 closed;** F-30 and F-46 closed for these collections.
+  - **F-45's race is answered:** simultaneous rows are refused by the unique index as a 422, proved
+    under load.
+  - **Pass one's clean-up** hit a 30 s database stall caused by the shared notification service's bulk
+    clean-up (one 500). Recorded, not registered.
+  - **`run-slice2`** made UAT's 12 "checked out before checked in" rows; it now asserts the refusal.
+  - **Handed to 2e:** telling a removed guest, and an assignee told and chased (F-34).
+
+  Next: 2e, the notices.

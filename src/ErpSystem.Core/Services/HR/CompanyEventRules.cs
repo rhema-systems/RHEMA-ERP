@@ -226,4 +226,94 @@ public static class CompanyEventRules
             ? $@"{days}, {st:hh\:mm}–{et:hh\:mm}"
             : $"all day {days}";
     }
+
+    // ── Guests, attendance and tasks (lane 2d) ───────────────────────────────────────────────────
+
+    /// <summary>An answer an invitation can be given: accepted, declined or tentative (F-11).</summary>
+    /// <remarks>⚠ The reply door took any status as an answer — "Not sent", "Sent", "No response".</remarks>
+    public static bool IsAnswer(InvitationStatus status) =>
+        status is InvitationStatus.Accepted or InvitationStatus.Declined or InvitationStatus.Tentative;
+
+    /// <summary>
+    /// Checks a guest and trims their details: an employee, or someone from outside with a name and an
+    /// email address — the invitation goes to the address. Answers the sentence to refuse with, or null.
+    /// </summary>
+    /// <remarks>⚠ The server took an outside guest with no name and no address, whom no invitation could reach.</remarks>
+    public static string? NormaliseGuest(Guid? employeeId, ref string? name, ref string? email, ref string? organisation)
+    {
+        name = Clean(name);
+        email = Clean(email);
+        organisation = Clean(organisation);
+
+        if (employeeId is not null)
+            return name is null && email is null && organisation is null
+                ? null
+                : "A guest is either an employee or someone from outside, not both. Clear the outside guest's details, or the employee.";
+
+        return name is null || email is null
+            ? "A guest from outside needs a name and an email address: the invitation goes to the address."
+            : null;
+    }
+
+    /// <summary>
+    /// Whether attendance can be marked yet: once the event has started, and never on a cancelled one.
+    /// Answers the sentence to refuse with, or null.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A register was taken a fortnight before a meeting, with a check-in on a day still to come — the
+    /// round-4 suite did exactly that twelve times on UAT, each row then "checked out" before it checked in.
+    /// </remarks>
+    public static string? RefuseMarking(CompanyEvent e, DateTime nowUtc)
+    {
+        if (e.IsCancelled || e.Status == EventStatus.Cancelled)
+            return $"{e.EventName} was cancelled, so there is no attendance to mark.";
+
+        var start = EventWindow.Of(e).Start;
+        return start > nowUtc
+            ? $"{e.EventName} has not started yet — it starts {Describe(start)}. Mark attendance once it is under way."
+            : null;
+    }
+
+    /// <summary>A check-in time as given: not still to come, and on one of the event's days.</summary>
+    public static string? RefuseCheckIn(CompanyEvent e, DateTime checkIn, DateTime nowUtc)
+    {
+        // A few minutes' grace for a clock that runs ahead of the server's.
+        if (checkIn > nowUtc.AddMinutes(5))
+            return $"The check-in time ({Describe(checkIn)}) has not come yet. Give the time they arrived.";
+        if (checkIn.Date < e.StartDate.Date || checkIn.Date > e.EndDate.Date)
+            return $"The check-in time ({Describe(checkIn)}) is not on one of {e.EventName}'s days. Give the time they arrived.";
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a person can be checked out: checked in, not checked out already, and not with a check-in
+    /// still to come. Answers the sentence to refuse with, or null.
+    /// </summary>
+    public static string? RefuseCheckOut(string name, EventAttendance a, DateTime nowUtc)
+    {
+        if (!a.Attended || a.CheckInTime is not { } checkIn)
+            return $"{name} has no check-in to check out from. Mark them as attended first.";
+        if (a.CheckOutTime is { } done)
+            return $"{name} was already checked out, {Describe(done)}.";
+        return checkIn > nowUtc
+            ? $"{name}'s check-in is recorded for {Describe(checkIn)}, which has not come yet. Correct the check-in first."
+            : null;
+    }
+
+    /// <summary>The statuses a task may be given. Overdue is not one: it is worked out from the due date.</summary>
+    public static bool IsSettableTaskStatus(EventTaskStatus status) =>
+        status is EventTaskStatus.NotStarted or EventTaskStatus.InProgress
+            or EventTaskStatus.Completed or EventTaskStatus.Cancelled;
+
+    /// <summary>Late: due before today and still open. Worked out on every read, never stored (F-12).</summary>
+    /// <remarks>
+    /// ⚠ Nothing set the stored Overdue status, and the repository's overdue query had no caller and read the
+    /// server's local date.
+    /// </remarks>
+    public static bool IsOverdue(EventTaskStatus status, DateTime? dueDate, DateTime nowUtc) =>
+        dueDate is { } due && due.Date < nowUtc.Date
+        && status is not (EventTaskStatus.Completed or EventTaskStatus.Cancelled);
+
+    /// <summary>Trimmed, or null when blank.</summary>
+    public static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }

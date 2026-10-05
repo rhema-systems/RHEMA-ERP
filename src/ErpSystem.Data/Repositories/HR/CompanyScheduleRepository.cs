@@ -51,38 +51,6 @@ public class EventParticipantRepository : GenericRepository<EventParticipant>, I
     public EventParticipantRepository(ApplicationDbContext context) : base(context)
     {
     }
-
-    public async Task<IEnumerable<EventParticipant>> GetByEventIdAsync(Guid eventId)
-    {
-        return await _dbSet
-            .Include(p => p.Employee)
-            .Where(p => p.EventId == eventId)
-            .OrderBy(p => p.Role)
-            .ThenBy(p => p.Employee != null ? p.Employee.FirstName : p.ExternalParticipantName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventParticipant>> GetByEmployeeIdAsync(Guid employeeId)
-    {
-        return await _dbSet
-            .Include(p => p.Event)
-            .Where(p => p.EmployeeId == employeeId)
-            .OrderByDescending(p => p.Event.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventParticipant>> GetByInvitationStatusAsync(Guid eventId, InvitationStatus status)
-    {
-        return await _dbSet
-            .Include(p => p.Employee)
-            .Where(p => p.EventId == eventId && p.InvitationStatus == status)
-            .ToListAsync();
-    }
-
-    public async Task<bool> IsParticipantAsync(Guid eventId, Guid employeeId)
-    {
-        return await _dbSet.AnyAsync(p => p.EventId == eventId && p.EmployeeId == employeeId);
-    }
 }
 
 #endregion Event Participant Repository
@@ -93,39 +61,6 @@ public class EventAttendanceRepository : GenericRepository<EventAttendance>, IEv
 {
     public EventAttendanceRepository(ApplicationDbContext context) : base(context)
     {
-    }
-
-    public async Task<IEnumerable<EventAttendance>> GetByEventIdAsync(Guid eventId)
-    {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Include(a => a.MarkedBy)
-            .Where(a => a.EventId == eventId)
-            .OrderBy(a => a.Employee.FirstName)
-            .ThenBy(a => a.Employee.LastName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventAttendance>> GetByEmployeeIdAsync(Guid employeeId)
-    {
-        return await _dbSet
-            .Include(a => a.Event)
-            .Where(a => a.EmployeeId == employeeId)
-            .OrderByDescending(a => a.Event.StartDate)
-            .ToListAsync();
-    }
-
-    public async Task<EventAttendance?> GetByEventAndEmployeeAsync(Guid eventId, Guid employeeId)
-    {
-        return await _dbSet
-            .Include(a => a.Employee)
-            .Include(a => a.MarkedBy)
-            .FirstOrDefaultAsync(a => a.EventId == eventId && a.EmployeeId == employeeId);
-    }
-
-    public async Task<int> GetAttendanceCountAsync(Guid eventId)
-    {
-        return await _dbSet.CountAsync(a => a.EventId == eventId && a.Attended);
     }
 }
 
@@ -164,61 +99,6 @@ public class EventTaskRepository : GenericRepository<EventTask>, IEventTaskRepos
 {
     public EventTaskRepository(ApplicationDbContext context) : base(context)
     {
-    }
-
-    public async Task<IEnumerable<EventTask>> GetByEventIdAsync(Guid eventId)
-    {
-        return await _dbSet
-            .Include(t => t.AssignedTo)
-            .Where(t => t.EventId == eventId)
-            .OrderBy(t => t.DueDate)
-            .ThenBy(t => t.Priority)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventTask>> GetByAssigneeAsync(Guid assignedToId)
-    {
-        return await _dbSet
-            .Include(t => t.Event)
-            .Where(t => t.AssignedToId == assignedToId)
-            .OrderBy(t => t.DueDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventTask>> GetByStatusAsync(Guid eventId, EventTaskStatus status)
-    {
-        return await _dbSet
-            .Include(t => t.AssignedTo)
-            .Where(t => t.EventId == eventId && t.Status == status)
-            .OrderBy(t => t.DueDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventTask>> GetPendingTasksAsync(Guid? assignedToId = null)
-    {
-        var query = _dbSet
-            .Include(t => t.Event)
-            .Include(t => t.AssignedTo)
-            .Where(t => t.Status == EventTaskStatus.NotStarted || t.Status == EventTaskStatus.InProgress);
-
-        if (assignedToId.HasValue)
-        {
-            query = query.Where(t => t.AssignedToId == assignedToId.Value);
-        }
-
-        return await query.OrderBy(t => t.DueDate).ToListAsync();
-    }
-
-    public async Task<IEnumerable<EventTask>> GetOverdueTasksAsync()
-    {
-        var today = DateTime.Today;
-
-        return await _dbSet
-            .Include(t => t.Event)
-            .Include(t => t.AssignedTo)
-            .Where(t => t.DueDate < today && t.Status != EventTaskStatus.Completed && t.Status != EventTaskStatus.Cancelled)
-            .OrderBy(t => t.DueDate)
-            .ToListAsync();
     }
 }
 

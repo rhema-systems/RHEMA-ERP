@@ -29,24 +29,24 @@ public interface ICompanyEventRepository : IGenericRepository<CompanyEvent>
 
 #region Event Participant Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventParticipantRepository : IGenericRepository<EventParticipant>
 {
-    Task<IEnumerable<EventParticipant>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventParticipant>> GetByEmployeeIdAsync(Guid employeeId);
-    Task<IEnumerable<EventParticipant>> GetByInvitationStatusAsync(Guid eventId, InvitationStatus status);
-    Task<bool> IsParticipantAsync(Guid eventId, Guid employeeId);
 }
 
 #endregion Event Participant Repository
 
 #region Event Attendance Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventAttendanceRepository : IGenericRepository<EventAttendance>
 {
-    Task<IEnumerable<EventAttendance>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventAttendance>> GetByEmployeeIdAsync(Guid employeeId);
-    Task<EventAttendance?> GetByEventAndEmployeeAsync(Guid eventId, Guid employeeId);
-    Task<int> GetAttendanceCountAsync(Guid eventId);
 }
 
 #endregion Event Attendance Repository
@@ -63,13 +63,12 @@ public interface IEventAttachmentRepository : IGenericRepository<EventAttachment
 
 #region Event Task Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventTaskRepository : IGenericRepository<EventTask>
 {
-    Task<IEnumerable<EventTask>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventTask>> GetByAssigneeAsync(Guid assignedToId);
-    Task<IEnumerable<EventTask>> GetByStatusAsync(Guid eventId, EventTaskStatus status);
-    Task<IEnumerable<EventTask>> GetPendingTasksAsync(Guid? assignedToId = null);
-    Task<IEnumerable<EventTask>> GetOverdueTasksAsync();
 }
 
 #endregion Event Task Repository

@@ -600,6 +600,34 @@ public class CreateEventParticipantDto : CreateDtoBase
 }
 
 /// <summary>
+/// A guest's details as HR corrects them (lane 2d, C-22). The employee of an employee guest is not among
+/// them — uninvite and invite the other person — and the outside details are for an outside guest only.
+/// </summary>
+public class UpdateEventParticipantDto
+{
+    [Required]
+    public Guid Id { get; set; }
+
+    [MaxLength(100)]
+    public string? ExternalParticipantName { get; set; }
+
+    [MaxLength(100)]
+    [EmailAddress]
+    public string? ExternalParticipantEmail { get; set; }
+
+    [MaxLength(100)]
+    public string? ExternalParticipantOrganization { get; set; }
+
+    [Required]
+    public ParticipantRole Role { get; set; }
+
+    public bool IsRequired { get; set; }
+
+    [MaxLength(1000)]
+    public string? SpecialRequirements { get; set; }
+}
+
+/// <summary>
 /// DTO for responding to event invitation
 /// </summary>
 public class RespondToEventInvitationDto
@@ -732,6 +760,10 @@ public class EventTaskDto : BaseDto
     public string PriorityName => Priority.ToString();
     public EventTaskStatus Status { get; set; }
     public string StatusName => Status.ToString();
+
+    /// <summary>Due before today and still open — worked out on every read, never stored (lane 2d, F-12).</summary>
+    public bool IsOverdue { get; set; }
+
     public DateTime? CompletionDate { get; set; }
     public string? CompletionNotes { get; set; }
 }

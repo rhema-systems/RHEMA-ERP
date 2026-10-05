@@ -56,6 +56,7 @@ import type {
   UpdateBusinessClosure,
   UpdateCompanyEvent,
   UpdateCompanyMilestone,
+  UpdateEventParticipant,
   UpdateEventTask,
   UpdateFiscalPeriod,
   UpdateFiscalYear,
@@ -226,6 +227,15 @@ class CompanyEventService {
     return apiService.post<void>(`${this.baseUrl}/events/${eventId}/participants/respond`, data);
   }
 
+  /** Corrects a guest — role, required, needs, an outside guest's details (C-22). */
+  updateParticipant(participantId: string, data: Omit<UpdateEventParticipant, 'id'>): Promise<EventParticipant> {
+    return apiService.put<EventParticipant>(`${this.baseUrl}/participants/${participantId}`, {
+      ...data,
+      id: participantId,
+    });
+  }
+
+  /** Uninvites a guest — on Write since lane 2d. */
   removeParticipant(participantId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/participants/${participantId}`);
   }
@@ -246,6 +256,11 @@ class CompanyEventService {
   checkOut(attendanceId: string, notes?: string | null): Promise<void> {
     const body: CheckOutEvent = { attendanceId, notes: notes ?? null };
     return apiService.post<void>(`${this.baseUrl}/attendance/${attendanceId}/checkout`, body);
+  }
+
+  /** Removes a row from the event's register — a correction (C-21). */
+  removeAttendance(eventId: string, attendanceId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/events/${eventId}/attendance/${attendanceId}`);
   }
 
   // ── attachments ───────────────────────────────────────────────────────────

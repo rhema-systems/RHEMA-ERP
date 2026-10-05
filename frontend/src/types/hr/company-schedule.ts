@@ -107,6 +107,10 @@ export const TASK_PRIORITIES: TaskPriority[] = ['Critical', 'High', 'Medium', 'L
 export const EVENT_TASK_STATUSES: EventTaskStatus[] = [
   'NotStarted', 'InProgress', 'Completed', 'Overdue', 'Cancelled',
 ];
+/** The statuses an edit may set (lane 2d). Overdue is worked out from the due date — see `EventTask.isOverdue`. */
+export const EVENT_TASK_SETTABLE_STATUSES: EventTaskStatus[] = ['NotStarted', 'InProgress', 'Completed', 'Cancelled'];
+/** The answers an invitation can be given (F-11). */
+export const INVITATION_ANSWERS: InvitationStatus[] = ['Accepted', 'Declined', 'Tentative'];
 export const ROOM_TYPES: RoomType[] = ['Conference', 'Boardroom', 'Training', 'Huddle', 'Auditorium'];
 export const BOOKING_STATUSES: BookingStatus[] = ['Tentative', 'Confirmed', 'Completed', 'Cancelled', 'NoShow'];
 export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
@@ -475,6 +479,20 @@ export interface CreateEventParticipant {
   specialRequirements?: string | null;
 }
 
+/**
+ * A guest as HR corrects them (lane 2d, C-22). An employee guest's employee cannot change — uninvite and
+ * invite the other person; the external fields are an outside guest's only, and need a name and an email.
+ */
+export interface UpdateEventParticipant {
+  id: string;
+  externalParticipantName?: string | null;
+  externalParticipantEmail?: string | null;
+  externalParticipantOrganization?: string | null;
+  role: ParticipantRole;
+  isRequired: boolean;
+  specialRequirements?: string | null;
+}
+
 export interface RespondToEventInvitation {
   participantId: string;
   response: InvitationStatus;
@@ -546,6 +564,8 @@ export interface EventTask extends AuditFields {
   priorityName: string;
   status: EventTaskStatus;
   statusName: string;
+  /** Due before today and still open — worked out by the server on every read (lane 2d, F-12). */
+  isOverdue: boolean;
   completionDate?: string | null;
   completionNotes?: string | null;
 }
