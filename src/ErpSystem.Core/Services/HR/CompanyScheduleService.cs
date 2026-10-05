@@ -618,6 +618,151 @@ public class CompanyEventService : ICompanyEventService
         };
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2g-1 — the register: search, paging, export (D-9; C-10…C-13)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The most rows an export holds — the register's whole history on UAT is a few hundred.</summary>
+    private const int MaxExportRows = 10_000;
+
+    /// <summary>"InProgress" → "In Progress", for a CSV a person reads.</summary>
+    private static string Words(Enum value) =>
+        System.Text.RegularExpressions.Regex.Replace(value.ToString(), "([a-z])([A-Z])", "$1 $2");
+
+    /// <summary>
+    /// The events a search finds — this tenant's (F-30), untracked, with no includes: callers select what they need from
+    /// it. Text is matched in the name, the number, the venue and the organiser's name; dates by overlap (lane 2a).
+    /// </summary>
+    private IQueryable<CompanyEvent> EventSearchQuery(Guid tenantId, CompanyEventSearchDto search)
+    {
+        var query = _eventRepository.GetQueryable().AsNoTracking().Where(e => e.TenantId == tenantId);
+        if (!string.IsNullOrWhiteSpace(search.Text))
+        {
+            var term = search.Text.Trim();
+            query = query.Where(e => e.EventName.Contains(term) || e.EventNumber.Contains(term)
+                                     || (e.VenueName != null && e.VenueName.Contains(term))
+                                     || (e.Organizer.FirstName + " " + e.Organizer.LastName).Contains(term));
+        }
+        if (search.Status is { } status) query = query.Where(e => e.Status == status);
+        if (search.Category is { } category) query = query.Where(e => e.Category == category);
+        if (search.LocationId is { } site) query = query.Where(e => e.LocationId == site);
+        if (search.OrganizationUnitId is { } unit) query = query.Where(e => e.OrganizationUnitId == unit);
+        if (search.OrganizerId is { } organiser) query = query.Where(e => e.OrganizerId == organiser);
+        if (search.SeriesId is { } seriesId) query = query.Where(e => e.RecurrenceSeriesId == seriesId);
+        if (search.From is { } from)
+        {
+            var first = from.Date;
+            query = query.Where(e => e.EndDate >= first);
+        }
+        if (search.To is { } to)
+        {
+            var last = to.Date;
+            query = query.Where(e => e.StartDate <= last);
+        }
+        return query;
+    }
+
+    /// <summary>The search's order: newest first by default, a series in its own order.</summary>
+    private static IOrderedQueryable<CompanyEvent> SortEvents(IQueryable<CompanyEvent> query, CompanyEventSearchDto search) =>
+        (search.Sort ?? (search.SeriesId is null ? "-start" : "occurrence")).Trim().ToLowerInvariant() switch
+        {
+            "start" => query.OrderBy(e => e.StartDate).ThenBy(e => e.StartTime).ThenBy(e => e.EventNumber),
+            "name" => query.OrderBy(e => e.EventName).ThenBy(e => e.StartDate),
+            "number" => query.OrderBy(e => e.EventNumber),
+            "-number" => query.OrderByDescending(e => e.EventNumber),
+            "occurrence" => query.OrderBy(e => e.OccurrenceNumber).ThenBy(e => e.StartDate),
+            _ => query.OrderByDescending(e => e.StartDate).ThenByDescending(e => e.StartTime).ThenByDescending(e => e.EventNumber),
+        };
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// ⚠ The page's ids first, sorted on narrow rows, then those events with their names. Sorting the joined rows —
+    /// each carrying a whole <c>Employee</c> — is what asked UAT's server for 387 MB at 2e-3.
+    /// </remarks>
+    public async Task<PagedResult<CompanyEventDto>> SearchAsync(CompanyEventSearchDto search, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var page = Math.Max(1, search.Page);
+        var size = Math.Clamp(search.PageSize, 1, 200);
+        var query = EventSearchQuery(tenantId, search);
+
+        var total = await query.CountAsync(cancellationToken);
+        var ids = await SortEvents(query, search).Select(e => e.Id)
+            .Skip((page - 1) * size).Take(size)
+            .ToListAsync(cancellationToken);
+        var rows = ids.Count == 0
+            ? new List<CompanyEvent>()
+            : await TenantEvents(tenantId).AsNoTracking().Where(e => ids.Contains(e.Id)).ToListAsync(cancellationToken);
+        var position = ids.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+        var dtos = rows.OrderBy(e => position[e.Id]).ToDtoList().ToList();
+        await FillSeriesCountsAsync(dtos, tenantId, cancellationToken);
+
+        return new PagedResult<CompanyEventDto> { Items = dtos, TotalCount = total, Page = page, PageSize = size };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>Narrow rows, in the search's order, up to <see cref="MaxExportRows"/>.</remarks>
+    public async Task<byte[]> ExportCsvAsync(CompanyEventSearchDto search, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var rows = await SortEvents(EventSearchQuery(tenantId, search), search)
+            .Select(e => new
+            {
+                e.EventNumber,
+                e.EventName,
+                e.Category,
+                e.Type,
+                e.StartDate,
+                e.StartTime,
+                e.EndDate,
+                e.EndTime,
+                e.IsAllDayEvent,
+                Site = e.SiteLocation != null ? e.SiteLocation.Name : null,
+                e.VenueName,
+                Unit = e.OrganizationUnit != null ? e.OrganizationUnit.Name : null,
+                e.Scope,
+                Organiser = e.Organizer.FirstName + " " + e.Organizer.LastName,
+                e.Status,
+                e.IsCancelled,
+                e.RequiresApproval,
+                e.ApprovalDate,
+                e.RecurrenceSeriesId,
+                e.OccurrenceNumber,
+            })
+            .Take(MaxExportRows)
+            .ToListAsync(cancellationToken);
+
+        var seriesIds = rows.Where(r => r.RecurrenceSeriesId != null).Select(r => r.RecurrenceSeriesId!.Value).Distinct().ToList();
+        var seriesSize = seriesIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await _eventRepository.GetQueryable().AsNoTracking()
+                .Where(e => e.TenantId == tenantId && e.RecurrenceSeriesId != null && seriesIds.Contains(e.RecurrenceSeriesId.Value))
+                .GroupBy(e => e.RecurrenceSeriesId!.Value)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        static string? Clock(TimeSpan? t) => t is { } v ? v.ToString(@"hh\:mm") : null;
+
+        return CompanyScheduleCsv.Build(
+            new[]
+            {
+                "Number", "Event", "Category", "Type", "Start date", "Start time", "End date", "End time", "All day",
+                "Site", "Venue", "Unit", "Audience", "Organiser", "Status", "Approval", "Occurrence",
+            },
+            rows.Select(r => new[]
+            {
+                r.EventNumber, r.EventName, Words(r.Category), Words(r.Type),
+                r.StartDate.ToString("yyyy-MM-dd"), r.IsAllDayEvent ? null : Clock(r.StartTime),
+                r.EndDate.ToString("yyyy-MM-dd"), r.IsAllDayEvent ? null : Clock(r.EndTime), r.IsAllDayEvent ? "Yes" : "No",
+                r.Site, r.VenueName, r.Unit, Words(r.Scope), r.Organiser.Trim(), Words(r.Status),
+                !r.RequiresApproval ? "Not needed"
+                    : r.ApprovalDate is { } approved ? $"Approved {approved:yyyy-MM-dd}"
+                    : r.IsCancelled ? null : "Awaiting",
+                r.RecurrenceSeriesId is { } series && r.OccurrenceNumber is { } number
+                    ? $"{number} of {seriesSize.GetValueOrDefault(series)}"
+                    : null,
+            }));
+    }
+
     /// <remarks>
     /// ⚠ By OVERLAP (lane 2a): every event that touches the range. The repository's read wanted the
     /// event to fit inside it, so a conference running into the range from the day before was missing.
@@ -3966,6 +4111,112 @@ public class RoomBookingService : IRoomBookingService
             Page = pageNumber,
             PageSize = pageSize
         };
+    }
+
+    // ── Lane 2g-1: the register's search and export (D-9; C-25) ──
+
+    private const int MaxExportRows = 10_000;
+
+    /// <summary>
+    /// The bookings a search finds — this tenant's, untracked, no includes. Text is matched in the number, the room, the
+    /// purpose and the booker's name; dates by overlap.
+    /// </summary>
+    private IQueryable<RoomBooking> BookingSearchQuery(Guid tenantId, RoomBookingSearchDto search)
+    {
+        var query = _bookingRepository.GetQueryable().AsNoTracking().Where(b => b.TenantId == tenantId);
+        if (!string.IsNullOrWhiteSpace(search.Text))
+        {
+            var term = search.Text.Trim();
+            query = query.Where(b => b.BookingNumber.Contains(term) || b.Room.RoomName.Contains(term) || b.Purpose.Contains(term)
+                                     || (b.BookedBy.FirstName + " " + b.BookedBy.LastName).Contains(term));
+        }
+        if (search.Status is { } status) query = query.Where(b => b.Status == status);
+        if (search.RoomId is { } roomId) query = query.Where(b => b.RoomId == roomId);
+        if (search.From is { } from)
+        {
+            var first = from.Date;
+            query = query.Where(b => b.EndDateTime > first);
+        }
+        if (search.To is { } to)
+        {
+            var dayAfter = to.Date.AddDays(1);
+            query = query.Where(b => b.StartDateTime < dayAfter);
+        }
+        return query;
+    }
+
+    private static IOrderedQueryable<RoomBooking> SortBookings(IQueryable<RoomBooking> query, RoomBookingSearchDto search) =>
+        (search.Sort ?? "-start").Trim().ToLowerInvariant() switch
+        {
+            "start" => query.OrderBy(b => b.StartDateTime).ThenBy(b => b.BookingNumber),
+            "number" => query.OrderBy(b => b.BookingNumber),
+            "-number" => query.OrderByDescending(b => b.BookingNumber),
+            _ => query.OrderByDescending(b => b.StartDateTime).ThenByDescending(b => b.BookingNumber),
+        };
+
+    /// <inheritdoc />
+    /// <remarks>The page's ids first on narrow rows, then those bookings with their names — as the events' search.</remarks>
+    public async Task<PagedResult<RoomBookingDto>> SearchAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var page = Math.Max(1, search.Page);
+        var size = Math.Clamp(search.PageSize, 1, 200);
+        var query = BookingSearchQuery(tenantId, search);
+
+        var total = await query.CountAsync(cancellationToken);
+        var ids = await SortBookings(query, search).Select(b => b.Id)
+            .Skip((page - 1) * size).Take(size)
+            .ToListAsync(cancellationToken);
+        var rows = ids.Count == 0
+            ? new List<RoomBooking>()
+            : await _bookingRepository.GetQueryable().AsNoTracking()
+                .Include(b => b.Room)
+                .Include(b => b.BookedBy)
+                .Include(b => b.Event)
+                .Where(b => b.TenantId == tenantId && ids.Contains(b.Id))
+                .ToListAsync(cancellationToken);
+        var position = ids.Select((id, index) => (id, index)).ToDictionary(x => x.id, x => x.index);
+
+        return new PagedResult<RoomBookingDto>
+        {
+            Items = rows.OrderBy(b => position[b.Id]).ToDtoList(),
+            TotalCount = total,
+            Page = page,
+            PageSize = size,
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<byte[]> ExportCsvAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var rows = await SortBookings(BookingSearchQuery(tenantId, search), search)
+            .Select(b => new
+            {
+                b.BookingNumber,
+                b.Room.RoomName,
+                b.Purpose,
+                Event = b.Event != null ? b.Event.EventName : null,
+                BookedBy = b.BookedBy.FirstName + " " + b.BookedBy.LastName,
+                b.StartDateTime,
+                b.EndDateTime,
+                b.ExpectedAttendees,
+                b.Status,
+                b.ApprovalDate,
+                b.CancellationReason,
+            })
+            .Take(MaxExportRows)
+            .ToListAsync(cancellationToken);
+
+        return CompanyScheduleCsv.Build(
+            new[] { "Number", "Room", "Purpose", "Event", "Booked by", "Starts", "Ends", "Attendees", "Status", "Approved", "Cancelled because" },
+            rows.Select(r => new[]
+            {
+                r.BookingNumber, r.RoomName, r.Purpose, r.Event, r.BookedBy.Trim(),
+                r.StartDateTime.ToString("yyyy-MM-dd HH:mm"), r.EndDateTime.ToString("yyyy-MM-dd HH:mm"),
+                r.ExpectedAttendees.ToString(), System.Text.RegularExpressions.Regex.Replace(r.Status.ToString(), "([a-z])([A-Z])", "$1 $2"),
+                r.ApprovalDate?.ToString("yyyy-MM-dd"), r.CancellationReason,
+            }));
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)

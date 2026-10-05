@@ -515,6 +515,48 @@ export interface RescheduleEvent {
   seriesScope?: SeriesScope;
 }
 
+/**
+ * The events register's search (lane 2g-1): filtered, sorted and paged on the server. Dates by overlap. The export
+ * takes the same filters.
+ */
+export interface CompanyEventSearch {
+  text?: string;
+  status?: EventStatus;
+  category?: EventCategory;
+  locationId?: string;
+  organizationUnitId?: string;
+  organizerId?: string;
+  /** One series' dates, in their order (lane 2f-1's register filter). */
+  seriesId?: string;
+  from?: string;
+  to?: string;
+  /** `-start` (newest first, the default), `start`, `name`, `number` or `-number`. */
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** The bookings register's search (lane 2g-1). */
+export interface RoomBookingSearch {
+  text?: string;
+  status?: BookingStatus;
+  roomId?: string;
+  from?: string;
+  to?: string;
+  /** `-start` (newest first, the default), `start`, `number` or `-number`. */
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** The landing page in one read (lane 2g-1). */
+export interface CompanyScheduleDashboard {
+  upcomingEvents: CompanyEventSummary[];
+  pendingBookings: RoomBookingSummary[];
+  upcomingClosures: BusinessClosure[];
+  upcomingMilestones: CompanyMilestone[];
+}
+
 /** What an edit, move or cancellation with a series scope did (lane 2f-2b): the dates, and who was told. */
 export interface EventSeriesChangeResult {
   eventNumbers: string[];

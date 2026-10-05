@@ -37,8 +37,9 @@ has not started (the user: "don't start the actual development yet").
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
    issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
-   2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b; none has a migration). **Next: 2g, search,
-   export, the dashboard and clashes on the two registers (C-10…C-13, C-15, C-25); then 2h.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b; none has a migration), and 2g-1, the
+   registers' search, paging, export and the dashboard. **Next: 2g-2, the event-against-event clash rule (C-15, as
+   ruled in lane 2 State's 2g); then 2h.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -313,7 +314,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2f built and proved (658/658 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2g next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2f and 2g-1 built and proved (679/679 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2g-2 next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -1001,7 +1002,7 @@ change.
       a line pointing to public holidays and milestones.
 - [x] *✅ 2a; the department is refused on the wire (D-5), and the page shows the unit.* `events/department/{id}` → `events/unit/{id}`; the event form's Department picker →
       `OrganizationUnitPickerField`.
-- [ ] (D-9, C-10…C-13, C-25) `GET events/search` and `GET bookings/search` — server-side filters
+- [x] *✅ 2g-1, export on the register's read permission (the user's ruling); the series filter rides on the search.* (D-9, C-10…C-13, C-25) `GET events/search` and `GET bookings/search` — server-side filters
       (text, status, category, site, unit, organiser, from/to on overlap), sort and paging; `GET
       events/export` and `GET bookings/export` answering `text/csv` for the same filters (the
       `LeavesController` export precedent); `GET CompanySchedule/dashboard` — the landing's four lists
@@ -1139,7 +1140,86 @@ built, proved twice and handed over on its own:
     with series scope needs the series-changed email, so **both templates come in 2f-2a** (52), and 2f-2b adds its
     kinds of change to the same email.
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
+  *Source check (2026-10-05, at HEAD after 2f-2b):*
+  - **The registers:** both load every row (`GET events`, `GET bookings`) and filter, sort and page nothing on the
+    server. 2f-1's series filter is in the browser too.
+  - **The landing page** makes four reads: upcoming events (30 days), bookings awaiting approval, closures and
+    milestones.
+  - **No export exists.** The leave module's CSVs are the precedent (`LeaveService.CsvCell`): a UTF-8 byte-order
+    mark, every cell quoted, and a cell starting `= + - @` prefixed so a spreadsheet does not run it.
+  - **No event-against-event clash rule exists (C-15).** 2a's check is people's diaries (the panel commitments), not
+    one event's audience against another's.
+
+  *Rulings by the user (2026-10-05, all as recommended):*
+  - **C-15, as D-9:** the server refuses only a whole-company event against a whole-company event, or a unit's
+    against the same unit's. Any other overlap (a whole-company event against a unit's, say) is a warning the form
+    shows before saving.
+  - **In the same place:** both at the same site, or either with no site (online, or company-wide). Two whole-company
+    events at different sites at once are allowed.
+  - **Export** on the register's own read permission (`HR.Company.Read`), as the leave register's is.
+  - **Two slices:** 2g-1 ✅ (2026-10-05; built and proved, below), search, paging, the date filter, CSV export and
+    the one-read dashboard, with both registers moved onto them; 2g-2, the clash rule, the clashes check, and the
+    form's warnings before save.
+
+  *Applied without a ruling (stated here):* a clash counts live events only, not cancelled, completed or postponed
+  ones, and includes those awaiting approval. On a series every date is checked; a refused date refuses the
+  action, named, as 2f-2b's refusals do.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2g-1 — what was built (2026-10-05): the registers' search, paging, export, and the dashboard (D-9; C-10…C-13, C-25).*
+- **No migration.**
+- **`GET events/search`** (`CompanyEventSearchDto`):
+  - filters: text in the name, number, venue or organiser's name; status; category; site; unit; organiser; series;
+    and a date range, by overlap as lane 2a's range read;
+  - sorted: newest first by default, oldest first, by name or number, a series in its own order;
+  - paged: 1–200 a page, a size out of range refused 400;
+  - each page's ids are sorted on narrow rows first, then only those events are loaded with their names (2e-3's
+    memory-grant lesson). Measured on UAT: under 1 MB of working memory and 5 ms or less a query.
+- **`GET bookings/search`** (`RoomBookingSearchDto`): text in the number, room, purpose or booker's name; status;
+  room; dates by overlap; sorted and paged the same way.
+- **`GET events/export` and `GET bookings/export`:** CSV for the same filters, on the register's read permission
+  (the user's ruling).
+  - The leave register's conventions (`CompanyScheduleCsv`): a UTF-8 byte-order mark, every cell quoted, and a
+    cell a spreadsheet would run as a formula prefixed with an apostrophe.
+  - Narrow rows, up to 10,000.
+  - The events file names the site, unit, audience, organiser, status, approval and the series place ("2 of 4").
+- **`GET dashboard`:** the landing page's four lists in one read (the next 30 days' events, the bookings awaiting
+  approval, the next 60 days' closures, the next 90 days' milestones). It made four.
+- **Screens:**
+  - both registers search as you type (a short pause), filter by status (and category), take a From–To date,
+    page 25 at a time with a count of everything the filters find (`RegisterPager`), and export what they show;
+  - 2f-1's series view rides on the search;
+  - the landing page reads the dashboard.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2g-1: **679/679 on two clean passes**, first time, the blocking watcher beside
+  both. **The watcher logged nothing at all:** no request waited over 3 s, the first passes since 2e with none. No
+  live `CSF-` event or mail-server row was left. 2g-1 has **21 assertions**:
+  - **the events register:**
+    - by text, the block's five, newest first; oldest first on asking;
+    - page 2 of 3 at two a page, with the way back and on;
+    - by status, category, organiser and site;
+    - a date range finding the three-day event that touches the day;
+    - the text found in a venue;
+    - one series in its own order with its place;
+    - a page of 500 refused;
+  - **the events export:** `text/csv` with a byte-order mark, the header, the same five rows in the search's order,
+    a name beginning `=` guarded, the cancelled one saying so;
+  - **the bookings register:** by text newest first, by a date range, paged; its export, the header and the three;
+  - **the dashboard** answering the four lists the landing page read one by one.
+- **The harness's notice withdrawal (lane 6's item) proved:** 5 s of work for 132 events, against about 50 s per
+  statement before, and nothing waited behind it.
+- **Regression:** the round-4 net **209/209**; `hr-recruitment/run-round4-d` **58/58**; the templates probe **30/30**;
+  `run-lane-n` **109/115**, the six section-J failures of #40. Its fixture tenant was removed by its own clean-up.
+- **The API log:** no request answered 500, and no query timed out. Its ERR lines are the known kinds:
+  - notifications with no mail server;
+  - the sink's bounces and `run-lane-n`'s test send;
+  - master's identity sweep;
+  - payroll's foreign key on minted fixtures (#23);
+  - the race proofs.
+- **After the runs:** every harness login is off (the no-email one by SQL, #42). No company-event notice to anyone
+  real is live. The R4D requisition's approval notices to md.tdc, managing.director, hr.head and hr.officer were
+  withdrawn twice, 0 live.
 
 *2f-2b — what was built (2026-10-05): edit, move and cancel across a series (D-12).*
 - **No migration.** The edit, reschedule and cancel requests carry `SeriesScope`. The edit's own `Scope` is who the
@@ -2305,7 +2385,10 @@ built, proved twice and handed over on its own:
       (closures beside holidays, D-15c);
       the configuration register (new endpoints and topics); the demo runbook's closure aside (in
       `dev-harness/`, outside the repo); memory `hr-company-schedule-guide-findings`.
-- [ ] **(Found at 2f, 2026-10-05) The suite's notice withdrawal grows with the run.** Its clean-up withdraws the
+- [x] *✅ Built 2026-10-05, after 2f-2b, and proved at 2g-1's run: two passes — by `EntityId` in one list, and by
+      link only over rows created since the run began. 5 s of work for 132 events; the blocking watcher logged
+      nothing.*
+      **(Found at 2f, 2026-10-05) The suite's notice withdrawal grows with the run.** Its clean-up withdraws the
       run's notices with one `UPDATE … WHERE EntityId = … OR ActionUrl LIKE '%…%'` over every event the run made. That
       scans `Notifications`, and holds the notification service's own clean-up behind it: 36 s at 85 events (2f-1),
       42 s at 100 (2f-2a), 50 s at 124 (2f-2b). **At 124 the notification service's poll timed out (30 s) behind it,
@@ -2744,3 +2827,18 @@ built API, so no web host and no seeders).
     twice: lane 6's item, raised.
 
   Next: 2g, search, export, the dashboard and clashes on the two registers; then 2h.
+- **2026-10-05, later** — **2f-2b committed.** The suite's slow notice withdrawal fixed first (lane 6's item; harness
+  only). **2g source-checked** and four rulings taken, all as recommended (lane 2 State): C-15 as D-9; "the same place"
+  is the same site, or either with no site; export on the register's read permission; two slices.
+- **2026-10-05, later** — **Lane 2, slice 2g-1 built and proved**: the registers' search, paging, export, and the
+  dashboard (D-9; C-10…C-13, C-25) (lane 2 State). No migration.
+  - **Built:**
+    - both registers searched, filtered, sorted and paged on the server, with a date filter;
+    - CSV exports for the same filters;
+    - the landing page in one read.
+  - **Results:** `run-final-review.mjs` scored 679/679 on two clean passes, with 21 checks in 2g-1, first time. The
+    blocking watcher logged nothing on either pass; the harness's withdrawal took 5 s, against about 50 s before. The
+    round-4 net was 209/209, recruitment 58/58, the templates probe 30/30 and `run-lane-n` 109/115 (section J, #40).
+    No request answered 500, and no query timed out.
+
+  Next: 2g-2, the clash rule (C-15), the clashes check and the form's warnings before save.

@@ -20,6 +20,12 @@ public interface ICompanyEventService
     Task<IEnumerable<CompanyEventSummaryDto>> GetByCategoryAsync(EventCategory category, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyEventSummaryDto>> GetUpcomingEventsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
 
+    /// <summary>The events register: filtered, sorted and paged on the server (lane 2g-1, C-10…C-13).</summary>
+    Task<PagedResult<CompanyEventDto>> SearchAsync(CompanyEventSearchDto search, CancellationToken cancellationToken = default);
+
+    /// <summary>Every event the search finds, as a CSV (lane 2g-1, C-12).</summary>
+    Task<byte[]> ExportCsvAsync(CompanyEventSearchDto search, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Creates an event. The organiser is <see cref="CreateCompanyEventDto.OrganizerId"/> when given,
     /// otherwise <paramref name="callerEmployeeId"/>; the caller is recorded as the creator either way (D-11).
@@ -170,6 +176,13 @@ public interface IRoomBookingService
     Task<IEnumerable<RoomBookingSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
     Task<IEnumerable<RoomBookingSummaryDto>> GetByStatusAsync(BookingStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<RoomBookingSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The bookings register: filtered, sorted and paged on the server (lane 2g-1, C-25).</summary>
+    Task<PagedResult<RoomBookingDto>> SearchAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default);
+
+    /// <summary>Every booking the search finds, as a CSV (lane 2g-1, C-25).</summary>
+    Task<byte[]> ExportCsvAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default);
+
     Task<RoomBookingDto> CreateAsync(CreateRoomBookingDto createDto, Guid bookedById, CancellationToken cancellationToken = default);
     Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default);

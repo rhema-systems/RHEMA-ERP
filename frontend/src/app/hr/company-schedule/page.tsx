@@ -6,12 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import {
-  businessClosureService,
-  companyEventService,
-  companyMilestoneService,
-  roomBookingService,
-} from '@/services/hr/company-schedule.service';
+import { companyEventService } from '@/services/hr/company-schedule.service';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 
@@ -20,22 +15,15 @@ const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2')
  * once — rooms, milestones, closures, fiscal years — live under Administration.
  */
 export default function CompanySchedulePage() {
-  const { data: events } = useQuery({
-    queryKey: ['hr', 'company-schedule', 'events', 'upcoming'],
-    queryFn: () => companyEventService.getUpcoming(30),
+  // Lane 2g-1 (D-9): the four lists in one read — it made four.
+  const { data: dashboard } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'dashboard'],
+    queryFn: () => companyEventService.getDashboard(),
   });
-  const { data: pending } = useQuery({
-    queryKey: ['hr', 'company-schedule', 'bookings', 'pending'],
-    queryFn: () => roomBookingService.getPendingApprovals(),
-  });
-  const { data: closures } = useQuery({
-    queryKey: ['hr', 'company-schedule', 'closures', 'upcoming'],
-    queryFn: () => businessClosureService.getUpcoming(60),
-  });
-  const { data: milestones } = useQuery({
-    queryKey: ['hr', 'company-schedule', 'milestones', 'upcoming'],
-    queryFn: () => companyMilestoneService.getUpcoming(90),
-  });
+  const events = dashboard?.upcomingEvents;
+  const pending = dashboard?.pendingBookings;
+  const closures = dashboard?.upcomingClosures;
+  const milestones = dashboard?.upcomingMilestones;
 
   return (
     <div className="space-y-6 p-6">

@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarCheck, CheckCircle2, MoreHorizontal, Plus, Search, Trash2, XCircle } from 'lucide-react';
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
+import { CalendarCheck, CheckCircle2, Download, Loader2, MoreHorizontal, Plus, Search, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -46,11 +46,14 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { RegisterPager } from '@/components/hr/company-schedule/RegisterPager';
+import { useDebounce } from '@/hooks/use-debounce';
 import { roomBookingService } from '@/services/hr/company-schedule.service';
 import { BOOKING_STATUSES } from '@/types/hr/company-schedule';
-import type { RoomBooking } from '@/types/hr/company-schedule';
+import type { BookingStatus, RoomBooking, RoomBookingSearch } from '@/types/hr/company-schedule';
 
 const ALL = '__all__';
+const PAGE_SIZE = 25;
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const when = (iso: string) => new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
@@ -70,27 +73,42 @@ export default function RoomBookingsPage() {
   const canDelete = hasPermission('HR.Company.Admin');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>(ALL);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<RoomBooking | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const [deleteTarget, setDeleteTarget] = useState<RoomBooking | null>(null);
+  const term = useDebounce(search.trim(), 300);
 
+  // Lane 2g-1 (C-25): searched, filtered by date and paged on the server; a new filter starts at the first page.
+  useEffect(() => setPage(1), [term, status, from, to]);
+  const filters: RoomBookingSearch = {
+    text: term || undefined,
+    status: status === ALL ? undefined : (status as BookingStatus),
+    from: from || undefined,
+    to: to || undefined,
+  };
   const key = ['hr', 'company-schedule', 'bookings'];
-  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => roomBookingService.getAll() });
+  const { data, isLoading } = useQuery({
+    queryKey: [...key, 'search', filters, page],
+    queryFn: () => roomBookingService.search({ ...filters, page, pageSize: PAGE_SIZE }),
+    placeholderData: keepPreviousData,
+  });
+  const bookings = data?.items ?? [];
+  const filtered = !!(term || status !== ALL || from || to);
 
-  const bookings = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return (data ?? [])
-      .filter((b) => (status === ALL ? true : b.status === status))
-      .filter(
-        (b) =>
-          !term ||
-          b.bookingNumber.toLowerCase().includes(term) ||
-          b.roomName.toLowerCase().includes(term) ||
-          b.purpose.toLowerCase().includes(term) ||
-          b.bookedByName.toLowerCase().includes(term),
-      )
-      .sort((a, b) => b.startDateTime.localeCompare(a.startDateTime));
-  }, [data, search, status]);
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      await roomBookingService.exportCsv(filters);
+    } catch (e) {
+      fail('Could not export the bookings')(e);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const fail = (title: string) => (error: any) =>
     toast({
@@ -145,18 +163,24 @@ export default function RoomBookingsPage() {
         description="Who has which room, when, and which bookings are still waiting on approval."
         backHref="/hr/company-schedule"
         actions={
-          <Button onClick={() => router.push('/hr/company-schedule/bookings/new')}>
-            <Plus className="mr-2 h-4 w-4" /> Book a room
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={exportCsv} disabled={exporting || !data?.totalCount}>
+              {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+              Export CSV
+            </Button>
+            <Button onClick={() => router.push('/hr/company-schedule/bookings/new')}>
+              <Plus className="mr-2 h-4 w-4" /> Book a room
+            </Button>
+          </div>
         }
       />
 
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-end justify-between gap-3">
             <CardTitle>Bookings</CardTitle>
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={status} onValueChange={setStatus}>
+            <div className="flex flex-wrap items-end gap-2">
+              <Select value={status} onValueChange={(v) => v && setStatus(v)}>
                 <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL}>All statuses</SelectItem>
@@ -165,10 +189,18 @@ export default function RoomBookingsPage() {
                   ))}
                 </SelectContent>
               </Select>
+              <div className="space-y-1">
+                <Label htmlFor="bookingsFrom" className="text-xs text-muted-foreground">From</Label>
+                <Input id="bookingsFrom" type="date" className="w-40" value={from} onChange={(e) => setFrom(e.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="bookingsTo" className="text-xs text-muted-foreground">To</Label>
+                <Input id="bookingsTo" type="date" className="w-40" value={to} onChange={(e) => setTo(e.target.value)} />
+              </div>
               <div className="relative w-64">
                 <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search bookings…"
+                  placeholder="Number, room, purpose or booker…"
                   className="pl-8"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
@@ -207,10 +239,8 @@ export default function RoomBookingsPage() {
                     <TableCell colSpan={9}>
                       <EmptyState
                         icon={CalendarCheck}
-                        title={data?.length ? 'No matching bookings' : 'No bookings yet'}
-                        description={
-                          data?.length ? 'Try a different search or filter.' : 'Book a room to get started.'
-                        }
+                        title={filtered ? 'No matching bookings' : 'No bookings yet'}
+                        description={filtered ? 'Try a different search, filter or dates.' : 'Book a room to get started.'}
                       />
                     </TableCell>
                   </TableRow>
@@ -265,6 +295,7 @@ export default function RoomBookingsPage() {
               </TableBody>
             </Table>
           </div>
+          <RegisterPager data={data} noun="bookings" onPage={setPage} />
         </CardContent>
       </Card>
 

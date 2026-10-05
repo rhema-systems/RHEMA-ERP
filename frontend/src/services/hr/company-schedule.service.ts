@@ -2,6 +2,11 @@ import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
 import type { HrAnnouncement } from './announcements.service';
 import type {
+  CompanyEventSearch,
+  CompanyScheduleDashboard,
+  RoomBookingSearch,
+} from '@/types/hr/company-schedule';
+import type {
   BookingStatus,
   BusinessClosure,
   CancelEvent,
@@ -82,6 +87,25 @@ import type {
  * pass an organiser or approver id here, the answer is that the API already knows who you are.
  */
 
+/** Today as `yyyy-mm-dd`, for a file name. */
+const today = () => new Date().toISOString().slice(0, 10);
+
+/** Fetches a CSV the register's filters describe and saves it (lane 2g-1); empty filters are left off. */
+async function saveCsv(endpoint: string, filters: Record<string, unknown>, fileName: string): Promise<void> {
+  const blob = await apiService.downloadBlob(endpoint, filters);
+  const url = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 class CompanyEventService {
   private readonly baseUrl = '/CompanySchedule';
 
@@ -126,6 +150,22 @@ class CompanyEventService {
       pageNumber,
       pageSize,
     });
+  }
+
+  /** The events register: filtered, sorted and paged on the server (lane 2g-1). */
+  search(search: CompanyEventSearch): Promise<PagedResult<CompanyEvent>> {
+    return apiService.get<PagedResult<CompanyEvent>>(`${this.baseUrl}/events/search`, { ...search });
+  }
+
+  /** Every event the same search finds, saved as a CSV (lane 2g-1). */
+  exportCsv(search: CompanyEventSearch): Promise<void> {
+    const { page: _page, pageSize: _size, ...filters } = search;
+    return saveCsv(`${this.baseUrl}/events/export`, filters, `company-events-${today()}.csv`);
+  }
+
+  /** The landing page in one read (lane 2g-1). */
+  getDashboard(): Promise<CompanyScheduleDashboard> {
+    return apiService.get<CompanyScheduleDashboard>(`${this.baseUrl}/dashboard`);
   }
 
   getById(id: string): Promise<CompanyEvent> {
@@ -382,6 +422,17 @@ class RoomBookingService {
       pageNumber,
       pageSize,
     });
+  }
+
+  /** The bookings register: filtered, sorted and paged on the server (lane 2g-1). */
+  search(search: RoomBookingSearch): Promise<PagedResult<RoomBooking>> {
+    return apiService.get<PagedResult<RoomBooking>>(`${this.baseUrl}/bookings/search`, { ...search });
+  }
+
+  /** Every booking the same search finds, saved as a CSV (lane 2g-1). */
+  exportCsv(search: RoomBookingSearch): Promise<void> {
+    const { page: _page, pageSize: _size, ...filters } = search;
+    return saveCsv(`${this.baseUrl}/bookings/export`, filters, `room-bookings-${today()}.csv`);
   }
 
   getById(id: string): Promise<RoomBooking> {

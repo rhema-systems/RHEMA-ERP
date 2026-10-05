@@ -307,6 +307,67 @@ public class EventSeriesChangeResultDto
 }
 
 /// <summary>
+/// The events register's search (lane 2g-1, D-9; C-10…C-13): filtered, sorted and paged on the server — it loaded every
+/// event and filtered in the browser. The export takes the same filters.
+/// </summary>
+public class CompanyEventSearchDto
+{
+    /// <summary>In the name, the number, the venue or the organiser's name.</summary>
+    [MaxLength(100)]
+    public string? Text { get; set; }
+    public EventStatus? Status { get; set; }
+    public EventCategory? Category { get; set; }
+    /// <summary>The site.</summary>
+    public Guid? LocationId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public Guid? OrganizerId { get; set; }
+    /// <summary>One series' dates (lane 2f-1's register filter), in their order.</summary>
+    public Guid? SeriesId { get; set; }
+    /// <summary>Events that touch this range — by overlap, as the range read does (lane 2a).</summary>
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+    /// <summary><c>-start</c> (newest first, the default), <c>start</c>, <c>name</c>, <c>number</c> or <c>-number</c>.</summary>
+    [MaxLength(20)]
+    public string? Sort { get; set; }
+    [Range(1, int.MaxValue)]
+    public int Page { get; set; } = 1;
+    [Range(1, 200)]
+    public int PageSize { get; set; } = 25;
+}
+
+/// <summary>The bookings register's search (lane 2g-1, D-9; C-25), as the events'.</summary>
+public class RoomBookingSearchDto
+{
+    /// <summary>In the number, the room, the purpose or the booker's name.</summary>
+    [MaxLength(100)]
+    public string? Text { get; set; }
+    public BookingStatus? Status { get; set; }
+    public Guid? RoomId { get; set; }
+    /// <summary>Bookings that touch this range.</summary>
+    public DateTime? From { get; set; }
+    public DateTime? To { get; set; }
+    /// <summary><c>-start</c> (newest first, the default), <c>start</c>, <c>number</c> or <c>-number</c>.</summary>
+    [MaxLength(20)]
+    public string? Sort { get; set; }
+    [Range(1, int.MaxValue)]
+    public int Page { get; set; } = 1;
+    [Range(1, 200)]
+    public int PageSize { get; set; } = 25;
+}
+
+/// <summary>The company schedule's landing page in one read (lane 2g-1, D-9): it made four.</summary>
+public class CompanyScheduleDashboardDto
+{
+    /// <summary>The next 30 days' events.</summary>
+    public List<CompanyEventSummaryDto> UpcomingEvents { get; set; } = new();
+    public List<RoomBookingSummaryDto> PendingBookings { get; set; } = new();
+    /// <summary>The next 60 days' closures.</summary>
+    public List<BusinessClosureDto> UpcomingClosures { get; set; } = new();
+    /// <summary>The next 90 days' milestones.</summary>
+    public List<CompanyMilestoneDto> UpcomingMilestones { get; set; } = new();
+}
+
+/// <summary>
 /// DTO for creating a company event
 /// </summary>
 public class CreateCompanyEventDto : CreateDtoBase

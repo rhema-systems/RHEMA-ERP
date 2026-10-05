@@ -81,6 +81,43 @@ public class CompanyScheduleController : HrControllerBase
         [FromQuery] int pageSize = 20)
         => Ok(await _eventService.GetPagedAsync(pageNumber, pageSize));
 
+    /// <summary>
+    /// The events register (lane 2g-1, C-10…C-13): text, status, category, site, unit, organiser, series and a date range
+    /// (by overlap), sorted and paged on the server.
+    /// </summary>
+    [HttpGet("events/search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<PagedResult<CompanyEventDto>>> SearchEvents([FromQuery] CompanyEventSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.SearchAsync(search, ct));
+    }
+
+    /// <summary>
+    /// Every event the same search finds, as a CSV (lane 2g-1, C-12) — on the register's own read permission (the user's
+    /// ruling), as the leave register's export is.
+    /// </summary>
+    [HttpGet("events/export")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> ExportEvents([FromQuery] CompanyEventSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return File(await _eventService.ExportCsvAsync(search, ct), "text/csv", $"company-events-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
+
+    /// <summary>The landing page in one read (lane 2g-1, D-9): the next 30 days' events, the bookings awaiting approval,
+    /// the next 60 days' closures and the next 90 days' milestones.</summary>
+    [HttpGet("dashboard")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<CompanyScheduleDashboardDto>> GetDashboard(CancellationToken ct)
+        => Ok(new CompanyScheduleDashboardDto
+        {
+            UpcomingEvents = (await _eventService.GetUpcomingEventsAsync(30, ct)).ToList(),
+            PendingBookings = (await _bookingService.GetPendingApprovalsAsync(ct)).ToList(),
+            UpcomingClosures = (await _closureService.GetUpcomingClosuresAsync(60, ct)).ToList(),
+            UpcomingMilestones = (await _milestoneService.GetUpcomingMilestonesAsync(90, ct)).ToList(),
+        });
+
     [HttpGet("events/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<CompanyEventDto>> GetEvent(Guid id)
@@ -567,6 +604,24 @@ public class CompanyScheduleController : HrControllerBase
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _bookingService.GetPagedAsync(pageNumber, pageSize));
+
+    /// <summary>The bookings register (lane 2g-1, C-25): text, status, room and a date range, sorted and paged on the server.</summary>
+    [HttpGet("bookings/search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<PagedResult<RoomBookingDto>>> SearchBookings([FromQuery] RoomBookingSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _bookingService.SearchAsync(search, ct));
+    }
+
+    /// <summary>Every booking the same search finds, as a CSV (lane 2g-1, C-25), on the register's read permission.</summary>
+    [HttpGet("bookings/export")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> ExportBookings([FromQuery] RoomBookingSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return File(await _bookingService.ExportCsvAsync(search, ct), "text/csv", $"room-bookings-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
 
     [HttpGet("bookings/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
