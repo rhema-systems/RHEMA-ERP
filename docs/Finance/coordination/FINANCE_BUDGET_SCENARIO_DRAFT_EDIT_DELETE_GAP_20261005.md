@@ -10,6 +10,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - Worktree: `.w/fin-uat-remediation-20261004`
 - Investigation starting commit: `e1c25df65`
 - Implementation base commit: `5389fe6bcb28db3a37f7a21fe41fee93b3fc9909`
+- Completed implementation commit: `90a2c4ad1` (`feat(finance): govern budget return scope and draft lifecycle`)
 - Pull request: no PR creation, update, or push is authorized for this workstream yet.
 
 ## Product decisions and evidence
@@ -90,7 +91,6 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 
 ## Remaining work
 
-- Commit the verified local implementation to `codex/finance-uat-remediation-20261004`.
 - Do not apply the migration until separately authorized; after application, manually verify create/edit/delete and return distribution against a disposable/local test tenant before UAT.
 - The current downstream model supports one account `SegmentValueId` plus one distribution dimension per return. Scenarios may govern multiple eligible segment structures, but a single return selects one structure/value. Supporting multiple account segment values on one return would require a separate normalized return-scope collection and is outside this authorized change.
 - A repository-wide TypeScript cleanup and the two unrelated Finance security diagnostics remain separate workstreams.
