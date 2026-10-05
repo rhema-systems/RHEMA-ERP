@@ -69,7 +69,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - New migration: `20261005225306_AddBudgetScenarioSegmentControls`.
 - Migration status: created and SQL-script validated, deliberately **not applied**.
 - Compatibility: existing non-deleted returns with `SegmentValueId` backfill their scenario/segment-structure declarations.
-- The combined unique return key is `(TenantId, BudgetScenarioId, SegmentValueId, DistributionDimensionValueId)` when at least one scope value is present. This permits the same `COMPANY` value across different departmental distributions while still rejecting an exact duplicate responsibility scope.
+- The combined unique active-return key is `(TenantId, BudgetScenarioId, SegmentValueId, DistributionDimensionValueId)` with the SQL Server-compatible filter `[IsDeleted] = 0`. This permits the same `COMPANY` value across different departmental distributions, rejects an exact duplicate responsibility scope, and permits only one unscoped legacy return per scenario.
 - No UAT or local database data was changed.
 
 ## Verification evidence
@@ -79,11 +79,13 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - Inspected `BudgetService.CreateReturnAsync` validation and persistence behavior.
 - Inspected budget hardening tests proving the current required distribution control is a scenario Finance dimension value.
 - `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj -c Release --no-restore`: passed with 0 errors (baseline warnings remain).
-- `dotnet test ... --filter FullyQualifiedName~BudgetServiceHardeningTests`: 28 passed, 0 failed.
+- `dotnet test ... --filter FullyQualifiedName~BudgetServiceHardeningTests`: 29 passed, 0 failed.
+- `dotnet test ... --filter FullyQualifiedName~BudgetSegmentMigration_UsesSqlServerCompatibleCombinedScopeFilter`: 1 passed, 0 failed; the contract asserts the exact combined key and rejects a filtered-index predicate containing `OR`.
 - `dotnet test ... --filter FullyQualifiedName~CriticalFinanceActions_ShouldMapToExpectedPermissions`: 92 passed, 0 failed.
 - Changed-file ESLint for both scenario pages, the budget service, and budget types: passed.
 - `npm run type-check`: repository-wide baseline remains red on unrelated existing development, portal, HR, inventory, reporting, and test fixture errors; no error references the changed budgeting files.
-- Migration SQL generated idempotently from immediate predecessor `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`; isolated script contains only the intended control table, legacy backfill, and combined-index operations.
+- Corrected migration SQL generated idempotently from immediate predecessor `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`; the isolated script contains only the intended control table, legacy backfill, and combined-index operations, with `WHERE [IsDeleted] = 0` on the combined unique index.
+- First local startup application attempt failed before completion because SQL Server rejected the original filtered-index predicate containing `OR` (`Error 156`). The corrected migration uses `[IsDeleted] = 0`; no restart or repeat application was performed by this task.
 - `git diff --check`: passed (only Windows line-ending notices).
 - Broader `FinanceControllerSecurityTests` run: 134 passed and 2 unrelated existing diagnostics failed:
   - `VendorInvoiceService.ReceiptAccounts.cs` contains an existing `Guid.Empty` tenant fallback.

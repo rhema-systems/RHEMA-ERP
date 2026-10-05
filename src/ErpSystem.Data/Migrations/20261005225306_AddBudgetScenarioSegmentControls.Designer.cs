@@ -13124,7 +13124,7 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId", "DistributionDimensionValueId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND ([SegmentValueId] IS NOT NULL OR [DistributionDimensionValueId] IS NOT NULL)");
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("BudgetReturns");
                 });

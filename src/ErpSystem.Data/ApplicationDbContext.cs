@@ -9658,7 +9658,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     budgetReturn.DistributionDimensionValueId
                 })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND ([SegmentValueId] IS NOT NULL OR [DistributionDimensionValueId] IS NOT NULL)");
+                .HasFilter("[IsDeleted] = 0");
             entity.HasOne(budgetReturn => budgetReturn.DistributionDimensionValue)
                 .WithMany()
                 .HasForeignKey(budgetReturn => budgetReturn.DistributionDimensionValueId)

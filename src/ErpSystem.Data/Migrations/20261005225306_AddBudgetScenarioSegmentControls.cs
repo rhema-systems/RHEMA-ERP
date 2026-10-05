@@ -87,7 +87,7 @@ namespace ErpSystem.Data.Migrations
                 table: "BudgetReturns",
                 columns: new[] { "TenantId", "BudgetScenarioId", "SegmentValueId", "DistributionDimensionValueId" },
                 unique: true,
-                filter: "[IsDeleted] = 0 AND ([SegmentValueId] IS NOT NULL OR [DistributionDimensionValueId] IS NOT NULL)");
+                filter: "[IsDeleted] = 0");
 
             migrationBuilder.CreateIndex(
                 name: "IX_BudgetScenarioControlSegments_AccountSegmentStructureId",

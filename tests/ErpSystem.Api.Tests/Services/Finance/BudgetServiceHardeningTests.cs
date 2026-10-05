@@ -5,8 +5,11 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Moq;
 using Xunit;
 
@@ -16,6 +19,21 @@ public class BudgetServiceHardeningTests
 {
     private static readonly Guid TenantId = Guid.NewGuid();
     private static readonly Guid CurrentUserId = Guid.NewGuid();
+
+    [Fact]
+    public void BudgetSegmentMigration_UsesSqlServerCompatibleCombinedScopeFilter()
+    {
+        var operation = new ExposedBudgetSegmentMigration().BuildOperations()
+            .OfType<CreateIndexOperation>()
+            .Single(item => item.Name ==
+                "IX_BudgetReturns_TenantId_BudgetScenarioId_SegmentValueId_DistributionDimensionValueId");
+
+        operation.IsUnique.Should().BeTrue();
+        operation.Columns.Should().Equal(
+            "TenantId", "BudgetScenarioId", "SegmentValueId", "DistributionDimensionValueId");
+        operation.Filter.Should().Be("[IsDeleted] = 0");
+        operation.Filter.Should().NotContain(" OR ");
+    }
 
     [Fact]
     public async Task UpdateScenarioAsync_OmittedDimensionPolicyPreservesExistingControls()
@@ -1306,4 +1324,14 @@ public class BudgetServiceHardeningTests
             FiscalPeriodId = periodId,
             AdjustmentAmountBase = adjustment
         };
+
+    private sealed class ExposedBudgetSegmentMigration : AddBudgetScenarioSegmentControls
+    {
+        public IReadOnlyList<MigrationOperation> BuildOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+    }
 }
