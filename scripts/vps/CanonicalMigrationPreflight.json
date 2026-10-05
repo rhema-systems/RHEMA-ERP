@@ -225,6 +225,46 @@
           "guardKind": "data-precondition"
         }
       ]
+    },
+    {
+      "sqlFile": "HrPerformanceFinalClosureMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20261001120541_PerformanceClosureBatch2",
+          "sourceSha256": "1E980234F5A3FDB017F79E5619D7F5AC6D578100FE177A59097931E912D34CA7",
+          "guardKind": "data-precondition"
+        },
+        {
+          "id": "20261001172838_PerformanceClosureWorkflowRetrofit",
+          "sourceSha256": "1B2B34114BBCC05293CDA6DD0E4DFABD9A6DB8DCC2A0E438B90B52449E2BD32E",
+          "guardKind": "data-precondition"
+        }
+      ]
+    },
+    {
+      "sqlFile": "HrTravelFinalClosureMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20261002000637_TravelClosureBatch1",
+          "sourceSha256": "1B0E37BA311AF801B4E5B88EF15DA72235B423270F2B8C0F8539E7C79B9F1C69",
+          "guardKind": "data-precondition"
+        },
+        {
+          "id": "20261002042909_TravelClosureApprovalLadder",
+          "sourceSha256": "22A3954A49224A73C507AAB1CBB344430814E582EBA56325048EEFBE19E69CA9",
+          "guardKind": "data-precondition"
+        },
+        {
+          "id": "20261003002540_TravelClosureHealthClearance",
+          "sourceSha256": "5BAE3B859705368AF140CD32120086855673A551A20974B749B09322A1943597",
+          "guardKind": "down-only"
+        },
+        {
+          "id": "20261003212653_TravelClosureAttendanceLink",
+          "sourceSha256": "F06E0811766D60FEE4862410FE2E66155F4F98BBED20695511DF2CD52D25CD12",
+          "guardKind": "down-only"
+        }
+      ]
     }
   ]
 }
