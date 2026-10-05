@@ -82,6 +82,47 @@ public sealed class FinanceApprovalQueueProjectionTests
 
     [Fact]
     [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Exchange_rate_should_appear_for_the_current_stage_role_and_link_to_rate_management()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var accountsOfficerId = Guid.NewGuid();
+        _ = AddApprovalGraph(
+            db,
+            tenantId,
+            WorkflowInstanceStatus.InProgress,
+            WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "ExchangeRate",
+            initiatorId: makerId,
+            approverRole: "Accounts Officer");
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var accountsOfficer = CreateQueueController(
+            db, tenantId, accountsOfficerId, new[] { "Accounts Officer" });
+        var response = await accountsOfficer.GetPending(CancellationToken.None);
+        var rows = ((OkObjectResult)response.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+
+        rows.Should().ContainSingle().Which.Should().Match<FinanceApprovalsController.FinanceApprovalQueueItemDto>(row =>
+            row.EntityType == "ExchangeRate" &&
+            row.DetailHref == "/finance/exchange-rates" &&
+            row.CanApprove && row.CanReject);
+
+        var laterStage = CreateQueueController(
+            db, tenantId, Guid.NewGuid(), new[] { "Finance Manager" });
+        var laterResponse = await laterStage.GetPending(CancellationToken.None);
+        var laterRows = ((OkObjectResult)laterResponse.Result!).Value
+            .Should().BeAssignableTo<IReadOnlyList<FinanceApprovalsController.FinanceApprovalQueueItemDto>>()
+            .Which;
+        laterRows.Should().BeEmpty("later-stage approvers receive the request only after the current stage completes");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
     public async Task Capital_project_submitter_cannot_action_assigned_approval_but_independent_checker_can()
     {
         await using var db = CreateContext();
@@ -494,12 +535,15 @@ public sealed class FinanceApprovalQueueProjectionTests
             NullLogger<FinanceApprovalsController>.Instance);
 
     private static FinanceApprovalsController CreateQueueController(
-        ApplicationDbContext db, Guid tenantId, Guid userId)
+        ApplicationDbContext db,
+        Guid tenantId,
+        Guid userId,
+        IReadOnlyCollection<string>? roles = null)
     {
         var user = new Mock<ICurrentUserService>();
         user.SetupGet(value => value.UserId).Returns(userId.ToString());
         user.SetupGet(value => value.TenantId).Returns(tenantId);
-        user.SetupGet(value => value.Roles).Returns(new[] { "Financial Controller" });
+        user.SetupGet(value => value.Roles).Returns(roles ?? new[] { "Financial Controller" });
         var authorization = new Mock<IAuthorizationService>();
         authorization.Setup(value => value.AuthorizeAsync(
                 It.IsAny<System.Security.Claims.ClaimsPrincipal>(),

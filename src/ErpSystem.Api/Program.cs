@@ -1258,6 +1258,16 @@ async Task SeedCriticalFinanceWorkflowDefinitionsAsync(WebApplication app)
     using var scope = app.Services.CreateScope();
     var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
     await seedingService.SeedCriticalFinanceWorkflowDefinitionsAsync();
+    var reconciliationService = scope.ServiceProvider.GetRequiredService<
+        ErpSystem.Api.Services.Finance.MultiCurrency.ExchangeRateWorkflowReconciliationService>();
+    var reconciliation = await reconciliationService.ReconcileAsync();
+    app.Logger.LogInformation(
+        "Exchange-rate workflow reconciliation completed: {PendingCount} pending, {OrphanCount} orphaned, {RecoveredCount} recovered, {FailedCount} failed, {SkippedWithoutInitiatorCount} skipped without initiator",
+        reconciliation.PendingCount,
+        reconciliation.OrphanCount,
+        reconciliation.RecoveredCount,
+        reconciliation.FailedCount,
+        reconciliation.SkippedWithoutInitiatorCount);
 }
 
 async Task SeedPaymentTermBaselineAsync(WebApplication app)

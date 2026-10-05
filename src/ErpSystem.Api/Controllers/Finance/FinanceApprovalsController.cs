@@ -3153,6 +3153,7 @@ public class FinanceApprovalsController : ControllerBase
             "RECURRINGJOURNALOCCURRENCE" or "RECURRINGJOURNALOCCURRENCEWAIVER" =>
                 "/finance/recurring-journals",
             "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
+            "EXCHANGERATE" => "/finance/exchange-rates",
             _ => "/finance/approvals"
         };
     }
