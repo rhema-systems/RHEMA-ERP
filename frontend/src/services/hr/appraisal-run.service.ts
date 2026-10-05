@@ -36,6 +36,7 @@ import type {
   UpdateCheckIn,
   UpdateCheckInGoalUpdate,
   ViewSubmittedEvaluation,
+  WithdrawAppraisalRequest,
 } from '@/types/hr/appraisal-run';
 
 /**
@@ -182,7 +183,10 @@ class PerformanceAppraisalService {
     );
   }
 
-  /** Peer feedback in full, for the manager. Evaluator identities are always shown here. */
+  /**
+   * Peer feedback in full, for the manager: every criterion each peer scored — competency, and KPI
+   * or goal rows where the cycle lets peers score them. Evaluator identities are always shown here.
+   */
   getPeerEvaluationReview(appraisalId: string): Promise<ManagerPeerEvaluationReview> {
     return apiService.get<ManagerPeerEvaluationReview>(
       `${this.baseUrl}/${appraisalId}/manager-peer-evaluations`,
@@ -191,13 +195,18 @@ class PerformanceAppraisalService {
 
   // ── Peer nominations ─────────────────────────────────────────────────────────────
 
+  /** The appraisee in Manager mode with anonymous reviews gets the counts only (`peersWithheld`). */
   getPeerNominationSummary(appraisalId: string): Promise<PeerNominationSummary> {
     return apiService.get<PeerNominationSummary>(
       `${this.baseUrl}/${appraisalId}/peer-nominations/summary`,
     );
   }
 
-  /** Nominations land Pending; approving them is a separate step. */
+  /**
+   * In Employee mode nominations land Pending and the manager approves them. In Manager mode the
+   * manager chooses the peers, so they are approved as they are made and the peers asked at once
+   * (performance closure D4).
+   */
   nominatePeers(
     appraisalId: string,
     data: BatchCreatePeerNominations,
@@ -271,39 +280,60 @@ class PerformanceAppraisalService {
     return apiService.post<HRReview>(`${this.baseUrl}/${appraisalId}/approve`, data);
   }
 
-  /** Reopens the manager's evaluation and puts the appraisal back to Active. Remarks required. */
+  /**
+   * Reopens the manager's evaluation and puts the appraisal back to Active. Remarks required. Only
+   * in governance, before the sign-off and while no calibration panel is sitting on it (422
+   * otherwise); the panel's restatement goes, so the appraisal is calibrated again on the manager's
+   * new evaluation. 403 on your own appraisal (performance closure E-a).
+   */
   returnToManager(appraisalId: string, data: ReturnAppraisal): Promise<HRReview> {
     return apiService.post<HRReview>(`${this.baseUrl}/${appraisalId}/return-to-manager`, data);
+  }
+
+  /**
+   * Takes the appraisal out of its cycle, with a reason (performance closure E-d1): from Draft,
+   * Active, or Governance before it is final — 422 otherwise, 403 on your own appraisal, 400
+   * without a reason. It leaves every count and queue; what was written stays, without a score.
+   * There is no undo yet (D-53).
+   */
+  withdraw(appraisalId: string, data: WithdrawAppraisalRequest): Promise<PerformanceAppraisal> {
+    return apiService.post<PerformanceAppraisal>(`${this.baseUrl}/${appraisalId}/withdraw`, data);
+  }
+
+  /**
+   * Rebuilds the appraisal's form — its criterion snapshot — from its own template, before anyone
+   * has scored it (performance closure E-g2, D-86): Draft or Active, its cycle open, its template
+   * approved; 422 otherwise, 403 on your own appraisal.
+   */
+  rebuildForm(appraisalId: string): Promise<{ appraisalId: string; rows: number; message: string }> {
+    return apiService.post<{ appraisalId: string; rows: number; message: string }>(
+      `${this.baseUrl}/${appraisalId}/rebuild-form`,
+      {},
+    );
   }
 
   // ── Employee acknowledgment ──────────────────────────────────────────────────────
 
   /**
-   * Corrects a generated appraisal's header — its window and its peer-evaluator count.
+   * Corrects a generated appraisal's window — its year and dates — and nothing else (performance
+   * closure E-a). 422 once the appraisal is final (Completed, Closed, Appealed, Withdrawn) or when
+   * the end is not after the start; 403 on your own appraisal.
    *
-   * ⚠ The route is a REPLACE and its DTO marks `appraisalCycleId`, `employeeId` and `status`
-   * required, so the whole record goes back. **The server ignores all three**, and that is a lane-3
-   * fix rather than an accident of the payload: until then this route honoured them, so a
-   * "correction" could move an appraisal — with its goals, self-evaluation and scores — onto a
-   * different person, into a different cycle, and walk it Draft → Completed past the forward-only
-   * state machine in `UpdateStatusAsync`. They are sent back unchanged so the replace is faithful.
-   *
-   * Regenerating the cycle is not an alternative: it does not touch an appraisal that already exists.
+   * The route used to take the whole record — the employee, the cycle, the status, the manager's
+   * narrative and recommendations, the peer count — and this sent none of the manager's fields, so
+   * every correction blanked them. Regenerating the cycle is not an alternative: it does not touch
+   * an appraisal that already exists.
    */
   updateHeader(appraisal: PerformanceAppraisal, patch: {
-    year: number; startDate: string; endDate: string; peerEvaluatorsCount: number;
+    year: number; startDate: string; endDate: string;
   }): Promise<void> {
-    return apiService.put<void>(`${this.baseUrl}/${appraisal.id}`, {
-      id: appraisal.id,
-      appraisalCycleId: appraisal.appraisalCycleId,
-      employeeId: appraisal.employeeId,
-      status: appraisal.status,
-      ...patch,
-    });
+    return apiService.put<void>(`${this.baseUrl}/${appraisal.id}`, { id: appraisal.id, ...patch });
   }
 
   /**
-   * Removes an appraisal generated against somebody who should not have been in scope.
+   * Removes an appraisal generated against somebody who should not have been in scope — only
+   * before anything in it counts: Draft, or Active with no evaluation submitted (422 otherwise;
+   * performance closure E-a).
    *
    * ⚠ Admin-tier — an HR-role caller is refused with a 403, established by
    * `hr-performance/probe-lane3-appraisals.mjs` rather than assumed, which is why the control is
@@ -338,11 +368,12 @@ class PerformanceAppraisalService {
   /**
    * Closes out the appraisal. Only from Governance, only by the appraisee, and only once —
    * all three answer 422/403 rather than failing silently. The employee id in the body is
-   * ignored; the token decides.
+   * ignored; the token decides. An optional comment is kept on the appraisal (E-a).
    */
-  acknowledge(appraisalId: string): Promise<{ message: string }> {
+  acknowledge(appraisalId: string, comments?: string | null): Promise<{ message: string }> {
     return apiService.post<{ message: string }>(`${this.baseUrl}/${appraisalId}/acknowledge`, {
       employeeId: '00000000-0000-0000-0000-000000000000',
+      comments: comments ?? null,
     });
   }
 }
@@ -389,19 +420,20 @@ class PeerNominationService {
     return apiService.get<PeerNomination[]>(`${this.baseUrl}/appraisal/${appraisalId}`);
   }
 
-  /** Nominations where this employee is the peer — including ones not yet approved. */
+  /**
+   * The nominations this employee has been asked to act on as the peer: approved ones only, with no
+   * rejection reason (performance closure D-41).
+   */
   getForPeer(peerEmployeeId: string): Promise<PeerNomination[]> {
     return apiService.get<PeerNomination[]>(`${this.baseUrl}/peer/${peerEmployeeId}`);
   }
 
-  /** Refused with 422 once the invitation has been sent. */
+  /**
+   * Withdraws a pending nomination. 422 once it is approved — the peer has been asked for their
+   * feedback — or rejected. (`send-invitation` went in D3: approval asks the peer.)
+   */
   remove(id: string): Promise<boolean> {
     return apiService.delete<boolean>(`${this.baseUrl}/${id}`);
-  }
-
-  /** Marks the invitation sent. 422 if it already was. */
-  sendInvitation(id: string): Promise<boolean> {
-    return apiService.post<boolean>(`${this.baseUrl}/${id}/send-invitation`);
   }
 }
 

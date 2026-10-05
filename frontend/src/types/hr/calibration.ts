@@ -20,13 +20,15 @@
  * item no longer does). Committing applies item-level adjustments first, then any overall
  * adjustment, which wins.
  *
- * **Lifecycle.** Pending → open → InProgress → start → complete → Completed → commit. Closing
- * the room and writing the ratings onto the appraisals are two decisions, and the second is
- * irreversible.
+ * **Lifecycle.** Pending → open → InProgress → complete → Completed → commit, or cancel from
+ * Pending or InProgress → Cancelled (releasing its appraisals). Opening stamps `startedDate`; there
+ * is no separate start. Closing the room and writing the ratings onto the appraisals are two
+ * decisions, and the second is irreversible. A commit takes each appraisal once, and only the
+ * evaluation the panel sat over.
  *
- * The actor is never sent: the facilitator, the adjuster and the committer all come from the
- * token. Reads are HR's and the session's panellists' (P3 — managers sit on the panel); writes
- * are HR.
+ * The actor is never sent: the facilitator (the creator, then the opener), the adjuster and the
+ * committer all come from the token. Reads are HR's and the session's panellists' (P3 — managers
+ * sit on the panel); writes are HR.
  *
  * Enums serialize as strings.
  */
@@ -56,19 +58,20 @@ export interface CalibrationSession extends AuditFields {
   meetingNotes?: string | null;
 }
 
+/** No facilitator: the creator facilitates until someone opens the session. */
 export interface CreateCalibrationSession {
   appraisalCycleId: string;
   sessionName: string;
   organizationLevelId?: string | null;
   organizationUnitId?: string | null;
   scheduledDate?: string | null;
-  facilitatedById?: string | null;
   agenda?: string | null;
 }
 
 /**
  * Particulars only. Status and the started/completed stamps belong to the lifecycle endpoints —
- * sending them here does nothing.
+ * sending them here does nothing. The scope (cycle, unit, level) is refused once the session is
+ * open.
  */
 export interface UpdateCalibrationSession extends CreateCalibrationSession {
   id: string;
@@ -149,12 +152,22 @@ export interface CalibrationMatrixRow {
   appraisalStatus: AppraisalStatus;
   /** The manager's own evaluation total, before any calibration. */
   managerProposedScore?: number | null;
+  /**
+   * HR returned the appraisal to its manager, who has not submitted again — no proposal and no
+   * pre-calibration figure until they do (performance closure E-g2, D-82).
+   */
+  managerReevaluating?: boolean;
   preCalibrationScore?: number | null;
-  /** From the latest *overall* adjustment; item-level ones show in `adjustments`. */
+  /**
+   * A calibrated appraisal's settled score — unless this session is still proposing another for
+   * it — otherwise this session's latest *overall* proposal; item-level ones show in `adjustments`.
+   */
   calibratedScore?: number | null;
   scoreAdjustment?: number | null;
   adjustmentRationale?: string | null;
   isCalibrated: boolean;
+  /** Why committing this session would leave the row alone; null when a commit would calibrate it. */
+  commitSkipReason?: string | null;
   managerName?: string | null;
   adjustments: CalibrationRatingAdjustment[];
 }

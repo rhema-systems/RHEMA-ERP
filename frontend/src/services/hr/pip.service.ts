@@ -24,8 +24,8 @@ import { PIP_OUTCOME_VALUES } from '@/types/hr/pip';
  * the screen must never set a status itself — refetch and let the adapter decide. Reuse
  * `WorkflowApprovalActions` / `WorkflowRecordTab` rather than building buttons here.
  *
- * ⚠ All four are inoperable until a `PerformanceImprovementPlan` workflow definition has been
- * published and `POST api/Workflow/entity-types/seed` re-run.
+ * With no published definition the server's fallback rules on them; the decider is the record's
+ * rule either way (whoever submitted does not decide — see `types/hr/pip.ts`).
  *
  * **Reads are entitlement-scoped.** Anything keyed on a plan id is 403 unless the caller is HR,
  * the employee, the supervisor or the HR owner. `getMine` and `getSupervising` need no id at all.
@@ -223,8 +223,16 @@ class PipMeetingService {
     return apiService.put<PipMeetingForm>(`${this.baseUrl}/${id}`, form);
   }
 
+  /** Record meeting: saves the record and stores the meeting as Held (closure D-73). */
   complete(id: string, form: PipMeetingForm): Promise<PipMeetingForm> {
     return apiService.post<PipMeetingForm>(`${this.baseUrl}/${id}/complete`, form);
+  }
+
+  /** Cancel a booked meeting that will not take place; never a held one (closure D-73). */
+  cancel(id: string, pipId: string): Promise<PipReviewMeeting> {
+    return apiService.post<PipReviewMeeting>(
+      `${this.baseUrl}/${id}/cancel?pipId=${encodeURIComponent(pipId)}`,
+    );
   }
 
   getSchedule(pipId: string): Promise<PipMeetingSchedule> {

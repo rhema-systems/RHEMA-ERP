@@ -80,20 +80,35 @@ class AppraisalSettingsService {
     return apiService.get<AppraisalSettings>(`${this.baseUrl}/${id}`);
   }
 
-  /** The most recently created profile. 404 when the tenant has none yet. */
+  /** The profile flagged as the tenant's default (closure B6). 404 when none is. */
   getDefault(): Promise<AppraisalSettings> {
     return apiService.get<AppraisalSettings>(`${this.baseUrl}/default`);
+  }
+
+  /** Makes this profile the default, and no other. */
+  makeDefault(id: string): Promise<AppraisalSettings> {
+    return apiService.post<AppraisalSettings>(`${this.baseUrl}/${id}/make-default`, {});
   }
 
   create(data: CreateAppraisalSettings): Promise<AppraisalSettings> {
     return apiService.post<AppraisalSettings>(this.baseUrl, data);
   }
 
+  /**
+   * Refused with 409 while the profile is in use and a rule changes (performance closure E-e,
+   * D-67): appraisals read its rules. Its name, deadline-risk bands, workload threshold and default
+   * HR reviewer still save; the rules change on a clone.
+   */
   update(id: string, data: UpdateAppraisalSettings): Promise<AppraisalSettings> {
     return apiService.put<AppraisalSettings>(`${this.baseUrl}/${id}`, data);
   }
 
-  /** Refused with 400 while any cycle still uses the profile. */
+  /** Copies the profile under a new name, not the default (E-e): how an in-use profile's rules change. */
+  clone(id: string, settingsName: string): Promise<AppraisalSettings> {
+    return apiService.post<AppraisalSettings>(`${this.baseUrl}/${id}/clone`, { settingsName });
+  }
+
+  /** Refused with 400 for the default profile, and while any cycle still uses the profile. */
   remove(id: string): Promise<boolean> {
     return apiService.delete<boolean>(`${this.baseUrl}/${id}`);
   }
@@ -179,9 +194,11 @@ class AppraisalGradeDefinitionService {
  * api/AppraisalTemplates — the form, its sections, its items and their grade bands.
  *
  * Two rules run through every write here and explain most of the errors a user will see:
- * a template assigned to an Open or InProgress cycle is frozen (clone it instead), and
- * activating or submitting one validates that section weights total 100, item weights total
- * 100 within each section, and every item has grade bands.
+ * a locked template — appraisals scored on it, or an open cycle has it — refuses every structural
+ * write with 409 (copy it instead; performance closure E-e), as does one awaiting approval, and a
+ * structural change sends an approved one back to Draft; and activating or submitting one validates
+ * that section weights total 100, item weights total 100 within each section, and every item has
+ * grade bands.
  *
  * Submit/approve/reject/recall run on the generic workflow engine, so who may approve comes
  * from the published AppraisalTemplate workflow definition, not from a role.
@@ -411,7 +428,7 @@ class AppraisalCycleService {
   // ── Lifecycle ────────────────────────────────────────────────────────────────────
 
   /**
-   * 400 when another non-closed cycle of the same type and year already covers any of these
+   * 400 when another open cycle of the same type and year already covers any of these
    * employees — the message names the overlapping cycles. Also raises the "cycle is open"
    * notification to everyone in scope.
    */

@@ -400,7 +400,7 @@ export function AppraisalsRecordTab({ employeeId }: { employeeId: string }) {
   return (
     <RecordSummaryTab<PerformanceAppraisal>
       title="Appraisals & goals"
-      description="Every appraisal on record with its score; the goals still open are listed above. Scoring, calibration and goal-setting happen on the performance screens."
+      description="Every appraisal on record with its score — a withdrawn one with its reason and no score; the goals still open are listed above. Scoring, calibration and goal-setting happen on the performance screens."
       queryKey={['hr', 'employees', employeeId, 'record', 'appraisals']}
       queryFn={() => performanceAppraisalService.getByEmployee(employeeId)}
       rowKey={(a) => a.id}
@@ -430,7 +430,22 @@ export function AppraisalsRecordTab({ employeeId }: { employeeId: string }) {
         { key: 'period', header: 'Period', render: (a) => `${formatDate(a.startDate)} — ${formatDate(a.endDate)}`, className: 'w-[220px]' },
         { key: 'score', header: 'Score', render: (a) => (a.adjustedScore ?? a.overallScore ?? '—'), className: 'w-[90px]' },
         { key: 'rank', header: 'Rank in unit', render: (a) => dash(a.rankInUnit), className: 'w-[110px]' },
-        { key: 'status', header: 'Status', render: (a) => <StatusBadge status={String(a.status)} />, className: 'w-[140px]' },
+        {
+          key: 'status',
+          header: 'Status',
+          // A withdrawn appraisal says why (performance closure E-d1); the server sends it no score.
+          render: (a) => (
+            <div className="space-y-1">
+              <StatusBadge status={String(a.status)} />
+              {a.withdrawnReason && (
+                <p className="line-clamp-2 text-xs text-muted-foreground" title={a.withdrawnReason}>
+                  {a.withdrawnReason}
+                </p>
+              )}
+            </div>
+          ),
+          className: 'w-[200px]',
+        },
       ]}
     />
   );

@@ -21,8 +21,6 @@ public class AppraisalCycleService : IAppraisalCycleService
     private readonly IGenericRepository<AppraisalCycleTemplate> _cycleTemplateRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<OrganizationUnit> _organizationUnitRepository;
-    private readonly IGenericRepository<EmployeePosition> _positionRepository;
-    private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<AppraisalSettings> _settingsRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evaluatorEvaluationRepository;
@@ -41,8 +39,6 @@ public class AppraisalCycleService : IAppraisalCycleService
         IGenericRepository<AppraisalCycleTemplate> cycleTemplateRepository,
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<OrganizationUnit> organizationUnitRepository,
-        IGenericRepository<EmployeePosition> positionRepository,
-        IGenericRepository<AppraisalTemplate> templateRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<AppraisalSettings> settingsRepository,
         IGenericRepository<EvaluatorEvaluation> evaluatorEvaluationRepository,
@@ -60,8 +56,6 @@ public class AppraisalCycleService : IAppraisalCycleService
         _cycleTemplateRepository = cycleTemplateRepository;
         _employeeRepository = employeeRepository;
         _organizationUnitRepository = organizationUnitRepository;
-        _positionRepository = positionRepository;
-        _templateRepository = templateRepository;
         _appraisalRepository = appraisalRepository;
         _settingsRepository = settingsRepository;
         _evaluatorEvaluationRepository = evaluatorEvaluationRepository;
@@ -104,14 +98,24 @@ public class AppraisalCycleService : IAppraisalCycleService
         return entity;
     }
 
-    private async Task<AppraisalCycleTarget> GetOwnedCycleTargetAsync(Guid cycleId, Guid targetId)
-    {
-        var entity = await _targetRepository.GetQueryable()
-            .FirstOrDefaultAsync(t => t.Id == targetId && t.AppraisalCycleId == cycleId);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Cycle target not found.");
-        return entity;
-    }
+    /// <summary>Who the cycle's active targets reach, through the one scope rule (E-c).</summary>
+    private Task<AppraisalCycleScopeResolution> ResolveScopeAsync(Guid cycleId, CancellationToken cancellationToken)
+        => AppraisalCycleScope.ResolveCycleAsync(
+            _targetRepository.GetQueryable(), _employeeRepository.GetQueryable(), _organizationUnitRepository.GetQueryable(),
+            GetTenantId(), cycleId, cancellationToken);
+
+    /// <summary>
+    /// The other Open cycles of this one's type and year that already cover any of these people — in their scope, or
+    /// holding an unwithdrawn appraisal for them (D-60). The open asks it of the scope; generation of the people it
+    /// would create.
+    /// </summary>
+    private Task<List<AppraisalCycleOverlap>> FindOpenOverlapsAsync(
+        AppraisalCycle cycle, IReadOnlyCollection<Guid> employeeIds, CancellationToken cancellationToken)
+        => AppraisalCycleScope.FindOpenOverlapsAsync(
+            cycle, employeeIds,
+            _cycleRepository.GetQueryable(), _targetRepository.GetQueryable(), _employeeRepository.GetQueryable(),
+            _organizationUnitRepository.GetQueryable(), _appraisalRepository.GetQueryable(),
+            GetTenantId(), cancellationToken);
 
     /// <inheritdoc />
     public async Task<IEnumerable<AppraisalCalendarEventDto>> GetCalendarAsync(Guid cycleId, CancellationToken cancellationToken = default)
@@ -166,9 +170,11 @@ public class AppraisalCycleService : IAppraisalCycleService
         Add(cycle.EmployeeAcknowledgeDeadline, "Employee acknowledgment deadline", "Deadline", "Acknowledgment");
         Add(cycle.FinalConversationDeadline, "Final conversation deadline", "Deadline", "Final Conversation");
 
-        // Review events (Custom frequency / generated)
+        // Review events (Custom frequency / generated). A withdrawn appraisal's open events are not
+        // on the calendar: no one will hold them (performance closure E-d1).
         var reviewEvents = await _reviewEventRepository.GetQueryable()
-            .Where(r => r.TenantId == tenantId && r.AppraisalCycleId == cycleId)
+            .Where(r => r.TenantId == tenantId && r.AppraisalCycleId == cycleId
+                        && (r.Appraisal.Status != AppraisalStatus.Withdrawn || r.Status == AppraisalReviewStatus.Completed))
             .ToListAsync(cancellationToken);
         foreach (var re in reviewEvents)
             events.Add(new AppraisalCalendarEventDto
@@ -342,7 +348,7 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new ArgumentException($"Appraisal cycle with ID '{updateDto.Id}' not found.");
 
         // Don't allow updates if cycle is closed
-        if (entity.ClosedDate.HasValue)
+        if (entity.ClosedDate.HasValue || entity.Status == AppraisalCycleStatus.Closed)
         {
             throw new InvalidOperationException("Cannot update a closed appraisal cycle.");
         }
@@ -351,6 +357,28 @@ public class AppraisalCycleService : IAppraisalCycleService
         if (updateDto.EndDate <= updateDto.StartDate)
         {
             throw new InvalidOperationException("End date must be after start date.");
+        }
+
+        // What a running cycle keeps (performance closure E-c). Once it is opened, or has appraisals, its
+        // settings profile is the rulebook they run by, and its year and type are what the open's overlap
+        // check was made on; once it has appraisals, its period is the one they were generated with. The
+        // name, the code and the phase deadlines stay HR's to move — the gates read the deadlines live.
+        var hasAppraisals = await _appraisalRepository.GetQueryable()
+            .AnyAsync(a => a.TenantId == tenantId && a.AppraisalCycleId == entity.Id, cancellationToken);
+        if (entity.OpenedDate.HasValue || entity.Status != AppraisalCycleStatus.Draft || hasAppraisals)
+        {
+            var fixedFields = new List<string>();
+            if (updateDto.AppraisalSettingsId != entity.AppraisalSettingsId) fixedFields.Add("settings profile");
+            if (updateDto.Year != entity.Year) fixedFields.Add("year");
+            if (updateDto.AppraisalType != entity.AppraisalType) fixedFields.Add("type");
+            if (fixedFields.Count > 0)
+                throw new InvalidOperationException(
+                    $"The cycle's {JoinAnd(fixedFields)} cannot change once it has been opened or has appraisals.");
+        }
+        if (hasAppraisals && (updateDto.StartDate != entity.StartDate || updateDto.EndDate != entity.EndDate))
+        {
+            throw new InvalidOperationException(
+                "The cycle's period cannot change once appraisals have been generated: each carries the dates it was generated with.");
         }
 
         var settingsChanged = entity.AppraisalSettingsId != updateDto.AppraisalSettingsId;
@@ -372,9 +400,24 @@ public class AppraisalCycleService : IAppraisalCycleService
         return entity.ToDto();
     }
 
+    /// <summary>"a", "a and b", "a, b and c".</summary>
+    private static string JoinAnd(IReadOnlyList<string> items) =>
+        items.Count == 1 ? items[0] : $"{string.Join(", ", items.Take(items.Count - 1))} and {items[^1]}";
+
+    /// <summary>
+    /// Deletes a cycle set up in error (performance closure E-d2a, D-57): never opened, and with
+    /// nothing but its configuration pointing at it. Its targets (with their exclusions) and its
+    /// template links go with it.
+    /// </summary>
+    /// <remarks>
+    /// It refused only an opened cycle and soft-deleted the cycle row alone, so a Draft cycle's
+    /// appraisals, goals, calibration sessions and check-ins — generation and goal setting ran on
+    /// Drafts — were left pointing at a hidden cycle, with its targets and template links.
+    /// </remarks>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(id);
+        var tenantId = GetTenantId();
 
         // Check if cycle has been opened
         if (entity.OpenedDate.HasValue)
@@ -382,10 +425,54 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("Cannot delete an appraisal cycle that has been opened.");
         }
 
+        // The work that points at the cycle — withdrawn appraisals included: they are records.
+        var work = new List<string>();
+        async Task CountAsync<T>(string label, System.Linq.Expressions.Expression<Func<T, bool>> belongs)
+            where T : ErpSystem.Core.Entities.BaseEntity
+        {
+            var n = await _unitOfWork.Repository<T>().GetQueryable().Where(belongs).CountAsync(cancellationToken);
+            if (n > 0) work.Add($"{n} {label}");
+        }
+        await CountAsync<PerformanceAppraisal>("appraisal(s)", a => a.TenantId == tenantId && a.AppraisalCycleId == id);
+        await CountAsync<EmployeeGoal>("employee goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<UnitGoal>("unit goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<CompanyGoal>("company goal(s)", g => g.TenantId == tenantId && g.AppraisalCycleId == id);
+        await CountAsync<CalibrationSession>("calibration session(s)", s => s.TenantId == tenantId && s.AppraisalCycleId == id);
+        await CountAsync<CheckIn>("check-in(s)", c => c.TenantId == tenantId && c.AppraisalCycleId == id);
+        await CountAsync<PerformanceJournalEntry>("journal entr(ies)", j => j.TenantId == tenantId && j.AppraisalCycleId == id);
+        await CountAsync<AppraisalReviewEvent>("review event(s)", r => r.TenantId == tenantId && r.AppraisalCycleId == id);
+        await CountAsync<EmployeeDevelopmentPlan>("development plan(s)", p => p.TenantId == tenantId && p.AppraisalCycleId == id);
+
+        if (work.Count > 0)
+            throw new InvalidOperationException(
+                $"This cycle cannot be deleted: {JoinAnd(work)} point at it. A cycle is deleted only while " +
+                "nothing but its targets and templates does.");
+
+        // Its configuration goes with it: the targets (and their exclusions) and the template links.
+        var targets = await _targetRepository.GetQueryable()
+            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == id)
+            .ToListAsync(cancellationToken);
+        var targetIds = targets.Select(t => t.Id).ToList();
+        var exclusions = await _unitOfWork.Repository<AppraisalCycleTargetExclusion>().GetQueryable()
+            .Where(x => x.TenantId == tenantId && targetIds.Contains(x.AppraisalCycleTargetId))
+            .ToListAsync(cancellationToken);
+        var templateLinks = await _cycleTemplateRepository.GetQueryable()
+            .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == id)
+            .ToListAsync(cancellationToken);
+
+        foreach (var exclusion in exclusions)
+            await _unitOfWork.Repository<AppraisalCycleTargetExclusion>().DeleteAsync(exclusion);
+        foreach (var target in targets)
+            await _targetRepository.DeleteAsync(target);
+        foreach (var link in templateLinks)
+            await _cycleTemplateRepository.DeleteAsync(link);
+
         await _cycleRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal cycle deleted: {cycleId}", id);
+        _logger.LogInformation(
+            "Appraisal cycle deleted: {cycleId}, with {targets} target(s), {exclusions} exclusion(s) and {links} template link(s)",
+            id, targets.Count, exclusions.Count, templateLinks.Count);
 
         return true;
     }
@@ -393,7 +480,6 @@ public class AppraisalCycleService : IAppraisalCycleService
     public async Task<bool> OpenCycleAsync(OpenAppraisalCycleDto openDto, Guid openedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(openDto.CycleId);
-        var tenantId = GetTenantId();
 
         if (entity.OpenedDate.HasValue)
         {
@@ -401,56 +487,22 @@ public class AppraisalCycleService : IAppraisalCycleService
         }
 
         // Scope-aware overlap check: block opening if any employee is already covered by another
-        // non-closed cycle of the same type and year.  Skipped when no targets are configured yet.
-        var thisTargets = await _targetRepository.GetQueryable()
-            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == entity.Id && t.IsActive && !t.IsDeleted)
-            .Include(t => t.Exclusions)
-            .ToListAsync(cancellationToken);
-
-        if (thisTargets.Any())
+        // open cycle of the same type and year — in its scope, or holding an appraisal there (D-60).
+        // Nothing to check while the targets reach nobody yet; generation asks again of whoever it creates.
+        //
+        // Only a cycle that is actually running reserves its people. A Draft appraises
+        // nobody, may never be opened at all, and blocking on one forced the user to go
+        // and delete somebody else's half-finished cycle before they could open theirs.
+        // Draft overlaps are still reported — as an advisory on the coverage preview —
+        // so the early warning survives without the hard block.
+        var thisScope = await ResolveScopeAsync(entity.Id, cancellationToken);
+        var overlaps = await FindOpenOverlapsAsync(entity, thisScope.InScope, cancellationToken);
+        if (overlaps.Count > 0)
         {
-            var thisScopeEmployees = await ResolveEmployeesFromTargetsAsync(thisTargets, cancellationToken);
-
-            if (thisScopeEmployees.Any())
-            {
-                // Only a cycle that is actually running reserves its people. A Draft appraises
-                // nobody, may never be opened at all, and blocking on one forced the user to go
-                // and delete somebody else's half-finished cycle before they could open theirs.
-                // Draft overlaps are still reported — as an advisory on the coverage preview —
-                // so the early warning survives without the hard block.
-                var siblingsQuery = _cycleRepository.GetQueryable()
-                    .Where(c => c.TenantId == tenantId &&
-                                c.Id != entity.Id &&
-                                c.AppraisalType == entity.AppraisalType &&
-                                c.Year == entity.Year &&
-                                (c.Status == AppraisalCycleStatus.Open ||
-                                 c.Status == AppraisalCycleStatus.InProgress));
-
-                var siblingCycles = await siblingsQuery.ToListAsync(cancellationToken);
-
-                var conflictDescriptions = new List<string>();
-                foreach (var sibling in siblingCycles)
-                {
-                    var siblingTargets = await _targetRepository.GetQueryable()
-                        .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == sibling.Id && t.IsActive && !t.IsDeleted)
-                        .Include(t => t.Exclusions)
-                        .ToListAsync(cancellationToken);
-
-                    if (!siblingTargets.Any()) continue;
-
-                    var siblingScope = await ResolveEmployeesFromTargetsAsync(siblingTargets, cancellationToken);
-                    var overlapCount = thisScopeEmployees.Count(id => siblingScope.Contains(id));
-                    if (overlapCount > 0)
-                        conflictDescriptions.Add($"'{sibling.CycleName}' ({overlapCount} shared employee(s))");
-                }
-
-                if (conflictDescriptions.Any())
-                {
-                    throw new InvalidOperationException(
-                        $"Cannot open this cycle — its employee scope overlaps with: {string.Join(", ", conflictDescriptions)}. " +
-                        "Adjust the target groups so each employee is covered by only one active cycle.");
-                }
-            }
+            throw new InvalidOperationException(
+                "Cannot open this cycle — its employee scope overlaps with: " +
+                $"{string.Join(", ", overlaps.Select(o => $"'{o.CycleName}' ({o.Shared.Count} shared employee(s))"))}. " +
+                "Adjust the target groups so each employee is covered by only one active cycle.");
         }
 
         // Update cycle status — generation happens separately via GenerateAppraisalsAsync
@@ -510,8 +562,13 @@ public class AppraisalCycleService : IAppraisalCycleService
     {
         var cycle = await GetOwnedCycleAsync(cycleId);
 
-        if (cycle.Status == AppraisalCycleStatus.Draft)
-            throw new InvalidOperationException("Reminders can only be sent for a cycle that has been opened.");
+        // Only a running cycle has deadlines to chase (performance closure E-d2a): a Closed one was
+        // reminded as readily as an Open one, and the analytics page offered it.
+        if (cycle.Status != AppraisalCycleStatus.Open)
+            throw new InvalidOperationException(
+                cycle.Status == AppraisalCycleStatus.Closed
+                    ? "Reminders are sent for an open cycle, and this one is closed."
+                    : "Reminders can only be sent for a cycle that has been opened.");
 
         // Risk bands are a tenant policy, held on the cycle's settings profile. Falling back
         // to the DTO defaults keeps this working for a settings row saved before they existed.
@@ -578,12 +635,14 @@ public class AppraisalCycleService : IAppraisalCycleService
     }
 
     /// <summary>
-    /// Generates appraisal instances for all employees in scope.
-    /// Can be called on Draft or Open cycles — blocked only on Closed.
-    /// This allows HR to generate (and review) appraisals before officially opening the cycle.
-    /// Uses target-only scope resolution (aligned with the coverage preview).
-    /// Assigns the resolved template to each appraisal. Throws if any employee has
-    /// a template conflict or no template — run the Coverage Preview first to fix issues.
+    /// Generates appraisal instances for all employees in scope, on an Open cycle only (performance closure E-d2b,
+    /// D-43): HR opens the cycle, checks the coverage preview, then generates. It ran on Draft cycles by design ("to
+    /// review appraisals before opening"), so a cycle could be generated, worked on and deleted without ever being
+    /// opened — or its open's overlap check, and its notice, skipped altogether.
+    /// Scope comes from <see cref="AppraisalCycleScope"/>, the rule the coverage preview reads. Refused when anyone it
+    /// would create is already covered by another Open cycle of the same type and year (D-60). Assigns the resolved
+    /// template to each appraisal. Throws if any employee has a template conflict or no template — run the Coverage
+    /// Preview first to fix issues.
     /// </summary>
     public async Task<(int Created, int EvaluationsCreated, int ReviewEventsCreated)> GenerateAppraisalsAsync(
         Guid cycleId, Guid generatedById, CancellationToken cancellationToken = default)
@@ -593,6 +652,10 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         if (cycle.Status == AppraisalCycleStatus.Closed)
             throw new InvalidOperationException("Cannot generate appraisals for a closed cycle.");
+        if (!AppraisalLiveCycle.IsLive(cycle.Status))
+            throw new InvalidOperationException(
+                "Appraisals are generated once the cycle is open: open it first — the open checks that nobody in scope " +
+                "is already in another open cycle of the same type and year, and tells them the cycle has begun.");
 
         var settings = await GetOwnedSettingsAsync(cycle.AppraisalSettingsId);
 
@@ -611,16 +674,31 @@ public class AppraisalCycleService : IAppraisalCycleService
         if (!activeTemplates.Any())
             throw new InvalidOperationException("No active templates are configured for this cycle. Assign at least one template before generating.");
 
-        // ── 2. Resolve employees from targets (target-only scope) ──
-        var activeTargets = await _targetRepository.GetQueryable()
-            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId && t.IsActive && !t.IsDeleted)
-            .Include(t => t.Exclusions)
-            .ToListAsync(cancellationToken);
+        // ── 1b. Nobody is scored on a template that is not approved (performance closure E-e): one sent back to Draft
+        //        by a structural edit, or never approved — the assignment checked once, and generation never again. ──
+        var unapproved = activeTemplates
+            .Where(ct => ct.AppraisalTemplate.ApprovalStatus != TemplateApprovalStatus.Approved)
+            .Select(ct => $"'{ct.AppraisalTemplate.TemplateName}' ({ct.AppraisalTemplate.ApprovalStatus})")
+            .ToList();
+        if (unapproved.Count > 0)
+            throw new InvalidOperationException(
+                $"Cannot generate appraisals — {(unapproved.Count == 1 ? "a template on this cycle is" : $"{unapproved.Count} templates on this cycle are")} " +
+                $"not approved: {string.Join(", ", unapproved)}. Approve {(unapproved.Count == 1 ? "it" : "them")}, or remove " +
+                $"{(unapproved.Count == 1 ? "it" : "them")} from the cycle, and generate again.");
+
+        // ── 2. Resolve employees from targets (the one scope rule the coverage preview reads) ──
+        var activeTargets = await AppraisalCycleScope.LoadActiveTargetsAsync(
+            _targetRepository.GetQueryable(), tenantId, cycleId, cancellationToken);
 
         if (!activeTargets.Any())
             throw new InvalidOperationException("No active targets are configured for this cycle. Add at least one target before generating.");
 
-        var employeeIds = await ResolveEmployeesFromTargetsAsync(activeTargets, cancellationToken);
+        var scope = await AppraisalCycleScope.ResolveAsync(
+            activeTargets, _employeeRepository.GetQueryable(), _organizationUnitRepository.GetQueryable(), tenantId, cancellationToken);
+        if (scope.Excluded.Count > 0)
+            _logger.LogInformation("Excluded {count} employees via target exclusion rules", scope.Excluded.Count);
+
+        var employeeIds = scope.InScope;
         if (employeeIds.Count == 0)
             throw new InvalidOperationException("No active employees found in the configured target groups.");
 
@@ -642,6 +720,29 @@ public class AppraisalCycleService : IAppraisalCycleService
             .Include(e => e.OrganizationLevel)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+        // ── 4b. Nobody gets a second appraisal of this type and year (D-60). The open checked the scope it had then;
+        //        a target added since, or a person who moved posts after another cycle generated theirs, is caught here. ──
+        var overlaps = await FindOpenOverlapsAsync(cycle, pendingIds, cancellationToken);
+        if (overlaps.Count > 0)
+        {
+            var nameOf = employees.ToDictionary(e => e.Id, e => $"{e.FullName} ({e.EmployeeNumber})");
+            var shared = overlaps.SelectMany(o => o.Shared).Distinct().Count();
+            var described = overlaps.Select(o =>
+            {
+                var people = o.Shared
+                    .Select(id => nameOf.GetValueOrDefault(id, id.ToString()))
+                    .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var shown = string.Join(", ", people.Take(10));
+                var more = people.Count > 10 ? $" and {people.Count - 10} more" : string.Empty;
+                return $"'{o.CycleName}' — {shown}{more}";
+            });
+            throw new InvalidOperationException(
+                $"Cannot generate appraisals — {shared} of the people still to be appraised " +
+                $"{(shared == 1 ? "is" : "are")} already covered by another open cycle of the same type and year: " +
+                $"{string.Join("; ", described)}. Exclude them from this cycle, or close the other cycle, and generate again.");
+        }
 
         var conflicts   = new List<string>();
         var noTemplates = new List<string>();
@@ -782,8 +883,10 @@ public class AppraisalCycleService : IAppraisalCycleService
                       && ct.AppraisalTemplate.OrganizationUnitId == emp.OrganizationUnitId
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();
+        // A level template covers that level's employees — it matched everyone (performance closure E-e).
         var levelMatches = assignments
             .Where(ct => ct.AppraisalTemplate.OrganizationLevelId.HasValue
+                      && ct.AppraisalTemplate.OrganizationLevelId == emp.OrganizationLevelId
                       && ct.AppraisalTemplate.OrganizationUnitId == null
                       && ct.AppraisalTemplate.PositionId == null)
             .ToList();
@@ -809,84 +912,6 @@ public class AppraisalCycleService : IAppraisalCycleService
             return (null, EmployeeCoverageStatus.Conflict, topTied.Select(m => m.AppraisalTemplate.TemplateName).ToList());
 
         return (topTied[0].AppraisalTemplateId, EmployeeCoverageStatus.Covered, new List<string>());
-    }
-
-    // ── Scope resolution from targets (mirrors CycleCoverageService, target-only) ──
-    private async Task<HashSet<Guid>> ResolveEmployeesFromTargetsAsync(
-        List<AppraisalCycleTarget> targets, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var set = new HashSet<Guid>();
-        foreach (var target in targets)
-        {
-            switch (target.TargetType)
-            {
-                case AppraisalTargetType.Position:
-                    if (target.PositionId.HasValue)
-                    {
-                        var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.TenantId == tenantId && e.PositionId == target.PositionId && !e.IsDeleted && e.IsActive)
-                            .Select(e => e.Id).ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-
-                case AppraisalTargetType.OrganizationUnit:
-                    if (target.OrganizationUnitId.HasValue)
-                    {
-                        var childIds = await GetChildUnitIdsForGenerationAsync(target.OrganizationUnitId.Value, cancellationToken);
-                        childIds.Add(target.OrganizationUnitId.Value);
-                        var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.TenantId == tenantId
-                                     && e.OrganizationUnitId.HasValue
-                                     && childIds.Contains(e.OrganizationUnitId.Value)
-                                     && !e.IsDeleted
-                                     && e.IsActive)
-                            .Select(e => e.Id).ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-
-                case AppraisalTargetType.OrganizationLevel:
-                    if (target.OrganizationLevelId.HasValue)
-                    {
-                        var ids = await _employeeRepository.GetQueryable()
-                            .Where(e => e.TenantId == tenantId && e.OrganizationLevelId == target.OrganizationLevelId && !e.IsDeleted && e.IsActive)
-                            .Select(e => e.Id).ToListAsync(cancellationToken);
-                        foreach (var id in ids) set.Add(id);
-                    }
-                    break;
-            }
-        }
-
-        // Apply all active exclusions across all targets.
-        var allExclusions = targets.SelectMany(t => t.Exclusions).ToList();
-        var beforeCount = set.Count;
-        await ApplyExclusionsAsync(set, allExclusions, cancellationToken);
-        var excluded = beforeCount - set.Count;
-        if (excluded > 0)
-            _logger.LogInformation("Excluded {count} employees via target exclusion rules", excluded);
-
-        return set;
-    }
-
-    private async Task<HashSet<Guid>> GetChildUnitIdsForGenerationAsync(
-        Guid parentUnitId, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var result = new HashSet<Guid>();
-        var queue = new Queue<Guid>();
-        queue.Enqueue(parentUnitId);
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
-            var children = await _organizationUnitRepository.GetQueryable()
-                .Where(u => u.TenantId == tenantId && u.ParentUnitId == current && !u.IsDeleted)
-                .Select(u => u.Id).ToListAsync(cancellationToken);
-            foreach (var child in children)
-                if (result.Add(child)) queue.Enqueue(child);
-        }
-        return result;
     }
 
     // ── Review event factory ──────────────────────────────────────────────────
@@ -970,9 +995,20 @@ public class AppraisalCycleService : IAppraisalCycleService
         };
     }
 
+    /// <summary>
+    /// Closes a cycle once its work is done (performance closure E-d2a, D-56): every appraisal
+    /// finished — Completed, Closed or Withdrawn — and every appeal window lapsed. The Completed
+    /// appraisals close with it, through the lifecycle; one with no score closes as it stands.
+    /// </summary>
+    /// <remarks>
+    /// It read no appraisal: it closed a cycle whatever was in it (26 of UAT's 34 Closed cycles hold
+    /// unfinished ones), cut every open appeal window, and left the Completed appraisals Completed —
+    /// only the raw status routes ever moved one to Closed.
+    /// </remarks>
     public async Task<bool> CloseCycleAsync(CloseAppraisalCycleDto closeDto, Guid closedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCycleAsync(closeDto.CycleId);
+        var tenantId = GetTenantId();
 
         if (!entity.OpenedDate.HasValue)
         {
@@ -984,6 +1020,48 @@ public class AppraisalCycleService : IAppraisalCycleService
             throw new InvalidOperationException("Appraisal cycle is already closed.");
         }
 
+        // Tracked: the Completed ones are closed below, in the same save as the cycle.
+        var appraisals = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == entity.Id)
+            .ToListAsync(cancellationToken);
+
+        var unfinished = appraisals
+            .Where(a => a.Status is not (AppraisalStatus.Completed or AppraisalStatus.Closed or AppraisalStatus.Withdrawn))
+            .GroupBy(a => a.Status)
+            .OrderBy(g => (int)g.Key)
+            .Select(g => $"{g.Count()} {UnfinishedWord(g.Key)}")
+            .ToList();
+        if (unfinished.Count > 0)
+            throw new InvalidOperationException(
+                $"This cycle cannot be closed while appraisals are unfinished: {JoinAnd(unfinished)}. " +
+                "Each is completed — or withdrawn, if it will not be — before the cycle closes.");
+
+        var completed = appraisals.Where(a => a.Status == AppraisalStatus.Completed).ToList();
+
+        // An appeal window still open is the employee's to use: the close waits for the last one.
+        if (completed.Count > 0)
+        {
+            var states = await _lifecycle.GetStatesAsync(completed.Select(a => a.Id).ToList(), cancellationToken);
+            var now = DateTime.UtcNow;
+            var windows = states.Values
+                .Select(s => AppraisalGates.CanFileAppeal(s.Facts, s.Settings, now))
+                .Where(w => w.Allowed)
+                .ToList();
+            if (windows.Count > 0)
+            {
+                var lastDay = windows.Max(w => w.LastDay);
+                throw new InvalidOperationException(
+                    $"This cycle cannot be closed while {windows.Count} completed appraisal(s) are inside their appeal " +
+                    $"window: the last one closes on {lastDay:d MMM yyyy}.");
+            }
+        }
+
+        foreach (var appraisal in completed)
+        {
+            AppraisalLifecycle.EnsureTransition(appraisal.Status, AppraisalStatus.Closed);
+            appraisal.Status = AppraisalStatus.Closed;
+        }
+
         entity.ClosedById = closedById;
         entity.ClosedDate = DateTime.UtcNow;
         entity.Status = AppraisalCycleStatus.Closed;
@@ -991,10 +1069,22 @@ public class AppraisalCycleService : IAppraisalCycleService
         await _cycleRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Appraisal cycle closed: {cycleId} by user {userId}", closeDto.CycleId, closedById);
+        _logger.LogInformation(
+            "Appraisal cycle closed: {cycleId} by user {userId}; {closed} completed appraisal(s) closed with it ({scoreless} with no score)",
+            closeDto.CycleId, closedById, completed.Count, completed.Count(a => a.OverallScore == null));
 
         return true;
     }
+
+    /// <summary>How the close's refusal names an unfinished status.</summary>
+    private static string UnfinishedWord(AppraisalStatus status) => status switch
+    {
+        AppraisalStatus.Draft => "not started (Draft)",
+        AppraisalStatus.Active => "in progress (Active)",
+        AppraisalStatus.Governance => "in governance",
+        AppraisalStatus.Appealed => "under appeal",
+        _ => status.ToString(),
+    };
 
     /// <summary>
     /// Gets comprehensive progress metrics for an appraisal cycle dashboard
@@ -1013,10 +1103,13 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         var settings = cycle.AppraisalSettings;
 
-        // Get all appraisals for this cycle with evaluations
-        var appraisals = await _appraisalRepository.GetQueryable()
+        // The cycle's appraisals. A withdrawn one is out of the cycle (performance closure E-d1): it
+        // leaves the phase, every progress denominator and the bottlenecks, and is counted on its
+        // own. Its unsubmitted evaluations read as work no one had started.
+        var all = await _appraisalRepository.GetQueryable()
             .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId)
             .ToListAsync(cancellationToken);
+        var appraisals = all.Where(a => a.Status != AppraisalStatus.Withdrawn).ToList();
 
         var appraisalIds = appraisals.Select(a => a.Id).ToList();
 
@@ -1026,6 +1119,7 @@ public class AppraisalCycleService : IAppraisalCycleService
 
         // Calculate progress metrics
         var totalAppraisals = appraisals.Count;
+        var scope = await ResolveScopeAsync(cycleId, cancellationToken);
 
         var progress = new AppraisalCycleProgressDto
         {
@@ -1057,9 +1151,14 @@ public class AppraisalCycleService : IAppraisalCycleService
             ManagerEvaluationProgress = CalculateEvaluationProgress(evaluations, EvaluatorRole.Manager, totalAppraisals, settings?.RequireManagerEvaluation ?? true),
             HRReviewProgress = CalculateEvaluationProgress(evaluations, EvaluatorRole.HR, totalAppraisals, settings?.RequireHRReview ?? false),
 
-            // Participation coverage
-            TotalEmployeesTargeted = totalAppraisals,
-            TotalEmployeesExcluded = await CalculateExcludedEmployees(cycleId, cancellationToken),
+            // Participation coverage. Targeted: the staff the active targets reach, less those an
+            // exclusion leaves out — the scope, which read the appraisal count (APC2026: 107 against
+            // a scope of 102, E-d1). Excluded: those an exclusion leaves out (it was always 0).
+            // Appraisals: the ones in play; Withdrawn: those taken out of the cycle.
+            TotalEmployeesTargeted = scope.InScope.Count,
+            TotalEmployeesExcluded = scope.Excluded.Count,
+            TotalAppraisals = totalAppraisals,
+            TotalWithdrawn = all.Count - totalAppraisals,
             TargetBreakdown = await CalculateTargetBreakdown(cycleId, cancellationToken)
         };
 
@@ -1118,12 +1217,6 @@ public class AppraisalCycleService : IAppraisalCycleService
         };
     }
 
-    private Task<int> CalculateExcludedEmployees(Guid cycleId, CancellationToken cancellationToken)
-    {
-        // Exclusions are now managed via AppraisalCycleTargetExclusion — not counted here.
-        return Task.FromResult(0);
-    }
-
     private async Task<TargetBreakdownDto> CalculateTargetBreakdown(Guid cycleId, CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
@@ -1136,7 +1229,6 @@ public class AppraisalCycleService : IAppraisalCycleService
             OrganizationLevelTargets = targets.Count(t => t.TargetType == AppraisalTargetType.OrganizationLevel),
             OrganizationUnitTargets = targets.Count(t => t.TargetType == AppraisalTargetType.OrganizationUnit),
             PositionTargets = targets.Count(t => t.TargetType == AppraisalTargetType.Position),
-            IndividualEmployeeTargets = targets.Count(t => t.TargetType == AppraisalTargetType.Employee)
         };
     }
 
@@ -1276,184 +1368,6 @@ public class AppraisalCycleService : IAppraisalCycleService
     }
 
     /// <summary>
-    /// Creates appraisal instances for all employees in scope when a cycle is opened
-    /// Efficiently handles bulk creation with batching for large employee sets
-    /// </summary>
-    private async Task CreateAppraisalInstancesAsync(AppraisalCycle cycle, AppraisalSettings settings, CancellationToken cancellationToken)
-    {
-        // Get all employees in scope
-        var employeeIds = (await GetEmployeesInScopeAsync(cycle.Id, cancellationToken)).ToList();
-        
-        if (!employeeIds.Any())
-        {
-            _logger.LogWarning("No employees found in scope for cycle {cycleId}. No appraisal instances created.", cycle.Id);
-            return;
-        }
-
-        _logger.LogInformation("Creating appraisal instances for {count} employees in cycle {cycleId}", employeeIds.Count, cycle.Id);
-
-        // Check if any appraisals already exist for this cycle (shouldn't happen, but safety check)
-        var tenantId = cycle.TenantId;
-        var existingAppraisals = await _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycle.Id)
-            .Select(a => a.EmployeeId)
-            .ToListAsync(cancellationToken);
-
-        if (existingAppraisals.Any())
-        {
-            _logger.LogWarning("Found {count} existing appraisals for cycle {cycleId}. Filtering out duplicates.", existingAppraisals.Count, cycle.Id);
-            employeeIds = employeeIds.Except(existingAppraisals).ToList();
-        }
-
-        if (!employeeIds.Any())
-        {
-            _logger.LogInformation("All employees already have appraisals for cycle {cycleId}. No new instances created.", cycle.Id);
-            return;
-        }
-
-        // Fetch employee details with their managers in batches to avoid memory issues
-        const int batchSize = 500;
-        var totalCreated = 0;
-        var totalEvaluationsCreated = 0;
-
-        for (int i = 0; i < employeeIds.Count; i += batchSize)
-        {
-            var batchEmployeeIds = employeeIds.Skip(i).Take(batchSize).ToList();
-            
-            // Fetch employee details with manager info
-            var employees = await _employeeRepository.GetQueryable()
-                .Where(e => e.TenantId == tenantId && batchEmployeeIds.Contains(e.Id))
-                .Select(e => new 
-                { 
-                    e.Id, 
-                    e.EmployeeNumber,
-                    e.ManagerId 
-                })
-                .ToListAsync(cancellationToken);
-
-            var appraisalsToAdd = new List<PerformanceAppraisal>();
-
-            // Generate a counter for appraisal numbers in this batch
-            var batchStartNumber = i + 1;
-
-            foreach (var employee in employees)
-            {
-                var appraisalNumber = GenerateAppraisalNumber(cycle, employee.EmployeeNumber, batchStartNumber + employees.IndexOf(employee));
-
-                var appraisal = new PerformanceAppraisal
-                {
-                    Id = Guid.NewGuid(),
-                    AppraisalCycleId = cycle.Id,
-                    EmployeeId = employee.Id,
-                    AppraisalNumber = appraisalNumber,
-                    Year = cycle.Year,
-                    StartDate = cycle.StartDate,
-                    EndDate = cycle.EndDate,
-                    Status = AppraisalStatus.Draft,
-                    PeerEvaluatorsCount = 0,
-                    TenantId = cycle.TenantId,
-                    CreatedBy = cycle.OpenedById?.ToString(),
-                    CreatedById = cycle.OpenedById,
-                    CreatedAt = DateTime.UtcNow
-                };
-
-                appraisalsToAdd.Add(appraisal);
-            }
-
-            // Bulk add and save appraisals first
-            foreach (var appraisal in appraisalsToAdd)
-            {
-                await _appraisalRepository.AddAsync(appraisal);
-            }
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            // Snapshot criterion config for each appraisal (freezes weights + grade bands at generation time)
-            foreach (var appraisal in appraisalsToAdd)
-            {
-                try
-                {
-                    await _effectiveConfigService.SnapshotConfigAsync(appraisal.Id, appraisal.EmployeeId, cycle.Id, cancellationToken: cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to snapshot criterion config for appraisal {appraisalId} (employee {employeeId}). Continuing generation.",
-                        appraisal.Id, appraisal.EmployeeId);
-                }
-            }
-
-            // Now create evaluations based on the saved appraisals
-            var evaluationsToAdd = new List<EvaluatorEvaluation>();
-            
-            foreach (var employee in employees)
-            {
-                // Find the saved appraisal for this employee
-                var appraisal = appraisalsToAdd.FirstOrDefault(a => a.EmployeeId == employee.Id);
-                if (appraisal == null) continue;
-
-                // Create evaluator evaluation records based on settings
-                
-                // 1. Self-evaluation (if required)
-                if (settings.RequireSelfEvaluation)
-                {
-                    evaluationsToAdd.Add(new EvaluatorEvaluation
-                    {
-                        Id = Guid.NewGuid(),
-                        AppraisalId = appraisal.Id,
-                        EvaluatorId = employee.Id,
-                        EvaluatorRole = EvaluatorRole.Self,
-                        EvaluatorWeight = settings.SelfEvaluationWeight,
-                        TenantId = cycle.TenantId,
-                        CreatedBy = cycle.OpenedById?.ToString(),
-                        CreatedById = cycle.OpenedById,
-                        CreatedAt = DateTime.UtcNow
-                    });
-                }
-
-                // 2. Manager evaluation (if required and employee has a manager)
-                if (settings.RequireManagerEvaluation && employee.ManagerId.HasValue)
-                {
-                    evaluationsToAdd.Add(new EvaluatorEvaluation
-                    {
-                        Id = Guid.NewGuid(),
-                        AppraisalId = appraisal.Id,
-                        EvaluatorId = employee.ManagerId.Value,
-                        EvaluatorRole = EvaluatorRole.Manager,
-                        EvaluatorWeight = settings.ManagerEvaluationWeight,
-                        TenantId = cycle.TenantId,
-                        CreatedBy = cycle.OpenedById?.ToString(),
-                        CreatedById = cycle.OpenedById,
-                        CreatedAt = DateTime.UtcNow
-                    });
-                }
-                else if (settings.RequireManagerEvaluation && !employee.ManagerId.HasValue)
-                {
-                    _logger.LogWarning("Employee {employeeId} has no manager assigned but manager evaluation is required for cycle {cycleId}", 
-                        employee.Id, cycle.Id);
-                }
-
-                // Note: Peer evaluations are typically nominated later, not created upfront
-                // HR evaluation will be created when HR review stage is reached
-            }
-
-            // Now add evaluations (they reference the committed appraisals)
-            foreach (var evaluation in evaluationsToAdd)
-            {
-                await _evaluatorEvaluationRepository.AddAsync(evaluation);
-            }
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-            totalCreated += appraisalsToAdd.Count;
-            totalEvaluationsCreated += evaluationsToAdd.Count;
-
-            _logger.LogInformation("Batch {batchNum}: Created {appraisalCount} appraisals and {evaluationCount} evaluations for cycle {cycleId}", 
-                (i / batchSize) + 1, appraisalsToAdd.Count, evaluationsToAdd.Count, cycle.Id);
-        }
-
-        _logger.LogInformation("Successfully created {totalAppraisals} appraisal instances and {totalEvaluations} evaluator evaluations for cycle {cycleId}", 
-            totalCreated, totalEvaluationsCreated, cycle.Id);
-    }
-
-    /// <summary>
     /// Generates a unique appraisal number for tracking
     /// Format: APR-{Year}-{CycleCode}-{EmployeeNumber}-{SequenceNumber}
     /// </summary>
@@ -1463,335 +1377,29 @@ public class AppraisalCycleService : IAppraisalCycleService
     }
 
     /// <summary>
-    /// Gets all employees in scope for the appraisal cycle.
-    /// Uses auto-discovery (position criteria + KPI targets) with optional manual additions/exclusions.
+    /// Who the cycle appraises — the people generation would create an appraisal for: active staff its
+    /// active targets cover, less those an exclusion leaves out (<see cref="AppraisalCycleScope"/>). The
+    /// open notice and the deadline reminders are addressed to them. It also took in everyone holding a
+    /// post any active template was scoped to, tenant-wide, and read inactive targets and leavers
+    /// (performance closure E-c).
+    ///
+    /// <para>Less anyone whose appraisal in the cycle was withdrawn (E-d1): the cycle no longer
+    /// appraises them, and every phase reminder still reached them.</para>
     /// </summary>
     public async Task<IEnumerable<Guid>> GetEmployeesInScopeAsync(Guid cycleId, CancellationToken cancellationToken = default)
     {
-        var cycle = await GetOwnedCycleAsync(cycleId);
-
-        // Step 1: Auto-discover employees with criteria or KPI targets
-        var autoDiscovered = await GetAutoDiscoveredEmployeesAsync(cycle, cancellationToken);
-        _logger.LogInformation("Auto-discovered {count} employees for cycle {cycleId}", autoDiscovered.Count, cycleId);
-
-        var finalEmployees = new HashSet<Guid>(autoDiscovered);
-
-        // Step 2: Get manual targets with their exclusions
-        var tenantId = GetTenantId();
-        var targets = await _targetRepository.GetQueryable()
-            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
-            .Include(t => t.Exclusions)
-            .ToListAsync(cancellationToken);
-
-        // Step 3: Apply manual targets (inclusions)
-        var manualAdditions = 0;
-        foreach (var target in targets)
-        {
-            var employeeIds = await ResolveTargetEmployeesAsync(target, cancellationToken);
-            var added = employeeIds.Count(id => finalEmployees.Add(id));
-            manualAdditions += added;
-        }
-
-        if (manualAdditions > 0)
-            _logger.LogInformation("Manually added {count} employees to cycle {cycleId}", manualAdditions, cycleId);
-
-        // Step 4: Apply exclusions — removes employees regardless of which target added them.
-        var allExclusions = targets.SelectMany(t => t.Exclusions).ToList();
-        var beforeExclusion = finalEmployees.Count;
-        await ApplyExclusionsAsync(finalEmployees, allExclusions, cancellationToken);
-        var excluded = beforeExclusion - finalEmployees.Count;
-        if (excluded > 0)
-            _logger.LogInformation("Excluded {count} employees via target exclusion rules for cycle {cycleId}", excluded, cycleId);
-
-        _logger.LogInformation("Final scope for cycle {cycleId}: {total} employees (auto: {auto}, added: {added}, excluded: {excluded})",
-            cycleId, finalEmployees.Count, autoDiscovered.Count, manualAdditions, excluded);
-
-        return finalEmployees;
-    }
-
-    /// <summary>
-    /// Auto-discovers employees who should be included in the appraisal cycle based on
-    /// positions that have an active appraisal template scoped to them.
-    /// </summary>
-    private async Task<HashSet<Guid>> GetAutoDiscoveredEmployeesAsync(AppraisalCycle cycle, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var employeeIds = new HashSet<Guid>();
-
-        // Find positions that have an active position-scoped appraisal template.
-        var positionsWithTemplate = await _templateRepository.GetQueryable()
-            .Where(t => t.TenantId == tenantId && !t.IsDeleted && t.IsActive && t.PositionId.HasValue)
-            .Select(t => t.PositionId!.Value)
-            .Distinct()
-            .ToListAsync(cancellationToken);
-
-        // Get employees in those positions
-        var employeesWithTemplate = await _employeeRepository.GetQueryable()
-            .Where(e => e.TenantId == tenantId && !e.IsDeleted && positionsWithTemplate.Contains(e.PositionId))
-            .Select(e => e.Id)
-            .ToListAsync(cancellationToken);
-
-        foreach (var id in employeesWithTemplate)
-            employeeIds.Add(id);
-
-        _logger.LogDebug("Found {count} employees with a position-scoped appraisal template", employeesWithTemplate.Count);
-
-        return employeeIds;
-    }
-
-    private async Task<IEnumerable<Guid>> ResolveTargetEmployeesAsync(AppraisalCycleTarget target, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-
-        switch (target.TargetType)
-        {
-            case AppraisalTargetType.Employee:
-                // EmployeeId is no longer stored on AppraisalCycleTarget (deprecated in entity redesign).
-                break;
-
-            case AppraisalTargetType.Position:
-                if (target.PositionId.HasValue)
-                {
-                    return await _employeeRepository.GetQueryable()
-                        .Where(e => e.TenantId == tenantId && e.PositionId == target.PositionId && !e.IsDeleted)
-                        .Select(e => e.Id)
-                        .ToListAsync(cancellationToken);
-                }
-                break;
-
-            case AppraisalTargetType.OrganizationUnit:
-                if (target.OrganizationUnitId.HasValue)
-                {
-                    var unitIds = new List<Guid> { target.OrganizationUnitId.Value };
-
-                    // Always include child units
-                    var childUnits = await GetChildUnitsAsync(target.OrganizationUnitId.Value, cancellationToken);
-                    unitIds.AddRange(childUnits);
-
-                    return await _employeeRepository.GetQueryable()
-                        .Where(e => e.TenantId == tenantId
-                                 && e.OrganizationUnitId.HasValue
-                                 && unitIds.Contains(e.OrganizationUnitId.Value)
-                                 && !e.IsDeleted)
-                        .Select(e => e.Id)
-                        .ToListAsync(cancellationToken);
-                }
-                break;
-
-            case AppraisalTargetType.OrganizationLevel:
-                if (target.OrganizationLevelId.HasValue)
-                {
-                    var unitsInLevel = await _organizationUnitRepository.GetQueryable()
-                        .Where(u => u.TenantId == tenantId && u.OrganizationLevelId == target.OrganizationLevelId && !u.IsDeleted)
-                        .Select(u => u.Id)
-                        .ToListAsync(cancellationToken);
-
-                    return await _employeeRepository.GetQueryable()
-                        .Where(e => e.TenantId == tenantId
-                                 && e.OrganizationUnitId.HasValue
-                                 && unitsInLevel.Contains(e.OrganizationUnitId.Value)
-                                 && !e.IsDeleted)
-                        .Select(e => e.Id)
-                        .ToListAsync(cancellationToken);
-                }
-                break;
-        }
-
-        return Enumerable.Empty<Guid>();
-    }
-
-    private async Task<List<Guid>> GetChildUnitsAsync(Guid parentUnitId, CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var childUnits = new List<Guid>();
-        var directChildren = await _organizationUnitRepository.GetQueryable()
-            .Where(u => u.TenantId == tenantId && u.ParentUnitId == parentUnitId && !u.IsDeleted)
-            .Select(u => u.Id)
-            .ToListAsync(cancellationToken);
-
-        childUnits.AddRange(directChildren);
-
-        foreach (var childId in directChildren)
-        {
-            var grandChildren = await GetChildUnitsAsync(childId, cancellationToken);
-            childUnits.AddRange(grandChildren);
-        }
-
-        return childUnits;
-    }
-
-    /// <summary>
-    /// Removes employees from <paramref name="employeeSet"/> that match any active exclusion rule.
-    /// Exclusion rules are applied globally (an employee excluded by any target rule is removed
-    /// from the final scope, regardless of which other target included them).
-    /// Supports four exclusion scope types: individual Employee, Position, OrganizationUnit
-    /// (including child units), and OrganizationLevel.
-    /// </summary>
-    private async Task ApplyExclusionsAsync(
-        HashSet<Guid> employeeSet,
-        IEnumerable<AppraisalCycleTargetExclusion> exclusions,
-        CancellationToken cancellationToken)
-    {
-        var tenantId = GetTenantId();
-        var active = exclusions.Where(e => e.IsActive && !e.IsDeleted).ToList();
-        if (active.Count == 0) return;
-
-        // The exclusion modal uses cascading scope selectors (Level → Unit → Position → Employee).
-        // A single-employee exclusion therefore stores PositionId (and possibly UnitId/LevelId) as
-        // navigation context alongside EmployeeId. We must honour only the most-specific scope:
-        //   EmployeeId present            → direct employee exclusion only
-        //   PositionId, no EmployeeId     → exclude everyone in that position
-        //   UnitId, no EmployeeId/Pos     → exclude everyone in that unit (and children)
-        //   LevelId only                  → exclude everyone at that org level
-
-        // 1. Direct employee exclusions — most specific, no DB query needed.
-        foreach (var ex in active.Where(e => e.EmployeeId.HasValue))
-            employeeSet.Remove(ex.EmployeeId!.Value);
-
-        // 2. Position exclusions (only when no EmployeeId — not a narrowing-selector value).
-        var excludedPositionIds = active
-            .Where(e => e.PositionId.HasValue && !e.EmployeeId.HasValue)
-            .Select(e => e.PositionId!.Value)
-            .Distinct().ToList();
-        if (excludedPositionIds.Count > 0)
-        {
-            var ids = await _employeeRepository.GetQueryable()
-                .Where(e => e.TenantId == tenantId && excludedPositionIds.Contains(e.PositionId) && !e.IsDeleted)
-                .Select(e => e.Id).ToListAsync(cancellationToken);
-            foreach (var id in ids) employeeSet.Remove(id);
-        }
-
-        // 3. OrganizationUnit exclusions (only when no EmployeeId or PositionId).
-        var excludedUnitIds = active
-            .Where(e => e.OrganizationUnitId.HasValue && !e.EmployeeId.HasValue && !e.PositionId.HasValue)
-            .Select(e => e.OrganizationUnitId!.Value)
-            .Distinct().ToList();
-        if (excludedUnitIds.Count > 0)
-        {
-            var allUnitIds = new HashSet<Guid>(excludedUnitIds);
-            foreach (var unitId in excludedUnitIds)
-            {
-                var children = await GetChildUnitIdsForGenerationAsync(unitId, cancellationToken);
-                foreach (var child in children) allUnitIds.Add(child);
-            }
-            var ids = await _employeeRepository.GetQueryable()
-                .Where(e => e.TenantId == tenantId
-                         && e.OrganizationUnitId.HasValue
-                         && allUnitIds.Contains(e.OrganizationUnitId.Value)
-                         && !e.IsDeleted)
-                .Select(e => e.Id).ToListAsync(cancellationToken);
-            foreach (var id in ids) employeeSet.Remove(id);
-        }
-
-        // 4. OrganizationLevel exclusions (only when no more-specific scope is set).
-        var excludedLevelIds = active
-            .Where(e => e.OrganizationLevelId.HasValue
-                     && !e.EmployeeId.HasValue
-                     && !e.PositionId.HasValue
-                     && !e.OrganizationUnitId.HasValue)
-            .Select(e => e.OrganizationLevelId!.Value)
-            .Distinct().ToList();
-        if (excludedLevelIds.Count > 0)
-        {
-            var ids = await _employeeRepository.GetQueryable()
-                .Where(e => e.TenantId == tenantId
-                         && e.OrganizationLevelId.HasValue
-                         && excludedLevelIds.Contains(e.OrganizationLevelId.Value)
-                         && !e.IsDeleted)
-                .Select(e => e.Id).ToListAsync(cancellationToken);
-            foreach (var id in ids) employeeSet.Remove(id);
-        }
-    }
-
-    #region AppraisalCycleTarget Operations
-
-    public async Task<AppraisalCycleTargetDto> AddCycleTargetAsync(Guid cycleId, CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default)
-    {
         await GetOwnedCycleAsync(cycleId);
+        var scope = await ResolveScopeAsync(cycleId, cancellationToken);
+
         var tenantId = GetTenantId();
+        var withdrawn = (await _appraisalRepository.GetQueryable()
+                .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == cycleId && a.Status == AppraisalStatus.Withdrawn)
+                .Select(a => a.EmployeeId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
 
-        // Validate that exactly one target type is specified
-        var targetCount = new[] { createDto.OrganizationLevelId, createDto.OrganizationUnitId, createDto.PositionId }
-            .Count(id => id.HasValue);
-
-        if (targetCount != 1)
-        {
-            throw new InvalidOperationException("Exactly one target type must be specified (OrganizationLevel, OrganizationUnit, or Position).");
-        }
-
-        var entity = createDto.ToEntity();
-        entity.AppraisalCycleId = cycleId;
-        entity.TenantId = tenantId;
-
-        await _targetRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        // Reload with includes
-        entity = await _targetRepository.GetQueryable()
-            .Include(t => t.AppraisalCycle)
-            .Include(t => t.OrganizationLevel)
-            .Include(t => t.OrganizationUnit)
-            .Include(t => t.Position)
-            .FirstOrDefaultAsync(t => t.Id == entity.Id && t.TenantId == tenantId, cancellationToken);
-
-        _logger.LogInformation("Cycle target added: {targetId} to cycle {cycleId}", entity!.Id, cycleId);
-
-        return entity.ToDto();
+        return scope.InScope.Where(id => !withdrawn.Contains(id)).ToList();
     }
-
-    public async Task<IEnumerable<AppraisalCycleTargetDto>> GetCycleTargetsAsync(Guid cycleId, CancellationToken cancellationToken = default)
-    {
-        await GetOwnedCycleAsync(cycleId);
-        var tenantId = GetTenantId();
-
-        var entities = await _targetRepository.GetQueryable()
-            .Include(t => t.AppraisalCycle)
-            .Include(t => t.OrganizationLevel)
-            .Include(t => t.OrganizationUnit)
-            .Include(t => t.Position)
-            .Where(t => t.TenantId == tenantId && t.AppraisalCycleId == cycleId)
-            .OrderBy(t => t.TargetType)
-            .ToListAsync(cancellationToken);
-
-        return entities.ToDtoList();
-    }
-
-    public async Task<AppraisalCycleTargetDto> UpdateCycleTargetAsync(Guid cycleId, UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedCycleTargetAsync(cycleId, updateDto.Id);
-
-        // Validate that exactly one target type is specified
-        var targetCount = new[] { updateDto.OrganizationLevelId, updateDto.OrganizationUnitId, updateDto.PositionId }
-            .Count(id => id.HasValue);
-
-        if (targetCount != 1)
-        {
-            throw new InvalidOperationException("Exactly one target type must be specified.");
-        }
-
-        updateDto.UpdateEntity(entity);
-
-        await _targetRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Cycle target updated: {targetId}", entity.Id);
-
-        return entity.ToDto();
-    }
-
-    public async Task<bool> RemoveCycleTargetAsync(Guid cycleId, Guid targetId, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedCycleTargetAsync(cycleId, targetId);
-
-        await _targetRepository.DeleteAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Cycle target removed: {targetId} from cycle {cycleId}", targetId, cycleId);
-
-        return true;
-    }
-
-    #endregion
 }
 
 #endregion Appraisal Cycle

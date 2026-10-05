@@ -151,6 +151,12 @@ public class StaffDailyAttendance : TenantEntity
 	public Guid? LeaveRequestId { get; set; }
 	public Guid? PublicHolidayId { get; set; }
 
+	/// <summary>
+	/// The staff-travel request that posted this day as <c>OnDuty</c> (travel final closure, lane 9, D-53) — how travel's
+	/// posting knows its own rows, as leave's knows its own by <see cref="LeaveRequestId"/>. Set-null if the trip is deleted.
+	/// </summary>
+	public Guid? StaffTravelRequestId { get; set; }
+
 	// ── Pay Period ────────────────────────────────────────────────────────
 
 	/// <summary>FK to the PayPeriod this attendance day belongs to.</summary>

@@ -16,13 +16,14 @@
  * | advance `settledAmount` / `unsettledAmount` | claims settled against it |
  * | advance `approvedAmount` | the approve endpoint, never a plain update |
  * | advance `disbursedAt`, claim `paidAt` | the clock, on the action that caused them |
- * | budget `totalCommitted` / `totalActual` / `variance` | the request's bookings and paid claims |
+ * | budget `totalCommitted` / `totalActual` / `variance` | the request's bookings, paid claims and advances paid out |
+ * | budget `currencyCode`, `approvedById` / `approvedAt` | the trip's currency; the approve endpoint |
  *
- * ⚠ **There is no GL posting anywhere in here.** Travel disburses advances and pays claims with no
- * accounting artifact at all; an unsettled advance is an employee receivable that appears in no
- * trial balance. That is a known, deliberate deferral (decision D-4) to the Finance sweep after the
- * HR module is complete, registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`. Do not invent an
- * HR-side posting mechanism to fill the gap.
+ * Finance posting (since 2026-09-20, the HR finance posting sweep): `TravelAdvanceDisbursed`,
+ * `TravelClaimApproved` and `TravelClaimPaid` post journals through HR's one posting adapter when a
+ * rule for the event is enabled under HR Settings → Finance posting; without one the record is kept
+ * Unposted. Nothing here posts on its own — read a record's posting through `FinancePostingCard`.
+ * (This header said "there is no GL posting anywhere in here" until the travel final closure.)
  */
 
 import type { AuditFields } from './common';
@@ -69,6 +70,8 @@ export type TravelPaymentMethod =
 
 export type TravelAdvanceType = 'Cash' | 'CorporateCardLoad' | 'PettyCash' | 'WireTransfer';
 
+// Rejected and Cancelled: travel final closure, migration batch 1 — written from lane 3. (A comment INSIDE the
+// union hid it from travel-enums.test.ts's regex, so it was never compared with the C# enum — lane 3, N9.)
 export type TravelAdvanceStatus =
   | 'Requested'
   | 'Approved'
@@ -76,7 +79,9 @@ export type TravelAdvanceStatus =
   | 'PartiallySettled'
   | 'FullySettled'
   | 'Overdue'
-  | 'WrittenOff';
+  | 'WrittenOff'
+  | 'Rejected'
+  | 'Cancelled';
 
 // ── Budget ───────────────────────────────────────────────────────────────────
 
@@ -91,31 +96,45 @@ export interface StaffTravelBudget extends AuditFields {
   transportBudget: number;
   miscellaneousBudget: number;
   /**
-   * Server-derived: the value of non-cancelled bookings on this request. Money the organisation is
-   * on the hook for, whether or not it has left yet.
+   * Server-derived: the value of bookings on this request that are not cancelled, refunded or a no-show,
+   * plus the cancellation fees of those cancelled or refunded. Money the organisation is on the hook for,
+   * whether or not it has left yet.
    */
   totalCommitted: number;
   /**
-   * Server-derived: expense claims that have been **paid**. Cash actually gone out through the
-   * claim route.
+   * Server-derived: cash actually gone out — `actualClaimsPaid` + `actualAdvancesPaidOut` (lane 3).
    *
    * ⚠ Committed and actual measure **different routes** and neither contains the other — a booking
    * paid direct to a vendor is committed but never becomes a claim. They must not be added
    * together, and a screen showing both should say what each one counts.
    */
   totalActual: number;
+  /** Claims paid, net of the advance each recovered. */
+  actualClaimsPaid: number;
+  /** Advance cash paid out, less cash handed back. */
+  actualAdvancesPaidOut: number;
   /** Server-derived: `approvedTotal − totalActual`. */
   variance: number;
+  /** The trip's approved budget (its estimate on a trip approved before lane 2) — the cap on `approvedTotal`. */
+  tripApprovedBudget?: number | null;
+  /** Committed spend is above `approvedTotal`. It warns; whether it refuses is a TDC question. */
+  committedOverrun: boolean;
+  /** Actual spend is above `approvedTotal`. */
+  actualOverrun: boolean;
   approvedById?: string | null;
   approvedByName?: string | null;
   approvedAt?: string | null;
 }
 
+/**
+ * Lane 3: only once the trip is approved; in the trip's currency (set by the server — there is no currency
+ * field); `approvedTotal` 0 takes the trip's approved budget, and may not exceed it; the five parts are all 0 or
+ * add up to the total exactly. Changing an approved budget withdraws its approval.
+ */
 export interface CreateStaffTravelBudget {
   staffTravelRequestId: string;
   budgetYear: number;
   approvedTotal: number;
-  currencyCode: string;
   flightBudget: number;
   accommodationBudget: number;
   perDiemBudget: number;
@@ -154,11 +173,48 @@ export interface StaffTravelExpenseClaimLine extends AuditFields {
   reviewedById?: string | null;
   reviewedByName?: string | null;
   reviewedAt?: string | null;
+  /** Lane 6 (D-30): a fuel expense's company-vehicle trip and the litres bought. */
+  fleetTripId?: string | null;
+  fuelQuantity?: number | null;
+  /** Fleet's fuel record the payment wrote (D-31); cleared by a voided payment. */
+  fleetFuelTransactionId?: string | null;
+}
+
+/** Lane 6 (D-30, D-32): `GET claims/{id}/fleet-fuel` — the trip's company-vehicle trips and Fleet's fuel on each. */
+export interface StaffTravelFleetFuelOptions {
+  /** A fuel expense must name one of the live trips: a company vehicle travels and no car is hired. */
+  fuelNamesTrip: boolean;
+  hasCarRental: boolean;
+  trips: StaffTravelFleetFuelTrip[];
+}
+
+export interface StaffTravelFleetFuelTrip {
+  fleetTripId: string;
+  vehicleName: string;
+  vehiclePlate?: string | null;
+  plannedStartAt?: string | null;
+  plannedEndAt?: string | null;
+  status: string;
+  live: boolean;
+  fuel: StaffTravelFleetFuelEntry[];
+}
+
+export interface StaffTravelFleetFuelEntry {
+  id: string;
+  fuelledAt: string;
+  quantity: number;
+  unit: string;
+  /** In Finance's base currency, as Fleet keeps it. */
+  totalCost?: number | null;
+  vendorName?: string | null;
+  /** The paid travel claim that logged it; otherwise Fleet's own entry. */
+  claimNumber?: string | null;
 }
 
 export interface StaffTravelExpenseClaimSummary {
   id: string;
   claimNumber: string;
+  staffTravelRequestId: string;
   employeeId: string;
   employeeName: string;
   claimType: TravelClaimType;
@@ -186,7 +242,7 @@ export interface StaffTravelExpenseClaim extends AuditFields {
   totalClaimed: number;
   totalApproved: number;
   totalRejected: number;
-  /** Server-derived: recovered from the linked advance when the claim is approved. */
+  /** Server-derived: recovered from the linked advance when the claim is PAID (not approved). */
   advanceDeducted: number;
   /** Server-derived: what actually leaves the organisation, net of any advance recovered. */
   netPayable: number;
@@ -199,6 +255,18 @@ export interface StaffTravelExpenseClaim extends AuditFields {
   financeReviewedByName?: string | null;
   financeReviewedAt?: string | null;
   submittedAt?: string | null;
+  // Lane 3 (slice 3b).
+  /** The reviewer's words on the outcome — always there for a returned or rejected claim. */
+  reviewNotes?: string | null;
+  /** Who recorded the payment — never the claimant or a reviewer of the claim. */
+  paidById?: string | null;
+  paidByName?: string | null;
+  /** Why the claim was paid in full past advance cash the traveller held that it did not name. */
+  advanceWaiverReason?: string | null;
+  // Lane 3 (slice 3c, T-39): the last payment voided, if one was. The claim went back to approved.
+  paymentVoidedAt?: string | null;
+  paymentVoidedByName?: string | null;
+  paymentVoidReason?: string | null;
   lines: StaffTravelExpenseClaimLine[];
 }
 
@@ -214,32 +282,37 @@ export interface CreateStaffTravelExpenseClaimLine {
   receiptAttachmentId?: string | null;
   isPerDiem: boolean;
   perDiemRateId?: string | null;
+  /** Lane 6 (D-30): a fuel expense's company-vehicle trip — on a trip with one and no hired car, required. */
+  fleetTripId?: string | null;
+  fuelQuantity?: number | null;
+  /** D-32: why the fill is claimed though Fleet already logs fuel for that trip that day — kept as an internal note. */
+  fuelDuplicateReason?: string | null;
 }
 
+/**
+ * The traveller and the currency are the server's (lane 3): the trip's traveller, and the base currency every
+ * claim total is kept in. Only on a trip that is approved, under way or completed.
+ */
 export interface CreateStaffTravelExpenseClaim {
   staffTravelRequestId: string;
-  employeeId: string;
   claimType: TravelClaimType;
+  /** An advance of this trip and traveller, recovered when the claim is paid. */
   travelAdvanceId?: string | null;
-  currencyCode: string;
   lines: CreateStaffTravelExpenseClaimLine[];
 }
 
+/** While the claim is a draft or returned. */
 export interface UpdateStaffTravelExpenseClaim {
   id: string;
   claimType: TravelClaimType;
   travelAdvanceId?: string | null;
-  currencyCode: string;
 }
 
 /**
- * Reviewing a claim sets its status outright — there is no boolean verdict. Both the reviewer and
- * the moment are the server's.
- *
- * ⚠ **The claim's status is not derived from its lines.** Approving every line does not approve the
- * claim; a reviewer says what the claim now is. So a screen must offer the real statuses rather
- * than an approve/reject pair, or it will leave claims stuck in `UnderReview` and unpayable —
- * `pay` refuses anything that is not `Approved`.
+ * The review's outcome (lane 3). `UnderReview`, `Rejected` and `Returned` are recorded as sent — the last two
+ * need `notes`, which the claimant sees. `Approved` asks the server to approve what the lines' reviews
+ * approved: every expense must be decided first, and the claim becomes `Approved` when all of it was approved,
+ * `PartiallyApproved` otherwise. Never the reviewer's own claim.
  */
 export interface ReviewStaffTravelExpenseClaim {
   claimId: string;
@@ -247,19 +320,35 @@ export interface ReviewStaffTravelExpenseClaim {
   notes?: string | null;
 }
 
-/** Omitting `amountApproved` on an approval leaves it null — set it explicitly. */
+/**
+ * One expense decided (lane 3). `Approved` takes `amountApproved` — the whole line when omitted, never more —
+ * and the rest is rejected by the server; `Rejected` takes nothing. Any rejected part needs `rejectionReason`.
+ */
 export interface ReviewStaffTravelExpenseClaimLine {
   lineId: string;
   status: TravelExpenseLineStatus;
   amountApproved?: number | null;
-  amountRejected?: number | null;
   rejectionReason?: string | null;
 }
 
+/**
+ * Not `PayrollOffset` (refused: payroll cannot receive travel claims yet). Never by the claimant or anyone who
+ * reviewed the claim or one of its expenses. `advanceWaiverReason` is needed only when the traveller holds paid-out
+ * advance cash on the trip that the claim does not name.
+ */
 export interface PayStaffTravelExpenseClaim {
   claimId: string;
   paymentMethod: TravelPaymentMethod;
   paymentReference?: string | null;
+  advanceWaiverReason?: string | null;
+}
+
+/**
+ * Lane 3, T-39: a travel administrator who is neither the claimant nor the payer, with a reason of at least five
+ * characters. The payment's journal is reversed, its advance settlement undone, and the claim goes back to approved.
+ */
+export interface VoidStaffTravelClaimPayment {
+  reason: string;
 }
 
 // ── Advances ─────────────────────────────────────────────────────────────────
@@ -267,6 +356,8 @@ export interface PayStaffTravelExpenseClaim {
 export interface StaffTravelAdvanceSummary {
   id: string;
   advanceNumber: string;
+  staffTravelRequestId: string;
+  requestNumber?: string | null;
   employeeId: string;
   employeeName: string;
   requestedAmount: number;
@@ -276,8 +367,17 @@ export interface StaffTravelAdvanceSummary {
   advanceTypeName: string;
   status: TravelAdvanceStatus;
   statusName: string;
+  /** Recovered by claims plus cash handed back. */
+  settledAmount: number;
+  /** What the traveller still holds: 0 until the advance is disbursed (lane 3). */
   unsettledAmount: number;
+  refundedAmount: number;
   settlementDeadline?: string | null;
+  disbursedAt?: string | null;
+  /** Cash out past its deadline — true before the nightly sweep writes Overdue. */
+  isOverdue: boolean;
+  /** Why a rejected, cancelled or written-off advance ended as it did. */
+  outcomeReason?: string | null;
 }
 
 export interface StaffTravelAdvance extends AuditFields {
@@ -304,19 +404,47 @@ export interface StaffTravelAdvance extends AuditFields {
   approvedByName?: string | null;
   disbursedById?: string | null;
   disbursedByName?: string | null;
+  // Lane 3 — the verbs' records.
+  rejectedAt?: string | null;
+  rejectedByName?: string | null;
+  rejectionReason?: string | null;
+  cancelledAt?: string | null;
+  cancelledByName?: string | null;
+  cancellationReason?: string | null;
+  writtenOffAt?: string | null;
+  writtenOffByName?: string | null;
+  writeOffReason?: string | null;
+  writtenOffAmount?: number | null;
+  refundedAmount: number;
+  refundedAt?: string | null;
+  refundedByName?: string | null;
+  refundReference?: string | null;
+  isOverdue: boolean;
 }
 
+/** The traveller is the trip's — the server sets it (lane 3, B3). */
 export interface CreateStaffTravelAdvance {
   staffTravelRequestId: string;
-  employeeId: string;
   requestedAmount: number;
   currencyCode: string;
   advanceType: TravelAdvanceType;
   settlementDeadline?: string | null;
 }
 
+/** A requested advance only. */
 export type UpdateStaffTravelAdvance =
-  Omit<CreateStaffTravelAdvance, 'staffTravelRequestId' | 'employeeId'> & { id: string };
+  Omit<CreateStaffTravelAdvance, 'staffTravelRequestId'> & { id: string };
+
+/** Reject, cancel or write off: the verb is the route; the reason is required. */
+export interface DecideStaffTravelAdvance {
+  reason: string;
+}
+
+/** Unused cash handed back — one refund per advance. */
+export interface RefundStaffTravelAdvance {
+  amount: number;
+  reference: string;
+}
 
 /** The approver is the token's. */
 export interface ApproveStaffTravelAdvance {

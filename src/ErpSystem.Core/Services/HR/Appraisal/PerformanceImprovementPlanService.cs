@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -130,37 +131,66 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     }
 
     /// <summary>
-    /// Allocates the next PIP reference for the tenant and year. Nothing else assigns one on this
-    /// path, so before this a plan created from the UI carried an empty reference while one raised
-    /// by <c>PipRecommendationHandler</c> did not — the same record type with and without an
-    /// identity. The loop covers the race between two concurrent creates; the column is indexed
-    /// but not unique, so the check is ours to make.
+    /// Allocates the next PIP reference for the tenant and year — <see cref="PipNumbering"/>, shared
+    /// with <c>PipRecommendationHandler</c> (performance closure D-75). Nothing else assigns one on
+    /// this path, so before it a plan created from the UI carried an empty reference. Two creates at
+    /// the same moment can still take the same number: the index is neither unique nor per tenant,
+    /// and making it so is migration batch 2's.
     /// </summary>
-    private async Task<string> NextPipNumberAsync(Guid tenantId, CancellationToken cancellationToken)
-    {
-        var year = DateTime.UtcNow.Year;
-        var prefix = $"PIP-{year}-";
-
-        var used = await _improvementPlanRepository
-            .GetQueryable(p => p.TenantId == tenantId && p.PipNumber.StartsWith(prefix))
-            .Select(p => p.PipNumber)
-            .ToListAsync(cancellationToken);
-
-        var taken = new HashSet<string>(used, StringComparer.OrdinalIgnoreCase);
-        for (var next = used.Count + 1; next <= used.Count + 1000; next++)
-        {
-            var candidate = $"{prefix}{next:D4}";
-            if (!taken.Contains(candidate))
-                return candidate;
-        }
-
-        // Unreachable in practice; a distinct fallback beats handing back a duplicate.
-        return $"{prefix}{Guid.NewGuid().ToString()[..6].ToUpperInvariant()}";
-    }
+    private Task<string> NextPipNumberAsync(Guid tenantId, CancellationToken cancellationToken)
+        => PipNumbering.NextAsync(_improvementPlanRepository, tenantId, cancellationToken);
 
     /// <summary>The states in which a plan is live against the employee.</summary>
     private static bool IsLive(PipStatus status)
         => status is PipStatus.Active or PipStatus.InProgress;
+
+    /// <summary>The states in which a plan is over: its outcome recorded, or cancelled.</summary>
+    private static bool IsClosed(PipStatus status)
+        => status is PipStatus.Completed or PipStatus.Unsuccessful or PipStatus.Cancelled;
+
+    /// <summary>
+    /// Decision D-73: a closed plan is a finished record and takes no more writes — no meetings, goal
+    /// changes, progress, replies or attachments. Each of these accepted any status, so a plan closed
+    /// as Unsuccessful could still be given new meetings and better progress.
+    /// </summary>
+    private static void EnsureNotClosed(PerformanceImprovementPlan pip, string action)
+    {
+        if (IsClosed(pip.Status))
+            throw new InvalidOperationException($"This plan is closed ({pip.Status}), so {action}.");
+    }
+
+    /// <summary>
+    /// Decision D-73 (D-46): a plan's goals are part of its terms, so they change while it is a draft
+    /// and only then — out for approval they are what the approver is weighing (recall it first), and
+    /// once approved they are what is in force. Goal add, edit and delete accepted any status.
+    /// </summary>
+    private static void EnsureGoalsEditable(PerformanceImprovementPlan pip)
+    {
+        if (pip.Status == PipStatus.PendingApproval)
+            throw new InvalidOperationException("This plan is out for approval. Recall it before changing its goals.");
+        EnsureNotClosed(pip, "its goals cannot change");
+        if (pip.Status != PipStatus.Draft)
+            throw new InvalidOperationException(
+                "This plan is in force, so its goals are the terms that were approved and cannot be changed. "
+                + "Record progress against them at a review meeting.");
+    }
+
+    /// <summary>Review meetings are held while the plan is in force (decision D-73).</summary>
+    private static void EnsureMeetingsOpen(PerformanceImprovementPlan pip, string action)
+    {
+        EnsureNotClosed(pip, action);
+        if (!IsLive(pip.Status))
+            throw new InvalidOperationException("Review meetings can only be held once the plan is in force.");
+    }
+
+    private async Task<PipReviewMeeting> GetOwnedMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        return await _reviewMeetingRepository.GetQueryable()
+                   .Include(m => m.ConductedBy)
+                   .FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId && m.TenantId == tenantId, cancellationToken)
+               ?? throw new ArgumentException("Review meeting not found");
+    }
 
     public async Task<PipReviewMeetingDto> AddReviewMeetingAsync(Guid pipId, CreatePipReviewMeetingDto createDto, CancellationToken cancellationToken = default)
     {
@@ -171,13 +201,14 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (!conductorExists)
             throw new ArgumentException("Meeting conductor not found");
 
-        if (pip.Status is PipStatus.Draft or PipStatus.PendingApproval)
-            throw new InvalidOperationException(
-                "Review meetings can only be held once the plan is in force.");
+        EnsureMeetingsOpen(pip, "no more review meetings can be booked");
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.PipId = pipId;
+        // Decision D-73: a booked meeting is Scheduled until it is recorded as held or cancelled —
+        // whatever its date. "Held" used to mean only that the date had passed.
+        entity.Status = PipMeetingStatus.Scheduled;
 
         await _reviewMeetingRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -217,6 +248,13 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<bool> CompletePipAsync(CompletePipDto completeDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(completeDto.PipId, cancellationToken);
+
+        // Decision D-75: the outcome is one of the defined ones. The outcome route cast any number,
+        // so a value outside the list closed the plan as Unsuccessful with an undefined outcome.
+        if (!Enum.IsDefined(completeDto.Outcome))
+            throw new InvalidOperationException(
+                $"{(int)completeDto.Outcome} is not an outcome. Choose one of: "
+                + string.Join(", ", Enum.GetValues<PipOutcome>().Select(o => $"{(int)o} {o}")) + ".");
 
         if (!IsLive(entity.Status))
             throw new InvalidOperationException(
@@ -275,7 +313,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     /// named employee, so it goes out for approval before it is in force — see
     /// <c>PerformanceImprovementPlanWorkflowStatusAdapter</c>.
     /// </summary>
-    public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, Guid? authoredById, CancellationToken cancellationToken = default)
     {
         // ── Data integrity: only one live or in-flight PIP per employee at a time ──────────
         var tenantId = GetTenantId();
@@ -315,6 +353,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         performanceImprovementPlan.TenantId = tenantId;
         performanceImprovementPlan.Status = PipStatus.Draft;
         performanceImprovementPlan.PipNumber = await NextPipNumberAsync(tenantId, cancellationToken);
+        // Who wrote it (D-102); the submission re-stamps whoever puts it forward.
+        performanceImprovementPlan.AuthoredById = authoredById is { } author && author != Guid.Empty ? author : null;
 
         await _improvementPlanRepository.AddAsync(performanceImprovementPlan);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -347,13 +387,15 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<bool> DeleteReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        var entity = await GetOwnedMeetingAsync(pipId, meetingId, cancellationToken);
 
-        var tenantId = GetTenantId();
-        var entity = await _reviewMeetingRepository.FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId && m.TenantId == tenantId);
-
-        if (entity == null)
-            throw new ArgumentException("Review meeting not found");
+        // Decision D-73: a closed plan's meetings are its record, and so is a meeting that was held —
+        // a delete said it never happened. A meeting that will not take place is cancelled instead.
+        EnsureNotClosed(pip, "its review meetings cannot be removed");
+        if (entity.Status == PipMeetingStatus.Held)
+            throw new InvalidOperationException(
+                "This review meeting was held, so it is part of the plan's record and cannot be removed.");
 
         await _reviewMeetingRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -532,10 +574,44 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     // see HrWorkflowFallbackAuthority for the mechanism and for why submit could not be fixed on
     // its own.
     //
-    // The second half of the old sentence still holds and is the point of the engine: when a
-    // definition IS published, the authority to approve comes from it and not from a role.
+    // When a definition IS published, it names who may be asked; the record names who may decide,
+    // on both paths (F3, D-12, D-102): the plan's author is whoever put it forward — stamped at
+    // create and again at submission — and never decides it. A plan the employee's line manager put
+    // forward is HR's to decide; one anybody else (HR) put forward is the line manager's or a tenant
+    // administrator's. Only the author recalls.
 
-    public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>The record's decider rule (F3, D-12, D-102), run before either path is asked.</summary>
+    private async Task EnsureMayDecidePlanAsync(PerformanceImprovementPlan entity, Guid? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        var roles = _currentUserProvider.Roles;
+        var isTenantAdmin = roles.Any(r => string.Equals(r, Constants.Roles.TenantAdmin, StringComparison.OrdinalIgnoreCase));
+        var actor = actorEmployeeId is { } a && a != Guid.Empty ? a : (Guid?)null;
+
+        if (actor is not null && actor == entity.AuthoredById)
+            throw new UnauthorizedAccessException("You put this plan forward, so someone else decides it.");
+
+        var lineManagerId = await _employeeRepository.GetQueryable()
+            .Where(e => e.Id == entity.EmployeeId && e.TenantId == entity.TenantId)
+            .Select(e => e.ManagerId)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // A plan with no recorded author predates the rule; it is HR's to decide, as every plan was.
+        var putForwardByLineManager = entity.AuthoredById is null || entity.AuthoredById == lineManagerId;
+        if (putForwardByLineManager)
+        {
+            if (isTenantAdmin || HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(roles, HrPermissions.ApprovePerformance))
+                return;
+            throw new UnauthorizedAccessException(
+                "This plan was put forward by the employee's line manager, so HR decides it.");
+        }
+
+        if (isTenantAdmin || (actor is not null && actor == lineManagerId))
+            return;
+        throw new UnauthorizedAccessException(
+            "This plan was put forward by HR, so the employee's line manager or a tenant administrator decides it.");
+    }
+
+    public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
 
@@ -583,6 +659,10 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
+        // Whoever puts the plan forward is its author for the decision (D-102): they do not decide it.
+        if (actorEmployeeId is { } submitter && submitter != Guid.Empty)
+            entity.AuthoredById = submitter;
+
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -590,29 +670,30 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return await AfterApprovalStepAsync(entity, cancellationToken);
     }
 
-    public async Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Decision D-75: approve and reject rule on a plan out for approval and nothing else. Neither
+    /// checked: with no published definition, approve put a draft nobody had submitted — or a closed
+    /// plan — into force, and reject sent a plan in force back to Draft, where it could be deleted.
+    /// </summary>
+    private static void EnsureAwaitingApproval(PerformanceImprovementPlan entity, string action)
+    {
+        if (entity.Status != PipStatus.PendingApproval)
+            throw new InvalidOperationException(
+                $"Only a plan awaiting approval can be {action}. This one is {entity.Status}.");
+    }
+
+    public async Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
+        EnsureAwaitingApproval(entity, "approved");
         var userId = RequireUserId();
 
-        WorkflowOutcome approvalOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        await EnsureMayDecidePlanAsync(entity, actorEmployeeId, cancellationToken);
 
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
-
-            approvalOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve an improvement plan", HrPermissions.ApprovePerformance);
-            approvalOutcome = WorkflowOutcome.Approved;
-        }
+        // Engine when a definition is published; with none, the record's rule above is the authority — the line
+        // manager deciding HR's plan holds no HR approve permission.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Approve", null);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, approvalOutcome, userId);
@@ -624,31 +705,18 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return await AfterApprovalStepAsync(entity, cancellationToken);
     }
 
-    public async Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
+        EnsureAwaitingApproval(entity, "rejected");
         var userId = RequireUserId();
+
+        await EnsureMayDecidePlanAsync(entity, actorEmployeeId, cancellationToken);
 
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
 
-        WorkflowOutcome rejectionOutcome;
-        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
-        {
-            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-            if (!workflowResult.ExecutionResult.Success)
-                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
-
-            rejectionOutcome = workflowResult.Outcome;
-        }
-        else
-        {
-            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject an improvement plan", HrPermissions.ApprovePerformance);
-            rejectionOutcome = WorkflowOutcome.Rejected;
-        }
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalDecidedByRecordAsync(
+            _workflowIntegrationService, EntityType, id, userId, "Reject", rejectionText);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
@@ -660,13 +728,17 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         return await ReloadDtoAsync(id, cancellationToken);
     }
 
-    public async Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, CancellationToken cancellationToken = default)
+    public async Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         var userId = RequireUserId();
 
         if (entity.Status != PipStatus.PendingApproval)
             throw new InvalidOperationException("Only a plan still awaiting approval can be recalled.");
+
+        // Only the person who put it forward pulls it back (F9); the engine kept that rule, nothing did without one.
+        if (entity.AuthoredById is { } author && actorEmployeeId != author)
+            throw new UnauthorizedAccessException("Only the person who put this plan forward can recall it.");
 
         // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
         // without an instance, so the recall would fail on exactly the tenants where submitting now
@@ -725,24 +797,77 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
     public async Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        var entity = await GetOwnedMeetingAsync(pipId, updateDto.Id, cancellationToken);
 
-        var tenantId = GetTenantId();
-        var entity = await _reviewMeetingRepository.GetQueryable()
-            .Include(m => m.ConductedBy)
-            .FirstOrDefaultAsync(m => m.Id == updateDto.Id && m.PipId == pipId && m.TenantId == tenantId, cancellationToken);
+        // Decision D-73: a closed plan's meetings are its record; a cancelled meeting is not going to
+        // happen, so there is nothing to write on it; a held one keeps a date that has passed.
+        EnsureNotClosed(pip, "its review meetings cannot change");
+        if (entity.Status == PipMeetingStatus.Cancelled)
+            throw new InvalidOperationException("This review meeting was cancelled, so it cannot be changed.");
+        if (entity.Status == PipMeetingStatus.Held && updateDto.MeetingDate.Date > DateTime.UtcNow.Date)
+            throw new InvalidOperationException("This review meeting was held, so its date cannot move into the future.");
 
-        if (entity == null)
-            throw new ArgumentException("Review meeting not found");
-
-        // The mapper carries the supervisor's record only — never the plan, the conductor or the
-        // employee's reply (P13) — and the meeting was found under this plan, so it stays there.
+        // The mapper carries the supervisor's record only — never the plan, the conductor, the
+        // employee's reply (P13) or the status — and the meeting was found under this plan, so it
+        // stays there.
         updateDto.UpdateEntity(entity);
         await _reviewMeetingRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Review meeting updated successfully: {Id}", entity.Id);
 
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Decision D-73: <i>Record meeting</i> — the supervisor's record of a meeting that took place,
+    /// which makes it Held. On a plan in force, on a meeting that is not cancelled, and not ahead of
+    /// its date. It used to save the form and report "completed" in the response only; nothing was
+    /// stored, and every reader inferred "held" from the date.
+    /// </summary>
+    public async Task<PipReviewMeetingDto> RecordReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        var entity = await GetOwnedMeetingAsync(pipId, updateDto.Id, cancellationToken);
+
+        EnsureMeetingsOpen(pip, "no review meeting can be recorded");
+        if (entity.Status == PipMeetingStatus.Cancelled)
+            throw new InvalidOperationException("This review meeting was cancelled, so it cannot be recorded as held.");
+        if (updateDto.MeetingDate.Date > DateTime.UtcNow.Date)
+            throw new InvalidOperationException(
+                $"This review meeting is set for {updateDto.MeetingDate:d MMM yyyy}, so it cannot be recorded as held yet.");
+
+        updateDto.UpdateEntity(entity);
+        entity.Status = PipMeetingStatus.Held;
+        await _reviewMeetingRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Review meeting {Id} recorded as held", entity.Id);
+        return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Decision D-73: a booked meeting that will not take place. There was no way to say so — the
+    /// meeting stayed "scheduled" until its date passed and then read as held. A held meeting is the
+    /// plan's record and is not cancelled; a cancelled one takes no more writes.
+    /// </summary>
+    public async Task<PipReviewMeetingDto> CancelReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default)
+    {
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        var entity = await GetOwnedMeetingAsync(pipId, meetingId, cancellationToken);
+
+        EnsureMeetingsOpen(pip, "its review meetings cannot change");
+        if (entity.Status == PipMeetingStatus.Held)
+            throw new InvalidOperationException("This review meeting was held, so it cannot be cancelled.");
+        if (entity.Status == PipMeetingStatus.Cancelled)
+            throw new InvalidOperationException("This review meeting is already cancelled.");
+
+        entity.Status = PipMeetingStatus.Cancelled;
+        await _reviewMeetingRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Review meeting {Id} cancelled", entity.Id);
         return entity.ToDto();
     }
 
@@ -759,13 +884,12 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (pip.EmployeeId != actorEmployeeId)
             throw new UnauthorizedAccessException("Only the employee on the plan can write their reply.");
 
-        var tenantId = GetTenantId();
-        var entity = await _reviewMeetingRepository.GetQueryable()
-            .Include(m => m.ConductedBy)
-            .FirstOrDefaultAsync(m => m.Id == meetingId && m.PipId == pipId && m.TenantId == tenantId, cancellationToken);
+        var entity = await GetOwnedMeetingAsync(pipId, meetingId, cancellationToken);
 
-        if (entity == null)
-            throw new ArgumentException("Review meeting not found");
+        // Decision D-73: a closed plan takes no writes, and a cancelled meeting has nothing to reply to.
+        EnsureNotClosed(pip, "a reply can no longer be added");
+        if (entity.Status == PipMeetingStatus.Cancelled)
+            throw new InvalidOperationException("This review meeting was cancelled, so it takes no reply.");
 
         entity.EmployeeComments = string.IsNullOrWhiteSpace(comments) ? null : comments.Trim();
         await _reviewMeetingRepository.UpdateAsync(entity);
@@ -810,12 +934,15 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         Guid pipId, CreatePipGoalDto dto, CancellationToken cancellationToken = default)
     {
         var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        EnsureGoalsEditable(pip);
 
         var tenantId = GetTenantId();
+        // P-55: the status, percent and notes the form sends are the goal's starting point. The status
+        // was forced to NotStarted and the percent and notes had nowhere to go, so all three were
+        // dropped without a word.
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         entity.PipId = pipId;
-        entity.Status = GoalProgressStatus.NotStarted;
 
         await _pipGoalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -840,7 +967,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<PipGoalDto> UpdatePipGoalAsync(
         Guid pipId, UpdatePipGoalDto dto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        EnsureGoalsEditable(pip);
 
         var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
@@ -860,7 +988,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     public async Task<bool> DeletePipGoalAsync(
         Guid pipId, Guid goalId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        EnsureGoalsEditable(pip);
 
         var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
@@ -878,7 +1007,13 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         Guid pipId, Guid goalId, decimal progressPercent, string? notes,
         GoalProgressStatus status, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+
+        // Decision D-73: progress is recorded on a draft (its starting point) and while the plan is in
+        // force — not while an approver is weighing it, and not once it is closed.
+        EnsureNotClosed(pip, "its goals' progress cannot change");
+        if (pip.Status == PipStatus.PendingApproval)
+            throw new InvalidOperationException("This plan is out for approval. Recall it before recording progress.");
 
         var tenantId = GetTenantId();
         var entity = await _pipGoalRepository.GetQueryable()
@@ -887,7 +1022,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (entity == null)
             throw new ArgumentException("PIP goal not found.");
 
-        var clamped = Math.Clamp((int)progressPercent, 0, 100);
+        // Clamped as a decimal: it was cut to a whole number first, so 62.5 % was stored as 62.
+        var clamped = Math.Clamp(progressPercent, 0m, 100m);
         entity.ProgressPercent = clamped;
 
         if (!string.IsNullOrWhiteSpace(notes))
@@ -946,7 +1082,8 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         Guid? documentRecordId = null,
         Guid? documentVersionId = null)
     {
-        await GetOwnedPipAsync(pipId, cancellationToken);
+        var pip = await GetOwnedPipAsync(pipId, cancellationToken);
+        EnsureNotClosed(pip, "no more documents can be attached");
 
         var tenantId = GetTenantId();
         var entity = new AppraisalAttachment
@@ -990,6 +1127,9 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
 
         if (entity == null)
             throw new ArgumentException($"PIP attachment with ID '{attachmentId}' not found.");
+
+        if (entity.PipId is Guid pipId)
+            EnsureNotClosed(await GetOwnedPipAsync(pipId, cancellationToken), "its documents cannot be removed");
 
         await _attachmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

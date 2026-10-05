@@ -1,4 +1,4 @@
-﻿using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -13,6 +14,13 @@ namespace ErpSystem.Core.Services.HR;
 
 #region Peer Nomination
 
+/// <summary>
+/// Who scores whom as a peer (performance closure lane D). A nomination is made Pending and approved
+/// by the one approval path (<see cref="StageApprovalAsync"/>), which creates the peer's evaluation —
+/// through the manager's approve, a Manager-mode nomination (the manager chooses, so there is no
+/// approval step, D4) and HR's advance past the step (D-39). Only a pending nomination is changed or
+/// withdrawn, and a rejected one leaves room for a replacement (D2).
+/// </summary>
 public class PeerNominationService : IPeerNominationService
 {
     private readonly IGenericRepository<PeerNomination> _nominationRepository;
@@ -71,48 +79,36 @@ public class PeerNominationService : IPeerNominationService
         return tenantId;
     }
 
-    // A nomination owned by another tenant is reported as missing rather than forbidden, so the endpoints do
-    // not confirm that the id exists elsewhere.
-    private async Task<PeerNomination> GetOwnedNominationAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var entity = await _nominationRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Peer nomination with ID '{id}' not found.");
-        return entity;
-    }
-
     private IQueryable<PeerNomination> TenantNominationQuery()
     {
         var tenantId = GetTenantId();
         return _nominationRepository.GetQueryable().Where(n => n.TenantId == tenantId);
     }
 
-    private async Task<PerformanceAppraisal> GetOwnedAppraisalAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var entity = await _appraisalRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException("Performance appraisal not found.");
-        return entity;
-    }
+    /// <summary>
+    /// Whether nominations may be made, changed or decided on this appraisal: while it is Draft or Active, in either
+    /// mode — never once it is withdrawn (performance closure E-d1), and only on an Open cycle (E-d2b). Manager mode
+    /// took them "until it is completed or closed", so an appraisal in governance or on appeal could gain a peer whose
+    /// evaluation the score had already settled without (E-g1, § 5). The caller loads the appraisal's cycle.
+    /// </summary>
+    private static bool NominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
+        => appraisal.AppraisalCycle != null && AppraisalLiveCycle.IsLive(appraisal.AppraisalCycle.Status)
+            && appraisal.Status is AppraisalStatus.Active or AppraisalStatus.Draft;
 
     private static void EnsureNominationsEditable(PerformanceAppraisal appraisal, AppraisalSettings settings)
     {
-        if (settings.PeerNominationMode == PeerNominationMode.Employee)
-        {
-            // Employee-driven: nominations only editable during Open/SelfEvaluation
-            if (appraisal.Status != AppraisalStatus.Active && appraisal.Status != AppraisalStatus.Draft)
-            {
-                throw new InvalidOperationException("Peer nominations are locked and cannot be edited after self-evaluation submission.");
-            }
-        }
-        else // Manager
-        {
-            // Manager-driven: nominations editable until appraisal is completed or closed
-            if (appraisal.Status == AppraisalStatus.Completed || appraisal.Status == AppraisalStatus.Closed)
-            {
-                throw new InvalidOperationException("Peer nominations are locked for completed or closed appraisals.");
-            }
-        }
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b).
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName,
+            "Peer nominations cannot be changed");
+
+        if (NominationsEditable(appraisal, settings)) return;
+
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so its peer nominations are closed.");
+
+        // The Employee-mode message said "after self-evaluation submission"; the rule is the status.
+        throw new InvalidOperationException("Peer nominations are closed on this appraisal: it has moved past the evaluations.");
     }
 
     /// <summary>
@@ -130,6 +126,62 @@ public class PeerNominationService : IPeerNominationService
             throw new InvalidOperationException("In this cycle your manager chooses your peer evaluators.");
     }
 
+    /// <summary>
+    /// Who may be a peer (D1): an employee of this tenant, neither the appraisee nor the appraisee's line
+    /// manager — the manager evaluates as the manager. Neither route refused the manager, and the batch
+    /// took any id, found or not.
+    ///
+    /// <para>And one still at work (performance closure E-d1): a leaver was nominated as readily as
+    /// anyone, and approving them asked someone who had gone to write an evaluation.</para>
+    /// </summary>
+    private async Task EnsurePeersMayBeNominatedAsync(
+        PerformanceAppraisal appraisal, IReadOnlyCollection<Guid> peerIds, CancellationToken cancellationToken)
+    {
+        var tenantId = appraisal.TenantId;
+
+        if (peerIds.Contains(appraisal.EmployeeId))
+            throw new InvalidOperationException("Cannot nominate the appraisee as their own peer evaluator.");
+
+        var managerId = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.Id == appraisal.EmployeeId)
+            .Select(e => e.ManagerId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (managerId is Guid manager && peerIds.Contains(manager))
+            throw new InvalidOperationException("The appraisee's manager evaluates as the manager, not as a peer.");
+
+        var found = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && peerIds.Contains(e.Id))
+            .Select(e => e.Id)
+            .ToListAsync(cancellationToken);
+        if (found.Count != peerIds.Distinct().Count())
+            throw new ArgumentException("A nominated peer was not found.");
+
+        await EnsurePeersAtWorkAsync(tenantId, peerIds, cancellationToken);
+    }
+
+    /// <summary>
+    /// Refuses a peer who has left (E-d1) — the scope's own reading of who is at work: active, and
+    /// not deleted. Checked when a peer is nominated and again when the nomination is approved,
+    /// since a peer can leave in between.
+    /// </summary>
+    private async Task EnsurePeersAtWorkAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> peerIds, CancellationToken cancellationToken)
+    {
+        var gone = await _employeeRepository.GetQueryable()
+            .Where(e => e.TenantId == tenantId && peerIds.Contains(e.Id) && !e.IsActive)
+            .Select(e => e.FirstName + " " + e.LastName)
+            .ToListAsync(cancellationToken);
+
+        if (gone.Count > 0)
+            throw new InvalidOperationException(
+                $"{string.Join(", ", gone)} {(gone.Count == 1 ? "is" : "are")} no longer at work, so cannot " +
+                "evaluate as a peer. Nominate someone else.");
+    }
+
+    /// <summary>The nominations that stand or may: a rejected one no longer counts, so a replacement can be nominated (D2).</summary>
+    private static int LiveCount(IEnumerable<PeerNomination> nominations)
+        => nominations.Count(n => n.NominationStatus != PeerNominationStatus.Rejected);
+
     public async Task<PeerNominationDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await TenantNominationQuery()
@@ -137,7 +189,7 @@ public class PeerNominationService : IPeerNominationService
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
             .FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
-        
+
         if (entity == null)
             throw new ArgumentException($"Peer nomination with ID '{id}' not found.");
 
@@ -157,40 +209,58 @@ public class PeerNominationService : IPeerNominationService
         return entities.ToDtoList();
     }
 
+    /// <summary>
+    /// The nominations a peer has been asked to act on (D-41): approved ones only, without a rejection
+    /// reason. This listed every nomination naming the peer — pending ones not yet decided, and rejected
+    /// ones with the reason written for the appraisee. Not on a withdrawn appraisal (E-d1): nothing is
+    /// asked of the peer there any more.
+    /// </summary>
     public async Task<IEnumerable<PeerNominationDto>> GetByPeerEmployeeIdAsync(Guid peerEmployeeId, CancellationToken cancellationToken = default)
     {
         var entities = await TenantNominationQuery()
             .Include(n => n.Appraisal)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
-            .Where(n => n.PeerEmployeeId == peerEmployeeId)
+            .Where(n => n.PeerEmployeeId == peerEmployeeId && n.NominationStatus == PeerNominationStatus.Approved
+                        && n.Appraisal.Status != AppraisalStatus.Withdrawn)
             .OrderByDescending(n => n.NominationDate)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return AsPeerSees(entities);
     }
 
+    /// <summary>
+    /// The approved nominations whose peer evaluation this employee has not submitted yet (D-41) —
+    /// on appraisals still in their cycle (E-d1).
+    /// </summary>
     public async Task<IEnumerable<PeerNominationDto>> GetPendingNominationsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
-        // Get nominations where the employee is the peer and invitation not yet sent, or sent but not completed
         var entities = await TenantNominationQuery()
             .Include(n => n.Appraisal)
                 .ThenInclude(a => a.EvaluatorEvaluations)
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
-            .Where(n => n.PeerEmployeeId == employeeId)
+            .Where(n => n.PeerEmployeeId == employeeId && n.NominationStatus == PeerNominationStatus.Approved
+                        && n.Appraisal.Status != AppraisalStatus.Withdrawn)
             .ToListAsync(cancellationToken);
 
         // Filter to those without a corresponding peer evaluation submitted
-        var pending = entities.Where(n => 
-            !n.Appraisal.EvaluatorEvaluations.Any(e => 
-                e.EvaluatorId == employeeId && 
+        var pending = entities.Where(n =>
+            !n.Appraisal.EvaluatorEvaluations.Any(e =>
+                e.EvaluatorId == employeeId &&
                 e.EvaluatorRole == EvaluatorRole.Peer &&
                 e.SubmittedDate.HasValue))
             .OrderBy(n => n.DueDate ?? DateTime.MaxValue)
             .ToList();
 
-        return pending.ToDtoList();
+        return AsPeerSees(pending);
+    }
+
+    private static List<PeerNominationDto> AsPeerSees(IEnumerable<PeerNomination> nominations)
+    {
+        var dtos = nominations.ToDtoList();
+        foreach (var dto in dtos) dto.RejectionReason = null;
+        return dtos;
     }
 
     public async Task<PeerNominationDto> CreateAsync(CreatePeerNominationDto createDto, CancellationToken cancellationToken = default)
@@ -211,21 +281,21 @@ public class PeerNominationService : IPeerNominationService
         // The controller sets NominatedById from the token (P14).
         EnsureMayNominate(appraisal, settings, createDto.NominatedById);
 
-        // Validate peer employee exists and is not the same as appraisee
-        var peerEmployee = await _employeeRepository.GetByIdAsync(createDto.PeerEmployeeId);
-        if (peerEmployee == null || peerEmployee.TenantId != tenantId)
-            throw new ArgumentException("Peer employee not found.");
+        // D1: a nomination starts Pending — the body's status was stored as sent, so a raw POST made an
+        // Approved nomination with no peer evaluation behind it.
+        if (createDto.NominationStatus != PeerNominationStatus.Pending)
+            throw new InvalidOperationException(
+                "A nomination starts Pending: approving it is the manager's step, which asks the peer for their feedback.");
 
-        if (createDto.PeerEmployeeId == appraisal.EmployeeId)
-            throw new InvalidOperationException("Cannot nominate the appraisee as their own peer evaluator.");
+        await EnsurePeersMayBeNominatedAsync(appraisal, new[] { createDto.PeerEmployeeId }, cancellationToken);
 
-        // Check if peer is already nominated
+        // Check if peer is already nominated (the unique index holds a rejected one too)
         var alreadyNominated = appraisal.PeerNominations.Any(n => n.PeerEmployeeId == createDto.PeerEmployeeId);
         if (alreadyNominated)
             throw new InvalidOperationException("This peer has already been nominated for this appraisal.");
 
-        // Validate against max peer evaluators from settings
-        if (settings.RequirePeerReviews && appraisal.PeerNominations.Count >= settings.MaxPeerEvaluators)
+        // Validate against max peer evaluators from settings — rejected ones leave room (D2).
+        if (settings.RequirePeerReviews && LiveCount(appraisal.PeerNominations) >= settings.MaxPeerEvaluators)
         {
             throw new InvalidOperationException($"Maximum of {settings.MaxPeerEvaluators} peer evaluators allowed.");
         }
@@ -234,6 +304,13 @@ public class PeerNominationService : IPeerNominationService
         entity.TenantId = tenantId;
 
         await _nominationRepository.AddAsync(entity);
+
+        // D4: in Manager mode the manager chooses the peers, so there is no approval step — the
+        // nomination is approved as it is made, and the peer asked.
+        var approved = settings.PeerNominationMode == PeerNominationMode.Manager
+            ? await StageApprovalAsync(appraisal, new[] { entity }, null, cancellationToken)
+            : Array.Empty<PeerNomination>();
+
         try
         {
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -245,6 +322,9 @@ public class PeerNominationService : IPeerNominationService
                 throw new InvalidOperationException("This peer has already been nominated for this appraisal.");
             throw;
         }
+
+        if (approved.Count > 0)
+            await NotifyApprovedAsync(appraisal.Id, approved, null, cancellationToken);
 
         // Reload with includes
         entity = await TenantNominationQuery()
@@ -263,6 +343,12 @@ public class PeerNominationService : IPeerNominationService
         => await TenantNominationQuery()
             .AnyAsync(n => n.AppraisalId == appraisalId && n.PeerEmployeeId == peerEmployeeId, cancellationToken);
 
+    /// <summary>
+    /// Changes a pending nomination's due date and instructions — nothing else (D1). The update took
+    /// the appraisal, the peer, the nominator, the invitation date and the status from the body: a
+    /// party could move a nomination onto another appraisal, mark it approved with no evaluation
+    /// behind it, or clear the date that guarded its deletion.
+    /// </summary>
     public async Task<PeerNominationDto> UpdateAsync(UpdatePeerNominationDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await TenantNominationQuery()
@@ -272,12 +358,16 @@ public class PeerNominationService : IPeerNominationService
             .Include(n => n.PeerEmployee)
             .Include(n => n.NominatedBy)
             .FirstOrDefaultAsync(n => n.Id == updateDto.Id, cancellationToken);
-        
+
         if (entity == null)
             throw new ArgumentException($"Peer nomination with ID '{updateDto.Id}' not found.");
 
         var settings = entity.Appraisal.AppraisalCycle.AppraisalSettings;
         EnsureNominationsEditable(entity.Appraisal, settings);
+
+        if (entity.NominationStatus != PeerNominationStatus.Pending)
+            throw new InvalidOperationException(
+                "Only a pending nomination can be changed: an approved peer has their form, and a rejected nomination is closed.");
 
         updateDto.UpdateEntity(entity);
 
@@ -289,38 +379,30 @@ public class PeerNominationService : IPeerNominationService
         return entity.ToDto();
     }
 
+    /// <summary>
+    /// Withdraws a pending nomination (D5). An approved peer has their evaluation, and withdrawing them
+    /// is not a nomination change — the decrement kept here for an approved one never ran, because
+    /// approval stamps the invitation date that the old guard refused on.
+    /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await TenantNominationQuery()
             .Include(n => n.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
                     .ThenInclude(c => c.AppraisalSettings)
-            .Include(n => n.Appraisal)
-                .ThenInclude(a => a.PeerNominations)
             .FirstOrDefaultAsync(n => n.Id == id, cancellationToken);
-        
+
         if (entity == null)
             throw new ArgumentException($"Peer nomination with ID '{id}' not found.");
 
         var settings = entity.Appraisal.AppraisalCycle.AppraisalSettings;
         EnsureNominationsEditable(entity.Appraisal, settings);
 
-        // Don't allow deletion if invitation has been sent
-        if (entity.InvitationSentDate.HasValue)
-        {
-            throw new InvalidOperationException("Cannot delete a peer nomination after invitation has been sent.");
-        }
+        if (entity.NominationStatus != PeerNominationStatus.Pending)
+            throw new InvalidOperationException(
+                "Only a pending nomination can be withdrawn: an approved peer has been asked for their feedback.");
 
         await _nominationRepository.DeleteAsync(entity);
-
-        // Update peer evaluators count only if the nomination was approved
-        if (entity.NominationStatus == PeerNominationStatus.Approved)
-        {
-            var appraisal = entity.Appraisal;
-            appraisal.PeerEvaluatorsCount = Math.Max(0, appraisal.PeerEvaluatorsCount - 1); // prevent count from going negative
-            await _appraisalRepository.UpdateAsync(appraisal);
-        }
-
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Peer nomination deleted: {nominationId}", id);
@@ -328,28 +410,14 @@ public class PeerNominationService : IPeerNominationService
         return true;
     }
 
-    public async Task<bool> SendInvitationAsync(SendPeerEvaluationInvitationDto invitationDto, CancellationToken cancellationToken = default)
-    {
-        var entity = await GetOwnedNominationAsync(invitationDto.PeerNominationId, cancellationToken);
-
-        if (entity.InvitationSentDate.HasValue)
-        {
-            throw new InvalidOperationException("Invitation has already been sent for this peer nomination.");
-        }
-
-        entity.InvitationSentDate = DateTime.UtcNow;
-
-        await _nominationRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Peer evaluation invitation sent: {nominationId}", invitationDto.PeerNominationId);
-
-        // TODO: Send email notification to peer employee
-
-        return true;
-    }
-
-    public async Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// The appraisal's nominations and where they stand. The counts leave rejected nominations out
+    /// (D2), and the window follows the cycle's mode. In Manager mode with anonymous reviews the
+    /// appraisee is told the counts only (D-40): the manager chose the peers, and with one peer the
+    /// peer average the appraisee reads is that person's score.
+    /// </summary>
+    public async Task<PeerNominationSummaryDto> GetNominationSummaryAsync(
+        Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var appraisal = await _appraisalRepository.GetQueryable()
@@ -359,6 +427,7 @@ public class PeerNominationService : IPeerNominationService
                 .ThenInclude(n => n.PeerEmployee)
             .Include(a => a.PeerNominations)
                 .ThenInclude(n => n.NominatedBy)
+            .AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == appraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
@@ -373,26 +442,27 @@ public class PeerNominationService : IPeerNominationService
         var pendingCount = nominations.Count(n => n.NominationStatus == PeerNominationStatus.Pending);
         var approvedCount = nominations.Count(n => n.NominationStatus == PeerNominationStatus.Approved);
         var rejectedCount = nominations.Count(n => n.NominationStatus == PeerNominationStatus.Rejected);
+        var live = pendingCount + approvedCount;
 
-        var canSubmit = nominations.Count >= settings.MinPeerEvaluators && 
-                       nominations.Count <= settings.MaxPeerEvaluators;
-        
-        var canEdit = appraisal.Status == AppraisalStatus.Active || 
-                     appraisal.Status == AppraisalStatus.Draft;
+        var peersWithheld = viewerEmployeeId is Guid viewer && viewer == appraisal.EmployeeId
+            && settings.PeerNominationMode == PeerNominationMode.Manager
+            && settings.PeerReviewsAnonymous;
 
         return new PeerNominationSummaryDto
         {
             AppraisalId = appraisalId,
             TotalNominations = nominations.Count,
+            ActiveNominations = live,
             PendingCount = pendingCount,
             ApprovedCount = approvedCount,
             RejectedCount = rejectedCount,
             MinRequired = settings.MinPeerEvaluators,
             MaxAllowed = settings.MaxPeerEvaluators,
-            CanSubmit = canSubmit,
-            CanEdit = canEdit,
+            CanSubmit = live >= settings.MinPeerEvaluators && live <= settings.MaxPeerEvaluators,
+            CanEdit = NominationsEditable(appraisal, settings),
             NominationMode = settings.PeerNominationMode,
-            Nominations = nominations.ToDtoList()
+            PeersWithheld = peersWithheld,
+            Nominations = peersWithheld ? new List<PeerNominationDto>() : nominations.ToDtoList()
         };
     }
 
@@ -412,8 +482,8 @@ public class PeerNominationService : IPeerNominationService
         EnsureNominationsEditable(appraisal, settings);
         EnsureMayNominate(appraisal, settings, nominatedById);
 
-        // Validate count
-        var totalAfterAdd = appraisal.PeerNominations.Count + batchDto.PeerEmployeeIds.Count;
+        // Validate count — a rejected nomination leaves room for its replacement (D2).
+        var totalAfterAdd = LiveCount(appraisal.PeerNominations) + batchDto.PeerEmployeeIds.Count;
         if (totalAfterAdd > settings.MaxPeerEvaluators)
         {
             throw new InvalidOperationException($"Adding {batchDto.PeerEmployeeIds.Count} peers would exceed the maximum of {settings.MaxPeerEvaluators}.");
@@ -425,11 +495,8 @@ public class PeerNominationService : IPeerNominationService
             throw new InvalidOperationException("Duplicate peer IDs found in nomination list.");
         }
 
-        // Check for self-nomination
-        if (batchDto.PeerEmployeeIds.Contains(appraisal.EmployeeId))
-        {
-            throw new InvalidOperationException("Cannot nominate the appraisee as their own peer evaluator.");
-        }
+        // Not the appraisee, not their manager, and each an employee of this tenant (D1).
+        await EnsurePeersMayBeNominatedAsync(appraisal, batchDto.PeerEmployeeIds, cancellationToken);
 
         // Check for already nominated peers
         var existingPeerIds = appraisal.PeerNominations.Select(n => n.PeerEmployeeId).ToList();
@@ -463,6 +530,14 @@ public class PeerNominationService : IPeerNominationService
             createdNominations.Add(nomination);
         }
 
+        // D4: in Manager mode the manager chooses the peers, so there is no approval step — the
+        // nominations are approved as they are made and the peers asked. Nobody was told anything in
+        // that mode: the list sat Pending for the manager's own approval.
+        var managerMode = settings.PeerNominationMode == PeerNominationMode.Manager;
+        var approved = managerMode
+            ? await StageApprovalAsync(appraisal, createdNominations, batchDto.DueDate, cancellationToken)
+            : Array.Empty<PeerNomination>();
+
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
@@ -476,18 +551,20 @@ public class PeerNominationService : IPeerNominationService
         _logger.LogInformation("Batch created {count} peer nominations for appraisal {appraisalId}",
             createdNominations.Count, batchDto.AppraisalId);
 
-        // Nominations sit at Pending until someone approves them, so the approver is told there
-        // is something waiting. Who that is follows the cycle's nomination mode: when the
-        // employee nominates, their manager signs the list off.
+        if (managerMode)
+        {
+            await NotifyApprovedAsync(appraisal.Id, approved, batchDto.DueDate, cancellationToken);
+            return reloadedNominations.ToDtoList();
+        }
+
+        // Nominations sit at Pending until the employee's manager signs the list off, so the manager
+        // is told there is something waiting.
         var appraisee = await _employeeRepository.GetQueryable()
             .Where(e => e.Id == appraisal.EmployeeId && e.TenantId == tenantId)
             .Select(e => new { e.FullName, e.ManagerId })
             .FirstOrDefaultAsync(cancellationToken);
 
-        var appraiseeName = appraisee?.FullName;
-        var approverId = settings.PeerNominationMode == PeerNominationMode.Employee ? appraisee?.ManagerId : null;
-
-        if (approverId is Guid managerId && managerId != Guid.Empty)
+        if (appraisee?.ManagerId is Guid managerId && managerId != Guid.Empty)
         {
             await NotifyQuietlyAsync(new[]
             {
@@ -499,7 +576,7 @@ public class PeerNominationService : IPeerNominationService
                     appraisal.AppraisalCycle?.CycleName,
                     $"/hr/performance/team-appraisals/{appraisal.Id}",
                     appraisal.Id,
-                    appraiseeName),
+                    appraisee.FullName),
             }, cancellationToken);
         }
 
@@ -513,11 +590,13 @@ public class PeerNominationService : IPeerNominationService
             .Include(a => a.AppraisalCycle)
                 .ThenInclude(c => c.AppraisalSettings)
             .Include(a => a.PeerNominations)
-            .Include(a => a.EvaluatorEvaluations)
             .FirstOrDefaultAsync(a => a.Id == approvalDto.AppraisalId && a.TenantId == tenantId, cancellationToken);
 
         if (appraisal == null)
             throw new ArgumentException("Performance appraisal not found.");
+
+        // A decision on the list is made while it is open — it was taken on a completed appraisal too.
+        EnsureNominationsEditable(appraisal, appraisal.AppraisalCycle.AppraisalSettings);
 
         var nominations = appraisal.PeerNominations
             .Where(n => approvalDto.NominationIds.Contains(n.Id))
@@ -526,39 +605,16 @@ public class PeerNominationService : IPeerNominationService
         if (nominations.Count != approvalDto.NominationIds.Count)
             throw new ArgumentException("Some nominations were not found.");
 
-        var settings = appraisal.AppraisalCycle.AppraisalSettings;
-
         foreach (var nomination in nominations)
         {
             if (nomination.NominationStatus != PeerNominationStatus.Pending)
                 throw new InvalidOperationException($"Nomination {nomination.Id} is not in pending status.");
-
-            // Update nomination status
-            nomination.NominationStatus = PeerNominationStatus.Approved;
-            nomination.ApprovedDate = DateTime.UtcNow;
-            nomination.InvitationSentDate = DateTime.UtcNow;
-            if (approvalDto.DueDate.HasValue)
-                nomination.DueDate = approvalDto.DueDate;
-
-            await _nominationRepository.UpdateAsync(nomination);
-
-            // Create EvaluatorEvaluation record ONLY on approval
-            var evaluatorEvaluation = new EvaluatorEvaluation
-            {
-                TenantId = tenantId,
-                AppraisalId = appraisal.Id,
-                EvaluatorId = nomination.PeerEmployeeId,
-                EvaluatorRole = EvaluatorRole.Peer,
-                EvaluatorWeight = settings.PeerEvaluationWeight
-            };
-
-            await _evaluatorEvaluationRepository.AddAsync(evaluatorEvaluation);
         }
 
-        // Update peer evaluators count to reflect approved nominations
-        appraisal.PeerEvaluatorsCount += nominations.Count;
-        await _appraisalRepository.UpdateAsync(appraisal);
+        // A peer nominated while at work may have left since (E-d1).
+        await EnsurePeersAtWorkAsync(tenantId, nominations.Select(n => n.PeerEmployeeId).Distinct().ToList(), cancellationToken);
 
+        var approved = await StageApprovalAsync(appraisal, nominations, approvalDto.DueDate, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         // Reload with includes
@@ -570,38 +626,184 @@ public class PeerNominationService : IPeerNominationService
             .ToListAsync(cancellationToken);
 
         _logger.LogInformation("Approved {count} peer nominations for appraisal {appraisalId}",
-            nominations.Count, approvalDto.AppraisalId);
+            approved.Count, approvalDto.AppraisalId);
+
+        await NotifyApprovedAsync(appraisal.Id, approved, approvalDto.DueDate, cancellationToken);
+
+        return reloadedNominations.ToDtoList();
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The one approval path (performance closure D1, D4, D-39). HR's advance past the nomination step
+    /// set the status alone, so its "approved" peers had no evaluation to fill in and were told nothing.
+    /// ⚠ Nothing here calls the repositories' <c>UpdateAsync</c>: a Manager-mode nomination is still
+    /// being added in the caller's unit of work, and an update would turn its INSERT into an UPDATE of
+    /// a row that does not exist. The tracked entities carry the changes.
+    /// </remarks>
+    public async Task<IReadOnlyList<PeerNomination>> StageApprovalAsync(
+        PerformanceAppraisal appraisal,
+        IEnumerable<PeerNomination> nominations,
+        DateTime? dueDate,
+        CancellationToken cancellationToken = default)
+    {
+        var weight = appraisal.AppraisalCycle?.AppraisalSettings?.PeerEvaluationWeight
+            ?? await _appraisalRepository.GetQueryable()
+                .Where(a => a.Id == appraisal.Id)
+                .Select(a => a.AppraisalCycle.AppraisalSettings.PeerEvaluationWeight)
+                .FirstAsync(cancellationToken);
+
+        // A peer already evaluating this appraisal is not given a second evaluation.
+        var evaluating = (await _evaluatorEvaluationRepository.GetQueryable()
+                .Where(e => e.TenantId == appraisal.TenantId && e.AppraisalId == appraisal.Id && e.EvaluatorRole == EvaluatorRole.Peer)
+                .Select(e => e.EvaluatorId)
+                .ToListAsync(cancellationToken))
+            .ToHashSet();
+
+        var now = DateTime.UtcNow;
+        var approved = new List<PeerNomination>();
+        foreach (var nomination in nominations.Where(n => n.NominationStatus == PeerNominationStatus.Pending))
+        {
+            nomination.NominationStatus = PeerNominationStatus.Approved;
+            nomination.ApprovedDate = now;
+            nomination.InvitationSentDate = now;
+            if (dueDate.HasValue)
+                nomination.DueDate = dueDate;
+
+            // The peer's evaluation — what approval exists to create.
+            if (evaluating.Add(nomination.PeerEmployeeId))
+            {
+                await _evaluatorEvaluationRepository.AddAsync(new EvaluatorEvaluation
+                {
+                    TenantId = appraisal.TenantId,
+                    AppraisalId = appraisal.Id,
+                    EvaluatorId = nomination.PeerEmployeeId,
+                    EvaluatorRole = EvaluatorRole.Peer,
+                    EvaluatorWeight = weight
+                });
+            }
+
+            approved.Add(nomination);
+        }
+
+        appraisal.PeerEvaluatorsCount += approved.Count;
+        return approved;
+    }
+
+    /// <inheritdoc/>
+    /// <summary>The reason a nomination carries when its peer has left before it was approved (D-83).</summary>
+    internal const string LeaverRejectionReason = "No longer at work";
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<(PeerNomination Nomination, string PeerName)>> StageLeaverRejectionsAsync(
+        IReadOnlyCollection<PeerNomination> nominations, Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        var pending = nominations.Where(n => n.NominationStatus == PeerNominationStatus.Pending).ToList();
+        if (pending.Count == 0) return Array.Empty<(PeerNomination, string)>();
+
+        var peerIds = pending.Select(n => n.PeerEmployeeId).Distinct().ToList();
+        // Deleted employees too: one no longer on the books has left as surely as an inactive one.
+        var peers = await _employeeRepository.GetQueryableIncludingDeleted(e => e.TenantId == tenantId && peerIds.Contains(e.Id))
+            .Select(e => new { e.Id, Name = e.FirstName + " " + e.LastName, AtWork = e.IsActive && !e.IsDeleted })
+            .ToListAsync(cancellationToken);
+        var atWork = peers.Where(p => p.AtWork).Select(p => p.Id).ToHashSet();
+        var names = peers.ToDictionary(p => p.Id, p => p.Name);
+
+        var rejected = new List<(PeerNomination, string)>();
+        foreach (var nomination in pending.Where(n => !atWork.Contains(n.PeerEmployeeId)))
+        {
+            // Tracked: the caller's unit of work saves it (see StageApprovalAsync on why no UpdateAsync).
+            nomination.NominationStatus = PeerNominationStatus.Rejected;
+            nomination.RejectionReason = LeaverRejectionReason;
+            rejected.Add((nomination, names.TryGetValue(nomination.PeerEmployeeId, out var name) ? name : "A peer"));
+        }
+        return rejected;
+    }
+
+    /// <inheritdoc/>
+    public async Task NotifyLeaversRejectedAsync(Guid appraisalId, IReadOnlyCollection<string> peerNames, CancellationToken cancellationToken = default)
+    {
+        if (peerNames.Count == 0) return;
+        var tenantId = GetTenantId();
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Include(a => a.AppraisalCycle)
+            .Include(a => a.Employee)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(cancellationToken);
+        if (appraisal is null) return;
+
+        // As for any rejection: the appraisee may now be below the cycle's minimum and is the one to nominate again.
+        await NotifyQuietlyAsync(new[]
+        {
+            new AppraisalNotificationRequest(
+                appraisal.EmployeeId,
+                AppraisalNotificationType.ActionRequired,
+                $"{peerNames.Count} of your peer nomination(s) were not approved",
+                $"Reason: {string.Join(", ", peerNames)} {(peerNames.Count == 1 ? "is" : "are")} no longer at work. Nominate a replacement if you are now below the minimum.",
+                appraisal.AppraisalCycle?.CycleName,
+                $"/me/performance/appraisals/{appraisal.Id}",
+                appraisal.Id,
+                appraisal.Employee?.FullName,
+                NotificationUrgency.Warning),
+        }, cancellationToken);
+    }
+
+    public async Task NotifyApprovedAsync(
+        Guid appraisalId,
+        IReadOnlyCollection<PeerNomination> approved,
+        DateTime? dueDate,
+        CancellationToken cancellationToken = default)
+    {
+        if (approved.Count == 0) return;
+
+        var tenantId = GetTenantId();
+        var context = await _appraisalRepository.GetQueryable()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Select(a => new
+            {
+                AppraiseeName = a.Employee.FullName,
+                a.AppraisalCycle.CycleName,
+                a.AppraisalCycle.AppraisalSettings.PeerEvaluationOpenMode,
+            })
+            .FirstOrDefaultAsync(cancellationToken);
 
         // Approval is what creates the peer's EvaluatorEvaluation, so it is the first moment the
         // peer has anything to do. In AfterSelfEval mode the form is not open yet — the employee
         // submitting their self-evaluation raises the "now open" notification instead.
-        var appraiseeName = await _employeeRepository.GetQueryable()
-            .Where(e => e.Id == appraisal.EmployeeId && e.TenantId == tenantId)
-            .Select(e => e.FullName)
-            .FirstOrDefaultAsync(cancellationToken);
+        var opensNow = context?.PeerEvaluationOpenMode == PeerEvaluationOpenMode.WithSelfEval;
+        var appraiseeName = context?.AppraiseeName;
 
-        var opensNow = settings.PeerEvaluationOpenMode == PeerEvaluationOpenMode.WithSelfEval;
-        var dueText = approvalDto.DueDate.HasValue ? $" Due {approvalDto.DueDate.Value:d MMM yyyy}." : string.Empty;
-
-        await NotifyQuietlyAsync(nominations.Select(n => new AppraisalNotificationRequest(
-            n.PeerEmployeeId,
-            AppraisalNotificationType.PeerEvaluationAssigned,
-            $"You have been asked to review {appraiseeName ?? "a colleague"}",
-            opensNow
-                ? $"Your peer feedback form is open.{dueText}"
-                : $"Your peer feedback form opens once they submit their self-evaluation.{dueText}",
-            appraisal.AppraisalCycle?.CycleName,
-            "/me/performance/peer-reviews",
-            appraisal.Id,
-            appraiseeName)), cancellationToken);
-
-        return reloadedNominations.ToDtoList();
+        await NotifyQuietlyAsync(approved.Select(n =>
+        {
+            var due = dueDate ?? n.DueDate;
+            var dueText = due.HasValue ? $" Due {due.Value:d MMM yyyy}." : string.Empty;
+            return new AppraisalNotificationRequest(
+                n.PeerEmployeeId,
+                AppraisalNotificationType.PeerEvaluationAssigned,
+                $"You have been asked to review {appraiseeName ?? "a colleague"}",
+                opensNow
+                    ? $"Your peer feedback form is open.{dueText}"
+                    : $"Your peer feedback form opens once they submit their self-evaluation.{dueText}",
+                context?.CycleName,
+                "/me/performance/peer-reviews",
+                appraisalId,
+                appraiseeName);
+        }), cancellationToken);
     }
 
     public async Task<IEnumerable<PeerNominationDto>> RejectNominationsAsync(RejectPeerNominationsDto rejectionDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        await GetOwnedAppraisalAsync(rejectionDto.AppraisalId, cancellationToken);
+        var owner = await _appraisalRepository.GetQueryable()
+            .Include(a => a.AppraisalCycle)
+                .ThenInclude(c => c.AppraisalSettings)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == rejectionDto.AppraisalId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException("Performance appraisal not found.");
+
+        // A decision on the list is made while it is open, as an approval is.
+        EnsureNominationsEditable(owner, owner.AppraisalCycle.AppraisalSettings);
 
         var nominations = await TenantNominationQuery()
             .Where(n => rejectionDto.NominationIds.Contains(n.Id) && n.AppraisalId == rejectionDto.AppraisalId)
@@ -664,4 +866,3 @@ public class PeerNominationService : IPeerNominationService
 }
 
 #endregion Peer Nomination
-

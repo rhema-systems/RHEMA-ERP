@@ -25,6 +25,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly IGenericRepository<PerformanceAppraisalCriterionConfig> _criterionConfigRepository;
+    private readonly IGenericRepository<PerformanceAppraisalCriterionConfigGradeRange> _criterionBandRepository;
     private readonly IAppraisalGoalRowService _goalRows;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
@@ -37,6 +38,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         IGenericRepository<AppraisalTemplate> templateRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
         IGenericRepository<PerformanceAppraisalCriterionConfig> criterionConfigRepository,
+        IGenericRepository<PerformanceAppraisalCriterionConfigGradeRange> criterionBandRepository,
         IAppraisalGoalRowService goalRows,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
@@ -48,6 +50,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         _templateRepository = templateRepository;
         _appraisalRepository = appraisalRepository;
         _criterionConfigRepository = criterionConfigRepository;
+        _criterionBandRepository = criterionBandRepository;
         _goalRows = goalRows;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
@@ -157,6 +160,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiTargetValue = criterion.KpiTargetValue,
                 KpiMinValue = criterion.KpiMinValue,
                 KpiMaxValue = criterion.KpiMaxValue,
+                KpiTolerancePercent = criterion.KpiTolerancePercent,
                 KpiTargetSource = criterion.KpiTargetSource,
                 GradeRanges = criterion.GradeRanges.Select(gr => new PerformanceAppraisalCriterionConfigGradeRange
                 {
@@ -176,6 +180,70 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
         // A goal set locked before generation is scored too (closure plan L2): the template rows
         // above cover the template's items, and the goals section gets one row per locked goal.
         await _goalRows.RebuildAsync(employeeId, cycleId, cancellationToken);
+    }
+
+    /// <inheritdoc/>
+    public async Task<int> RebuildSnapshotAsync(Guid performanceAppraisalId, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var appraisal = await _appraisalRepository.GetQueryable()
+            .Include(a => a.AppraisalCycle)
+            .Include(a => a.EvaluatorEvaluations)
+                .ThenInclude(ev => ev.CriterionScores)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(a => a.Id == performanceAppraisalId && a.TenantId == tenantId, cancellationToken)
+            ?? throw new ArgumentException($"Appraisal with ID '{performanceAppraisalId}' not found.");
+
+        // Two actors: an HR officer does not rebuild their own appraisal's form.
+        if (actorEmployeeId is Guid actor && actor == appraisal.EmployeeId)
+            throw new UnauthorizedAccessException("This is your own appraisal: another HR officer rebuilds its form.");
+
+        if (appraisal.Status is not (AppraisalStatus.Draft or AppraisalStatus.Active))
+            throw new InvalidOperationException(
+                $"This appraisal is {appraisal.Status}: a form is rebuilt only before anyone scores it, while the appraisal is a draft or active.");
+        AppraisalLiveCycle.EnsureOpen(appraisal.AppraisalCycle.Status, appraisal.AppraisalCycle.CycleName, "Its form cannot be rebuilt");
+        if (appraisal.EvaluatorEvaluations.Any(ev => ev.SubmittedDate != null))
+            throw new InvalidOperationException("An evaluation of this appraisal has been submitted against its form, so the form is not rebuilt.");
+        if (appraisal.EvaluatorEvaluations.Any(ev => ev.CriterionScores.Any()))
+            throw new InvalidOperationException("A draft evaluation holds scores against this appraisal's form, so the form is not rebuilt.");
+
+        if (appraisal.AppraisalTemplateId is not Guid templateId)
+            throw new InvalidOperationException("This appraisal has no template, so there is no form to rebuild it from.");
+        var template = await _templateRepository.GetQueryable()
+            .Where(t => t.Id == templateId && t.TenantId == tenantId)
+            .Select(t => new { t.TemplateName, t.ApprovalStatus })
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException("This appraisal's template no longer exists, so its form cannot be rebuilt.");
+        if (template.ApprovalStatus != TemplateApprovalStatus.Approved)
+            throw new InvalidOperationException(
+                $"Its template '{template.TemplateName}' is not approved: approve it before rebuilding the form from it.");
+
+        var written = 0;
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            // The template rows it had are replaced whole — a partial snapshot is not patched. Goal rows are the goal-row
+            // service's, rebuilt by the snapshot.
+            var old = await _criterionConfigRepository.GetQueryable()
+                .Include(c => c.GradeRanges)
+                .Where(c => c.TenantId == tenantId && c.PerformanceAppraisalId == appraisal.Id && c.TemplateItemId != null)
+                .ToListAsync(ct);
+            foreach (var config in old)
+            {
+                foreach (var band in config.GradeRanges.ToList())
+                    await _criterionBandRepository.DeleteAsync(band);
+                await _criterionConfigRepository.DeleteAsync(config);
+            }
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            await SnapshotConfigAsync(appraisal.Id, appraisal.EmployeeId, appraisal.AppraisalCycleId, templateId, ct);
+
+            written = await _criterionConfigRepository.GetQueryable()
+                .CountAsync(c => c.TenantId == tenantId && c.PerformanceAppraisalId == appraisal.Id && c.TemplateItemId != null, ct);
+        }, cancellationToken);
+
+        _logger.LogInformation("Appraisal {AppraisalId}'s form rebuilt from template {TemplateId}: {Rows} row(s)",
+            appraisal.Id, templateId, written);
+        return written;
     }
 
     // ── Private helpers ────────────────────────────────────────────────────
@@ -301,6 +369,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
             decimal? kpiTargetValue = null;
             decimal? kpiMinValue = null;
             decimal? kpiMaxValue = null;
+            decimal? kpiTolerancePercent = null;
             KpiTargetSource? kpiTargetSource = null;
 
             // A template KPI item is the same KPI with the same target for everyone on the template
@@ -314,6 +383,8 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                     kpiTargetValue = item.KpiTargetValue;
                     kpiMinValue = item.KpiMinValue;
                     kpiMaxValue = item.KpiMaxValue;
+                    // The definition's tolerance, captured with the target (D-32).
+                    kpiTolerancePercent = item.KpiDefinition?.TolerancePercent;
                     kpiTargetSource = KpiTargetSource.Template;
                 }
             }
@@ -330,6 +401,7 @@ public class EffectiveAppraisalConfigurationService : IEffectiveAppraisalConfigu
                 KpiTargetValue = kpiTargetValue,
                 KpiMinValue = kpiMinValue,
                 KpiMaxValue = kpiMaxValue,
+                KpiTolerancePercent = kpiTolerancePercent,
                 KpiTargetSource = kpiTargetSource,
                 GradeRanges = gradeRanges
             });

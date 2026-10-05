@@ -59,7 +59,11 @@ export type TeamGovernanceStatus =
   | 'InProgress'
   | 'AwaitingApproval'
   | 'InvalidWeight'
-  | 'StructurallyComplete';
+  | 'StructurallyComplete'
+  /** Fewer goals than the cycle requires (closure B2). */
+  | 'BelowMinimum'
+  /** More goals than the cycle allows (closure B2). */
+  | 'AboveMaximum';
 
 const opts = <T extends string>(entries: [T, string][]) =>
   entries.map(([value, label]) => ({ value, label }));
@@ -100,7 +104,8 @@ export const GOAL_PROGRESS_STATUS_OPTIONS = opts<GoalProgressStatus>([
 // ── Appraisal cycle (read-only here) ─────────────────────────────────────────────
 // Cycles themselves are a later slice of area 5; the goal screens only need to pick one.
 
-export type AppraisalCycleStatus = 'Draft' | 'Open' | 'InProgress' | 'Closed' | 'Archived';
+/** The API's statuses (`types/hr/appraisal.ts` has the same union); `InProgress` went with D-14, and `Archived` never existed. */
+export type AppraisalCycleStatus = 'Draft' | 'Open' | 'Closed';
 
 export interface AppraisalCycleOption extends AuditFields {
   cycleCode: string;
@@ -476,9 +481,12 @@ export interface CreateEmployeeGoal {
   dueDate: string;
 }
 
+/**
+ * No progressPercent (performance closure D-72): a goal's progress is what its progress entries say.
+ * The edit wrote it straight onto the goal, and both forms sent back the value they had loaded.
+ */
 export type UpdateEmployeeGoal = Omit<CreateEmployeeGoal, 'goalLibraryId'> & {
   id: string;
-  progressPercent: number;
 };
 
 export interface EmployeeGoalSummary {
@@ -561,6 +569,12 @@ export interface TeamMemberOverview {
   overdueCount: number;
   totalWeight: number;
   isWeightBalanced: boolean;
+  /** Every goal but a rejected one — what the cycle's bounds count (closure B2). */
+  liveGoalCount: number;
+  minGoals: number;
+  maxGoals?: number | null;
+  meetsMinGoalCount: boolean;
+  withinMaxGoalCount: boolean;
   governanceStatus: TeamGovernanceStatus;
 }
 

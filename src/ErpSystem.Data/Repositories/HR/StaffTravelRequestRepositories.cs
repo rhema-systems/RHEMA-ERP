@@ -35,6 +35,11 @@ public class StaffTravelRequestRepository : GenericRepository<StaffTravelRequest
             .Include(r => r.Employee)
             .Include(r => r.InitiatedBy)
             .Include(r => r.CancelledBy)
+            // Lane 1's lifecycle actors — without these the names map blank on every read.
+            .Include(r => r.ApprovedBy)
+            .Include(r => r.ReturnedBy)
+            .Include(r => r.ClosedBy)
+            .Include(r => r.ChangeRequestedBy)
             .Include(r => r.OrganizationUnit)
             .Include(r => r.DestinationCountry)
             .Include(r => r.OriginCountry)
@@ -173,6 +178,9 @@ public class StaffGroupTravelRepository : GenericRepository<StaffGroupTravel>, I
             .Include(g => g.LeadEmployee)
             .Include(g => g.DestinationCountry)
             .Include(g => g.Requests).ThenInclude(r => r.Employee)
+            // Each traveller's destination country, so the group page can say whose trip differs
+            // from the group (travel closure lane 1, T-32).
+            .Include(g => g.Requests).ThenInclude(r => r.DestinationCountry)
             .FirstOrDefaultAsync(g => g.Id == id && !g.IsDeleted);
     }
 
@@ -181,6 +189,8 @@ public class StaffGroupTravelRepository : GenericRepository<StaffGroupTravel>, I
         return await _dbSet
             .Include(g => g.LeadEmployee)
             .Include(g => g.DestinationCountry)
+            // The summary counts the places taken; without the travellers it read 0 for every group.
+            .Include(g => g.Requests)
             .Where(g => g.Status == status && !g.IsDeleted)
             .OrderByDescending(g => g.TravelStartDate)
             .ToListAsync();

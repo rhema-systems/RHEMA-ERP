@@ -60,6 +60,11 @@ public interface IStaffTravelComplianceService
     Task<StaffTravelAlertDto> UpdateAlertAsync(UpdateStaffTravelAlertDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAlertAsync(Guid id, CancellationToken cancellationToken = default);
 
+    // Lane 7 (D-36, T-25): the destination's health requirements on a trip, each cleared or not.
+    Task<IReadOnlyList<StaffTravelTripHealthRequirementDto>> GetTripHealthRequirementsAsync(Guid requestId, CancellationToken cancellationToken = default);
+    Task<StaffTravelTripHealthRequirementDto> ClearHealthRequirementAsync(Guid requestId, Guid healthRequirementId, string? note, Guid clearedByEmployeeId, CancellationToken cancellationToken = default);
+    Task<bool> UnclearHealthRequirementAsync(Guid requestId, Guid healthRequirementId, CancellationToken cancellationToken = default);
+
     // Alert notifications
     Task<StaffTravelAlertNotificationDto> CreateAlertNotificationAsync(CreateStaffTravelAlertNotificationDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelAlertNotificationDto>> GetNotificationsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default);

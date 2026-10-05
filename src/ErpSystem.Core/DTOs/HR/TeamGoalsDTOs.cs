@@ -54,6 +54,22 @@ public sealed class TeamMemberOverviewDto
     /// <summary>True when TotalGoals > 0 AND TotalWeight == 100.</summary>
     public bool IsWeightBalanced { get; init; }
 
+    // ── Goal-count governance (performance closure B2) ──────────────────────
+    /// <summary>Goals in the set: every goal but a rejected one (GoalSetRules.IsLive).</summary>
+    public int LiveGoalCount { get; init; }
+
+    /// <summary>The cycle's minimum goals per employee (1 when the profile sets none).</summary>
+    public int MinGoals { get; init; }
+
+    /// <summary>The cycle's maximum goals per employee; null when the profile sets none.</summary>
+    public int? MaxGoals { get; init; }
+
+    /// <summary>The set holds at least <see cref="MinGoals"/> live goals.</summary>
+    public bool MeetsMinGoalCount { get; init; }
+
+    /// <summary>The set holds no more than <see cref="MaxGoals"/> live goals.</summary>
+    public bool WithinMaxGoalCount { get; init; }
+
     // ── Governance status (derived, see derivation rules in service) ──────────
     public TeamGovernanceStatus GovernanceStatus { get; init; }
 }

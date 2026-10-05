@@ -107,7 +107,7 @@ sweep, since nobody else owns it.
 
 Status key: 🔲 to record · ✅ recorded, awaiting the sweep · ⏳ area not yet built
 
-### Area 12 — Staff Travel ✅ *(surveyed 2026-08-17; area not yet built)*
+### Area 12 — Staff Travel ✅ *(surveyed 2026-08-17; built since, and closed by the travel final closure 2026-10-01…04 — rows 12.6–12.8 added then)*
 
 Source: `plans/HR-Area-12-Travel-Build-Plan.md` §7.4. Measured fact: **zero** references to
 `GLAccount`, cost centre, `ProjectId`, `Payroll`, `BudgetEntry` or `SupplierId` across all 34
@@ -115,11 +115,19 @@ travel entities.
 
 | # | money event | entity | what is missing |
 |---|---|---|---|
-| 12.1 | Expense claim paid - **POSTS 2026-09-20** (`TRAVEL_CLAIM_APPROVED` recognises on review, `TRAVEL_CLAIM_PAID` settles on pay; payroll offset posts only the advance recovery) | `StaffTravelExpenseClaim` | ~~No GL posting~~, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
+| 12.1 | Expense claim paid - **POSTS 2026-09-20** (`TRAVEL_CLAIM_APPROVED` recognises on review, `TRAVEL_CLAIM_PAID` settles on pay; payroll offset posts only the advance recovery — ⚠ **payroll offset is refused since 2026-10-02** (travel closure D-10): payroll has no intake, so it paid nobody; cross-module defect #37) | `StaffTravelExpenseClaim` | ~~No GL posting~~, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
 | 12.2 | Cash advance disbursed - **POSTS 2026-09-20** (`TRAVEL_ADVANCE_DISBURSED`: Dr staff advances receivable / Cr clearing) | `StaffTravelAdvance` | ~~No GL entry~~. An outstanding advance is an **employee receivable**: `UnsettledAmount` is a balance-sheet figure living only in HR, appearing in no trial balance and no ageing. |
 | 12.3 | Advance settled against a claim - **POSTS 2026-09-20** (the Cr receivable leg of `TRAVEL_CLAIM_PAID`) | `StaffTravelExpenseClaim.AdvanceDeducted` | ~~The contra-entry that clears the receivable has no accounting counterpart.~~ **⚠ Note: the travel-side arithmetic now EXISTS as of slice 4** — paying a claim deducts and settles the linked advance, capped at the outstanding balance. Before that, nothing wrote `AdvanceDeducted` or `SettledAmount` at all, so employees were paid in full despite holding an advance and the advance stayed outstanding for ever. The sweep therefore inherits correct travel-side numbers to post from, not a blank field. |
 | 12.4 | Trip budget committed / consumed | `StaffTravelBudget` | Per-trip envelope (flight / accommodation / per-diem / transport / misc) with no link to `BudgetEntry`, `UnitBudget`, a GL account or a cost centre. The breakdown is legitimately travel-owned; the missing part is that it must **consume from** the department's finance budget. |
 | 12.5 | Booking cost committed | `StaffTravel{Flight,Hotel,GroundTransport,CarRental}Booking` | `EstimatedCost` / `ActualCost` per booking, no commitment accounting. |
+| 12.6 | Advance cash handed back - **POSTS since 2026-10-02** (travel closure lane 3: `TRAVEL_ADVANCE_REFUNDED`, Dr staff payments clearing / Cr staff advances receivable) | `StaffTravelAdvance` | One refund per advance; recorded by the desk's *Cash back*. |
+| 12.7 | Advance written off - **POSTS since 2026-10-02** (lane 3: `TRAVEL_ADVANCE_WRITTEN_OFF`, Dr staff receivable write-off / Cr staff advances receivable) | `StaffTravelAdvance` | Uses the existing *staff receivable write-off* role (posting slice 4's, for waived surcharges, fines and bonds); a tenant that mapped it posts this too. |
+| 12.8 | Advance recovered from a leaver's final settlement - **posts NOTHING in travel, by design** (travel closure 9c, D-58) | `StaffTravelAdvance` via `SeparationSettlementLine.SourceTravelAdvanceId` | The settlement's own journal (`SEPARATION_SETTLEMENT_RELEASED`) credits the receivable; travel only marks the advance settled. A refund through 12.6 would credit it twice. |
+
+**The dated rate (travel closure lane 3, B12), beyond travel.** `HrCurrencyBridge.GetRateToBaseAsync` reads the rate in
+force on the date asked — Finance's own lookup order, the direct quote then the inverse, to six places. Until lane 3 it
+checked that the date had a rate, then converted at today's. It is shared, so **HR's Finance posting adapter** (every
+foreign-currency HR posting) and **staff requisition costs** now value at their own date too, not only travel's expenses.
 
 ⚠ **What slice 4 already fixed, so the sweep does not re-litigate it.** The travel-side money
 arithmetic is now correct and tested against known quantities: advance settlement exists and is
@@ -147,7 +155,7 @@ the sweep is a re-survey after all.
 | 2 — Leave | leave encashment — in service and on separation | ✅ **recorded 2026-09-17**, see below |
 | 4 — Compensation | pay components, allowances, the payroll boundary — **recorded 2026-09-21: nothing to post.** Salary grades/notches (sweep row 10) are reference data; pay-component amounts (row 11) and movement-driven salary changes (row 57) are *authorisations* that feed payroll's next run, and payroll's own journal (route `HrPayrollJournal`) is the accounting event. HR posts none of it; the HR↔payroll settings register covers the boundary | ✅ recorded — payroll's |
 | 7 — Training | service bonds **POST 2026-09-20** (slice 4: breached / settled / waived); budget transactions **deliberately not posted** (a memo of a Finance document — design § 3.1e); the budget *read* **BUILT 2026-09-21** (`GET training-budgets/{id}/finance-actuals`, design § 3.1f) | ✅ built |
-| 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll). Insurance premium, insurer recovery and NHIS recovery **POST 2026-09-20** (slice 5: `MEDICAL_PREMIUM_PAID`, `MEDICAL_INSURER_RECOVERY_RECEIVED`, `NHIS_CLAIM_REIMBURSED`) | ✅ built |
+| 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll — ⚠ **and nothing reaches payroll, so a claim paid that way pays nobody**; still offered, deferred pending cross-module defect #37 and the TDC question, see the finish plan's hand-offs lane). Insurance premium, insurer recovery and NHIS recovery **POST 2026-09-20** (slice 5: `MEDICAL_PREMIUM_PAID`, `MEDICAL_INSURER_RECOVERY_RECEIVED`, `NHIS_CLAIM_REIMBURSED`) | ✅ built |
 | 10 — SHE | incident insurance proceeds **POST 2026-09-20** (slice 5: `SHE_INSURANCE_CLAIM_RECEIVED`); no other SHE money field exists to post | ✅ built |
 
 ⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it

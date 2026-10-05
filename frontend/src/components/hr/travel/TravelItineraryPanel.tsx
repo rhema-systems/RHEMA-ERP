@@ -1,11 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarRange, Plus, MapPin, Loader2, Star, CheckCheck } from 'lucide-react';
+import {
+  CalendarRange, Plus, MapPin, Loader2, Star, CheckCheck, Pencil, Trash2, MoreHorizontal, Stamp, AlertTriangle, Link2,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -17,12 +19,19 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import {
@@ -39,7 +48,11 @@ import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
 import { travelBookingsService } from '@/services/hr/travel-bookings.service';
 import type { StaffTravelRequest } from '@/types/hr/travel';
-import type { StaffTravelItineraryLeg } from '@/types/hr/travel-bookings';
+import type {
+  StaffTravelItinerary, StaffTravelItineraryActivity, StaffTravelItineraryLeg, TravelItineraryStatus,
+} from '@/types/hr/travel-bookings';
+import { TravelQueryError } from './TravelQueryError';
+import { useTravelAccess } from './useTravelAccess';
 
 const LEG_TYPES = ['Departure', 'Transit', 'Arrival', 'Stay', 'DayTrip', 'Return'] as const;
 const TRANSPORT_MODES = [
@@ -64,85 +77,102 @@ const fmtTime = (v?: string | null) =>
  * wherever the person booking it happens to be sitting.
  */
 const orNull = (v?: string | null) => (v && v.trim() ? v : null);
+const toLocalInput = (v?: string | null) => (v ? v.slice(0, 16) : '');
+
+/** The trip states a plan is made and changed in (lane 5, slice 5b) — from its draft until it is under way. */
+const PLANNABLE = new Set(['Draft', 'Submitted', 'ReturnedForRevision', 'Approved', 'InProgress']);
+/** A version still being written; a finalised, superseded or cancelled one is the record of a plan (D-25). */
+const isEditable = (s?: TravelItineraryStatus) => s === 'Draft' || s === 'PendingReview';
+const describe = (s?: string) => (s === 'Approved' ? 'Finalised' : humanize(s ?? ''));
+
+function useItineraryToast() {
+  const { toast } = useToast();
+  return {
+    done: (title: string) => toast({ title }),
+    failed: (title: string) => (e: Error) => toast({ variant: 'destructive', title, description: e.message }),
+  };
+}
 
 // ── Dialogs ──────────────────────────────────────────────────────────────────
 
 const itinerarySchema = z.object({
   title: z.string().min(1, 'Required').max(300),
-  totalTravelDays: z.coerce.number().min(0).max(365),
-  totalWorkingDays: z.coerce.number().min(0).max(365),
-  totalWeekendDays: z.coerce.number().min(0).max(365),
   summaryNotes: z.string().max(2000).optional(),
+  makeCurrent: z.boolean(),
 });
 
+/** A new version, or a draft version's words. The days follow the trip; the status is the server's (D-25). */
 function ItineraryDialog({
-  requestId, nextVersion, open, onOpenChange,
+  requestId, editing, hasVersions, open, onOpenChange,
 }: {
   requestId: string;
-  nextVersion: number;
+  /** The draft version to change; null for a new version. */
+  editing: StaffTravelItinerary | null;
+  hasVersions: boolean;
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const notify = useItineraryToast();
 
   const form = useForm<z.input<typeof itinerarySchema>>({
     resolver: zodResolver(itinerarySchema),
-    defaultValues: {
-      title: '', totalTravelDays: 0, totalWorkingDays: 0, totalWeekendDays: 0,
-    },
+    defaultValues: { title: '', summaryNotes: '', makeCurrent: false },
   });
+  useEffect(() => {
+    if (!open) return;
+    form.reset(editing
+      ? { title: editing.title, summaryNotes: editing.summaryNotes ?? '', makeCurrent: false }
+      : { title: '', summaryNotes: '', makeCurrent: false });
+  }, [open, editing, form]);
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof itinerarySchema>) => {
       const v = itinerarySchema.parse(values);
-      return travelBookingsService.createItinerary({
-        ...v,
-        staffTravelRequestId: requestId,
-        versionNumber: nextVersion,
-        // A new version does not take over on its own — promoting it is a separate, deliberate act.
-        isCurrentVersion: nextVersion === 1,
-      });
+      return editing
+        ? travelBookingsService.updateItinerary({ id: editing.id, title: v.title, summaryNotes: v.summaryNotes || null })
+        : travelBookingsService.createItinerary({
+            staffTravelRequestId: requestId, title: v.title, summaryNotes: v.summaryNotes || null,
+            // A trip's first version is current whatever this says; a later one takes over only when asked.
+            isCurrentVersion: v.makeCurrent,
+          });
     },
     onSuccess: async () => {
-      toast({ title: 'Itinerary created' });
+      notify.done(editing ? 'Itinerary saved' : 'Itinerary created');
       onOpenChange(false);
-      form.reset();
       await queryClient.invalidateQueries({ queryKey: ['travel-itineraries', requestId] });
+      if (editing) await queryClient.invalidateQueries({ queryKey: ['travel-itinerary', editing.id] });
     },
-    onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not create the itinerary', description: e.message }),
+    onError: notify.failed(editing ? 'Could not save the itinerary' : 'Could not create the itinerary'),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New itinerary — version {nextVersion}</DialogTitle>
+          <DialogTitle>{editing ? `Version ${editing.versionNumber}` : 'New itinerary version'}</DialogTitle>
           <DialogDescription>
-            {nextVersion === 1
-              ? 'The first version becomes the current one.'
-              : 'Created alongside the current version; promote it when it is ready.'}
+            The travel, working and weekend days are worked out from the trip&apos;s dates.
+            {!editing && (hasVersions
+              ? ' A new version sits beside the one in force until you make it current.'
+              : ' The first version is the current one.')}
           </DialogDescription>
         </DialogHeader>
-        <form
-          id="itinerary-form"
-          className="space-y-4"
-          onSubmit={form.handleSubmit((v) => save.mutate(v))}
-        >
+        <form id="itinerary-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <TextField form={form} name="title" label="Title" required />
-          <FieldRow>
-            <NumberField form={form} name="totalTravelDays" label="Travel days" required />
-            <NumberField form={form} name="totalWorkingDays" label="Working days" />
-          </FieldRow>
-          <NumberField form={form} name="totalWeekendDays" label="Weekend days" />
           <TextareaField form={form} name="summaryNotes" label="Summary" />
+          {!editing && hasVersions && (
+            <SwitchField
+              form={form} name="makeCurrent" label="Make it the current version now"
+              description="The version in force is then superseded — kept as the record of the earlier plan."
+            />
+          )}
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button type="submit" form="itinerary-form" disabled={save.isPending}>
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Create
+            {editing ? 'Save' : 'Create'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -161,57 +191,87 @@ const legSchema = z.object({
   transportMode: z.enum(TRANSPORT_MODES).optional(),
   departureDatetime: z.string().optional(),
   arrivalDatetime: z.string().optional(),
+  /** "flight:<id>", "hotel:<id>" or "ground:<id>" — one booking per leg, sent as the matching field. */
+  linkedBooking: z.string().optional(),
   notes: z.string().max(2000).optional(),
 });
 
+/** Adds or changes a leg; the booking it points at must be this trip's (Q3), its date compared with the leg's (T-19). */
 function LegDialog({
-  itineraryId, requestId, nextOrder, countryOptions, open, onOpenChange,
+  itineraryId, requestId, editing, nextOrder, countryOptions, bookingOptions, open, onOpenChange,
 }: {
   itineraryId: string;
   requestId: string;
+  editing: StaffTravelItineraryLeg | null;
   nextOrder: number;
   countryOptions: { value: string; label: string }[];
+  bookingOptions: { value: string; label: string }[];
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const notify = useItineraryToast();
 
   const form = useForm<z.input<typeof legSchema>>({
     resolver: zodResolver(legSchema),
     defaultValues: { sequenceOrder: nextOrder, legType: 'Departure', legDate: '' },
   });
+  useEffect(() => {
+    if (!open) return;
+    if (!editing) {
+      form.reset({ sequenceOrder: nextOrder, legType: 'Departure', legDate: '', linkedBooking: '' });
+      return;
+    }
+    form.reset({
+      sequenceOrder: editing.sequenceOrder, legType: editing.legType, legDate: editing.legDate.slice(0, 10),
+      originCity: editing.originCity ?? '', originCountryId: editing.originCountryId ?? '',
+      destinationCity: editing.destinationCity ?? '', destinationCountryId: editing.destinationCountryId ?? '',
+      transportMode: editing.transportMode ?? undefined,
+      departureDatetime: toLocalInput(editing.departureDatetime), arrivalDatetime: toLocalInput(editing.arrivalDatetime),
+      linkedBooking: editing.flightBookingId ? `flight:${editing.flightBookingId}`
+        : editing.hotelBookingId ? `hotel:${editing.hotelBookingId}`
+          : editing.groundTransportId ? `ground:${editing.groundTransportId}` : '',
+      notes: editing.notes ?? '',
+    });
+  }, [open, editing, nextOrder, form]);
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof legSchema>) => {
       const v = legSchema.parse(values);
-      return travelBookingsService.addLeg(itineraryId, {
-        ...v,
-        staffTravelItineraryId: itineraryId,
+      const [kind, bookingId] = (v.linkedBooking ?? '').split(':');
+      const payload = {
+        sequenceOrder: v.sequenceOrder, legType: v.legType, legDate: v.legDate,
+        originCity: v.originCity, destinationCity: v.destinationCity, notes: v.notes,
         originCountryId: v.originCountryId || null,
         destinationCountryId: v.destinationCountryId || null,
         transportMode: v.transportMode ?? null,
         departureDatetime: orNull(v.departureDatetime),
         arrivalDatetime: orNull(v.arrivalDatetime),
-      });
+        flightBookingId: kind === 'flight' ? bookingId : null,
+        hotelBookingId: kind === 'hotel' ? bookingId : null,
+        groundTransportId: kind === 'ground' ? bookingId : null,
+      };
+      return editing
+        ? travelBookingsService.updateLeg({ ...payload, id: editing.id })
+        : travelBookingsService.addLeg(itineraryId, { ...payload, staffTravelItineraryId: itineraryId });
     },
     onSuccess: async () => {
-      toast({ title: 'Leg added' });
+      notify.done(editing ? 'Leg saved' : 'Leg added');
       onOpenChange(false);
-      form.reset({ sequenceOrder: nextOrder + 1, legType: 'Transit', legDate: '' });
       await queryClient.invalidateQueries({ queryKey: ['travel-itinerary', itineraryId] });
       await queryClient.invalidateQueries({ queryKey: ['travel-itineraries', requestId] });
     },
-    onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not add the leg', description: e.message }),
+    onError: notify.failed(editing ? 'Could not save the leg' : 'Could not add the leg'),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add a leg</DialogTitle>
-          <DialogDescription>One movement or stay in the plan.</DialogDescription>
+          <DialogTitle>{editing ? 'Change the leg' : 'Add a leg'}</DialogTitle>
+          <DialogDescription>
+            One movement or stay in the plan, inside the trip&apos;s dates (a day either side).
+          </DialogDescription>
         </DialogHeader>
         <form id="leg-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <FieldRow>
@@ -243,13 +303,18 @@ function LegDialog({
             <DateTimeField form={form} name="departureDatetime" label="Departs" />
             <DateTimeField form={form} name="arrivalDatetime" label="Arrives" />
           </FieldRow>
+          <SelectField
+            form={form} name="linkedBooking" label="Linked booking" options={bookingOptions}
+            allowEmpty emptyLabel="None"
+            description="A flight, hotel or ground booking of this trip. If its dates and the leg's differ, the leg is flagged."
+          />
           <TextareaField form={form} name="notes" label="Notes" />
         </form>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button type="submit" form="leg-form" disabled={save.isPending}>
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Add leg
+            {editing ? 'Save leg' : 'Add leg'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -272,67 +337,72 @@ const activitySchema = z.object({
 });
 
 function ActivityDialog({
-  leg, itineraryId, open, onOpenChange,
+  leg, editing, itineraryId, open, onOpenChange,
 }: {
   leg: StaffTravelItineraryLeg | null;
+  editing: StaffTravelItineraryActivity | null;
   itineraryId: string;
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const notify = useItineraryToast();
 
   const form = useForm<z.input<typeof activitySchema>>({
     resolver: zodResolver(activitySchema),
     defaultValues: { activityType: 'Meeting', title: '', isMandatory: false },
   });
+  useEffect(() => {
+    if (!open) return;
+    form.reset(editing
+      ? {
+          activityType: editing.activityType, title: editing.title, description: editing.description ?? '',
+          locationName: editing.locationName ?? '', locationAddress: editing.locationAddress ?? '',
+          startDatetime: toLocalInput(editing.startDatetime), endDatetime: toLocalInput(editing.endDatetime),
+          contactName: editing.contactName ?? '', contactEmail: editing.contactEmail ?? '',
+          contactPhone: editing.contactPhone ?? '', isMandatory: editing.isMandatory,
+        }
+      : { activityType: 'Meeting', title: '', isMandatory: false });
+  }, [open, editing, form]);
 
   const save = useMutation({
     mutationFn: (values: z.input<typeof activitySchema>) => {
-      if (!leg) throw new Error('No leg selected');
       const v = activitySchema.parse(values);
-      return travelBookingsService.addActivity(leg.id, {
+      const payload = {
         ...v,
-        staffTravelItineraryLegId: leg.id,
         // An empty string is not a missing email; the server validates the format of what it gets,
         // so `[EmailAddress]` would refuse `""` rather than treat it as "none given".
         contactEmail: v.contactEmail || null,
         contactPhone: v.contactPhone || null,
         startDatetime: orNull(v.startDatetime),
         endDatetime: orNull(v.endDatetime),
-      });
+      };
+      if (editing) return travelBookingsService.updateActivity({ ...payload, id: editing.id });
+      if (!leg) throw new Error('No leg selected');
+      return travelBookingsService.addActivity(leg.id, { ...payload, staffTravelItineraryLegId: leg.id });
     },
     onSuccess: async () => {
-      toast({ title: 'Activity added' });
+      notify.done(editing ? 'Activity saved' : 'Activity added');
       onOpenChange(false);
-      form.reset({ activityType: 'Meeting', title: '', isMandatory: false });
       await queryClient.invalidateQueries({ queryKey: ['travel-itinerary', itineraryId] });
     },
-    onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not add the activity', description: e.message }),
+    onError: notify.failed(editing ? 'Could not save the activity' : 'Could not add the activity'),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Add an activity</DialogTitle>
+          <DialogTitle>{editing ? 'Change the activity' : 'Add an activity'}</DialogTitle>
           <DialogDescription>
             {leg
               ? `On the ${humanize(leg.legTypeName).toLowerCase()} leg of ${fmtDate(leg.legDate)}.`
               : 'What the traveller is there to do.'}
           </DialogDescription>
         </DialogHeader>
-        <form
-          id="activity-form"
-          className="space-y-4"
-          onSubmit={form.handleSubmit((v) => save.mutate(v))}
-        >
+        <form id="activity-form" className="space-y-4" onSubmit={form.handleSubmit((v) => save.mutate(v))}>
           <FieldRow>
-            <SelectField
-              form={form} name="activityType" label="Activity" required
-              options={options(ACTIVITY_TYPES)}
-            />
+            <SelectField form={form} name="activityType" label="Activity" required options={options(ACTIVITY_TYPES)} />
             <TextField form={form} name="title" label="Title" required />
           </FieldRow>
           <TextareaField form={form} name="description" label="Description" />
@@ -360,7 +430,7 @@ function ActivityDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button type="submit" form="activity-form" disabled={save.isPending}>
             {save.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Add activity
+            {editing ? 'Save activity' : 'Add activity'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -369,6 +439,11 @@ function ActivityDialog({
 }
 
 // ── The panel ────────────────────────────────────────────────────────────────
+
+type Removing =
+  | { kind: 'version'; id: string; label: string }
+  | { kind: 'leg'; id: string; label: string }
+  | { kind: 'activity'; id: string; label: string };
 
 /**
  * The plan for a trip: what the traveller does, day by day.
@@ -379,19 +454,31 @@ function ActivityDialog({
  * separate act; promoting supersedes its predecessor rather than overwriting it. This panel shows
  * one version at a time and says plainly which is in force.
  *
- * A leg may point at a booking already recorded against the request — that is where the plan and
- * what was actually reserved meet.
+ * <b>The server owns the status (lane 5, D-25).</b> A version is a Draft while it is written; <i>Finalise</i> marks the
+ * version in force Approved — the agreed plan — after which it, its legs and its activities are not changed (a new
+ * version is); a version replaced as current is Superseded, and the trip's cancel marks the current one Cancelled.
+ * The days are worked out from the trip's dates. The version in force is not deleted. A plan is made while the trip
+ * is open — from its draft until it is under way.
+ *
+ * A leg may point at a booking of the same trip — that is where the plan and what was actually reserved meet — and is
+ * flagged when the two disagree on the date (T-19).
  */
 export function TravelItineraryPanel({ request }: { request: StaffTravelRequest }) {
   const requestId = request.id;
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const notify = useItineraryToast();
+  const { canWrite, canAdmin } = useTravelAccess();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showItineraryDialog, setShowItineraryDialog] = useState(false);
-  const [showLegDialog, setShowLegDialog] = useState(false);
-  const [activityLeg, setActivityLeg] = useState<StaffTravelItineraryLeg | null>(null);
+  const [versionDialog, setVersionDialog] = useState<{ editing: StaffTravelItinerary | null } | null>(null);
+  const [legDialog, setLegDialog] = useState<{ editing: StaffTravelItineraryLeg | null } | null>(null);
+  const [activityDialog, setActivityDialog] =
+    useState<{ leg: StaffTravelItineraryLeg | null; editing: StaffTravelItineraryActivity | null } | null>(null);
+  const [removing, setRemoving] = useState<Removing | null>(null);
 
-  const { data: versions, isLoading } = useQuery({
+  const plannable = PLANNABLE.has(request.status);
+  const mayPlan = canWrite && plannable;
+
+  const { data: versions, isLoading, isError, error } = useQuery({
     queryKey: ['travel-itineraries', requestId],
     queryFn: () => travelBookingsService.getItinerariesByRequest(requestId),
   });
@@ -400,33 +487,70 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
     queryKey: ['countries', 'active'],
     queryFn: () => countryService.getActive(),
   });
+  // The trip's bookings, for the leg's link — the same queries the Bookings tab reads.
+  const { data: flights } = useQuery({
+    queryKey: ['travel-flights', requestId],
+    queryFn: () => travelBookingsService.getFlightsByRequest(requestId),
+  });
+  const { data: hotels } = useQuery({
+    queryKey: ['travel-hotels', requestId],
+    queryFn: () => travelBookingsService.getHotelsByRequest(requestId),
+  });
+  const { data: grounds } = useQuery({
+    queryKey: ['travel-ground', requestId],
+    queryFn: () => travelBookingsService.getGroundTransportsByRequest(requestId),
+  });
 
   const ordered = [...(versions ?? [])].sort((a, b) => b.versionNumber - a.versionNumber);
   const current = ordered.find((v) => v.isCurrentVersion);
   const viewingId = selectedId ?? current?.id ?? ordered[0]?.id ?? null;
 
-  const { data: itinerary } = useQuery({
+  const {
+    data: itinerary, isError: itineraryFailed, error: itineraryError,
+  } = useQuery({
     queryKey: ['travel-itinerary', viewingId],
     queryFn: () => travelBookingsService.getItinerary(viewingId as string),
     enabled: !!viewingId,
   });
 
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ['travel-itineraries', requestId] });
+    await queryClient.invalidateQueries({ queryKey: ['travel-itinerary', viewingId] });
+  };
   const promote = useMutation({
     mutationFn: (id: string) => travelBookingsService.setCurrentItinerary(id),
-    onSuccess: async () => {
-      toast({ title: 'This version is now in force' });
-      await queryClient.invalidateQueries({ queryKey: ['travel-itineraries', requestId] });
-      await queryClient.invalidateQueries({ queryKey: ['travel-itinerary', viewingId] });
+    onSuccess: async () => { notify.done('This version is now in force'); await refresh(); },
+    onError: notify.failed('Could not promote the version'),
+  });
+  const finalise = useMutation({
+    mutationFn: (id: string) => travelBookingsService.finaliseItinerary(id),
+    onSuccess: async () => { notify.done('Itinerary finalised'); await refresh(); },
+    onError: notify.failed('Could not finalise the itinerary'),
+  });
+  const remove = useMutation({
+    mutationFn: (r: Removing) =>
+      r.kind === 'version' ? travelBookingsService.deleteItinerary(r.id)
+        : r.kind === 'leg' ? travelBookingsService.deleteLeg(r.id)
+          : travelBookingsService.deleteActivity(r.id),
+    onSuccess: async (_d, r) => {
+      notify.done(r.kind === 'version' ? 'Version deleted' : r.kind === 'leg' ? 'Leg removed' : 'Activity removed');
+      setRemoving(null);
+      if (r.kind === 'version') setSelectedId(null);
+      await refresh();
     },
-    onError: (e: Error) =>
-      toast({ variant: 'destructive', title: 'Could not promote the version', description: e.message }),
+    onError: notify.failed('Could not remove it'),
   });
 
   const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
+  const bookingOptions = [
+    ...(flights ?? []).map((f) => ({ value: `flight:${f.id}`, label: `Flight ${f.bookingReference || f.airlineName || ''} (${humanize(f.statusName).toLowerCase()})` })),
+    ...(hotels ?? []).map((h) => ({ value: `hotel:${h.id}`, label: `${h.hotelName}, ${fmtDate(h.checkInDate)}–${fmtDate(h.checkOutDate)} (${humanize(h.statusName).toLowerCase()})` })),
+    ...(grounds ?? []).map((g) => ({ value: `ground:${g.id}`, label: `${humanize(g.transportTypeName)} ${g.bookingReference ?? ''} (${humanize(g.statusName).toLowerCase()})` })),
+  ];
   const legs = [...(itinerary?.legs ?? [])].sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-  const nextVersion = (ordered[0]?.versionNumber ?? 0) + 1;
   const nextOrder = (legs[legs.length - 1]?.sequenceOrder ?? 0) + 1;
   const viewing = ordered.find((v) => v.id === viewingId);
+  const editable = mayPlan && isEditable(itinerary?.status);
 
   if (isLoading) {
     return (
@@ -436,6 +560,10 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
     );
   }
 
+  // A failed read is not "no itinerary yet" — offering to create version 1 over a list that
+  // could not be read invites a duplicate.
+  if (isError && !versions) return <TravelQueryError error={error} what="the itinerary" />;
+
   if (ordered.length === 0) {
     return (
       <>
@@ -444,20 +572,22 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
             <EmptyState
               icon={CalendarRange}
               title="No itinerary yet"
-              description="Plan the trip day by day once the request has been approved."
+              description={plannable
+                ? 'Plan the trip day by day — while it is open, from its draft until it is under way.'
+                : `This trip is ${humanize(request.status).toLowerCase()}, so no itinerary is planned for it.`}
             />
-            <div className="flex justify-center pb-6">
-              <Button onClick={() => setShowItineraryDialog(true)}>
-                <Plus className="mr-2 h-4 w-4" /> Create an itinerary
-              </Button>
-            </div>
+            {mayPlan && (
+              <div className="flex justify-center pb-6">
+                <Button onClick={() => setVersionDialog({ editing: null })}>
+                  <Plus className="mr-2 h-4 w-4" /> Create an itinerary
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
         <ItineraryDialog
-          requestId={requestId}
-          nextVersion={1}
-          open={showItineraryDialog}
-          onOpenChange={setShowItineraryDialog}
+          requestId={requestId} editing={null} hasVersions={false}
+          open={!!versionDialog} onOpenChange={(v) => { if (!v) setVersionDialog(null); }}
         />
       </>
     );
@@ -481,30 +611,51 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
                 ))}
               </SelectContent>
             </Select>
-            {viewing && <StatusBadge status={humanize(viewing.statusName)} />}
+            {viewing && <StatusBadge status={describe(viewing.statusName)} />}
             {viewing?.isCurrentVersion && (
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 <Star className="h-3.5 w-3.5" /> In force
               </span>
             )}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {viewing && !viewing.isCurrentVersion && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => promote.mutate(viewing.id)}
-                disabled={promote.isPending}
-              >
-                <CheckCheck className="mr-2 h-4 w-4" /> Make this the current version
+          {mayPlan && (
+            <div className="flex flex-wrap gap-2">
+              {viewing && !viewing.isCurrentVersion && viewing.status !== 'Superseded' && viewing.status !== 'Cancelled' && (
+                <Button variant="outline" size="sm" onClick={() => promote.mutate(viewing.id)} disabled={promote.isPending}>
+                  <CheckCheck className="mr-2 h-4 w-4" /> Make this the current version
+                </Button>
+              )}
+              {viewing?.isCurrentVersion && isEditable(viewing.status) && (
+                <Button
+                  variant="outline" size="sm" onClick={() => finalise.mutate(viewing.id)}
+                  disabled={finalise.isPending || legs.length === 0}
+                  title={legs.length === 0 ? 'Add a leg first' : undefined}
+                >
+                  <Stamp className="mr-2 h-4 w-4" /> Finalise
+                </Button>
+              )}
+              {itinerary && isEditable(itinerary.status) && (
+                <Button variant="outline" size="sm" onClick={() => setVersionDialog({ editing: itinerary })}>
+                  <Pencil className="mr-2 h-4 w-4" /> Edit
+                </Button>
+              )}
+              {viewing && !viewing.isCurrentVersion && canAdmin && (
+                <Button
+                  variant="outline" size="sm"
+                  onClick={() => setRemoving({ kind: 'version', id: viewing.id, label: `version ${viewing.versionNumber}` })}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                </Button>
+              )}
+              <Button variant="outline" size="sm" onClick={() => setVersionDialog({ editing: null })}>
+                <Plus className="mr-2 h-4 w-4" /> New version
               </Button>
-            )}
-            <Button variant="outline" size="sm" onClick={() => setShowItineraryDialog(true)}>
-              <Plus className="mr-2 h-4 w-4" /> New version
-            </Button>
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      {itineraryFailed && !itinerary && <TravelQueryError error={itineraryError} what="this itinerary version" />}
 
       {itinerary && (
         <Card>
@@ -513,14 +664,23 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
               <CardTitle className="text-base">{itinerary.title}</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
                 {itinerary.totalTravelDays} travel days · {itinerary.totalWorkingDays} working ·{' '}
-                {itinerary.totalWeekendDays} weekend
+                {itinerary.totalWeekendDays} weekend <span className="text-xs">(from the trip&apos;s dates)</span>
+                {itinerary.finalizedAt ? ` · finalised ${fmtDate(itinerary.finalizedAt)}` : ''}
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={() => setShowLegDialog(true)}>
-              <Plus className="mr-2 h-4 w-4" /> Add leg
-            </Button>
+            {editable && (
+              <Button variant="outline" size="sm" onClick={() => setLegDialog({ editing: null })}>
+                <Plus className="mr-2 h-4 w-4" /> Add leg
+              </Button>
+            )}
           </CardHeader>
           <CardContent className="space-y-3">
+            {!isEditable(itinerary.status) && (
+              <p className="text-xs text-muted-foreground">
+                This version is {describe(itinerary.statusName).toLowerCase()} — the record of a plan, not changed. Make a
+                new version to change it.
+              </p>
+            )}
             {itinerary.summaryNotes && (
               <p className="text-sm whitespace-pre-wrap text-muted-foreground">
                 {itinerary.summaryNotes}
@@ -553,33 +713,80 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
                             <> · {fmtTime(leg.departureDatetime)}–{fmtTime(leg.arrivalDatetime) ?? '—'}</>
                           )}
                         </p>
-                        {(leg.flightBookingId || leg.hotelBookingId || leg.groundTransportId) && (
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            Linked to a booking on this request.
+                        {leg.linkedBooking && (
+                          <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Link2 className="h-3.5 w-3.5" />
+                            {leg.linkedBooking}{leg.linkedBookingDates ? ` — ${leg.linkedBookingDates}` : ''}
+                          </p>
+                        )}
+                        {leg.linkedBookingDateMismatch && (
+                          <p className="mt-1 flex items-center gap-1.5 text-xs text-destructive">
+                            <AlertTriangle className="h-3.5 w-3.5" />
+                            The leg&apos;s date is not one of its booking&apos;s — one of the two has moved.
                           </p>
                         )}
                         {leg.notes && (
                           <p className="mt-1 text-sm whitespace-pre-wrap">{leg.notes}</p>
                         )}
                       </div>
-                      <Button variant="ghost" size="sm" onClick={() => setActivityLeg(leg)}>
-                        <Plus className="mr-2 h-4 w-4" /> Activity
-                      </Button>
+                      {editable && (
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="sm" onClick={() => setActivityDialog({ leg, editing: null })}>
+                            <Plus className="mr-2 h-4 w-4" /> Activity
+                          </Button>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm" aria-label="Leg actions"><MoreHorizontal className="h-4 w-4" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setLegDialog({ editing: leg })}>Edit leg</DropdownMenuItem>
+                              {canAdmin && (
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => setRemoving({ kind: 'leg', id: leg.id, label: `the ${humanize(leg.legTypeName).toLowerCase()} leg of ${fmtDate(leg.legDate)}` })}
+                                >
+                                  Remove leg
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      )}
                     </div>
 
                     {leg.activities.length > 0 && (
                       <ul className="mt-3 space-y-2 border-t pt-3">
                         {leg.activities.map((a) => (
-                          <li key={a.id} className="text-sm">
-                            <span className="font-medium">{a.title}</span>
-                            <span className="text-muted-foreground">
-                              {' '}· {humanize(a.activityTypeName)}
-                              {a.locationName ? ` · ${a.locationName}` : ''}
-                              {fmtTime(a.startDatetime) ? ` · ${fmtTime(a.startDatetime)}` : ''}
-                              {a.isMandatory ? ' · mandatory' : ''}
-                            </span>
-                            {a.description && (
-                              <p className="text-muted-foreground">{a.description}</p>
+                          <li key={a.id} className="flex items-start justify-between gap-2 text-sm">
+                            <div>
+                              <span className="font-medium">{a.title}</span>
+                              <span className="text-muted-foreground">
+                                {' '}· {humanize(a.activityTypeName)}
+                                {a.locationName ? ` · ${a.locationName}` : ''}
+                                {fmtTime(a.startDatetime) ? ` · ${fmtTime(a.startDatetime)}` : ''}
+                                {a.isMandatory ? ' · mandatory' : ''}
+                              </span>
+                              {a.description && (
+                                <p className="text-muted-foreground">{a.description}</p>
+                              )}
+                            </div>
+                            {editable && (
+                              <div className="flex shrink-0 gap-1">
+                                <Button
+                                  variant="ghost" size="sm" aria-label="Edit activity"
+                                  onClick={() => setActivityDialog({ leg, editing: a })}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </Button>
+                                {canAdmin && (
+                                  <Button
+                                    variant="ghost" size="sm" aria-label="Remove activity"
+                                    onClick={() => setRemoving({ kind: 'activity', id: a.id, label: `“${a.title}”` })}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                )}
+                              </div>
                             )}
                           </li>
                         ))}
@@ -595,28 +802,42 @@ export function TravelItineraryPanel({ request }: { request: StaffTravelRequest 
 
       <ItineraryDialog
         requestId={requestId}
-        nextVersion={nextVersion}
-        open={showItineraryDialog}
-        onOpenChange={setShowItineraryDialog}
+        editing={versionDialog?.editing ?? null}
+        hasVersions
+        open={!!versionDialog}
+        onOpenChange={(v) => { if (!v) setVersionDialog(null); }}
       />
       {viewingId && (
         <LegDialog
           itineraryId={viewingId}
           requestId={requestId}
+          editing={legDialog?.editing ?? null}
           nextOrder={nextOrder}
           countryOptions={countryOptions}
-          open={showLegDialog}
-          onOpenChange={setShowLegDialog}
+          bookingOptions={bookingOptions}
+          open={!!legDialog}
+          onOpenChange={(v) => { if (!v) setLegDialog(null); }}
         />
       )}
       {viewingId && (
         <ActivityDialog
-          leg={activityLeg}
+          leg={activityDialog?.leg ?? null}
+          editing={activityDialog?.editing ?? null}
           itineraryId={viewingId}
-          open={!!activityLeg}
-          onOpenChange={(v) => !v && setActivityLeg(null)}
+          open={!!activityDialog}
+          onOpenChange={(v) => { if (!v) setActivityDialog(null); }}
         />
       )}
+      <ConfirmationDialog
+        open={!!removing}
+        onOpenChange={(v) => { if (!v) setRemoving(null); }}
+        title="Remove it?"
+        description={`${removing?.label ? removing.label[0].toUpperCase() + removing.label.slice(1) : 'It'} is removed for good.${removing?.kind === 'version' ? ' Only a version that is not in force can be.' : ''}`}
+        confirmText="Remove"
+        variant="destructive"
+        isLoading={remove.isPending}
+        onConfirm={() => { if (removing) remove.mutate(removing); return false; }}
+      />
     </div>
   );
 }

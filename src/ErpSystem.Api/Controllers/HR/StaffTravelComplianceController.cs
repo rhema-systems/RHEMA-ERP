@@ -16,11 +16,49 @@ namespace ErpSystem.Api.Controllers.HR;
 public class StaffTravelComplianceController : HrControllerBase
 {
     private readonly IStaffTravelComplianceService _service;
+    private readonly IStaffTravelFleetService _fleet;
 
-    public StaffTravelComplianceController(IStaffTravelComplianceService service, ICurrentUserService currentUser)
+    public StaffTravelComplianceController(IStaffTravelComplianceService service, IStaffTravelFleetService fleet, ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
+        _fleet = fleet;
+    }
+
+    /// <summary>
+    /// Lane 6 (D-29, FX-8's read half): the incidents Fleet records on a trip's company vehicles while on its fleet trips —
+    /// read-only, through travel's door (HR holds no Maintenance permission). Telling anyone of them is lane 8's.
+    /// </summary>
+    [HttpGet("requests/{requestId:guid}/fleet-incidents")]
+    public async Task<ActionResult<IReadOnlyList<StaffTravelFleetIncidentDto>>> GetFleetIncidents(Guid requestId)
+        => Ok(await _fleet.GetIncidentsAsync(requestId));
+
+    /// <summary>
+    /// Lane 7 (D-36, T-25): the destination's health requirements in force over the trip, mandatory first, each with
+    /// whether the desk has cleared it for this traveller. Nothing is blocked by an uncleared one.
+    /// </summary>
+    [HttpGet("requests/{requestId:guid}/health-requirements")]
+    public async Task<ActionResult<IReadOnlyList<StaffTravelTripHealthRequirementDto>>> GetTripHealthRequirements(Guid requestId)
+        => Ok(await _service.GetTripHealthRequirementsAsync(requestId));
+
+    /// <summary>Ticks a health requirement as checked for the trip — by the caller, a person, so it needs the employee link.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("requests/{requestId:guid}/health-requirements/{healthRequirementId:guid}/clear")]
+    public async Task<ActionResult<StaffTravelTripHealthRequirementDto>> ClearHealthRequirement(
+        Guid requestId, Guid healthRequirementId,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] ClearStaffTravelHealthRequirementDto? dto)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Clearing a health requirement") is { } contextError) return contextError;
+        return Ok(await _service.ClearHealthRequirementAsync(requestId, healthRequirementId, dto?.Note, employeeId));
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpDelete("requests/{requestId:guid}/health-requirements/{healthRequirementId:guid}/clear")]
+    public async Task<IActionResult> UnclearHealthRequirement(Guid requestId, Guid healthRequirementId)
+    {
+        await _service.UnclearHealthRequirementAsync(requestId, healthRequirementId);
+        return NoContent();
     }
 
     /// <summary>

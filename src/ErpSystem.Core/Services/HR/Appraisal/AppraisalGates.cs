@@ -26,10 +26,25 @@ public sealed record AppraisalGateFacts
 {
     public required Guid AppraisalId { get; init; }
     public required AppraisalStatus Status { get; init; }
+
+    /// <summary>
+    /// The appraisal's cycle: a gated write is refused unless it is Open (<see cref="AppraisalLiveCycle"/>, performance
+    /// closure E-d2b). The step itself does not read it — where an appraisal stands is the same on any cycle.
+    /// </summary>
+    public required AppraisalCycleStatus CycleStatus { get; init; }
+
+    public string? CycleName { get; init; }
+
     public AppraisalAppealStatus? CurrentAppealStatus { get; init; }
 
     /// <summary><c>AppealRemandedDate</c> is set: the manager owes a re-evaluation.</summary>
     public bool Remanded { get; init; }
+
+    /// <summary>
+    /// The remand's re-evaluation deadline — set while the manager owes the re-evaluation, cleared
+    /// when they submit it and the appeal waits for HR (performance closure C3).
+    /// </summary>
+    public DateTime? RemandDeadline { get; init; }
 
     public bool HasAppeal { get; init; }
     public bool IsCalibrated { get; init; }
@@ -132,8 +147,13 @@ public static class AppraisalGates
 
     // ── The pipeline ────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Goal setting is a step when goals or the kick-off conversation are required. The mid-year
+    /// conversation is not part of it: it holds the manager's submission, not the self-evaluation
+    /// (performance closure B2 — B1 had put it beside the kick-off).
+    /// </summary>
     private static bool HasGoalSettingStep(AppraisalSettings s)
-        => s.RequireGoalSetting || s.RequireKickOffConversation || s.RequireMidYearConversation;
+        => s.RequireGoalSetting || s.RequireKickOffConversation;
 
     private static bool HasPeerSteps(AppraisalSettings s)
         => s.RequirePeerReviews && s.MinPeerEvaluators > 0;
@@ -209,7 +229,12 @@ public static class AppraisalGates
         }
 
         if (f.CurrentAppealStatus == AppraisalAppealStatus.Remanded && f.Remanded)
-            return new(AppraisalSubStatus.AppealUnderReview, "the appeal was remanded: the manager re-evaluates, then HR decides");
+        {
+            // Whose move it is (C3): the manager's until they re-submit, then HR's.
+            return new(AppraisalSubStatus.AppealUnderReview, f.RemandDeadline is DateTime due
+                ? $"the appeal was remanded: the manager re-evaluates by {due:d MMM yyyy}, then HR decides"
+                : "the manager has re-evaluated: HR decides the appeal");
+        }
 
         if (f.Status == AppraisalStatus.Appealed)
         {
@@ -257,13 +282,20 @@ public static class AppraisalGates
                             return waiting == 1
                                 ? "one goal still waits for the manager's approval"
                                 : $"{waiting} goals still wait for the manager's approval";
-
-                        var drafts = live.Count(g => g.Status == GoalStatus.Draft);
-                        if (drafts > 0)
-                            return drafts == 1
-                                ? "one goal is still a draft, not yet submitted for the manager's approval"
-                                : $"{drafts} goals are still drafts, not yet submitted for the manager's approval";
                     }
+
+                    // A draft is the employee's unfinished work whether or not the manager approves
+                    // goals (B2): with approval off the submission is the agreement, so an
+                    // unsubmitted goal agrees to nothing. It used to count toward the minimum.
+                    var drafts = live.Count(g => g.Status == GoalStatus.Draft);
+                    if (drafts > 0)
+                        return s.RequireManagerGoalApproval
+                            ? drafts == 1
+                                ? "one goal is still a draft, not yet submitted for the manager's approval"
+                                : $"{drafts} goals are still drafts, not yet submitted for the manager's approval"
+                            : drafts == 1
+                                ? "one goal is still a draft, not yet submitted"
+                                : $"{drafts} goals are still drafts, not yet submitted";
 
                     if (f.GoalSetMustBeLocked && live.Any(g => !g.IsSetLocked))
                         return "the goal set is not locked";
@@ -271,9 +303,6 @@ public static class AppraisalGates
 
                 if (s.RequireKickOffConversation && !f.ConversationsHeld.Contains(ConversationType.KickOff))
                     return "the kick-off conversation has not been held";
-
-                if (s.RequireMidYearConversation && !f.ConversationsHeld.Contains(ConversationType.MidYear))
-                    return "the mid-year conversation has not been held";
 
                 return null;
             }
@@ -301,7 +330,12 @@ public static class AppraisalGates
             }
 
             case AppraisalSubStatus.ManagerEvaluation:
-                return f.ManagerSubmitted ? null : "the manager has not submitted their evaluation";
+                if (f.ManagerSubmitted) return null;
+                // The mid-year conversation holds the manager's submission (B2), so while it is
+                // missing it is why the appraisal waits here — the manager's to hold.
+                return MidYearMissing(f, s)
+                    ? "the mid-year conversation has not been held"
+                    : "the manager has not submitted their evaluation";
 
             case AppraisalSubStatus.PendingCalibration:
                 return f.IsCalibrated
@@ -326,6 +360,24 @@ public static class AppraisalGates
         }
     }
 
+    private static bool MidYearMissing(AppraisalGateFacts f, AppraisalSettings s)
+        => s.RequireMidYearConversation && !f.ConversationsHeld.Contains(ConversationType.MidYear);
+
+    /// <summary>
+    /// Refuses the manager's submission while the mid-year conversation the profile requires has not
+    /// been held (performance closure B2). The appraisal is <i>at</i> the manager-evaluation step
+    /// while it waits — the conversation is the manager's own to hold — so the step check alone lets
+    /// the submission through. The self-evaluation and the peers are not held by it: B1 had put the
+    /// mid-year in goal setting, where it held everything after it.
+    /// </summary>
+    public static void EnsureManagerMaySubmit(AppraisalGateFacts f, AppraisalSettings s, string action)
+    {
+        if (MidYearMissing(f, s))
+            throw new AppraisalGateException(
+                AppraisalSubStatus.ManagerEvaluation,
+                Refusal(action, new AppraisalGateBlock(AppraisalSubStatus.ManagerEvaluation, "the mid-year conversation has not been held")));
+    }
+
     private static AppraisalSubStatus InProgressForm(AppraisalSubStatus step, AppraisalGateFacts f) => step switch
     {
         AppraisalSubStatus.PendingCalibration when f.CalibrationStarted => AppraisalSubStatus.CalibrationInProgress,
@@ -340,6 +392,43 @@ public static class AppraisalGates
     /// <summary>Whether a step can be waived by HR's advance (the steps before the manager's evaluation).</summary>
     public static bool CanBeWaived(AppraisalSubStatus step) => Waivable.Contains(StepOf(step));
 
+    /// <summary>
+    /// What is recorded for steps the pipeline puts after <paramref name="at"/> — the transition
+    /// report (performance closure B8). Empty when the records agree with the gates, or when the
+    /// appraisal is past the pipeline (completed, appealed, withdrawn). Only the profile's own
+    /// steps count: a self-evaluation on a profile that does not require one contradicts nothing.
+    /// </summary>
+    public static IReadOnlyList<string> RecordedAhead(AppraisalGateFacts f, AppraisalSettings s, AppraisalSubStatus at)
+    {
+        var pipeline = Pipeline(s);
+        var atIndex = IndexOf(pipeline, StepOf(at));
+        if (atIndex < 0) return [];
+
+        var ahead = new List<string>();
+        void Check(AppraisalSubStatus step, bool recorded, string what)
+        {
+            if (recorded && IndexOf(pipeline, step) > atIndex) ahead.Add(what);
+        }
+
+        Check(AppraisalSubStatus.SelfEvaluation, f.SelfSubmitted, "the self-evaluation is submitted");
+        Check(AppraisalSubStatus.PeerEvaluation, f.PeersSubmitted > 0,
+            f.PeersSubmitted == 1 ? "a peer evaluation is submitted" : $"{f.PeersSubmitted} peer evaluations are submitted");
+        Check(AppraisalSubStatus.ManagerEvaluation, f.ManagerSubmitted, "the manager's evaluation is submitted");
+        Check(AppraisalSubStatus.PendingCalibration, f.IsCalibrated, "a calibration session has committed it");
+        Check(AppraisalSubStatus.PendingHRReview, f.HrApproved, "HR has signed it off");
+        Check(AppraisalSubStatus.PendingConversation, f.ConversationsHeld.Contains(ConversationType.FinalReview),
+            "the final conversation is held");
+        Check(AppraisalSubStatus.PendingAcknowledgment, f.EmployeeAcknowledged, "the employee has acknowledged it");
+        return ahead;
+
+        static int IndexOf(IReadOnlyList<AppraisalSubStatus> steps, AppraisalSubStatus step)
+        {
+            for (var i = 0; i < steps.Count; i++)
+                if (steps[i] == step) return i;
+            return -1;
+        }
+    }
+
     /// <summary>Reads an advance-log <c>FromSubStatus</c> back as a step; null for anything unrecognised.</summary>
     public static AppraisalSubStatus? ParseLoggedStep(string? loggedSubStatus)
         => Enum.TryParse<AppraisalSubStatus>(loggedSubStatus, out var sub) ? StepOf(sub) : null;
@@ -351,12 +440,13 @@ public static class AppraisalGates
         => steps.Any(step => StepOf(step) == StepOf(block.Step));
 
     /// <summary>
-    /// Refuses <paramref name="action"/> unless the appraisal is at one of <paramref name="steps"/>:
-    /// throws <see cref="AppraisalGateException"/> naming the step it is at and why.
+    /// Refuses <paramref name="action"/> unless the appraisal's cycle is Open (E-d2b, D-59) and the appraisal is at one
+    /// of <paramref name="steps"/>: throws <see cref="AppraisalGateException"/> naming the step it is at and why.
     /// </summary>
     public static AppraisalGateBlock EnsureAt(
         AppraisalGateFacts f, AppraisalSettings s, string action, params AppraisalSubStatus[] steps)
     {
+        AppraisalLiveCycle.EnsureOpen(f.CycleStatus, f.CycleName, action);
         var block = Resolve(f, s);
         if (Check(block, steps)) return block;
         throw new AppraisalGateException(block.Step, Refusal(action, block));

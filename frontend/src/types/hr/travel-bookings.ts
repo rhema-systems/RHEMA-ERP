@@ -5,20 +5,19 @@
  *
  * Backend routes: `api/staff-travel/itineraries` and `api/staff-travel/bookings`.
  *
- * ⚠ **Several fields on these records are server-assigned. Do not bind a form control to one.**
- * They stay on the write types because the API still accepts and ignores them, and removing them
- * silently would only hide that from the next reader:
+ * ⚠ **Several fields on these records are server-assigned, and since the travel closure's lane 5 they
+ * are on the read types only — the write types no longer carry them:**
  *
  * | field | who decides |
  * |---|---|
+ * | `status` | the booking's verbs (hold, confirm, ticket, cancel, no-show, complete) — a create is Pending |
  * | `policyAllowedClass`, `policyMaxRatePerNight` | the travel policy in force for the traveller |
  * | `numberOfNights`, hotel `totalCost`, car-rental `totalCost` | the dates and the rate |
  * | segment `durationMinutes` | the two datetimes |
- * | `bookedAt`, `cancelledAt` | the booking's own status |
+ * | `bookedAt`, `cancelledAt`, `cancellationFee` | confirm and cancel |
  *
- * The two `*ExceptionApproved` flags ARE inputs, but they are requests for authority rather than
- * statements of fact: they are honoured only for a caller holding `HR.Travel.Admin`. Booking above
- * a policy cap without one is refused (422); asking for one without the right is refused (403).
+ * The two `*ExceptionApproved` flags ARE inputs, but they ASK for an exception (with the reason) rather
+ * than grant it (lane 4, D-8): the booking waits for another travel administrator's authorisation.
  */
 
 import type { AuditFields } from './common';
@@ -100,6 +99,12 @@ export interface StaffTravelItineraryLeg extends AuditFields {
   groundTransportId?: string | null;
   notes?: string | null;
   activities: StaffTravelItineraryActivity[];
+  /** The linked booking as the desk names it — "Flight H4RB9L (confirmed)" (lane 5, T-19). */
+  linkedBooking?: string | null;
+  /** The booking's own dates — its segment days, its stay, its pick-up. */
+  linkedBookingDates?: string | null;
+  /** The leg's date is not one of its booking's: flagged, not refused. */
+  linkedBookingDateMismatch?: boolean;
 }
 
 export interface StaffTravelItinerarySummary {
@@ -130,27 +135,22 @@ export interface StaffTravelItinerary extends AuditFields {
   legs: StaffTravelItineraryLeg[];
 }
 
+/**
+ * A new version (lane 5, slice 5b): numbered by the server, a Draft, its days worked out from the trip's dates.
+ * A trip's first version is current whatever `isCurrentVersion` says; a later one only when asked.
+ */
 export interface CreateStaffTravelItinerary {
   staffTravelRequestId: string;
-  versionNumber?: number;
   isCurrentVersion?: boolean;
   title: string;
-  totalTravelDays: number;
-  totalWorkingDays: number;
-  totalWeekendDays: number;
   summaryNotes?: string | null;
 }
 
+/** A draft version's words. Status, the current flag, the days and finalisation are the server's (D-25). */
 export interface UpdateStaffTravelItinerary {
   id: string;
-  status: TravelItineraryStatus;
   title: string;
-  isCurrentVersion: boolean;
-  totalTravelDays: number;
-  totalWorkingDays: number;
-  totalWeekendDays: number;
   summaryNotes?: string | null;
-  finalizedAt?: string | null;
 }
 
 export interface CreateStaffTravelItineraryLeg {
@@ -215,6 +215,12 @@ export type TravelBookingChannel =
 /** Ordered Economy → First; the policy cap is a comparison against this ordering. */
 export type FlightCabinClass = 'Economy' | 'PremiumEconomy' | 'Business' | 'First';
 
+/**
+ * Where an above-cap booking's exception stands (travel final closure D-8, lane 4). `None` on every
+ * booking made before migration batch 1.
+ */
+export type TravelBookingExceptionState = 'None' | 'Pending' | 'Authorised' | 'Refused';
+
 export type GroundTransportType =
   | 'Taxi'
   | 'Rideshare'
@@ -271,9 +277,48 @@ export interface StaffTravelFlightBookingSummary {
   statusName: string;
   ticketNumber?: string | null;
   segmentCount: number;
+  vendorName?: string | null;
+  /** Lane 4, D-8: a breach of the policy waits for a different travel administrator. */
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
 }
 
-export interface StaffTravelFlightBooking extends AuditFields {
+/**
+ * Who asked for a booking's policy exception and who decided it (lane 4, D-8). `exceptionAuthorisedBy*` is the
+ * DECIDER — the state says whether they authorised or refused.
+ */
+export interface TravelBookingExceptionFields {
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
+  exceptionRequestedById?: string | null;
+  exceptionRequestedByName?: string | null;
+  exceptionAuthorisedById?: string | null;
+  exceptionAuthorisedByName?: string | null;
+  exceptionAuthorisedAt?: string | null;
+}
+
+/** One row of the policy-breach register (lane 4, D-8). */
+export interface StaffTravelBookingException {
+  bookingId: string;
+  kind: 'Flight' | 'Hotel';
+  staffTravelRequestId: string;
+  requestNumber: string;
+  travellerName: string;
+  travelStartDate: string;
+  booking: string;
+  policyCap?: string | null;
+  reason?: string | null;
+  bookingStatus: TravelBookingStatus;
+  bookingStatusName: string;
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
+  requestedByName?: string | null;
+  decidedByName?: string | null;
+  decidedAt?: string | null;
+  createdAt: string;
+}
+
+export interface StaffTravelFlightBooking extends AuditFields, TravelBookingExceptionFields {
   staffTravelRequestId: string;
   bookingReference?: string | null;
   airlineCode?: string | null;
@@ -307,9 +352,7 @@ export interface CreateStaffTravelFlightBooking {
   airlineCode?: string | null;
   airlineName?: string | null;
   bookingClass: FlightCabinClass;
-  /** Ignored — the cap comes from the policy. Sent only because the DTO still declares it. */
-  policyAllowedClass?: FlightCabinClass;
-  /** A request for authority, honoured only for `HR.Travel.Admin`. */
+  /** ASKS for a policy exception, with the reason (lane 4, D-8). */
   classExceptionApproved: boolean;
   classExceptionReason?: string | null;
   bookedBy: TravelBookingChannel;
@@ -318,14 +361,10 @@ export interface CreateStaffTravelFlightBooking {
   taxesAndFees: number;
   currencyCode: string;
   ticketNumber?: string | null;
-  status: TravelBookingStatus;
 }
 
 export type UpdateStaffTravelFlightBooking =
-  Omit<CreateStaffTravelFlightBooking, 'staffTravelRequestId'> & {
-    id: string;
-    cancellationFee?: number | null;
-  };
+  Omit<CreateStaffTravelFlightBooking, 'staffTravelRequestId'> & { id: string };
 
 export interface CreateStaffTravelFlightSegment {
   staffTravelFlightBookingId: string;
@@ -361,9 +400,12 @@ export interface StaffTravelHotelBookingSummary {
   currencyCode: string;
   status: TravelBookingStatus;
   statusName: string;
+  vendorName?: string | null;
+  exceptionState: TravelBookingExceptionState;
+  exceptionStateName: string;
 }
 
-export interface StaffTravelHotelBooking extends AuditFields {
+export interface StaffTravelHotelBooking extends AuditFields, TravelBookingExceptionFields {
   staffTravelRequestId: string;
   bookingReference?: string | null;
   hotelName: string;
@@ -412,20 +454,16 @@ export interface CreateStaffTravelHotelBooking {
   roomType?: string | null;
   ratePerNight: number;
   currencyCode: string;
-  /** A request for authority, honoured only for `HR.Travel.Admin`. */
+  /** ASKS for a policy exception, with the reason (lane 4, D-8). */
   rateExceptionApproved: boolean;
   rateExceptionReason?: string | null;
   vendorId?: string | null;
   bookedBy: TravelBookingChannel;
-  status: TravelBookingStatus;
   cancellationPolicy?: string | null;
 }
 
 export type UpdateStaffTravelHotelBooking =
-  Omit<CreateStaffTravelHotelBooking, 'staffTravelRequestId'> & {
-    id: string;
-    cancellationFee?: number | null;
-  };
+  Omit<CreateStaffTravelHotelBooking, 'staffTravelRequestId'> & { id: string };
 
 // ── Ground transport ─────────────────────────────────────────────────────────
 
@@ -448,17 +486,82 @@ export interface StaffTravelGroundTransport extends AuditFields {
   status: TravelBookingStatus;
   statusName: string;
   notes?: string | null;
+  // A company vehicle's fleet trip, read from Fleet (lane 6) — the leg's status is Fleet's, mapped.
+  vehicleAssetId?: string | null;
+  vehicleName?: string | null;
+  vehiclePlate?: string | null;
+  driverEmployeeId?: string | null;
+  driverName?: string | null;
+  /** Fleet's own status: Draft, Submitted, Approved, Rejected, Dispatched, Completed, Cancelled. */
+  fleetStatus?: string | null;
+  fleetRejectionReason?: string | null;
+  /** Why the vehicle is not held yet, when it is not — e.g. Fleet publishes no approval route. */
+  fleetNote?: string | null;
+  dispatchedAt?: string | null;
+  returnedAt?: string | null;
+  distance?: number | null;
+  /** Lane 6 (D-33, D-34): the driver's own request the leg keeps, and whether the leg keeps its driver away overnight. */
+  driverTravelRequestId?: string | null;
+  driverTravelRequestNumber?: string | null;
+  driverTravelRequestStatus?: string | null;
+  driverAwayOvernight?: boolean;
+}
+
+/** Lane 6 (D-29): an incident Fleet records on one of the trip's company vehicles — read-only. */
+export interface StaffTravelFleetIncident {
+  id: string;
+  fleetTripId?: string | null;
+  vehicleName: string;
+  vehiclePlate?: string | null;
+  driverName?: string | null;
+  occurredAtUtc: string;
+  incidentType: string;
+  title: string;
+  description?: string | null;
+  location?: string | null;
+  severity: string;
+  status: string;
+}
+
+/** What a company-vehicle leg chooses from, through travel's own door (lane 6). */
+export interface StaffTravelFleetOptions {
+  windowStart: string;
+  windowEnd: string;
+  vehicles: {
+    vehicleAssetId: string;
+    name: string;
+    assetNumber?: string | null;
+    licensePlate?: string | null;
+    assignedTo?: string | null;
+    blockingCompliance: string[];
+    overlaps: string[];
+    available: boolean;
+  }[];
+  drivers: {
+    employeeId: string;
+    name: string;
+    employeeNumber?: string | null;
+    licenceExpiry?: string | null;
+    flags: string[];
+  }[];
+  defaultVehicleAssetId?: string | null;
+  defaultDriverEmployeeId?: string | null;
+  destinationRequired: boolean;
+  destinations: { id: string; name: string }[];
+  approvalRoutePublished: boolean;
 }
 
 /**
  * ⚠ `vehicleAssetId` is **required when `transportType` is `CompanyVehicle`** — that mode reserves a
- * real vehicle through Fleet rather than recording a note, and the server refuses without it.
+ * real vehicle through Fleet rather than recording a note, and the server refuses without it. Since lane 6 the
+ * pick-up and drop-off are required too, and Fleet's destination when its settings ask one.
  */
 export interface CreateStaffTravelGroundTransport {
   staffTravelRequestId: string;
   transportType: GroundTransportType;
   vehicleAssetId?: string | null;
   driverEmployeeId?: string | null;
+  fleetTripDestinationId?: string | null;
   vendorId?: string | null;
   bookingReference?: string | null;
   pickupLocation?: string | null;
@@ -468,13 +571,12 @@ export interface CreateStaffTravelGroundTransport {
   estimatedCost?: number | null;
   actualCost?: number | null;
   currencyCode: string;
-  status: TravelBookingStatus;
   notes?: string | null;
 }
 
+/** On a company vehicle's leg, a null vehicle or driver keeps the fleet trip's own (lane 6). */
 export type UpdateStaffTravelGroundTransport =
-  Omit<CreateStaffTravelGroundTransport, 'staffTravelRequestId' | 'vehicleAssetId' | 'driverEmployeeId'>
-  & { id: string };
+  Omit<CreateStaffTravelGroundTransport, 'staffTravelRequestId'> & { id: string };
 
 // ── Car rentals ──────────────────────────────────────────────────────────────
 
@@ -517,8 +619,29 @@ export interface CreateStaffTravelCarRentalBooking {
   insuranceIncluded: boolean;
   fuelPolicy?: string | null;
   driverLicenseRequired: boolean;
-  status: TravelBookingStatus;
 }
 
 export type UpdateStaffTravelCarRentalBooking =
   Omit<CreateStaffTravelCarRentalBooking, 'staffTravelRequestId'> & { id: string };
+
+// ── The traveller's portal (lane 7, slice 7c1) ───────────────────────────────
+
+/**
+ * `GET staff-travel/me/requests/{id}/itinerary` — the version in force (the one the desk finalised, D-42), or none and
+ * whether the desk is still drafting one.
+ */
+export interface StaffTravelTravellerItinerary {
+  inForce?: StaffTravelItinerary | null;
+  beingPlanned: boolean;
+}
+
+/**
+ * `GET staff-travel/me/requests/{id}/bookings` — every booking in full, a flight's segments in flying order. The
+ * exception's decision fields arrive empty: who asked, who authorised and why are the desk's (P3).
+ */
+export interface StaffTravelTravellerBookings {
+  flights: StaffTravelFlightBooking[];
+  hotels: StaffTravelHotelBooking[];
+  groundTransports: StaffTravelGroundTransport[];
+  carRentals: StaffTravelCarRentalBooking[];
+}

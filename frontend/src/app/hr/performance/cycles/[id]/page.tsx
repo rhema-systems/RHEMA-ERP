@@ -79,9 +79,10 @@ import { OrganizationUnitPickerField } from '@/components/hr/common/Organization
  *               template or a tie between two equally-specific ones shows up.
  *   Generate  — only once coverage is clean, because generation refuses on a gap or a conflict.
  *
- * Opening the cycle sits before all of that and is checked separately: an employee may be
- * covered by only one non-closed cycle of the same type and year, and the refusal names the
- * cycles that overlap.
+ * Opening the cycle sits between the set-up and generation, and is checked separately: an employee
+ * may be covered by only one open cycle of the same type and year, and the refusal names the
+ * cycles that overlap. Generation runs on an open cycle only and asks the same of whoever it
+ * would create (performance closure E-d2b, D-43 and D-60).
  */
 const day = (value?: string | null) => value?.slice(0, 10) ?? '—';
 
@@ -168,14 +169,21 @@ const emptyTarget: TargetForm = {
   isActive: true,
 };
 
-const exclusionSchema = z.object({
-  organizationLevelId: z.string().optional(),
-  organizationUnitId: z.string().optional(),
-  positionId: z.string().optional(),
-  employeeId: z.string().optional(),
-  reason: z.string().min(1, 'Required').max(500),
-  isActive: z.boolean(),
-});
+// An exclusion names whom it leaves out (performance closure E-g1): one naming no one was saved and
+// left out nobody. The server refuses it too (422).
+const exclusionSchema = z
+  .object({
+    organizationLevelId: z.string().optional(),
+    organizationUnitId: z.string().optional(),
+    positionId: z.string().optional(),
+    employeeId: z.string().optional(),
+    reason: z.string().min(1, 'Required').max(500),
+    isActive: z.boolean(),
+  })
+  .refine(
+    (v) => !!(v.employeeId || v.positionId || v.organizationUnitId || v.organizationLevelId),
+    { message: 'Name whom to leave out: an employee, a position, a unit or a level', path: ['employeeId'] },
+  );
 
 type ExclusionForm = z.input<typeof exclusionSchema>;
 
@@ -324,7 +332,9 @@ export default function AppraisalCycleDetailPage() {
 
   const isDraft = cycle.status === 'Draft';
   const isClosed = cycle.status === 'Closed';
-  const canGenerate = !isClosed;
+  // Generation runs on an open cycle only (performance closure E-d2b): the open checks nobody in
+  // scope is in another open cycle of the type and year, and tells them the cycle has begun.
+  const canGenerate = cycle.status === 'Open';
 
   return (
     <div className="space-y-6 p-6">
@@ -403,13 +413,22 @@ export default function AppraisalCycleDetailPage() {
             <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
             <div className="space-y-1 text-sm">
               <p className="font-medium">Generation would be refused</p>
-              <p className="text-muted-foreground">
-                {!coverage.hasActiveTargets
-                  ? 'No active target groups — nobody is in scope yet.'
-                  : !coverage.hasActiveTemplates
-                    ? 'No active template assignments — there is no form to score anyone on.'
-                    : `${coverage.employeesWithoutTemplate} employee(s) resolve to no template and ${coverage.conflictCount} have a tie between two equally-specific ones. The Coverage tab lists who.`}
-              </p>
+              {/* The server's reasons, in the order generation checks them (performance closure E-d2b). */}
+              {(coverage.generationBlockedBy ?? []).length > 0 ? (
+                <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
+                  {coverage.generationBlockedBy.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted-foreground">
+                  {!coverage.hasActiveTargets
+                    ? 'No active target groups — nobody is in scope yet.'
+                    : !coverage.hasActiveTemplates
+                      ? 'No active template assignments — there is no form to score anyone on.'
+                      : `${coverage.employeesWithoutTemplate} employee(s) resolve to no template and ${coverage.conflictCount} have a tie between two equally-specific ones. The Coverage tab lists who.`}
+                </p>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -527,7 +546,6 @@ export default function AppraisalCycleDetailPage() {
             update={(cycleId, targetId, values) =>
               appraisalCycleService.updateTarget(cycleId, targetId, {
                 id: targetId,
-                appraisalCycleId: cycleId,
                 targetType: values.targetType as AppraisalTargetType,
                 organizationLevelId: values.organizationLevelId || null,
                 organizationUnitId: values.organizationUnitId || null,
@@ -632,7 +650,7 @@ export default function AppraisalCycleDetailPage() {
                     ['hr', 'appraisal-cycle-targets', id],
                     ['hr', 'appraisal-cycle-coverage', id],
                   ]}
-                  dialogHint="Name whichever scope identifies the people to leave out — an employee, a position, a unit or a level."
+                  dialogHint="Name at least one. The narrowest decides: an employee; else everyone in the position; else the unit and the units beneath it; else the level."
                   emptyDescription="Nobody is excluded from this target group."
                   list={(targetId) => appraisalCycleTargetService.getExclusions(targetId)}
                   create={(targetId, values) =>
@@ -720,7 +738,8 @@ export default function AppraisalCycleDetailPage() {
             The forms this cycle may draw on. Each employee gets the most specific one that
             matches them — position beats unit beats level beats global — and{' '}
             <strong>priority</strong> is what breaks a tie between two that are equally specific.
-            Only approved, active templates are offered.
+            Only approved, active templates are offered. Once appraisals in this cycle are scored on a
+            template, its row stays as it is — add another template for people not yet generated.
           </p>
 
           <ResourceCollectionTab<
@@ -753,12 +772,24 @@ export default function AppraisalCycleDetailPage() {
             }
             remove={(_cycleId, assignmentId) => appraisalCycleTemplateService.remove(assignmentId)}
             readOnly={isClosed}
+            // A link whose template this cycle's appraisals are scored on stays as it is (performance
+            // closure E-e, D-68): removing or switching it off was a way round the template's lock.
+            canEditItem={(r) => !r.templateInUseInCycle}
+            canRemoveItem={(r) => !r.templateInUseInCycle}
             getId={(r) => r.id}
             columns={[
               { header: 'Template', cell: (r) => <span className="font-medium">{r.templateName}</span> },
               { header: 'Scope', cell: (r) => <Badge variant="outline">{scopeLabel(r)}</Badge> },
               { header: 'Priority', cell: (r) => r.priority, className: 'text-right' },
-              { header: 'Status', cell: (r) => <StatusBadge active={r.isActive} /> },
+              {
+                header: 'Status',
+                cell: (r) => (
+                  <span className="flex items-center gap-2">
+                    <StatusBadge active={r.isActive} />
+                    {r.templateInUseInCycle && <Badge variant="secondary">Appraisals on it</Badge>}
+                  </span>
+                ),
+              },
             ]}
             schema={
               z.object({
@@ -773,20 +804,23 @@ export default function AppraisalCycleDetailPage() {
               priority: r.priority,
               isActive: r.isActive,
             })}
-            renderFields={(form) => (
+            renderFields={(form, editing) => (
               <>
-                <SelectField
-                  form={form}
-                  name="appraisalTemplateId"
-                  label="Template"
-                  required
-                  options={assignableTemplates}
-                  placeholder={
-                    assignableTemplates.length === 0
-                      ? 'No approved, active templates yet'
-                      : 'Select a template…'
-                  }
-                />
+                {/* A link's template is fixed (E-e, D-68): another template is another link. */}
+                <fieldset disabled={editing} className="min-w-0">
+                  <SelectField
+                    form={form}
+                    name="appraisalTemplateId"
+                    label="Template"
+                    required
+                    options={assignableTemplates}
+                    placeholder={
+                      assignableTemplates.length === 0
+                        ? 'No approved, active templates yet'
+                        : 'Select a template…'
+                    }
+                  />
+                </fieldset>
                 <FieldRow>
                   <NumberField
                     form={form}
@@ -831,9 +865,10 @@ export default function AppraisalCycleDetailPage() {
                   <CardHeader className="pb-2">
                     <CardTitle className="text-base">Competing cycles</CardTitle>
                     <CardDescription>
-                      Other cycles of the same type and year that cover some of the same people.
-                      A cycle that is already running blocks this one from opening; a draft does
-                      not, but is worth re-scoping before it becomes one.
+                      Other cycles of the same type and year that cover some of the same people — a
+                      running one also counts whoever already holds an appraisal in it. A cycle that
+                      is already running blocks this one from opening, and from generating for the
+                      people it shares; a draft does not, but is worth re-scoping before it becomes one.
                     </CardDescription>
                   </CardHeader>
                   <CardContent>
@@ -854,7 +889,11 @@ export default function AppraisalCycleDetailPage() {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={humanizeEnum(o.status)} />
                           <Badge variant={o.blocksOpening ? 'destructive' : 'outline'}>
-                            {o.blocksOpening ? 'Blocks opening' : 'Advisory'}
+                            {o.blocksOpening
+                              ? isDraft
+                                ? 'Blocks opening'
+                                : 'Blocks generation'
+                              : 'Advisory'}
                           </Badge>
                         </div>
                       </div>
@@ -1077,6 +1116,9 @@ export default function AppraisalCycleDetailPage() {
                 <CardContent className="grid grid-cols-2 gap-x-6 md:grid-cols-4">
                   <InfoRow label="Targeted" value={progress.totalEmployeesTargeted} />
                   <InfoRow label="Excluded" value={progress.totalEmployeesExcluded} />
+                  {/* The appraisals in play, and those taken out of the cycle (E-d1). */}
+                  <InfoRow label="Appraisals" value={progress.totalAppraisals} />
+                  <InfoRow label="Withdrawn" value={progress.totalWithdrawn} />
                   <InfoRow
                     label="Not started self-evaluation"
                     value={progress.employeesNotStartedSelfEvaluation}
@@ -1088,10 +1130,6 @@ export default function AppraisalCycleDetailPage() {
                   <InfoRow label="Level targets" value={progress.targetBreakdown.organizationLevelTargets} />
                   <InfoRow label="Unit targets" value={progress.targetBreakdown.organizationUnitTargets} />
                   <InfoRow label="Position targets" value={progress.targetBreakdown.positionTargets} />
-                  <InfoRow
-                    label="Individual targets"
-                    value={progress.targetBreakdown.individualEmployeeTargets}
-                  />
                 </CardContent>
               </Card>
             </>
@@ -1166,11 +1204,11 @@ export default function AppraisalCycleDetailPage() {
         }
         description={
           action === 'open'
-            ? 'Everyone in scope is notified that the cycle is open. Opening is refused if another non-closed cycle of the same type and year already covers any of them.'
+            ? 'Everyone in scope is notified that the cycle is open. Opening is refused if another open cycle of the same type and year already covers any of them.'
             : action === 'close'
-              ? 'A closed cycle refuses every further edit. This cannot be undone.'
+              ? 'Every appraisal must be finished — completed, or withdrawn if it will not be — and every appeal window lapsed; the server refuses the close and says what is left. The completed appraisals are closed with the cycle, and its targets and exclusions no longer change. This cannot be undone.'
               : action === 'generate'
-                ? 'Creates the appraisal records for everyone in scope. Refused if anyone has no template or a template conflict — check the Coverage tab first.'
+                ? 'Creates the appraisal records for everyone in scope who has none yet. Refused if anyone has no template or a template conflict, or is already covered by another open cycle of the same type and year — check the Coverage tab first.'
                 : 'Raises an in-app notification for every phase that is overdue or closing soon, to everyone in scope. Repeat-safe: identical unread reminders are skipped.'
         }
         confirmText={

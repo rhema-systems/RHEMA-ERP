@@ -63,6 +63,15 @@ public class SeparationService : ISeparationService
     /// </summary>
     private readonly ILeaveOwedCalculator _leaveOwed;
 
+    /// <summary>
+    /// Staff travel's side of the exit (travel final closure, lane 9, D-56…D-58): what the leaver has open in travel, and the
+    /// advance the settlement recovered. Travel owns what counts as open; this service owns the form and the approval.
+    /// </summary>
+    private readonly StaffTravelSeparationBridge _travel;
+
+    /// <summary>Travel's own cancel, which the approval runs on the leaver's trips not yet approved (D-57).</summary>
+    private readonly IStaffTravelRequestService _travelRequests;
+
     private readonly ILogger<SeparationService> _logger;
 
     /// <summary>
@@ -83,8 +92,12 @@ public class SeparationService : ISeparationService
         AssetCustodyClearanceBridge assetCustody,
         ILogger<SeparationService> logger,
         IHrFinancePostingAdapter financePosting,
-        ILeaveOwedCalculator leaveOwed)
+        ILeaveOwedCalculator leaveOwed,
+        StaffTravelSeparationBridge travel,
+        IStaffTravelRequestService travelRequests)
     {
+        _travel = travel;
+        _travelRequests = travelRequests;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _policyProvider = policyProvider;
@@ -671,6 +684,9 @@ public class SeparationService : ISeparationService
             "Separation {Number} submitted for approval (effective {Effective:yyyy-MM-dd})",
             entity.SeparationNumber, entity.EffectiveDate);
 
+        // Travel final closure, lane 9 (D-57): a published route that approves at submission approves here.
+        await CancelLeaverTripsAsync(entity, actorEmployeeId, cancellationToken);
+
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
 
@@ -823,7 +839,67 @@ public class SeparationService : ISeparationService
             "Separation {Number} approved (procedural={Procedural})",
             entity.SeparationNumber, entity.IsProcedural);
 
+        // Travel final closure, lane 9 (D-57): approved — the last stage, not an intermediate one — the leaver's trips
+        // not yet approved are cancelled.
+        await CancelLeaverTripsAsync(entity, actorEmployeeId, cancellationToken);
+
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
+    }
+
+    /// <summary>
+    /// D-57: an approved separation cancels the leaver's trips not yet approved — drafts, submissions, trips sent back —
+    /// each through travel's own cancel (which withdraws its approval in progress, its holds and undisbursed advances, and
+    /// tells the traveller and the desk), after the separation's own save. Best-effort: a trip travel refuses to cancel (a
+    /// booking a supplier committed to, say) stays, and the clearance's Travel block names it. Approved and under-way trips
+    /// are left for the desk — bookings and money hang off them.
+    /// </summary>
+    private async Task CancelLeaverTripsAsync(EmployeeSeparation entity, Guid? actorEmployeeId, CancellationToken cancellationToken)
+    {
+        if (entity.Status != SeparationStatus.Approved) return;
+
+        var tenantId = entity.TenantId;
+        var trips = await _unitOfWork.Repository<StaffTravelRequest>()
+            .GetQueryable(t => t.TenantId == tenantId && t.EmployeeId == entity.EmployeeId
+                            && StaffTravelSeparationBridge.CancelledOnApproval.Contains(t.Status))
+            .OrderBy(t => t.RequestNumber)
+            .Select(t => new { t.Id, t.RequestNumber })
+            .ToListAsync(cancellationToken);
+        if (trips.Count == 0) return;
+
+        // The trip's cancel records who cancelled it as an employee; a login with no employee record leaves them for the desk.
+        if (actorEmployeeId is not Guid actor)
+        {
+            _logger.LogWarning(
+                "Separation {Number}: approved by a login with no employee record, so the leaver's {Count} trip(s) not yet approved are left for the travel desk",
+                entity.SeparationNumber, trips.Count);
+            return;
+        }
+
+        var day = entity.EffectiveDate ?? entity.LastWorkingDay;
+        var reason = $"Left the organisation" +
+                     (day is DateOnly d ? $" on {d.ToString("d MMM yyyy", CultureInfo.InvariantCulture)}" : string.Empty) +
+                     $" — separation {entity.SeparationNumber}.";
+        var cancelled = 0;
+        foreach (var trip in trips)
+        {
+            try
+            {
+                await _travelRequests.CancelAsync(new CancelStaffTravelRequestDto
+                {
+                    RequestId = trip.Id,
+                    CancellationReason = reason,
+                    CancelledById = actor,
+                }, _currentUserProvider.UserId, cancellationToken);
+                cancelled++;
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or UnauthorizedAccessException or ArgumentException)
+            {
+                _logger.LogWarning(ex, "Separation {Number}: the leaver's trip {Trip} could not be cancelled with it",
+                    entity.SeparationNumber, trip.RequestNumber);
+            }
+        }
+        _logger.LogInformation("Separation {Number}: {Cancelled} of the leaver's {Count} trip(s) not yet approved cancelled",
+            entity.SeparationNumber, cancelled, trips.Count);
     }
 
     /// <inheritdoc />
@@ -2311,21 +2387,24 @@ public class SeparationService : ISeparationService
 
         // Travel advances the employee still holds. HR's own data, and until now nothing connected
         // it to somebody leaving — an employee could walk out owing one with nothing to notice.
+        // Cash out by travel's own definition (travel final closure, lane 3, N1): this named only Disbursed and
+        // PartiallySettled, so an advance the travel sweep had marked Overdue — the one most likely to be owed —
+        // would have dropped off a leaver's clearance; and it recomputed the amount owed, ignoring cash handed back.
         var advances = await _unitOfWork.Repository<StaffTravelAdvance>().GetQueryable()
             .AsNoTracking()
-            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == separation.EmployeeId
-                        && (a.Status == TravelAdvanceStatus.Disbursed
-                            || a.Status == TravelAdvanceStatus.PartiallySettled))
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.EmployeeId == separation.EmployeeId)
+            .Where(StaffTravelAdvanceRules.CashOut)
             .ToListAsync(cancellationToken);
 
         foreach (var advance in advances)
         {
-            var outstanding = (advance.ApprovedAmount ?? advance.RequestedAmount) - advance.SettledAmount;
+            var outstanding = advance.UnsettledAmount;
             if (outstanding <= 0) continue;
 
             // ⚠ A currency the settlement is not stated in cannot simply be added to it. Recorded
             // as uncomputed with the figure in the text, rather than converted here: Finance owns
-            // conversion, and its rates are known to be inverted (see StaffTravelCurrencyBridge).
+            // conversion. (Written while Finance's rates were inverted; Finance fixed them on
+            // 2026-09-10 — converting through HrCurrencyBridge is now possible, and is not done here.)
             var sameCurrency = string.Equals(advance.CurrencyCode, currency, StringComparison.OrdinalIgnoreCase);
 
             Add(SettlementLineCategory.TravelAdvanceRecovery, true,
@@ -3057,6 +3136,11 @@ public class SeparationService : ISeparationService
 
             separation.Status = SeparationStatus.SettlementApproved;
 
+            // Travel final closure, lane 9 (D-58): each travel advance this settlement recovered is settled in travel, in
+            // the same transaction as Finance's journal — and posted by that journal alone, not a second time by travel.
+            await StaffTravelSeparationBridge.ApplyFinalSettlementRecoveryAsync(
+                _unitOfWork, tenantId, lines, separation.SeparationNumber, actorEmployeeId, _logger, ct);
+
             await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
             await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -3681,6 +3765,10 @@ public class SeparationService : ISeparationService
                           && mandatoryOutstanding == 0
                           && separation.Status == SeparationStatus.ClearanceInProgress,
             BlockedReason = ClearanceBlockedReason(separation, items, mandatoryOutstanding),
+            // Travel final closure, lane 9 (D-56): the leaver's staff travel, read live as the asset register is —
+            // advisory, outside the gate above.
+            Travel = await _travel.ReadAsync(tenantId, separation.EmployeeId,
+                StaffTravelSeparationBridge.Decided.Contains(separation.Status), cancellationToken),
         };
     }
 

@@ -17,16 +17,12 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 import { travelFinanceService } from '@/services/hr/travel-finance.service';
 
 const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 type View = 'all' | 'unpaid-approved';
 
@@ -39,7 +35,7 @@ type View = 'all' | 'unpaid-approved';
 export default function TravelClaimsPage() {
   const [view, setView] = useState<View>('all');
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['travel-claims-register', view],
     queryFn: () =>
       view === 'unpaid-approved'
@@ -95,6 +91,10 @@ export default function TravelClaimsPage() {
           {isLoading ? (
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the expense claims" />
             </div>
           ) : items.length === 0 ? (
             <EmptyState

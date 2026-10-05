@@ -2903,9 +2903,11 @@ public class TalentReviewSessionService : ITalentReviewSessionService
         var tenantId = GetTenantId();
 
         // The most recent appraisal that actually carries a score. An unscored draft suggests
-        // nothing — better an empty grid than a number derived from a blank.
+        // nothing — better an empty grid than a number derived from a blank. Nor does a withdrawn
+        // appraisal, whose score is no result (performance closure E-d1).
         var appraisal = await _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.OverallScore != null)
+            .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.OverallScore != null
+                        && a.Status != AppraisalStatus.Withdrawn)
             .OrderByDescending(a => a.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 

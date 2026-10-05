@@ -487,6 +487,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IAppraisalScoreService, AppraisalScoreService>();
         // The appraisal pipeline's one gate evaluator, and the status it implies (performance closure lane B1).
         services.AddScoped<IAppraisalLifecycleService, AppraisalLifecycleService>();
+        // An appraisal out of its cycle without a result: HR's action and the leaver's exit (performance closure E-d1).
+        services.AddScoped<IAppraisalWithdrawalService, AppraisalWithdrawalService>();
         // An appraisal's goals section: one snapshot row per locked goal (performance closure lane L-b).
         services.AddScoped<IAppraisalGoalRowService, AppraisalGoalRowService>();
         services.AddScoped<IAppraisalOutcomeService, AppraisalOutcomeService>();
@@ -660,6 +662,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffTravelRequestService, StaffTravelRequestService>();
         services.AddScoped<IStaffTravelItineraryService, StaffTravelItineraryService>();
         services.AddScoped<IStaffTravelBookingService, StaffTravelBookingService>();
+        // Travel's side of the seam with Fleet (travel final closure, lane 6) — Fleet's services, Fleet's code untouched.
+        services.AddScoped<IStaffTravelFleetService, StaffTravelFleetService>();
         services.AddScoped<IStaffTravelFinanceService, StaffTravelFinanceService>();
         services.AddScoped<IStaffTravelPolicyService, StaffTravelPolicyService>();
         services.AddScoped<IStaffTravelComplianceService, StaffTravelComplianceService>();
@@ -803,6 +807,8 @@ public static class HrModuleServiceRegistration
         // the separation service it feeds rather than with the asset services it reads, so that the
         // one place this crosses areas is visible from the side that consumes it.
         services.AddScoped<AssetCustodyClearanceBridge>();
+        // Travel final closure, lane 9 (D-56…D-58): staff travel's side of a separation.
+        services.AddScoped<StaffTravelSeparationBridge>();
         // The sixth reminder engine in the system, after SHE, movements, discipline, travel and
         // probation. Same shape: a run header, one dispatch row per reminder, a dedupe key.
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();
@@ -815,12 +821,10 @@ public static class HrModuleServiceRegistration
         // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
         // rather than starting a seventh.
         services.AddScoped<IAssetReminderService, AssetReminderService>();
-        // Travel's read-only window onto Finance's currency and exchange-rate masters —
-        // replaces the retired StaffTravelCurrencyExchangeRate table (slice 6).
+        // HR's read-only window onto Finance's currency and exchange-rate masters — replaced travel's
+        // retired StaffTravelCurrencyExchangeRate table (slice 6). Travel's own alias for it was retired
+        // on 2026-10-01 (travel final closure, lane 0); the travel services inject this directly.
         services.AddScoped<HrCurrencyBridge>();
-        // Area 12's alias for the same bridge — registered separately so its existing constructor
-        // injections resolve unchanged. Retire with the alias.
-        services.AddScoped<StaffTravelCurrencyBridge>();
         // HR → Finance posting (HR finish plan lane 8): the HR side of FIN-INT-001. One adapter for
         // every HR money event; the store is split out so its contract tests need no EF provider.
         services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();
@@ -831,6 +835,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
         services.AddScoped<StaffTravelBudgetRollup>();
+        // Who hears what about a trip — one topic per event and audience (travel final closure, lane 8).
+        services.AddScoped<StaffTravelNotices>();
+        // Travel final closure, lane 9 (O-12, D-53, D-54): a trip's working days on the traveller's attendance as OnDuty.
+        services.AddScoped<StaffTravelAttendancePosting>();
 
         services.AddScoped<IStaffOffenseService, StaffOffenseService>();
         services.AddScoped<IStaffDisciplinaryActionTypeService, StaffDisciplinaryActionTypeService>();

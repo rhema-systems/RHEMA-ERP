@@ -59,8 +59,10 @@ import {
  *
  * The employee's own scores sit beside each row rather than on a separate tab — the whole
  * point of a manager evaluation is the comparison, and putting the two a click apart makes it
- * an act of memory. Whether the self-score is visible at all is the cycle's decision
- * (`showSelfScoreToManager`), so the aside is dropped rather than shown blank when it is off.
+ * an act of memory. When the self-score is visible is the server's decision (closure B2): never
+ * while the self-evaluation is a draft, and — when the cycle's `showSelfScoreToManager` is off —
+ * not until the manager has submitted their own evaluation. The aside is dropped rather than
+ * shown blank while the scores are withheld.
  *
  * ⚠ **Submitting is one-way and does more than save.** It assigns the HR reviewer, moves the
  * appraisal to Governance, and locks every later write — a remand is the only route back.
@@ -88,6 +90,7 @@ export default function ManagerEvaluationPage() {
     recommendTraining: false,
     recommendPIP: false,
     recommendTermination: false,
+    recommendAward: false,
   });
   const [goalValues, setGoalValues] = useState<GoalAssessmentValues>({});
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -137,6 +140,7 @@ export default function ManagerEvaluationPage() {
       recommendTraining: context.recommendTraining,
       recommendPIP: context.recommendPIP,
       recommendTermination: context.recommendTermination,
+      recommendAward: context.recommendAward ?? false,
     });
   }, [appraisalId, context?.isManagerEvaluationSubmitted]);
 
@@ -169,7 +173,8 @@ export default function ManagerEvaluationPage() {
     return map;
   }, [context]);
 
-  const showSelfScores = context?.settings?.showSelfScoreToManager !== false;
+  // The server withholds them (B2); the switch alone used to hide them for good, even after submitting.
+  const showSelfScores = context?.selfScoresWithheld !== true;
   const readOnly = context?.isManagerEvaluationSubmitted === true || context?.isEditable === false;
   const remanded = context?.isRemandedAppeal === true;
 
@@ -284,11 +289,13 @@ export default function ManagerEvaluationPage() {
 
       <Card>
         <CardContent className="p-4">
-          <AppraisalPhaseRail phase={phase?.phase} settings={context.settings} />
+          <AppraisalPhaseRail phase={phase?.phase} subStatus={phase?.subStatus} settings={context.settings} />
         </CardContent>
       </Card>
 
-      {remanded && (
+      {/* A remand reopens the evaluation until its deadline (closure C3); once the manager has
+          re-submitted, the appeal is HR's to decide and the form is closed again. */}
+      {remanded && !context.isManagerEvaluationSubmitted && (
         <Alert variant="destructive">
           <TriangleAlert className="h-4 w-4" />
           <AlertTitle>Re-evaluation after an appeal</AlertTitle>
@@ -300,9 +307,20 @@ export default function ManagerEvaluationPage() {
                 {' '}
                 This must be resubmitted by{' '}
                 <strong>{formatDate(context.appealRemandDeadline)}</strong>
-                {context.isRemandDeadlineExceeded && ' — that deadline has passed, so the server will refuse the save. Contact HR.'}
+                {context.isRemandDeadlineExceeded &&
+                  ' — that deadline has passed, so the form is closed. HR can extend it, or decide the appeal on your original scores.'}
               </>
             )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {remanded && context.isManagerEvaluationSubmitted && (
+        <Alert>
+          <Send className="h-4 w-4" />
+          <AlertTitle>Re-evaluation submitted</AlertTitle>
+          <AlertDescription>
+            HR will compare it with your original evaluation and decide the appeal.
           </AlertDescription>
         </Alert>
       )}
@@ -319,10 +337,39 @@ export default function ManagerEvaluationPage() {
         </Alert>
       )}
 
-      {!context.isManagerEvaluationSubmitted && !showSelfScores && (
+      {context.selfScoresWithheld && (
         <p className="text-sm text-muted-foreground">
-          This cycle does not show you the employee&apos;s self-scores while you evaluate.
+          This cycle shows you {context.employeeName.split(' ')[0]}&apos;s self-scores once you have
+          submitted your own evaluation.
         </p>
+      )}
+
+      {/* D-90: the interim reviews as context for the year-end judgement. A full interim
+          appraisal gave a period score; a light-touch review gives none. Read-only. */}
+      {(context.interimReviews?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Interim reviews this cycle</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              For context. The year-end score is yours; a period score does not feed it.
+            </p>
+          </CardHeader>
+          <CardContent className="grid gap-2 sm:grid-cols-3">
+            {context.interimReviews!.map((review) => (
+              <div key={review.id} className="rounded-md border p-3 text-sm">
+                <div className="font-medium">{humanizeEnum(review.type)}</div>
+                <div className="text-muted-foreground">
+                  {formatDate(review.eventDate)} · {humanizeEnum(review.status)}
+                </div>
+                <div className="mt-1">
+                  {review.isFullAppraisal
+                    ? `Period score ${review.overallPeriodScore ?? '—'}`
+                    : 'Light touch — no period score'}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -390,7 +437,9 @@ export default function ManagerEvaluationPage() {
                 return (
                   <div className="space-y-1">
                     <p className="text-muted-foreground">
-                      {context.employeeName.split(' ')[0]} has not scored this yet.
+                      {context.selfEvaluationSubmitted
+                        ? `${context.employeeName.split(' ')[0]} did not score this.`
+                        : `${context.employeeName.split(' ')[0]} has not submitted their self-evaluation yet.`}
                     </p>
                     {override}
                   </div>
@@ -489,8 +538,9 @@ export default function ManagerEvaluationPage() {
             <CardHeader>
               <CardTitle className="text-base">Recommendations</CardTitle>
               <p className="text-sm text-muted-foreground">
-                These are recorded against the appraisal for HR to act on — ticking one does not
-                itself start a promotion, increment or improvement plan.
+                When you submit, each one ticked goes to HR as a recommendation to decide — ticking
+                one does not itself start a promotion, increment or improvement plan. Untick one before
+                submitting again and the recommendation is withdrawn, unless HR has already decided it.
               </p>
             </CardHeader>
             <CardContent className="grid gap-3 sm:grid-cols-2">
@@ -501,6 +551,7 @@ export default function ManagerEvaluationPage() {
                   ['recommendTraining', 'Training'],
                   ['recommendPIP', 'Performance improvement plan'],
                   ['recommendTermination', 'Termination'],
+                  ['recommendAward', 'Award or recognition'],
                 ] as const
               ).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-sm">
@@ -543,7 +594,11 @@ export default function ManagerEvaluationPage() {
         </TabsContent>
 
         <TabsContent value="conversations" className="mt-4">
-          <ConversationsPanel appraisalId={appraisalId} canSchedule />
+          {/* The appraisee books none of their own conversations — an HR officer included (D-74). */}
+          <ConversationsPanel
+            appraisalId={appraisalId}
+            canSchedule={user?.employeeId !== context.employeeId}
+          />
         </TabsContent>
       </Tabs>
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { Loader2, Plus, Plane } from 'lucide-react';
+import { IdCard, Loader2, Plus, Plane } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
@@ -18,17 +18,10 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { travelService } from '@/services/hr/travel.service';
 import { MyTravelAlertsPanel } from '@/components/hr/travel/MyTravelAlertsPanel';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from '@/components/hr/travel/travel-format';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: currency || 'GHS',
-        currencyDisplay: 'code',
-      }).format(amount);
 
 /**
  * An employee's own travel.
@@ -38,7 +31,7 @@ const fmtMoney = (amount?: number | null, currency?: string) =>
  * anyone without `HR.Travel.Read`, which is why this page exists rather than filtering that one.
  */
 export default function MyTravelPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['my-travel-requests'],
     queryFn: () => travelService.getMine(),
   });
@@ -52,12 +45,21 @@ export default function MyTravelPage() {
         description="Trips you have requested, and where each one has got to."
         backHref="/me"
         actions={
-          <Button asChild>
-            <Link href="/me/travel/new">
-              <Plus className="mr-2 h-4 w-4" />
-              Request travel
-            </Link>
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            {/* Lane 7 (7c1, E2): your passport decides which trips need a visa, and its expiry is checked. */}
+            <Button variant="outline" asChild>
+              <Link href="/me/travel/documents">
+                <IdCard className="mr-2 h-4 w-4" />
+                My travel documents
+              </Link>
+            </Button>
+            <Button asChild>
+              <Link href="/me/travel/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Request travel
+              </Link>
+            </Button>
+          </div>
         }
       />
 
@@ -72,6 +74,10 @@ export default function MyTravelPage() {
           {isLoading ? (
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="your travel requests" />
             </div>
           ) : items.length === 0 ? (
             <EmptyState

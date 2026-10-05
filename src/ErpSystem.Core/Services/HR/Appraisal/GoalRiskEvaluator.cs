@@ -44,9 +44,10 @@ public sealed class GoalRiskEvaluator : IGoalRiskEvaluator
         GoalRiskSetting settings,
         DateTime        utcNow)
     {
-        // ── Skip terminal statuses ─────────────────────────────────────────
-        // Completed and Rejected goals are closed; risk monitoring is irrelevant.
-        if (goal.Status is GoalStatus.Completed or GoalStatus.Rejected)
+        // ── Watch agreed goals only ────────────────────────────────────────
+        // Completed and Rejected goals are closed; a draft or a goal still waiting for the manager is
+        // nobody's commitment yet (performance closure D-71), and every list that asks shares this.
+        if (Array.IndexOf(GoalSetRules.RiskWatched, goal.Status) < 0)
             return RiskEvaluationResult.NotAtRisk;
 
         var today = DateOnly.FromDateTime(utcNow.Date);

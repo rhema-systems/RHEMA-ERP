@@ -230,8 +230,8 @@ export default function SelfEvaluationPage() {
           <TriangleAlert className="h-4 w-4" />
           <AlertTitle>This appraisal is not open for your self-evaluation</AlertTitle>
           <AlertDescription>
-            Either the cycle has moved past the self-evaluation step, or goal setting is still
-            outstanding.
+            The cycle has moved past the self-evaluation step, goal setting is still outstanding,
+            or the cycle is not open.
           </AlertDescription>
         </Alert>
       )}
@@ -239,6 +239,14 @@ export default function SelfEvaluationPage() {
       {!context.isSelfEvaluationSubmitted && context.selfEvaluationDeadline && (
         <p className="text-sm text-muted-foreground">
           Due {formatDate(context.selfEvaluationDeadline)}.
+        </p>
+      )}
+
+      {/* The profile switch is named "allow", but it requires (closure B2): with it on, the
+          submission is refused until every behavioural criterion has a score. */}
+      {!context.isSelfEvaluationSubmitted && context.allowSelfSoftSkillRating && (
+        <p className="text-sm text-muted-foreground">
+          This cycle asks you to score every behavioural criterion before you submit.
         </p>
       )}
 

@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import { CheckCircle2, ScrollText, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -13,12 +14,18 @@ import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { appraisalAppealService } from '@/services/hr/appeals.service';
+import { formatActualAgainstTarget, formatCriterionScore } from '@/types/hr/appeals';
 
 /**
  * The employee's final outcome — the record of what happened to their appeal.
  *
  * Only reachable once the appeal is Upheld or Rejected; a remand is still in flight and the
  * server answers 400, so the empty state says to check the status page instead.
+ *
+ * **It says whether anything moved** (closure C-b): an upheld appeal can leave every score as it
+ * was — HR agreed, on a profile that does not let HR change scores — and the message said "your
+ * scores were adjusted" regardless. A contested row shows what it scored when the appeal was filed
+ * beside the final score (D-38); a KPI or goal with a target shows its actual (it read "—").
  */
 export default function AppealOutcomePage() {
   const params = useParams<{ id: string }>();
@@ -100,8 +107,8 @@ export default function AppealOutcomePage() {
             value: data.scoresChangedAfterAppeal ? 'Yes' : 'No',
             tone: data.scoresChangedAfterAppeal ? 'success' : 'default',
             hint: data.scoresChangedAfterAppeal
-              ? 'At least one score moved as a result'
-              : 'The original scores stand',
+              ? 'The appeal moved a score'
+              : 'The scores you appealed stand',
           },
           { label: 'Items contested', value: data.appealedItems.length },
           { label: 'Appeal filed', value: formatDate(data.appealSubmittedDate) },
@@ -144,7 +151,12 @@ export default function AppealOutcomePage() {
             <EmptyState
               icon={ScrollText}
               title="No itemised scores"
-              description="This appraisal has no scored criteria on record."
+              description={
+                // The server sends none when the cycle shows the overall only (closure B2).
+                data.scoreBreakdownShown
+                  ? 'This appraisal has no scored criteria on record.'
+                  : 'This cycle shows you the final result, not each criterion’s score.'
+              }
             />
           ) : (
             <Table>
@@ -152,43 +164,72 @@ export default function AppealOutcomePage() {
                 <TableRow>
                   <TableHead>Criterion</TableHead>
                   <TableHead className="text-right">Weight</TableHead>
-                  <TableHead className="text-right">Score</TableHead>
+                  <TableHead className="text-right">When you appealed</TableHead>
+                  <TableHead className="text-right">Final score</TableHead>
                   <TableHead className="text-right">Weighted</TableHead>
                   <TableHead>Contested</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.finalCriteriaScores.map((c) => (
-                  <TableRow key={c.criterionKey}>
-                    <TableCell>
-                      <div className="font-medium">{c.itemName}</div>
-                      {c.managerComments && (
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {c.managerComments}
+                {data.finalCriteriaScores.map((c) => {
+                  const actual =
+                    c.scoringMethod === 'Measured'
+                      ? formatActualAgainstTarget(c.finalActualValue, c.targetValue, c.unit)
+                      : null;
+                  return (
+                    <TableRow key={c.criterionKey}>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{c.itemName}</span>
+                          <Badge variant="secondary">{c.itemType}</Badge>
                         </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
-                      {c.finalScore ?? '—'}
-                      {c.achievementOverridden && (
-                        <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
-                          Achievement %, overridden by calibration/appeal
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {c.finalWeightedScore.toFixed(1)}
-                    </TableCell>
-                    <TableCell>
-                      {c.wasAppealed ? (
-                        <StatusBadge status="Appealed" />
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                        {c.sectionName && (
+                          <div className="text-xs text-muted-foreground">{c.sectionName}</div>
+                        )}
+                        {c.managerComments && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {c.managerComments}
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{c.weight}%</TableCell>
+                      <TableCell className="text-right tabular-nums text-muted-foreground">
+                        {c.wasAppealed ? formatCriterionScore(c.scoreWhenAppealed, c.scoringMethod) : ''}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {formatCriterionScore(c.finalScore, c.scoringMethod)}
+                        {actual && (
+                          <div className="text-xs font-normal text-muted-foreground">{actual}</div>
+                        )}
+                        {c.achievementOverridden && (
+                          <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                            Achievement restated by calibration or appeal
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {c.finalWeightedScore.toFixed(1)}
+                      </TableCell>
+                      <TableCell>
+                        {c.wasAppealed ? (
+                          <div className="space-y-1">
+                            <StatusBadge status="Appealed" />
+                            {c.changedOnAppeal === true && (
+                              <div className="text-xs text-emerald-700 dark:text-emerald-400">
+                                Changed
+                              </div>
+                            )}
+                            {c.changedOnAppeal === false && (
+                              <div className="text-xs text-muted-foreground">Unchanged</div>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}

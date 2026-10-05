@@ -93,6 +93,14 @@ public class TdcDemoPersonaSeeder
             "Drives every HR register and admin screen; also a line manager and an employee",
             Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.Employee),
 
+        // A second HR desk officer (travel final closure, lane 3, 2026-10-02). Money and authority in HR are
+        // two-person: whoever approves a travel advance cannot pay it out (D-2), whoever books above a policy
+        // cap cannot authorise the breach (D-8). With hr.head the only HR login, the demo could show neither —
+        // the Kumasi advance stopped at Approved. An officer, not a line manager.
+        new("hr.officer", Post("Human Resource Officer", "HR Assistant"),
+            "A second HR desk officer: pays out what hr.head approved and authorises what hr.head booked — the two-person rules",
+            Constants.Roles.Hr, Constants.Roles.Employee),
+
         // DR-10 (2026-09-03): the safety function has its own two roles and no HR role. The desk
         // officer sits on a junior SHE post and WORKS every register; the HSE Supervisor — the
         // head of the SHE Section — holds SHE Manager and is the one who CONFIGURES it (catalogues,

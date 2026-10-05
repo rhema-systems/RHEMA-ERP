@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,12 @@ public class UnitGoalService : IUnitGoalService
 {
     private readonly IGenericRepository<UnitGoal> _unitGoalRepository;
     private readonly IGenericRepository<AppraisalAttachment> _attachmentRepository;
+    private readonly IGenericRepository<EmployeeGoal> _employeeGoalRepository;
+    private readonly IGenericRepository<CompanyGoal> _companyGoalRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly IGenericRepository<OrganizationUnit> _unitRepository;
+    private readonly IGenericRepository<OrganizationLevel> _levelRepository;
+    private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<UnitGoalService> _logger;
@@ -22,12 +29,24 @@ public class UnitGoalService : IUnitGoalService
     public UnitGoalService(
         IGenericRepository<UnitGoal> unitGoalRepository,
         IGenericRepository<AppraisalAttachment> attachmentRepository,
+        IGenericRepository<EmployeeGoal> employeeGoalRepository,
+        IGenericRepository<CompanyGoal> companyGoalRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
+        IGenericRepository<OrganizationUnit> unitRepository,
+        IGenericRepository<OrganizationLevel> levelRepository,
+        IGenericRepository<Employee> employeeRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<UnitGoalService> logger)
     {
         _unitGoalRepository = unitGoalRepository;
         _attachmentRepository = attachmentRepository;
+        _employeeGoalRepository = employeeGoalRepository;
+        _companyGoalRepository = companyGoalRepository;
+        _cycleRepository = cycleRepository;
+        _unitRepository = unitRepository;
+        _levelRepository = levelRepository;
+        _employeeRepository = employeeRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -274,10 +293,107 @@ public class UnitGoalService : IUnitGoalService
             .ToListAsync(cancellationToken);
     }
 
+    /// <summary>
+    /// What hangs off a unit goal (performance closure E-g1, D-78): the employee goals aligned to it, the unit goals
+    /// cascaded from it, and the files attached to it. Null when nothing does.
+    /// </summary>
+    private async Task<string?> DescribeUseAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var employeeGoals = await _employeeGoalRepository.GetQueryable()
+            .CountAsync(g => g.TenantId == tenantId && g.UnitGoalId == id, cancellationToken);
+        var childGoals = await _unitGoalRepository.GetQueryable()
+            .CountAsync(u => u.TenantId == tenantId && u.ParentUnitGoalId == id, cancellationToken);
+        var attachments = await _attachmentRepository.GetQueryable()
+            .CountAsync(a => a.TenantId == tenantId && a.UnitGoalId == id, cancellationToken);
+
+        return DefinitionUse.Describe(
+            new DefinitionUse.Use(employeeGoals, "an employee goal", "employee goals"),
+            new DefinitionUse.Use(childGoals, "a unit goal cascaded from it", "unit goals cascaded from it"),
+            new DefinitionUse.Use(attachments, "an attached file", "attached files"));
+    }
+
+    /// <summary>
+    /// What a unit goal names is this tenant's, and its parents are its cycle's (performance closure E-g1, D-79):
+    /// create and update stored whatever ids they were sent — a parent in another cycle or tenant, a unit, level or
+    /// author that did not exist, a goal its own parent. A goal with a cascade under it stays in its cycle. An update
+    /// checks what it changes (a stored unit since retired does not block an edit of the title); it keeps the author.
+    /// </summary>
+    private async Task ValidateReferencesAsync(UnitGoal candidate, UnitGoal? stored, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var cycleChanged = stored == null || candidate.AppraisalCycleId != stored.AppraisalCycleId;
+        if (cycleChanged && !await _cycleRepository.GetQueryable()
+                .AnyAsync(c => c.Id == candidate.AppraisalCycleId && c.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The appraisal cycle named was not found.");
+        if ((stored == null || candidate.OrganizationUnitId != stored.OrganizationUnitId)
+            && !await _unitRepository.GetQueryable()
+                .AnyAsync(u => u.Id == candidate.OrganizationUnitId && u.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The organisation unit named was not found.");
+        if ((stored == null || candidate.OrganizationLevelId != stored.OrganizationLevelId)
+            && !await _levelRepository.GetQueryable()
+                .AnyAsync(l => l.Id == candidate.OrganizationLevelId && l.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The organisation level named was not found.");
+        if (stored == null && !await _employeeRepository.GetQueryable()
+                .AnyAsync(e => e.Id == candidate.CreatedByManagerId && e.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The manager named as the goal's author was not found.");
+
+        if (candidate.ParentCompanyGoalId is Guid companyGoalId
+            && (cycleChanged || companyGoalId != stored!.ParentCompanyGoalId))
+        {
+            var parentCycle = await _companyGoalRepository.GetQueryable()
+                .Where(g => g.Id == companyGoalId && g.TenantId == tenantId)
+                .Select(g => (Guid?)g.AppraisalCycleId)
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The parent company goal named was not found.");
+            if (parentCycle != candidate.AppraisalCycleId)
+                throw new InvalidOperationException(
+                    "The parent company goal belongs to another cycle; a unit goal cascades from its own cycle's goals.");
+        }
+
+        if (candidate.ParentUnitGoalId is Guid parentId
+            && (cycleChanged || parentId != stored!.ParentUnitGoalId))
+        {
+            // Walk up from the parent: the goal must not be found above itself.
+            var seen = new HashSet<Guid>();
+            Guid? cursor = parentId;
+            var first = true;
+            while (cursor is Guid current)
+            {
+                if (current == candidate.Id)
+                    throw new InvalidOperationException("A unit goal cannot cascade from itself or from a goal cascaded from it.");
+                if (!seen.Add(current)) break;
+                var parent = await _unitGoalRepository.GetQueryable()
+                    .Where(g => g.Id == current && g.TenantId == tenantId)
+                    .Select(g => new { g.AppraisalCycleId, g.ParentUnitGoalId })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (parent == null)
+                {
+                    if (first) throw new InvalidOperationException("The parent unit goal named was not found.");
+                    break;
+                }
+                if (first && parent.AppraisalCycleId != candidate.AppraisalCycleId)
+                    throw new InvalidOperationException(
+                        "The parent unit goal belongs to another cycle; a unit goal cascades from its own cycle's goals.");
+                first = false;
+                cursor = parent.ParentUnitGoalId;
+            }
+        }
+
+        if (stored != null && candidate.AppraisalCycleId != stored.AppraisalCycleId)
+        {
+            var uses = await DescribeUseAsync(stored.Id, cancellationToken);
+            if (uses != null)
+                throw new InvalidOperationException(
+                    $"The unit goal \"{stored.Title}\" is used by {uses} in its cycle, so it cannot move to another cycle.");
+        }
+    }
+
     public async Task<UnitGoalDto> CreateAsync(CreateUnitGoalDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ValidateReferencesAsync(entity, null, cancellationToken);
         await _unitGoalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Unit goal created: {Id} '{Title}'", entity.Id, entity.Title);
@@ -287,7 +403,17 @@ public class UnitGoalService : IUnitGoalService
     public async Task<UnitGoalDto> UpdateAsync(UpdateUnitGoalDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
+        var stored = new UnitGoal
+        {
+            Id = entity.Id, Title = entity.Title, AppraisalCycleId = entity.AppraisalCycleId,
+            OrganizationUnitId = entity.OrganizationUnitId, OrganizationLevelId = entity.OrganizationLevelId,
+            ParentCompanyGoalId = entity.ParentCompanyGoalId, ParentUnitGoalId = entity.ParentUnitGoalId,
+        };
+        var author = entity.CreatedByManagerId;
         updateDto.UpdateEntity(entity);
+        // The author is who raised it (E-g1): the body's author re-assigned the goal, and with it who may manage it.
+        entity.CreatedByManagerId = author;
+        await ValidateReferencesAsync(entity, stored, cancellationToken);
         await _unitGoalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Unit goal updated: {Id}", entity.Id);
@@ -297,6 +423,11 @@ public class UnitGoalService : IUnitGoalService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id, cancellationToken);
+        // A unit goal with anything under it is not deleted (E-g1, D-78): its employee goals and child goals lost
+        // their parent, and its files their goal.
+        var uses = await DescribeUseAsync(id, cancellationToken);
+        if (uses != null)
+            throw DefinitionUse.DeleteRefused("unit goal", entity.Title, uses);
         await _unitGoalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Unit goal deleted: {Id}", id);

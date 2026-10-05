@@ -74,9 +74,12 @@ public class PipDashboardController : ControllerBase
                 .Select(m => new
                 {
                     PipId = m.Key,
-                    Total = m.Count(),
-                    Held = m.Count(x => x.MeetingDate <= now),
-                    Next = m.Where(x => x.MeetingDate > now).Min(x => (DateTime?)x.MeetingDate),
+                    // The stored status (decision D-73): held means recorded as held, and a cancelled
+                    // meeting is neither held nor next. Both used to be read off the date.
+                    Total = m.Count(x => x.Status != PipMeetingStatus.Cancelled),
+                    Held = m.Count(x => x.Status == PipMeetingStatus.Held),
+                    Next = m.Where(x => x.Status == PipMeetingStatus.Scheduled && x.MeetingDate > now)
+                            .Min(x => (DateTime?)x.MeetingDate),
                 })
                 .ToDictionaryAsync(x => x.PipId, ct);
 

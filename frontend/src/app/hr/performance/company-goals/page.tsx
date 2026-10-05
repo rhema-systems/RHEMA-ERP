@@ -626,7 +626,13 @@ export default function CompanyGoalsPage() {
         title="Delete company goal?"
         description={
           pendingDelete
-            ? `“${pendingDelete.title}” has ${pendingDelete.unitGoalCount} unit goal(s) and ${pendingDelete.employeeGoalCount} employee goal(s) aligned to it. They stay, but lose the link.`
+            ? // A goal with anything under it is refused (performance closure E-g1): the copy said they
+              // "stay, but lose the link" — the delete orphaned them.
+              `“${pendingDelete.title}” is deleted only when nothing hangs off it — no unit goal, employee goal or check-in. ` +
+              `It has ${pendingDelete.unitGoalCount} unit goal(s) and ${pendingDelete.employeeGoalCount} employee goal(s) aligned to it.` +
+              (pendingDelete.unitGoalCount + pendingDelete.employeeGoalCount > 0
+                ? ' Hide it instead: untick “Visible to employees” on its form, and no new goal can align to it.'
+                : '')
             : ''
         }
         confirmText="Delete"

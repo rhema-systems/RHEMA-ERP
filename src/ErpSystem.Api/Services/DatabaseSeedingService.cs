@@ -16,6 +16,7 @@ using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Core.Services.Projects;
+using StaffTravelApprovalLadder = ErpSystem.Core.Services.HR.StaffTravelApprovalLadder;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Data;
@@ -123,10 +124,16 @@ namespace ErpSystem.Web.Services
             string DefinitionName,
             string Description);
 
+        /// <param name="DynamicApproverKeys">Engine context keys each holding one approver's login — a stage
+        /// addressed to people named by the record, not by role (staff travel's line-manager stage).</param>
+        /// <param name="FallbackRole">The step's required role: who the engine asks when no approver rule
+        /// resolves, as when none of the <paramref name="DynamicApproverKeys"/> holds a login.</param>
         private sealed record WorkflowApprovalStageSeed(
             string StepName,
             IReadOnlyCollection<string> RoleNames,
-            string Description);
+            string Description,
+            IReadOnlyCollection<string>? DynamicApproverKeys = null,
+            string? FallbackRole = null);
 
         private sealed record EstateSopWorkflowSeedSpec(
             string EntityCode,
@@ -458,6 +465,8 @@ namespace ErpSystem.Web.Services
             await EnsureHrWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring HR leave workflows are seeded...");
             await EnsureLeaveWorkflowsSeededAsync();
+            _logger.LogInformation("Ensuring the staff travel workflow is seeded...");
+            await EnsureStaffTravelWorkflowSeededAsync();
 
             _logger.LogInformation("Ensuring Legal procedure workflows are seeded...");
             await EnsureLegalProcedureWorkflowsSeededAsync();
@@ -509,7 +518,7 @@ namespace ErpSystem.Web.Services
         /// not overwritten. Payroll runs are excluded — payroll is another owner's module.</para>
         /// </remarks>
         /// <summary>
-        /// The two HR steps of <see cref="SeedWorkflowDefinitionsAsync"/> on their own — what the
+        /// The HR steps of <see cref="SeedWorkflowDefinitionsAsync"/> on their own — what the
         /// Developer Test Data screen's Foundation tier runs, so seeding HR does not also re-seed
         /// every other module's definitions.
         /// </summary>
@@ -517,6 +526,7 @@ namespace ErpSystem.Web.Services
         {
             await EnsureHrWorkflowsSeededAsync();
             await EnsureLeaveWorkflowsSeededAsync();
+            await EnsureStaffTravelWorkflowSeededAsync();
         }
 
         private async Task EnsureHrWorkflowsSeededAsync()
@@ -529,6 +539,9 @@ namespace ErpSystem.Web.Services
                 var hrControlled = new[] { Constants.Roles.Hr, Constants.Roles.Manager, Constants.Roles.TenantAdmin };
                 var executive = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin, Constants.Roles.Hr };
                 var mdOnly = new[] { Constants.Roles.ManagingDirector, Constants.Roles.TenantAdmin };
+                // Performance closure D-104: a pay or employment decision is the appointing authority's alone — no
+                // administrator backstop, which would be a system role making a business decision.
+                var managingDirector = new[] { Constants.Roles.ManagingDirector };
 
                 var specs = new (string Code, string Name, string Definition, string Description, string[] Roles)[]
                 {
@@ -537,7 +550,9 @@ namespace ErpSystem.Web.Services
                     ("STAFF_OVERTIME_REQUEST", "Staff Overtime Request", "Overtime Approval", "Pre-approval of overtime: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
                     ("REMOTE_WORK_REQUEST", "Remote Work Request", "Remote Work Approval", "Remote-working request: Draft -> PendingApproval (line manager) -> Approved.", staffRaised),
                     ("STAFF_ATTENDANCE_REGULARIZATION", "Staff Attendance Regularization", "Attendance Regularisation Approval", "Missed-punch and attendance corrections: Draft -> PendingApproval -> Approved.", staffRaised),
-                    ("STAFF_TRAVEL_REQUEST", "Staff Travel Request", "Staff Travel Approval", "Official travel: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
+                    // ⚠ STAFF_TRAVEL_REQUEST is NOT here since the travel closure's lane 2 (D-7): it is
+                    // two-stage — the traveller's line authority, then HR — and is seeded below by
+                    // EnsureStaffTravelWorkflowSeededAsync.
                     ("TRAINING_NOMINATION", "Training Nomination", "Training Nomination Approval", "Nomination for a training schedule: Draft -> PendingApproval (supervisor, then HR) -> Approved.", staffRaised),
                     ("CONSULTANT_TIMESHEET", "Consultant Timesheet", "Consultant Timesheet Approval", "Consultant timesheet: Draft -> PendingApproval -> Approved, before it is sent to the client.", staffRaised),
                     ("HR_ASSET_REQUISITION", "HR Asset Requisition", "Asset Requisition Approval", "Request for a company asset: Draft -> PendingApproval (line manager or HR) -> Approved.", staffRaised),
@@ -549,8 +564,11 @@ namespace ErpSystem.Web.Services
                     ("STAFF_MOVEMENT", "Staff Movement", "Staff Movement Approval", "Promotion, transfer, secondment or demotion: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("PROBATION_PERIOD", "Probation Period", "Probation Confirmation", "Confirmation at the end of probation: Draft -> PendingApproval (confirming authority) -> Approved.", hrControlled),
                     ("PERFORMANCE_IMPROVEMENT_PLAN", "Performance Improvement Plan", "PIP Approval", "Performance improvement plan: Draft -> PendingApproval (HR) -> Approved.", hrControlled),
-                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
-                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", executive),
+                    // Performance closure F3 (D-12, D-94, D-104): a pay or employment proposal is the Managing
+                    // Director's to decide — HR prepares it. `executive` names HR, and stays as it is for the salary
+                    // change request below.
+                    ("SALARY_REVIEW_PROPOSAL", "Salary Review Proposal", "Salary Review Approval", "Post-appraisal salary proposal: Draft -> PendingApproval (Managing Director) -> Approved.", managingDirector),
+                    ("EMPLOYMENT_ACTION_PROPOSAL", "Employment Action Proposal", "Employment Action Approval", "Post-appraisal employment action: Draft -> PendingApproval (Managing Director) -> Approved.", managingDirector),
                     ("SUCCESSION_PLAN", "Succession Plan", "Succession Plan Approval", "Succession plan for a critical post: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("STAFF_DISCIPLINARY_ACTION", "Staff Disciplinary Action", "Disciplinary Decision Confirmation", "Confirmation of a proposed disciplinary decision: Draft -> PendingApproval (HR, Managing Director) -> Approved.", executive),
                     ("EMPLOYEE_SEPARATION", "Employee Separation", "Separation Approval", "Resignation, retirement or termination: Draft -> PendingApproval (Managing Director, FR-HR-092) -> Approved.", mdOnly),
@@ -570,6 +588,17 @@ namespace ErpSystem.Web.Services
                     ("HR_EMPLOYEE_SALARY_CHANGE_REQUEST", "HR Employee Salary Change Request", "Salary Change Approval", "A change to an employee's pay: Draft -> PendingApproval (HR, Managing Director) -> Approved, then applied to HR and payroll.", executive),
                 };
 
+                // Performance closure F3 (D-94): the four performance routes bar the initiator, so the engine itself
+                // refuses the person who submitted — including on the generic approval paths that bypass the services
+                // (cross-module #15). The services' record-level rules still run on both their paths. An existing
+                // definition gets the bar from EnsureWorkflowInitiatorSeparationAsync; existing databases also get it,
+                // and HR and TenantAdmin taken off the two proposal routes, from the PerformanceClosureWorkflowRetrofit
+                // migration (D-101, D-104) — this seeder only adds.
+                var barInitiator = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "PERFORMANCE_IMPROVEMENT_PLAN", "SALARY_REVIEW_PROPOSAL", "EMPLOYMENT_ACTION_PROPOSAL", "APPRAISAL_TEMPLATE",
+                };
+
                 foreach (var tenant in tenants)
                 {
                     foreach (var spec in specs)
@@ -581,7 +610,8 @@ namespace ErpSystem.Web.Services
                             entityClassName: null,
                             definitionName: spec.Definition,
                             description: spec.Description,
-                            approvalRoleNames: spec.Roles);
+                            approvalRoleNames: spec.Roles,
+                            preventInitiatorApproval: barInitiator.Contains(spec.Code));
                     }
                 }
             }
@@ -615,8 +645,9 @@ namespace ErpSystem.Web.Services
         /// here, for the reason recorded as trap 7 in <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>. That
         /// flag guards the <i>initiator</i>, but a leave request's conflicted party is its
         /// <i>subject</i> — and HR raises requests on other people's behalf from the desk. On a
-        /// tenant with one HR user (the demo tenant is exactly that: <c>hr.head</c> is the only
-        /// holder of the HR role) the flag would strand every desk-raised request at stage 2 with
+        /// tenant with one HR user (the demo tenant was exactly that until 2026-10-02, when the
+        /// persona seeder gained <c>hr.officer</c> for travel's two-person rules; a real tenant may
+        /// still be) the flag would strand every desk-raised request at stage 2 with
         /// nobody able to clear it, which is the area-9b mistake repeated. So the engine does not
         /// block the initiator, and each leave service refuses an approval where the actor IS the
         /// employee the record is about. That targets the real conflict and cannot strand a third
@@ -678,6 +709,73 @@ namespace ErpSystem.Web.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to seed HR leave workflows");
+            }
+        }
+
+        /// <summary>
+        /// Staff travel on a TWO-stage ladder (travel final closure, lane 2, decision D-7): the
+        /// traveller's line authority approves, then HR, which also sets the approved budget.
+        /// </summary>
+        /// <remarks>
+        /// <para><b>Stage 1 is addressed by name, not by role</b> — unlike leave's, which names the
+        /// Manager role and so reaches every manager in the tenant. The stage's two Dynamic approver
+        /// rules read the logins of the traveller's two nearest line authorities, which the engine's
+        /// context for a travel request carries (<see cref="StaffTravelApprovalLadder"/>,
+        /// <c>SimpleWorkflowService</c>): the task, its notification and the inbox row reach the
+        /// traveller's own supervisor or head of unit, and a supervisor without the Manager role can
+        /// decide. This is per-record assignment, not conditional routing (cross-module defect #3 is
+        /// about transitions). When neither key holds a login, the engine falls back to the step's
+        /// required role, HR — D-7's "a traveller with no line authority who has a login goes to HR".
+        /// The travel service checks the decider again and records why when the desk decides.</para>
+        ///
+        /// <para><b>Stage 2 is HR, with TenantAdmin as the backstop</b> every HR definition carries —
+        /// it is what clears the trip of the tenant's only HR officer.
+        /// <c>PreventInitiatorApproval</c> stays false, as on leave: the travel service refuses the
+        /// traveller on both stages, which targets the real conflict without stranding a request the
+        /// desk raised.</para>
+        ///
+        /// <para>Idempotent and additive, via <see cref="EnsureSequentialWorkflowDefinitionSeededAsync"/>:
+        /// it creates the route for a tenant that has none. A database seeded with the one-step route
+        /// before lane 2 is moved onto this one by the <c>TravelClosureApprovalLadder</c> migration — the
+        /// seeder only adds.</para>
+        /// </remarks>
+        private async Task EnsureStaffTravelWorkflowSeededAsync()
+        {
+            try
+            {
+                var tenants = await _context.Tenants
+                    .Where(t => !t.IsDeleted && t.Status == TenantStatus.Active)
+                    .ToListAsync();
+
+                var stages = new[]
+                {
+                    new WorkflowApprovalStageSeed(
+                        StaffTravelApprovalLadder.LineStageName,
+                        Array.Empty<string>(),
+                        "The traveller's supervisor, or the head of their unit or of a unit above it, approves the trip, rejects it or returns it for revision. A traveller with no line manager who can sign in goes to HR.",
+                        DynamicApproverKeys: new[] { StaffTravelApprovalLadder.LineApproverKey, StaffTravelApprovalLadder.SecondLineApproverKey },
+                        FallbackRole: StaffTravelApprovalLadder.LineStageFallbackRole),
+                    new WorkflowApprovalStageSeed(
+                        StaffTravelApprovalLadder.DeskStageName,
+                        StaffTravelApprovalLadder.DeskStageRoles,
+                        "HR approves the trip and the budget it may spend."),
+                };
+
+                foreach (var tenant in tenants)
+                {
+                    await EnsureSequentialWorkflowDefinitionSeededAsync(
+                        tenant.Id,
+                        entityCode: "STAFF_TRAVEL_REQUEST",
+                        entityName: "Staff Travel Request",
+                        entityClassName: null,
+                        definitionName: StaffTravelApprovalLadder.DefinitionName,
+                        description: "Official travel: Draft -> line manager approval -> HR approval -> Approved.",
+                        approvalStages: stages);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to seed the staff travel workflow");
             }
         }
 
@@ -6604,7 +6702,9 @@ namespace ErpSystem.Web.Services
                     StepType = WorkflowStepType.Approval,
                     Order = index + 2,
                     IsRequired = true,
-                    Configuration = BuildApprovalConfigurationJson(stage.RoleNames),
+                    RequiredRole = stage.FallbackRole,
+                    Configuration = BuildApprovalConfigurationJson(
+                        stage.RoleNames, dynamicApproverKeys: stage.DynamicApproverKeys),
                     CreatedAt = now,
                     CreatedBy = "System"
                 })
@@ -7025,11 +7125,12 @@ namespace ErpSystem.Web.Services
 
         private static string BuildApprovalConfigurationJson(
             IReadOnlyCollection<string> approvalRoleNames,
-            bool preventInitiatorApproval = false)
+            bool preventInitiatorApproval = false,
+            IReadOnlyCollection<string>? dynamicApproverKeys = null)
         {
             var configuration = new WorkflowStepConfigurationDto
             {
-                ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval)
+                ApprovalConfig = BuildApprovalConfig(approvalRoleNames, preventInitiatorApproval, dynamicApproverKeys)
             };
 
             return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
@@ -7037,8 +7138,20 @@ namespace ErpSystem.Web.Services
 
         private static WorkflowApprovalConfigDto BuildApprovalConfig(
             IReadOnlyCollection<string> approvalRoleNames,
-            bool preventInitiatorApproval = false)
+            bool preventInitiatorApproval = false,
+            IReadOnlyCollection<string>? dynamicApproverKeys = null)
         {
+            // People named by the record come first (staff travel's line authorities); roles after.
+            var namedApprovers = (dynamicApproverKeys ?? Array.Empty<string>())
+                .Where(key => !string.IsNullOrWhiteSpace(key))
+                .Select(key => key.Trim())
+                .Distinct(StringComparer.Ordinal)
+                .Select(key => new WorkflowAssignmentRuleDto
+                {
+                    AssignmentType = WorkflowAssignmentType.Dynamic,
+                    DynamicExpression = key
+                });
+
             return new WorkflowApprovalConfigDto
             {
                 ApprovalType = WorkflowApprovalType.Single,
@@ -7046,15 +7159,16 @@ namespace ErpSystem.Web.Services
                 RejectionHandling = WorkflowRejectionHandling.StopWorkflow,
                 PreventInitiatorApproval = preventInitiatorApproval,
                 RequireDistinctApprovers = preventInitiatorApproval,
-                ApproverRules = approvalRoleNames
-                    .Where(role => !string.IsNullOrWhiteSpace(role))
-                    .Select(role => role.Trim())
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Select(role => new WorkflowAssignmentRuleDto
-                    {
-                        AssignmentType = WorkflowAssignmentType.Role,
-                        Role = role
-                    })
+                ApproverRules = namedApprovers
+                    .Concat(approvalRoleNames
+                        .Where(role => !string.IsNullOrWhiteSpace(role))
+                        .Select(role => role.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Select(role => new WorkflowAssignmentRuleDto
+                        {
+                            AssignmentType = WorkflowAssignmentType.Role,
+                            Role = role
+                        }))
                     .ToList()
             };
         }

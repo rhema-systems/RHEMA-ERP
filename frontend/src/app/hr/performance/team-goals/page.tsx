@@ -58,6 +58,9 @@ const GOVERNANCE_HINT: Record<string, string> = {
   NotStarted: 'No goals written yet',
   InProgress: 'Goals still in draft or returned',
   AwaitingApproval: 'Waiting on your approval',
+  // The cycle's goal-count bounds (closure B2) — what the lock and the goal-setting gate hold to.
+  BelowMinimum: 'Fewer goals than the cycle requires',
+  AboveMaximum: 'More goals than the cycle allows',
   InvalidWeight: 'Weights do not total 100%',
   StructurallyComplete: 'Set is complete',
 };
@@ -329,6 +332,16 @@ export default function TeamGoalsPage() {
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
                                 {r.totalGoals}
+                                {!r.meetsMinGoalCount && r.totalGoals > 0 && (
+                                  <span className="ml-1 text-xs text-amber-600 dark:text-amber-500">
+                                    (min {r.minGoals})
+                                  </span>
+                                )}
+                                {!r.withinMaxGoalCount && (
+                                  <span className="ml-1 text-xs text-amber-600 dark:text-amber-500">
+                                    (max {r.maxGoals})
+                                  </span>
+                                )}
                               </TableCell>
                               <TableCell className="text-right tabular-nums">
                                 {r.draftCount}

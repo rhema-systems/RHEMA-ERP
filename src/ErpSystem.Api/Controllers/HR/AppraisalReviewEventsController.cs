@@ -374,6 +374,11 @@ public class AppraisalReviewEventsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "deleting a review event");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting appraisal review event {Id}", id);
@@ -624,6 +629,10 @@ public class AppraisalReviewEventsController : ControllerBase
             if (ex is ArgumentException)
                 return NotFound(new { message = ex.Message });
 
+            // A withdrawn appraisal's review events take no more evidence (performance closure E-d1).
+            if (ex is InvalidOperationException rule)
+                return BusinessRuleRejected(rule, "adding an attachment to a review event");
+
             _logger.LogError(ex, "Error adding attachment to review event {EventId}", eventId);
             return StatusCode(500, "An error occurred while adding the attachment");
         }
@@ -714,6 +723,11 @@ public class AppraisalReviewEventsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "removing a review event's attachment");
         }
         catch (Exception ex)
         {

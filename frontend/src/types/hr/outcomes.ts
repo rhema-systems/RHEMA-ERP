@@ -2,8 +2,9 @@
  * Appraisal outcomes — what an appraisal says should happen next, and the intake records that
  * follow from it. Area 5's fourth slice, and all of area 24.
  *
- * **The chain.** A manager (or HR) proposes a `RecommendationType` on a finished appraisal. HR
- * approves it, and approval *dispatches* it: a registered handler in the owning module creates a
+ * **The chain.** The line manager's ticks become Proposed recommendations when they submit their
+ * evaluation (F2); HR may propose others by hand. Another person than the recommender approves
+ * it, and approval *dispatches* it: a registered handler in the owning module creates a
  * real downstream record and the recommendation becomes `Actioned` with a `targetEntityType` /
  * `targetEntityId` back-link. Where each type lands:
  *
@@ -25,9 +26,9 @@
  * `WorkflowApprovalActions`, and the terminal step (Applied / Actioned) stays a direct HR action
  * because it records that another module did the work, not that anyone approved it.
  *
- * ⚠ Submit/approve/reject are inoperable until a `SalaryReviewProposal` /
- * `EmploymentActionProposal` workflow definition has been published — approval authority comes
- * from the definition, not from a role.
+ * With no published definition the server's fallback rules on them. Either way a proposal is
+ * decided by the Managing Director — never its submitter, never the employee it is about — and
+ * only its submitter recalls it (performance closure F3, F9, D-104).
  *
  * Routes: `api/AppraisalOutcomeRecommendations`, `api/SalaryReviewProposals`,
  * `api/EmploymentActionProposals`, `api/DeadlineEnforcement`, `api/training-service-bonds`.
@@ -68,6 +69,9 @@ export interface AppraisalOutcomeRecommendation extends AuditFields {
   recommendedDate?: string | null;
   approvedById?: string | null;
   approvedDate?: string | null;
+  /** Who rejected or dismissed it, and when — never the approver's fields. */
+  decidedById?: string | null;
+  decidedDate?: string | null;
   actionedDate?: string | null;
   notes?: string | null;
   resolutionNotes?: string | null;
@@ -215,6 +219,36 @@ export interface DeadlineEnforcementResult {
   advanced: number;
   /** Per-appraisal notes: advanced steps and any failures. */
   messages: string[];
+}
+
+/**
+ * The transition report (closure B8): a cycle's in-flight appraisals whose records run ahead of
+ * where the gates hold them. Read-only — HR waives each through the audited advance.
+ */
+export interface AppraisalTransitionReport {
+  cycleId: string;
+  cycleName?: string | null;
+  generatedAt: string;
+  /** In-flight appraisals examined: not completed, closed, appealed or withdrawn. */
+  examined: number;
+  rows: AppraisalTransitionRow[];
+}
+
+export interface AppraisalTransitionRow {
+  appraisalId: string;
+  appraisalNumber?: string | null;
+  employeeId: string;
+  employeeName: string;
+  employeeNumber?: string | null;
+  status: string;
+  /** Where the gates hold it, and why. */
+  subStatus: AppraisalSubStatus;
+  stepLabel: string;
+  reason?: string | null;
+  /** What is recorded for steps after it — "the self-evaluation is submitted", …. */
+  recordedAhead: string[];
+  /** HR's advance can move it past the step; otherwise the step itself must be completed. */
+  canWaive: boolean;
 }
 
 export interface ManualAdvanceRequest {

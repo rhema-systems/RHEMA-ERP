@@ -25,6 +25,12 @@ public interface IStaffTravelRequestService
     Task<IEnumerable<StaffTravelRequestSummaryDto>> GetUpcomingTripsAsync(int daysAhead = 30, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestSummaryDto>> GetChildRequestsAsync(Guid parentRequestId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The approved policy a trip would be checked against — the traveller's own unit, the two
+    /// countries, the departure date — for the request form, before anything is saved (T-16).
+    /// </summary>
+    Task<StaffTravelPolicyPreviewDto> GetPolicyPreviewAsync(Guid employeeId, DateOnly departure, Guid? originCountryId, Guid? destinationCountryId, CancellationToken cancellationToken = default);
+
     // Dashboard
     Task<StaffTravelDashboardDto> GetDashboardAsync(int upcomingDays = 30, CancellationToken cancellationToken = default);
 
@@ -34,16 +40,71 @@ public interface IStaffTravelRequestService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Workflow
-    Task<bool> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
-    Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, CancellationToken cancellationToken = default);
-    Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Sends a Draft or returned request for approval, once everything that must hold does (lane 1);
+    /// returns where it now is, the policy it was checked against and any warnings.
+    /// </summary>
+    Task<StaffTravelSubmitResultDto> SubmitAsync(SubmitStaffTravelRequestDto submitDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Approves the stage the request is on (lane 2, D-7): the line-manager stage is the traveller's line
+    /// authority's — the travel desk's only when no line authority can sign in — and HR's stage sets the
+    /// approved budget.
+    /// </summary>
+    /// <param name="callerIsTravelDesk">Whether the caller holds <c>HR.Travel.Write</c> — evaluated by the
+    /// API's policy pipeline, never taken from the request body.</param>
+    Task<bool> ApproveAsync(ApproveStaffTravelRequestDto approveDto, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+    Task<bool> RejectAsync(Guid requestId, Guid rejectedByUserId, string? reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
     /// <summary>
     /// Cancels a request. <c>CancelledById</c> on the DTO is the <b>employee</b> who cancelled (an
     /// Employee FK on the entity); <paramref name="cancelledByUserId"/> is the platform user, for
     /// the audit trail. Different identifiers — the DTO field used to serve both.
     /// </summary>
-    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default);
+    /// <param name="callerIsTravelDesk">The desk's route (HR.Travel.Write): only it may cancel a trip under way, as not
+    /// travelled (lane 8, D-48).</param>
+    Task<bool> CancelAsync(CancelStaffTravelRequestDto cancelDto, Guid cancelledByUserId, CancellationToken cancellationToken = default, bool callerIsTravelDesk = false);
+
+    /// <summary>
+    /// Lane 6 (D-35): refuses — naming why — when a leg's driver's own request is live and could not be cancelled (under
+    /// way, advance cash out, a committed booking). Nothing when there is none. Called before Fleet's cancel saves (G3).
+    /// </summary>
+    Task RequireDriverRequestCancellableAsync(Guid? driverRequestId, string tripNumber, CancellationToken cancellationToken = default);
+
+    /// <summary>Lane 6 (D-35): cancels a leg's driver's own request, if it is live — with the leg.</summary>
+    Task CancelDriverRequestAsync(
+        Guid? driverRequestId, string reason, Guid cancelledById, Guid cancelledByUserId, CancellationToken cancellationToken = default);
     Task<bool> MarkCompletedAsync(Guid requestId, Guid updatedByUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>An approver sends a submitted request back to its requester, with what to change (D-6).</summary>
+    Task<bool> ReturnForRevisionAsync(Guid requestId, string reason, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    // The approver's door (lane 2, D-7, finding O-1)
+    /// <summary>
+    /// Whether the caller may open the request without the travel read permission: they are the
+    /// traveller's line authority, or it is waiting for their decision now.
+    /// </summary>
+    Task<bool> CanOpenAsApproverAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    /// <summary>What the caller may decide on the request, at which stage, and as whom.</summary>
+    Task<StaffTravelViewerActionsDto> GetViewerActionsAsync(Guid requestId, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The active destination alerts over the trip's dates — its country, and its city or country-wide — most severe
+    /// first (lane 5, T-45). Shown as a warning to whoever approves or books the trip; whether one should block is TDC's
+    /// question.
+    /// </summary>
+    Task<IEnumerable<StaffTravelAlertSummaryDto>> GetDestinationAlertsAsync(Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>The submitted requests waiting for the caller's decision — asked of the engine, then of the line rule.</summary>
+    Task<PagedResult<StaffTravelApprovalQueueItemDto>> GetMyPendingApprovalsAsync(int pageNumber, int pageSize, bool callerIsTravelDesk, CancellationToken cancellationToken = default);
+
+    /// <summary>A change to an approved trip: back to the requester, then approved again (D-9).</summary>
+    Task<bool> RequestChangeAsync(Guid requestId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>The traveller or whoever raised it withdraws a submitted request, back to Draft.</summary>
+    Task<bool> RecallAsync(Guid requestId, string? reason, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes a completed trip once every claim and advance on it is finished (D-6).</summary>
+    Task<bool> CloseAsync(Guid requestId, CancellationToken cancellationToken = default);
 
     // Comment operations
     /// <summary>
@@ -52,8 +113,10 @@ public interface IStaffTravelRequestService
     /// </summary>
     Task<StaffTravelRequestCommentDto> AddCommentAsync(CreateStaffTravelRequestCommentDto createDto, Guid tenantId, Guid createdByUserId, Guid authorEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestCommentDto>> GetCommentsAsync(Guid requestId, CancellationToken cancellationToken = default);
-    Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
-    Task<bool> DeleteCommentAsync(Guid commentId, CancellationToken cancellationToken = default);
+    /// <summary>Only the comment's author, or a travel administrator (<paramref name="callerIsTravelAdmin"/>), may edit it.</summary>
+    Task<StaffTravelRequestCommentDto> UpdateCommentAsync(UpdateStaffTravelRequestCommentDto updateDto, Guid updatedByUserId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default);
+    /// <summary>Only the comment's author, or a travel administrator (<paramref name="callerIsTravelAdmin"/>), may delete it.</summary>
+    Task<bool> DeleteCommentAsync(Guid commentId, bool callerIsTravelAdmin, CancellationToken cancellationToken = default);
 
     // Attachment operations
     /// <summary>
@@ -63,6 +126,18 @@ public interface IStaffTravelRequestService
     Task<StaffTravelRequestAttachmentDto> AddAttachmentAsync(CreateStaffTravelRequestAttachmentDto createDto, Guid tenantId, Guid createdByUserId, Guid uploaderEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<StaffTravelRequestAttachmentDto>> GetAttachmentsAsync(Guid requestId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
+
+    // The traveller's own acts on the portal (lane 7, slice 7c2) — each refuses a request that is not the traveller's
+    // as "not found".
+    /// <summary>A file is not added to a cancelled, rejected or closed trip from the portal — checked before it is stored.</summary>
+    Task RequireTravellerMayAttachAsync(Guid requestId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>D-40: only the traveller's own upload, and only while the trip is a draft or returned to them.</summary>
+    Task<bool> DeleteTravellerAttachmentAsync(Guid attachmentId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// D-41: a reply to a note the desk shared with the traveller (<paramref name="parentCommentId"/>), or a question of
+    /// their own; visible to the traveller, authored by them.
+    /// </summary>
+    Task<StaffTravelRequestCommentDto> AddTravellerCommentAsync(Guid requestId, string body, Guid? parentCommentId, Guid tenantId, Guid createdByUserId, Guid travellerEmployeeId, CancellationToken cancellationToken = default);
 
     // Group travel operations
     Task<StaffGroupTravelDto> CreateGroupTravelAsync(CreateStaffGroupTravelDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
@@ -82,6 +157,18 @@ public interface IStaffTravelRequestService
 
     /// <summary>Unlinks a participant's request from the group (the request itself is retained).</summary>
     Task<bool> RemoveGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>Puts an existing draft (or returned) request on the group, aligned to its destination and dates.</summary>
+    Task<StaffGroupTravelDto> LinkGroupParticipantAsync(Guid groupTravelId, Guid requestId, CancellationToken cancellationToken = default);
+
+    /// <summary>Opens a group to travellers (from Planning, or reopens a closed one).</summary>
+    Task<StaffGroupTravelDto> OpenGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Closes a group to new travellers.</summary>
+    Task<StaffGroupTravelDto> CloseGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Calls a group off once none of its travellers has a trip still going ahead.</summary>
+    Task<StaffGroupTravelDto> CancelGroupTravelAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 #endregion

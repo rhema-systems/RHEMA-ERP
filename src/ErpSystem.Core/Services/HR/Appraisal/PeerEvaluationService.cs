@@ -112,8 +112,34 @@ public class PeerEvaluationService : IPeerEvaluationService
         AppraisalGates.EnsureAt(state.Facts, state.Settings, action, AppraisalGates.PeerWindow(state.Settings));
     }
 
+    /// <summary>
+    /// The approved nomination behind each of this peer's evaluations, by appraisal: its due date and
+    /// the nominator's instructions (performance closure D5). Neither reached the peer — the due date
+    /// shown was always the cycle's, and the instructions nowhere.
+    /// </summary>
+    private async Task<Dictionary<Guid, (DateTime? DueDate, string? Instructions)>> NominationsBehindAsync(
+        Guid evaluatorId, IEnumerable<Guid> appraisalIds, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var ids = appraisalIds.Distinct().ToList();
+        var rows = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && ids.Contains(a.Id))
+            .SelectMany(a => a.PeerNominations
+                .Where(n => !n.IsDeleted && n.PeerEmployeeId == evaluatorId && n.NominationStatus == PeerNominationStatus.Approved)
+                .Select(n => new { n.AppraisalId, n.DueDate, n.InstructionsToPeer }))
+            .ToListAsync(cancellationToken);
+
+        return rows
+            .GroupBy(r => r.AppraisalId)
+            .ToDictionary(g => g.Key, g => (g.First().DueDate, g.First().InstructionsToPeer));
+    }
+
+    /// <summary>The nomination's due date, else the cycle's peer deadline.</summary>
+    private static DateOnly? DueDateOf(DateTime? nominationDue, DateOnly? cycleDeadline)
+        => nominationDue is DateTime due ? DateOnly.FromDateTime(due) : cycleDeadline;
+
     public async Task<IEnumerable<PeerEvaluationAssignmentDto>> GetPeerEvaluationAssignmentsAsync(
-        Guid evaluatorId, 
+        Guid evaluatorId,
         CancellationToken cancellationToken = default)
     {
         // Get all peer evaluation assignments for this evaluator
@@ -127,25 +153,36 @@ public class PeerEvaluationService : IPeerEvaluationService
                     .ThenInclude(emp => emp.OrganizationUnit)
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.AppraisalCycle)
-            .Where(e => e.EvaluatorId == evaluatorId && e.EvaluatorRole == EvaluatorRole.Peer)
+            // A withdrawn appraisal's unsubmitted evaluations are asked of no one (performance closure
+            // E-d1): they sat in the queue as "N peer reviews are waiting on you". A submitted one
+            // stays, as the peer's record of what they wrote.
+            .Where(e => e.EvaluatorId == evaluatorId && e.EvaluatorRole == EvaluatorRole.Peer
+                        && (e.Appraisal.Status != AppraisalStatus.Withdrawn || e.SubmittedDate != null))
             .OrderByDescending(e => e.Id)
             .ToListAsync(cancellationToken);
 
-        var assignments = evaluations.Select(e => new PeerEvaluationAssignmentDto
+        var nominations = await NominationsBehindAsync(evaluatorId, evaluations.Select(e => e.AppraisalId), cancellationToken);
+
+        var assignments = evaluations.Select(e =>
         {
-            EvaluationId = e.Id,
-            AppraisalId = e.AppraisalId,
-            AppraisalCycleName = e.Appraisal.AppraisalCycle?.CycleName ?? "Unknown Cycle",
-            AppraiseeId = e.Appraisal.EmployeeId,
-            AppraiseeName = e.Appraisal.Employee.FullName,
-            AppraiseePosition = e.Appraisal.Employee.Position?.Title ?? "Unknown",
-            AppraiseeOrganizationUnit = e.Appraisal.Employee.OrganizationUnit?.Name ?? "Unknown",
-            Status = e.SubmittedDate.HasValue ? "Submitted" : 
-                     e.StartedDate.HasValue ? "In Progress" : "Not Started",
-            StartedDate = e.StartedDate,
-            SubmittedDate = e.SubmittedDate,
-            DueDate = e.Appraisal.AppraisalCycle?.PeerEvaluationDeadline,
-            EvaluatorWeight = e.EvaluatorWeight
+            var nomination = nominations.GetValueOrDefault(e.AppraisalId);
+            return new PeerEvaluationAssignmentDto
+            {
+                EvaluationId = e.Id,
+                AppraisalId = e.AppraisalId,
+                AppraisalCycleName = e.Appraisal.AppraisalCycle?.CycleName ?? "Unknown Cycle",
+                AppraiseeId = e.Appraisal.EmployeeId,
+                AppraiseeName = e.Appraisal.Employee.FullName,
+                AppraiseePosition = e.Appraisal.Employee.Position?.Title ?? "Unknown",
+                AppraiseeOrganizationUnit = e.Appraisal.Employee.OrganizationUnit?.Name ?? "Unknown",
+                Status = e.SubmittedDate.HasValue ? "Submitted" :
+                         e.StartedDate.HasValue ? "In Progress" : "Not Started",
+                StartedDate = e.StartedDate,
+                SubmittedDate = e.SubmittedDate,
+                DueDate = DueDateOf(nomination.DueDate, e.Appraisal.AppraisalCycle?.PeerEvaluationDeadline),
+                EvaluatorWeight = e.EvaluatorWeight,
+                InstructionsToPeer = nomination.Instructions,
+            };
         }).ToList();
 
         return assignments;
@@ -189,7 +226,10 @@ public class PeerEvaluationService : IPeerEvaluationService
             // One query per collection: as a single twelve-way join it needed a memory grant a
             // loaded server could not give, and timed out reading back every peer save.
             .AsSplitQuery()
-            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62): the self and manager rows are read by their
+            // own forms.
+            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
@@ -205,6 +245,9 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException("Appraisal settings not found.");
         }
 
+        var nomination = (await NominationsBehindAsync(evaluatorId, new[] { evaluation.AppraisalId }, cancellationToken))
+            .GetValueOrDefault(evaluation.AppraisalId);
+
         var detail = new PeerEvaluationDetailDto
         {
             EvaluationId = evaluation.Id,
@@ -217,7 +260,8 @@ public class PeerEvaluationService : IPeerEvaluationService
             AllowPeerKpiEvaluation = settings.AllowPeerKpiEvaluation,
             IsAnonymous = settings.PeerReviewsAnonymous,
             IsSubmitted = evaluation.SubmittedDate.HasValue,
-            DueDate = evaluation.Appraisal.AppraisalCycle?.PeerEvaluationDeadline,
+            DueDate = DueDateOf(nomination.DueDate, evaluation.Appraisal.AppraisalCycle?.PeerEvaluationDeadline),
+            InstructionsToPeer = nomination.Instructions,
             Sections = BuildPeerEvaluationSections(evaluation.Appraisal, evaluation, settings.AllowPeerKpiEvaluation)
         };
 
@@ -237,11 +281,14 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.Employee)
             .Include(e => e.CriterionScores)
-            .FirstOrDefaultAsync(e => e.Id == saveDto.EvaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62). It matched on the id and the evaluator, so the
+            // appraisee's self-evaluation or the manager's evaluation could be written here, past their own forms' rules.
+            .FirstOrDefaultAsync(e => e.Id == saveDto.EvaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
-            throw new InvalidOperationException("Evaluation not found or access denied.");
+            throw new KeyNotFoundException("Evaluation not found or access denied.");
         }
 
         if (evaluation.SubmittedDate.HasValue)
@@ -282,6 +329,10 @@ public class PeerEvaluationService : IPeerEvaluationService
                 ?? throw new InvalidOperationException("An item on this form is not one of this appraisal's criteria.");
             if (!allowPeerKpi && criterion.CriterionConfigId is Guid configId && scoring.GoalRow(configId) != null)
                 throw new InvalidOperationException("Peers do not score the employee's goals in this cycle.");
+            // B2: nor a KPI on the template. The draft took one, and the peer's total — and so the
+            // overall — counted it, though the form never offers it (AllowPeerKpiEvaluation).
+            if (!allowPeerKpi && scoring.IsMeasured(criterion.Key))
+                throw new InvalidOperationException("Peers do not score measured work (KPIs) in this cycle.");
 
             var existingScore = evaluation.CriterionScores
                 .FirstOrDefault(cs => (cs.TemplateItemId.HasValue || cs.CriterionConfigId.HasValue)
@@ -293,6 +344,7 @@ public class PeerEvaluationService : IPeerEvaluationService
                 existingScore.NumericScore = itemInput.NumericScore;
                 existingScore.ActualValue  = itemInput.ActualValue;
                 existingScore.Notes = itemInput.Notes;
+                existingScore.EvidenceLinks = itemInput.EvidenceLinks;
 
                 await _scores.ScoreCriterionAsync(existingScore, scoring, cancellationToken);
                 await _criterionScoreRepository.UpdateAsync(existingScore);
@@ -307,7 +359,9 @@ public class PeerEvaluationService : IPeerEvaluationService
                     CriterionConfigId = criterion.CriterionConfigId,
                     NumericScore = itemInput.NumericScore,
                     ActualValue  = itemInput.ActualValue,
-                    Notes = itemInput.Notes
+                    Notes = itemInput.Notes,
+                    // B2: the form sent it and no save kept it.
+                    EvidenceLinks = itemInput.EvidenceLinks
                 };
 
                 await _scores.ScoreCriterionAsync(newScore, scoring, cancellationToken);
@@ -338,12 +392,16 @@ public class PeerEvaluationService : IPeerEvaluationService
             .Include(e => e.Appraisal)
                 .ThenInclude(a => a.CriterionConfigs)
                     .ThenInclude(cc => cc.TemplateItem)
+                        .ThenInclude(ti => ti!.Competency)
             .Include(e => e.CriterionScores)
-            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId, cancellationToken);
+            // A peer's own evaluation only (performance closure D-62): the submission of a self or manager evaluation
+            // through this route skipped their gates, and — where peers may not score KPIs — deleted that row's KPI scores.
+            .FirstOrDefaultAsync(e => e.Id == evaluationId && e.EvaluatorId == evaluatorId
+                                   && e.EvaluatorRole == EvaluatorRole.Peer, cancellationToken);
 
         if (evaluation == null)
         {
-            throw new InvalidOperationException("Evaluation not found or access denied.");
+            throw new KeyNotFoundException("Evaluation not found or access denied.");
         }
 
         if (evaluation.SubmittedDate.HasValue)
@@ -376,10 +434,47 @@ public class PeerEvaluationService : IPeerEvaluationService
             throw new InvalidOperationException($"Please score all required criteria before submitting. {unscoredCount} criteria remaining.");
         }
 
+        // B2: a scored criterion whose competency requires evidence needs a link. A peer's submit
+        // carries no body — it submits the draft — so the stored entries are the ones read.
+        var evidenceRequired = evaluation.Appraisal.CriterionConfigs
+            .Where(cc => cc.TemplateItemId.HasValue && cc.TemplateItem?.Competency?.RequireEvidence == true)
+            .Select(cc => new RequiredEvidence { Key = cc.TemplateItemId!.Value, Name = cc.TemplateItem!.Competency!.CriteriaName })
+            .ToList();
+        var evidenceError = AppraisalEvidence.Missing(evidenceRequired, evaluation.CriterionScores
+            .Where(cs => !cs.IsDeleted)
+            .GroupBy(cs => cs.CriterionKey())
+            .ToDictionary(g => g.Key, g => new EvidenceEntry(
+                g.Any(cs => cs.NumericScore.HasValue || cs.ActualValue.HasValue),
+                g.Select(cs => cs.EvidenceLinks).FirstOrDefault(l => !string.IsNullOrWhiteSpace(l)))));
+        if (evidenceError != null)
+            throw new InvalidOperationException(evidenceError);
+
         // A weighted mean over the criteria this peer was asked to score, recomputed from the raw
         // inputs by the shared path — the same number the settle will use.
         var scoring = await _scores.LoadScoringAsync(evaluation.AppraisalId, cancellationToken);
-        var totalWeightedScore = await _scores.ScoreEvaluatorAsync(evaluation.CriterionScores, scoring, cancellationToken);
+
+        // B2: a row the cycle does not let a peer score — measured work or the employee's goals,
+        // with AllowPeerKpiEvaluation off — is dropped here rather than counted. A draft saved before
+        // the draft save refused them may hold one, and the form cannot show it to be removed.
+        var scored = evaluation.CriterionScores.ToList();
+        if (!allowPeerKpi)
+        {
+            var barred = scored
+                .Where(cs => scoring.IsMeasured(cs.CriterionKey())
+                          || (cs.CriterionConfigId is Guid rowId && scoring.GoalRow(rowId) != null))
+                .ToList();
+            foreach (var row in barred)
+                await _criterionScoreRepository.DeleteAsync(row);
+            if (barred.Count > 0)
+            {
+                _logger.LogWarning(
+                    "Peer evaluation {EvaluationId}: dropped {Count} score(s) on measured work or goals the cycle does not let peers score",
+                    evaluation.Id, barred.Count);
+                scored = scored.Except(barred).ToList();
+            }
+        }
+
+        var totalWeightedScore = await _scores.ScoreEvaluatorAsync(scored, scoring, cancellationToken);
 
         evaluation.TotalScore = totalWeightedScore;
         evaluation.SubmittedDate = DateTime.UtcNow;
@@ -539,6 +634,7 @@ public class PeerEvaluationService : IPeerEvaluationService
         KpiTargetValue          = config.KpiTargetValue,
         KpiMinValue             = config.KpiMinValue,
         KpiMaxValue             = config.KpiMaxValue,
+        KpiTolerancePercent     = config.KpiTolerancePercent,
         GradeRanges             = config.GradeRanges.Select(gr => new EvaluationGradeRangeDto
         {
             GradeDefinitionId = gr.GradeDefinitionId,

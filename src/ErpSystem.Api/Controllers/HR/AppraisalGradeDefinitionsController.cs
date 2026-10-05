@@ -22,6 +22,17 @@ public class AppraisalGradeDefinitionsController : ControllerBase
     }
 
     /// <summary>
+    /// A rule refused the write (performance closure E-g1): an overall band that overlaps another, leaves a gap or
+    /// lacks a bound or rating, or a grade in use whose band, rating or active flag would change, or that would be
+    /// deleted. Answered 422 with the reason — the update answered these 404 and the create 400.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("Grade definition rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
+    /// <summary>
     /// Get all appraisal grade definitions
     /// </summary>
     [HttpGet]
@@ -89,6 +100,7 @@ public class AppraisalGradeDefinitionsController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalGradeDefinitionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalGradeDefinitionDto createDto)
     {
@@ -99,6 +111,10 @@ public class AppraisalGradeDefinitionsController : ControllerBase
 
             var response = await _gradeDefinitionService.CreateAsync(createDto);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "creating");
         }
         catch (ArgumentException ex)
         {
@@ -118,6 +134,7 @@ public class AppraisalGradeDefinitionsController : ControllerBase
     [ProducesResponseType(typeof(AppraisalGradeDefinitionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalGradeDefinitionDto updateDto)
     {
@@ -133,6 +150,10 @@ public class AppraisalGradeDefinitionsController : ControllerBase
 
             var response = await _gradeDefinitionService.UpdateAsync(updateDto);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating");
         }
         catch (ArgumentException ex)
         {
@@ -151,6 +172,7 @@ public class AppraisalGradeDefinitionsController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -158,6 +180,10 @@ public class AppraisalGradeDefinitionsController : ControllerBase
         {
             var response = await _gradeDefinitionService.DeleteAsync(id);
             return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "deleting");
         }
         catch (ArgumentException ex)
         {

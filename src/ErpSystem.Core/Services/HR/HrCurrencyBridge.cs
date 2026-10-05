@@ -23,14 +23,13 @@ namespace ErpSystem.Core.Services.HR;
 /// <para><b>⚠ Renamed from travel-specific to HR-wide on 2026-09-01, because this file said to.</b>
 /// Its own note read: <i>"Same division StaffTravelCurrencyBridge settled for travel; when a third
 /// area needs this the two should become one HR-wide bridge."</i> Guarantor sureties (lane 3a) are
-/// that third area, so the implementation moved here and
-/// <see cref="StaffTravelCurrencyBridge"/> is now a thin alias.</para>
+/// that third area, so the implementation moved here. Travel kept a thin alias,
+/// <c>StaffTravelCurrencyBridge</c>, until the travel final closure retired it (2026-10-01, lane 0):
+/// the travel services now take this class directly.</para>
 ///
-/// <para><b>Two callers are owed migration and are deliberately NOT migrated here.</b> Area 12's
-/// travel services keep using the alias, and <c>SeparationService.ResolveCurrencyAsync</c> keeps
-/// its own copy of the settings-then-base fallback. Both are closed areas with their own harnesses;
-/// moving them is a change worth making deliberately with those suites green, not as a side effect
-/// of an employee-master slice.</para>
+/// <para><b>One caller still keeps its own copy.</b> <c>SeparationService.ResolveCurrencyAsync</c>
+/// has its own settings-then-base fallback; moving it is a change worth making with the separation
+/// suites green, not as a side effect of another area's slice.</para>
 /// </remarks>
 public class HrCurrencyBridge
 {
@@ -88,10 +87,14 @@ public class HrCurrencyBridge
     /// travel screen and another on a financial report.</para>
     ///
     /// <para>⚠ <b>RESOLVED 2026-09-10.</b> Finance PR #99 (<c>finance-fx-seed-contract</c>) transposed
-    /// the seed and documented the contract; <c>GET /api/finance/exchange-rates/current/USD</c> now
-    /// reads <c>rate 12.5, inverseRate 0.08</c> and this bridge answers 12.5 GHS per USD (asserted
-    /// by <c>hr-jobarch/run-r7.mjs</c>). The paragraphs below are kept as the record of what was
-    /// wrong and why this class inherited it rather than working around it.</para>
+    /// the seed and documented the contract; this bridge answers 12.5 GHS per USD (asserted by
+    /// <c>hr-jobarch/run-r7.mjs</c>). (This remark said <c>current/USD</c> reads <c>rate 12.5</c>; on
+    /// 2026-10-02 UAT's row reads <c>GHS → USD, Rate 0.08, InverseRate 12.5</c> — the contract's
+    /// "1 base = Rate target" — and the 12.5 is reached through the inverse.) Since the travel final
+    /// closure's lane 3 the rate is the one in force on the date asked, read with the same direct-then-
+    /// inverse lookup <c>ConvertAsync</c> uses, rather than <c>ConvertAsync</c>'s today. The paragraphs
+    /// below are kept as the record of what was wrong and why this class inherited it rather than
+    /// working around it.</para>
     ///
     /// <para><b>Finance's conversion WAS inverted, and this deliberately inherited that.</b>
     /// Measured 2026-08-17: <c>GET /api/finance/currencies/convert</c> answers
@@ -122,39 +125,55 @@ public class HrCurrencyBridge
             string.Equals(baseCode, code, StringComparison.OrdinalIgnoreCase))
             return 1m;
 
-        // Refuse before converting if Finance holds no rate for the pair: ConvertAsync returns the
-        // amount UNCHANGED when it finds none, which would silently value a foreign claim as
-        // though it were local — the same class of error slice 4 removed from the amount.
-        var published = await _rates.GetCurrentRateAsync(
-            targetCurrencyCode: code,
-            baseCurrencyCode: baseCode,
-            effectiveDate: asOf.ToDateTime(TimeOnly.MinValue),
-            cancellationToken: cancellationToken);
+        // ⚠ The rate ON `asOf` (travel final closure, lane 3, B12). This checked that a rate existed for the date
+        // and then converted through `CurrencyService.ConvertAsync`, which reads TODAY's rate — so a back-dated
+        // expense was valued at whatever the rate was on the day it was keyed. Finance's contract (the ExchangeRate
+        // entity): one unit of BaseCurrencyCode equals Rate units of TargetCurrencyCode. `ConvertAsync` looks for a
+        // direct quote (from → base), then the inverse (base → from); this asks the same two questions, dated. On
+        // UAT the row is GHS → USD at 0.08, so a USD expense is valued at 1 / 0.08 = 12.5 GHS, as ConvertAsync
+        // reaches it — but on the expense date. Six decimal places: ConvertAsync converted one unit and rounded
+        // the RESULT to the base currency's two places, which rounded the rate itself.
+        var at = asOf.ToDateTime(TimeOnly.MinValue);
+        var direct = await _rates.GetCurrentRateAsync(
+            targetCurrencyCode: baseCode, baseCurrencyCode: code, effectiveDate: at, cancellationToken: cancellationToken);
+        if (direct is { Rate: > 0m })
+            return decimal.Round(direct.Rate, 6, MidpointRounding.AwayFromZero);
 
-        if (published is null || published.Rate <= 0m)
-            throw new InvalidOperationException(
-                $"Finance holds no exchange rate for {code} on {asOf:yyyy-MM-dd}. " +
-                "Add the rate in Finance, then resubmit — travel does not keep its own rates.");
+        var inverse = await _rates.GetCurrentRateAsync(
+            targetCurrencyCode: code, baseCurrencyCode: baseCode, effectiveDate: at, cancellationToken: cancellationToken);
+        if (inverse is { Rate: > 0m })
+            return decimal.Round(1m / inverse.Rate, 6, MidpointRounding.AwayFromZero);
 
-        var rate = await _currencies.ConvertAsync(1m, code, baseCode, cancellationToken);
-        if (rate <= 0m)
-            throw new InvalidOperationException(
-                $"Finance could not convert {code} to {baseCode}. Check the rate in Finance and resubmit.");
-
-        return rate;
+        // Refused rather than guessed: valuing a foreign claim as though it were local is the error slice 4
+        // removed from the amount.
+        throw new InvalidOperationException(
+            $"Finance holds no exchange rate for {code} on {asOf:yyyy-MM-dd}. " +
+            "Add the rate in Finance, then resubmit — travel does not keep its own rates.");
     }
-}
 
-/// <summary>
-/// Travel's name for <see cref="HrCurrencyBridge"/>, kept so area 12's call sites and its harness
-/// need no change.
-/// </summary>
-/// <remarks>
-/// ⚠ Retire this when area 12 is next opened with its suite runnable — not before. A rename across
-/// a closed area is a cheap edit and an expensive regression.
-/// </remarks>
-public sealed class StaffTravelCurrencyBridge : HrCurrencyBridge
-{
-    public StaffTravelCurrencyBridge(ICurrencyService currencies, IExchangeRateService rates)
-        : base(currencies, rates) { }
+    /// <summary>The organisation's base currency code, or null when Finance marks none.</summary>
+    public async Task<string?> GetBaseCurrencyCodeAsync(CancellationToken cancellationToken = default)
+        => (await _currencies.GetBaseCurrencyAsync(cancellationToken))?.CurrencyCode;
+
+    /// <summary>
+    /// Expresses an amount in another currency, through the base currency, at the rates Finance
+    /// holds — so a figure in one currency can be compared with a limit set in another.
+    /// </summary>
+    /// <remarks>
+    /// Added for the travel policy's single-trip limit (travel final closure, lane 1): a trip costed
+    /// in USD against a limit set in GHS. Each leg is <see cref="GetRateToBaseAsync"/>, so it refuses
+    /// in the same words when Finance holds no rate, and it inherits that method's rate date (which
+    /// travel's lane 3 corrects for back-dated expenses). The same currency needs no rate at all.
+    /// </remarks>
+    public async Task<decimal> ConvertBetweenAsync(
+        decimal amount, string fromCurrency, string toCurrency, DateOnly asOf,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.Equals(fromCurrency?.Trim(), toCurrency?.Trim(), StringComparison.OrdinalIgnoreCase))
+            return amount;
+
+        var fromRate = await GetRateToBaseAsync(fromCurrency!, asOf, cancellationToken);
+        var toRate = await GetRateToBaseAsync(toCurrency!, asOf, cancellationToken);
+        return amount * fromRate / toRate;
+    }
 }

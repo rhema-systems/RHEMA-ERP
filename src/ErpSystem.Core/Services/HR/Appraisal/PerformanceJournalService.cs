@@ -15,6 +15,7 @@ public class PerformanceJournalService : IPerformanceJournalService
 {
     private readonly IGenericRepository<PerformanceJournalEntry> _journalRepository;
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PerformanceJournalService> _logger;
@@ -22,12 +23,14 @@ public class PerformanceJournalService : IPerformanceJournalService
     public PerformanceJournalService(
         IGenericRepository<PerformanceJournalEntry> journalRepository,
         IGenericRepository<AppraisalCycle> cycleRepository,
+        IGenericRepository<EmployeeGoal> goalRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PerformanceJournalService> logger)
     {
         _journalRepository = journalRepository;
         _cycleRepository = cycleRepository;
+        _goalRepository = goalRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -145,20 +148,36 @@ public class PerformanceJournalService : IPerformanceJournalService
         };
     }
 
+    /// <summary>Gate: private journaling must be enabled for the entry's cycle.</summary>
+    private async Task EnsurePrivateJournalAllowedAsync(Guid cycleId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var settings = await _cycleRepository.GetQueryable(c => c.Id == cycleId && c.TenantId == tenantId)
+            .Include(c => c.AppraisalSettings)
+            .Select(c => c.AppraisalSettings)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (settings is { EnablePrivateJournal: false })
+            throw new InvalidOperationException("Private journaling is not enabled for this appraisal cycle.");
+    }
+
+    /// <summary>
+    /// The date the note is about (performance closure E-g1, D-80): the create overwrote it with the time of saving,
+    /// so a note written up later sat at the wrong point in the lists and the date filters. None sent is now; a
+    /// future one is refused — a journal records what happened.
+    /// </summary>
+    private static DateTime EntryDateOf(DateTime sent)
+    {
+        if (sent == default) return DateTime.UtcNow;
+        if (sent.Date > DateTime.UtcNow.Date)
+            throw new InvalidOperationException("A journal entry records what happened: its date cannot be in the future.");
+        return sent;
+    }
+
     public async Task<PerformanceJournalEntryDto> CreateAsync(
         CreatePerformanceJournalEntryDto createDto, Guid ownerId, CancellationToken cancellationToken = default)
     {
-        // Gate: private journaling must be enabled for this cycle.
         if (createDto.IsPrivate)
-        {
-            var tenantId = GetTenantId();
-            var settings = await _cycleRepository.GetQueryable(c => c.Id == createDto.AppraisalCycleId && c.TenantId == tenantId)
-                .Include(c => c.AppraisalSettings)
-                .Select(c => c.AppraisalSettings)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (settings is { EnablePrivateJournal: false })
-                throw new InvalidOperationException("Private journaling is not enabled for this appraisal cycle.");
-        }
+            await EnsurePrivateJournalAllowedAsync(createDto.AppraisalCycleId, cancellationToken);
 
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
@@ -166,7 +185,17 @@ public class PerformanceJournalService : IPerformanceJournalService
         // person and an attributable note; letting the body name its own owner would let anyone
         // plant one in someone else's journal.
         entity.OwnerId = ownerId;
-        entity.EntryDate = DateTime.UtcNow;
+        entity.EntryDate = EntryDateOf(createDto.EntryDate);
+
+        // The goal a note names is the goal of whom it is about — the subject, or the author's own (E-g1, D-80).
+        if (entity.RelatedGoalId is Guid goalId)
+        {
+            var tenantId = GetTenantId();
+            var about = entity.SubjectEmployeeId ?? ownerId;
+            if (!await _goalRepository.GetQueryable()
+                    .AnyAsync(g => g.Id == goalId && g.TenantId == tenantId && g.EmployeeId == about, cancellationToken))
+                throw new InvalidOperationException("The goal named is not one of the goals of the person the entry is about.");
+        }
 
         await _journalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -179,6 +208,12 @@ public class PerformanceJournalService : IPerformanceJournalService
         UpdatePerformanceJournalEntryDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id);
+
+        // Made private by the edit: the cycle allows it, as the create checks (E-g1, D-80 — only the create did).
+        if (updateDto.IsPrivate && !entity.IsPrivate)
+            await EnsurePrivateJournalAllowedAsync(entity.AppraisalCycleId, cancellationToken);
+        if (updateDto.EntryDate != default)
+            updateDto.EntryDate = EntryDateOf(updateDto.EntryDate);
 
         updateDto.UpdateEntity(entity);
         await _journalRepository.UpdateAsync(entity);
@@ -202,6 +237,9 @@ public class PerformanceJournalService : IPerformanceJournalService
         Guid id, bool isPrivate, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
+
+        if (isPrivate && !entity.IsPrivate)
+            await EnsurePrivateJournalAllowedAsync(entity.AppraisalCycleId, cancellationToken);
 
         entity.IsPrivate = isPrivate;
         // No IsSharedWithManager field — IsPrivate controls visibility

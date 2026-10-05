@@ -40,9 +40,12 @@ function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
  * comes from the published AppraisalTemplate workflow definition; a caller who is not an
  * approver for the current step gets 403 rather than a hidden button.
  *
- * ⚠ Editing is locked once the template is assigned to an Open or InProgress cycle. That is
- * enforced server-side on every structural write; the editor below is switched to read-only so
- * the affordances disappear instead of failing, and copying is the way forward.
+ * ⚠ The structure is locked while appraisals are scored on the template or an open cycle has it
+ * (performance closure E-e, D-66), and nothing changes while it awaits approval. Both are enforced
+ * server-side on every structural write; the editor reads the server's `isLocked` and reason (P-7 —
+ * it froze on any assignment, while the server refused only an open cycle's), so the affordances
+ * disappear instead of failing, and copying is the way forward. A change to an approved template
+ * sends it back to Draft.
  */
 export default function AppraisalTemplateDetailPage() {
   const params = useParams();
@@ -132,10 +135,10 @@ export default function AppraisalTemplateDetailPage() {
   }
 
   const liveAssignments = (assignments ?? []).filter((a) => a.isActive);
-  // The server blocks edits for Open/InProgress cycles specifically; the assignment rows do
-  // not carry a cycle status, so any live assignment is treated as a freeze here. Erring this
-  // way shows the reason rather than letting the write fail.
-  const frozen = liveAssignments.length > 0;
+  // The server's own lock (E-e): appraisals scored on it, or an open cycle has it. Pending approval
+  // is read-only too — what the approver decides is what is there.
+  const pending = template.approvalStatus === 'PendingApproval';
+  const frozen = template.isLocked || pending;
 
   return (
     <div className="space-y-6 p-6">
@@ -156,18 +159,46 @@ export default function AppraisalTemplateDetailPage() {
         }
       />
 
-      {frozen && (
+      {template.isLocked && (
         <Card className="border-amber-500/50">
           <CardContent className="flex items-start gap-3 p-4">
             <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
             <div className="space-y-1 text-sm">
-              <p className="font-medium">This template is assigned to a cycle</p>
+              <p className="font-medium">This template is locked</p>
               <p className="text-muted-foreground">
-                Structural edits are refused while a cycle is Open or InProgress, so the form an
-                appraisal was scored on cannot change underneath it. Copy the template from the
-                list page and change the copy.
+                {template.lockReason
+                  ? `${template.lockReason.charAt(0).toUpperCase()}${template.lockReason.slice(1)}.`
+                  : 'Appraisals rely on it.'}{' '}
+                Its structure cannot change underneath them — copy the template from the list page
+                and change the copy. Its name and description can still be edited.
               </p>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!template.isLocked && pending && (
+        <Card className="border-amber-500/50">
+          <CardContent className="flex items-start gap-3 p-4">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Awaiting approval</p>
+              <p className="text-muted-foreground">
+                Nothing changes while it is with the approver. Recall it to make a change.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {!frozen && template.approvalStatus === 'Approved' && (
+        <Card className="border-sky-500/50">
+          <CardContent className="space-y-1 p-4 text-sm">
+            <p className="font-medium">Approved</p>
+            <p className="text-muted-foreground">
+              A change to its structure sends it back to Draft: it is approved again before a cycle
+              can generate on it.
+            </p>
           </CardContent>
         </Card>
       )}
@@ -227,6 +258,8 @@ export default function AppraisalTemplateDetailPage() {
                     <li key={a.id} className="flex items-center justify-between gap-3">
                       <span>{a.cycleCode ?? a.appraisalCycleId}</span>
                       <span className="flex items-center gap-2">
+                        {a.cycleStatus && <StatusBadge status={a.cycleStatus} />}
+                        {a.templateInUseInCycle && <Badge variant="secondary">Appraisals on it</Badge>}
                         <Badge variant="outline">Priority {a.priority}</Badge>
                         <StatusBadge active={a.isActive} />
                       </span>

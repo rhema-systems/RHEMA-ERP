@@ -2869,6 +2869,11 @@ does)*, milestones, or fiscal years.
 
 ## 21. What this walk found
 
+> ⚠ **The live state of every finding below is now kept in
+> `HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md` (2026-10-01)** — its § 5 owns each C- and R4-
+> finding by lane and its § 8 holds their status. This section is the record of the walk, not a
+> to-do list.
+
 **Fifty-one findings.** This module is in better shape than its history suggests — it was dormant
 for a year and was built, wired and harnessed in one pass, and it shows. Six behaviours will catch
 you out in a demonstration; **five** are the ones to fix before it is called finished.

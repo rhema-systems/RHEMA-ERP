@@ -94,9 +94,11 @@ public sealed class AppraisalGoalRowService : IAppraisalGoalRowService
     {
         var tenantId = GetTenantId();
 
-        // The employee's appraisals in the cycle with a goals section on their template.
+        // The employee's appraisals in the cycle with a goals section on their template — not a
+        // withdrawn one, whose goals section is the record of how far it got (performance closure E-d1).
         var appraisals = await _appraisalRepository.GetQueryable()
             .Where(a => a.TenantId == tenantId && a.EmployeeId == employeeId && a.AppraisalCycleId == cycleId
+                     && a.Status != AppraisalStatus.Withdrawn
                      && a.Template != null
                      && a.Template.Sections.Any(s => !s.IsDeleted && s.Kind == AppraisalSectionKind.EmployeeGoals))
             .Select(a => new
@@ -121,6 +123,8 @@ public sealed class AppraisalGoalRowService : IAppraisalGoalRowService
                          && g.Status != GoalStatus.Rejected
                          && (g.IsLocked || g.Status == GoalStatus.Locked)
                          && YearEndPeriods.Contains(g.Period))
+                // A KPI-measured goal's tolerance is its KPI definition's (D-32, L6).
+                .Include(g => g.KpiDefinition)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken))
             .OrderBy(g => g.CreatedAt)
@@ -178,6 +182,9 @@ public sealed class AppraisalGoalRowService : IAppraisalGoalRowService
                 row.KpiTargetValue = measured ? goal.TargetValue : null;
                 row.KpiMinValue = measured ? goal.MinValue : null;
                 row.KpiMaxValue = measured ? goal.MaxValue : null;
+                // Kept with the target, as a template row keeps its KPI's (D-32): a goal measured on a KPI that
+                // tolerates a 5 % miss scores a 96 against 100 as met; a goal with no KPI has an exact target.
+                row.KpiTolerancePercent = measured ? goal.KpiDefinition?.TolerancePercent : null;
                 row.KpiTargetSource = measured ? KpiTargetSource.Goal : null;
 
                 // A rated goal is scored on the tenant's overall grade scale (D-16); a measured one
@@ -250,12 +257,12 @@ public sealed class AppraisalGoalRowService : IAppraisalGoalRowService
     private readonly record struct RowShape(
         Guid? SectionId, int? SectionWeight, int Weight, string? Label, CriterionScoringMethod? Method,
         MeasurementType? Measure, string? Unit, int? Order, decimal? Target, decimal? Min, decimal? Max,
-        KpiTargetSource? Source);
+        decimal? Tolerance, KpiTargetSource? Source);
 
     private static RowShape Shape(PerformanceAppraisalCriterionConfig row) => new(
         row.AppraisalTemplateSectionId, row.SectionWeightUsed, row.WeightUsed, row.ItemLabel, row.ScoringMethod,
         row.MeasurementType, row.Unit, row.DisplayOrder, row.KpiTargetValue, row.KpiMinValue, row.KpiMaxValue,
-        row.KpiTargetSource);
+        row.KpiTolerancePercent, row.KpiTargetSource);
 
     /// <summary>
     /// Goal weights normalised to 100 within the section, by largest remainder so they add to

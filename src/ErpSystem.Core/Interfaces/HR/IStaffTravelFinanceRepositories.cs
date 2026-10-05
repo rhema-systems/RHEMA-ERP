@@ -44,9 +44,8 @@ public interface IStaffTravelExpenseClaimRepository : IGenericRepository<StaffTr
 
     /// <summary>Returns approved claims that have not yet been paid.</summary>
     Task<IEnumerable<StaffTravelExpenseClaim>> GetUnpaidApprovedClaimsAsync();
-
-    /// <summary>Returns the count of claims created in a given calendar year (supports claim-number generation).</summary>
-    Task<int> CountByYearAsync(int year);
+    // CountByYearAsync removed (lane 3, B9): a live count reissued a deleted claim's number; the service reads the
+    // highest number ever issued instead.
 }
 
 #endregion
@@ -86,14 +85,12 @@ public interface IStaffTravelAdvanceRepository : IGenericRepository<StaffTravelA
     /// <summary>Returns advances filtered by status.</summary>
     Task<IEnumerable<StaffTravelAdvance>> GetByStatusAsync(TravelAdvanceStatus status);
 
-    /// <summary>Returns advances for an employee that still have an unsettled balance.</summary>
+    /// <summary>Returns an employee's advances with cash still out (disbursed, partly settled or overdue).</summary>
     Task<IEnumerable<StaffTravelAdvance>> GetOutstandingByEmployeeAsync(Guid employeeId);
 
-    /// <summary>Returns disbursed advances whose settlement deadline has passed and that remain unsettled.</summary>
+    /// <summary>Returns advances with cash still out whose settlement deadline has passed.</summary>
     Task<IEnumerable<StaffTravelAdvance>> GetOverdueSettlementsAsync();
-
-    /// <summary>Returns the count of advances created in a given calendar year (supports advance-number generation).</summary>
-    Task<int> CountByYearAsync(int year);
+    // CountByYearAsync removed (lane 3, B9) — see the claim repository.
 }
 
 #endregion

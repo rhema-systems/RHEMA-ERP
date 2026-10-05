@@ -11,19 +11,96 @@ import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { useToast } from '@/hooks/use-toast';
 import { travelRemindersService } from '@/services/hr/travel-reminders.service';
+import { SWEEP_MOVES } from '@/types/hr/travel-reminders';
 
 const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 
-/** The horizons the engine actually uses. Stated so an admin can see why something is or isn't due. */
+/**
+ * The kinds, their windows and who each reaches. Stated so an admin can see why something is or isn't due.
+ *
+ * ⚠ Worded from `StaffTravelReminderService` (its rungs, `TierFor` and the D-50 constants), not from intent. An
+ * expiry is chased at 90, 30 and 7 days — an item first seen inside a rung gets that rung's notice only — and after
+ * the date once in each of the windows 1–7, 8–30 and 31–90 days late. Before travel final closure lane 8 (slice 8b)
+ * every kind went to the HR role in the app only, and a document got one notice before it lapsed (finding F2).
+ */
 const HORIZONS = [
-  { kind: 'Travel document expiring', detail: 'chased from 90 days out' },
-  { kind: 'Visa expiring', detail: 'chased from 90 days out' },
-  { kind: 'Advance settlement overdue', detail: 'once past its settlement deadline' },
-  { kind: 'Trip departing', detail: 'announced 14 days out' },
+  {
+    kind: 'Travel document expiring',
+    detail: '90, 30 and 7 days before expiry, then after it lapses, after a week and after a month — to its owner',
+  },
+  {
+    kind: 'Visa expiring',
+    detail: 'the same rungs, for a visa on a trip still to happen or under way — to the traveller',
+  },
+  {
+    kind: 'Advance settlement overdue',
+    detail: 'once its settlement deadline has passed, then after a week and after a month — to the traveller and the desk',
+  },
+  { kind: 'Trip departing', detail: 'once, when an approved trip is 14 days or less away — to the traveller' },
+  {
+    kind: 'Visa missing',
+    detail: 'once, when an approved trip that needs a visa is 14 days or less away with none approved — to the traveller and the desk',
+  },
+  {
+    kind: 'Approval waiting',
+    detail: 'after 5 days, then after a week and a month — to the people its current stage is asking (the desk when nobody can be)',
+  },
+  {
+    kind: 'Approval escalated',
+    detail: 'once, when a request still waiting is 3 days or less from departure, or past it — to the desk',
+  },
+  {
+    kind: 'Briefing unacknowledged',
+    detail: 'once, when a trip 7 days or less away has a risk assessment the traveller has not acknowledged — to the traveller',
+  },
+  {
+    kind: 'Claim window closing',
+    detail: 'once, 7 days before a completed trip\'s claim window closes with no claim submitted — to the traveller',
+  },
+  {
+    kind: 'Claim window passed',
+    detail: 'once, when it has closed with a claim not submitted or advance cash still out — to the desk',
+  },
+  {
+    kind: 'Fleet returned',
+    detail: 'once, when every company vehicle of a trip still under way is back in Fleet — to the desk, to mark it completed',
+  },
+  {
+    kind: 'Fleet incident',
+    detail: 'once per incident Fleet records on the vehicle of a trip not yet closed — to the desk and the traveller\'s line manager',
+  },
+];
+
+/**
+ * What the sweep moves (lane 8, slice 8c — D-6, D-47, D-51), worded from `PlanTransitionsAsync`. Each move is logged
+ * below beside the reminders; only a completion tells anyone.
+ */
+const MOVES = [
+  {
+    kind: 'Under way',
+    detail: 'an approved trip, on its departure date — or before it, once Fleet dispatches one of its company vehicles',
+  },
+  {
+    kind: 'Completed',
+    detail: 'a trip under way, the day after it ends — the traveller is told the last day to claim',
+  },
+  {
+    kind: 'Closed',
+    detail: 'a completed trip, once its claim window has passed (30 days with no policy) and every claim is paid or rejected and every advance settled',
+  },
+  {
+    kind: 'Group trips',
+    detail: 'under way once any traveller\'s trip is, completed once every one is completed or closed',
+  },
+  {
+    kind: 'Attendance',
+    detail: 'each approved trip\'s working days on the traveller\'s attendance as on duty, the last 14 days and ahead — never over a punch, leave or a clerk\'s entry',
+  },
 ];
 
 /**
@@ -43,17 +120,19 @@ export default function TravelRemindersPage() {
   const { toast } = useToast();
   const [asOf, setAsOf] = useState('');
 
-  const { data: preview, isLoading: previewLoading } = useQuery({
+  const {
+    data: preview, isLoading: previewLoading, isError: previewFailed, error: previewError,
+  } = useQuery({
     queryKey: ['travel-reminder-preview', asOf],
     queryFn: () => travelRemindersService.preview(asOf || undefined),
   });
 
-  const { data: runs } = useQuery({
+  const { data: runs, isError: runsFailed, error: runsError } = useQuery({
     queryKey: ['travel-reminder-runs'],
     queryFn: () => travelRemindersService.getRuns(20),
   });
 
-  const { data: log } = useQuery({
+  const { data: log, isError: logFailed, error: logError } = useQuery({
     queryKey: ['travel-reminder-log'],
     queryFn: () => travelRemindersService.getLog(14),
   });
@@ -61,12 +140,23 @@ export default function TravelRemindersPage() {
   const run = useMutation({
     mutationFn: () => travelRemindersService.run(),
     onSuccess: async (result) => {
+      const moved = [
+        result.tripsStarted > 0 ? `${result.tripsStarted} under way` : '',
+        result.tripsCompleted > 0 ? `${result.tripsCompleted} completed` : '',
+        result.tripsClosed > 0 ? `${result.tripsClosed} closed` : '',
+      ].filter(Boolean);
+      const notes = [
+        moved.length ? `Trips moved: ${moved.join(', ')}.` : '',
+        result.groupsUpdated > 0 ? `${result.groupsUpdated} group trip(s) moved.` : '',
+        result.attendanceDaysAdded > 0 || result.attendanceDaysRemoved > 0
+          ? `Attendance: ${result.attendanceDaysAdded} day(s) on duty added, ${result.attendanceDaysRemoved} removed.`
+          : '',
+        result.retried > 0 ? `${result.retried} left unsent by an earlier sweep were sent now.` : '',
+        result.alreadySent > 0 ? `${result.alreadySent} were already sent and were not repeated.` : '',
+      ].filter(Boolean);
       toast({
-        title: `Sweep complete — ${result.remindersQueued} queued`,
-        description:
-          result.alreadySent > 0
-            ? `${result.alreadySent} were already sent and were not repeated.`
-            : undefined,
+        title: `Sweep complete — ${result.remindersQueued} sent`,
+        description: notes.length ? notes.join(' ') : undefined,
       });
       await queryClient.invalidateQueries({ queryKey: ['travel-reminder-runs'] });
       await queryClient.invalidateQueries({ queryKey: ['travel-reminder-log'] });
@@ -77,13 +167,15 @@ export default function TravelRemindersPage() {
   });
 
   const items = preview ?? [];
-  const wouldFire = items.filter((i) => !i.alreadySent);
+  const wouldFire = items.filter((i) => !i.alreadySent && !SWEEP_MOVES.has(i.kind));
+  const wouldMove = items.filter((i) => !i.alreadySent && SWEEP_MOVES.has(i.kind));
+  const skipped = items.filter((i) => i.alreadySent);
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title="Travel reminders"
-        description="Expiring passports and visas, overdue advances, and departures coming up."
+        description="Expiring passports and visas, overdue advances, departures, waiting approvals, closing claim windows and Fleet's word — each to the people who act on it; and trips moved under way, completed and closed."
         backHref="/administration/hr"
         actions={
           <Button onClick={() => run.mutate()} disabled={run.isPending}>
@@ -112,6 +204,33 @@ export default function TravelRemindersPage() {
             The 90-day document horizon is our figure, not a TDC requirement: it is the shortest
             notice that still allows a Ghanaian passport renewal. A 30-day warning about a document
             that takes six weeks to replace is not a warning.
+          </p>
+          {/* Lane 8, slice 8b: who is told, as the sweep sends it — before it, every kind went to the HR role in the
+              app only (finding F2), and this card said so. */}
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            The traveller and the approvers are told in the app and by email; the desk (the HR role) in the app.
+            A traveller with no login is emailed at the address on their employee record; with neither, the desk is
+            told to tell them. Each reminder is sent once — a run that stopped before sending one leaves it for the next.
+            The words and recipients of each are on Administration → Notification Topics, under StaffTravel.
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Lane 8, slice 8c (D-6, D-47, D-51): the statuses nothing wrote — the sweep writes them, nightly. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">What the sweep moves</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-2 md:grid-cols-2">
+          {MOVES.map((m) => (
+            <p key={m.kind} className="text-sm">
+              <span className="font-medium">{m.kind}</span>
+              <span className="text-muted-foreground"> — {m.detail}</span>
+            </p>
+          ))}
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            The desk can still mark a trip completed early, and close one once settled. A trip moved under way that did not
+            happen is cancelled by the desk as not travelled — until its end date, and while nothing was spent on it.
           </p>
         </CardContent>
       </Card>
@@ -149,6 +268,8 @@ export default function TravelRemindersPage() {
             <div className="flex items-center justify-center p-6">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
             </div>
+          ) : previewFailed && !preview ? (
+            <TravelQueryError error={previewError} what="the reminder preview" />
           ) : items.length === 0 ? (
             <EmptyState
               icon={BellRing}
@@ -163,9 +284,14 @@ export default function TravelRemindersPage() {
             <>
               <p className="text-sm">
                 <span className="font-medium">{wouldFire.length}</span> would be sent
-                {items.length !== wouldFire.length && (
+                {wouldMove.length > 0 && (
+                  <>
+                    {' '}· <span className="font-medium">{wouldMove.length}</span> trip or group move(s) would be made
+                  </>
+                )}
+                {skipped.length > 0 && (
                   <span className="text-muted-foreground">
-                    {' '}· {items.length - wouldFire.length} already sent and would be skipped
+                    {' '}· {skipped.length} already sent and would be skipped
                   </span>
                 )}
               </p>
@@ -177,6 +303,7 @@ export default function TravelRemindersPage() {
                     <TableHead>Due</TableHead>
                     <TableHead className="w-24">Days</TableHead>
                     <TableHead className="w-20">Tier</TableHead>
+                    <TableHead>Sent to</TableHead>
                     <TableHead className="w-32" />
                   </TableRow>
                 </TableHeader>
@@ -188,6 +315,7 @@ export default function TravelRemindersPage() {
                       <TableCell className="whitespace-nowrap">{fmtDate(i.dueDate)}</TableCell>
                       <TableCell>{i.daysRemaining}</TableCell>
                       <TableCell>{i.escalationTier}</TableCell>
+                      <TableCell>{(i.sentTo ?? []).map(humanize).join(', ') || '—'}</TableCell>
                       <TableCell>
                         {i.alreadySent && <Badge variant="outline">Already sent</Badge>}
                       </TableCell>
@@ -208,7 +336,11 @@ export default function TravelRemindersPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(runs ?? []).length === 0 ? (
+          {runsFailed && !runs ? (
+            <div className="p-4">
+              <TravelQueryError error={runsError} what="the recent sweeps" />
+            </div>
+          ) : (runs ?? []).length === 0 ? (
             <EmptyState title="No sweeps yet" description="Nothing has run for this tenant." />
           ) : (
             <Table>
@@ -237,10 +369,14 @@ export default function TravelRemindersPage() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Sent in the last 14 days</CardTitle>
+          <CardTitle className="text-base">Sent and moved in the last 14 days</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {(log ?? []).length === 0 ? (
+          {logFailed && !log ? (
+            <div className="p-4">
+              <TravelQueryError error={logError} what="the reminder log" />
+            </div>
+          ) : (log ?? []).length === 0 ? (
             <EmptyState title="Nothing sent" description="No reminders in the last fortnight." />
           ) : (
             <Table>
@@ -251,6 +387,7 @@ export default function TravelRemindersPage() {
                   <TableHead>Record</TableHead>
                   <TableHead>Due</TableHead>
                   <TableHead className="w-20">Tier</TableHead>
+                  <TableHead>Sent</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -261,6 +398,9 @@ export default function TravelRemindersPage() {
                     <TableCell>{l.reference}</TableCell>
                     <TableCell className="whitespace-nowrap">{fmtDate(l.dueDate)}</TableCell>
                     <TableCell>{l.escalationTier}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {l.publishedAt ? fmtDateTime(l.publishedAt) : <Badge variant="outline">Not yet — next sweep</Badge>}
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

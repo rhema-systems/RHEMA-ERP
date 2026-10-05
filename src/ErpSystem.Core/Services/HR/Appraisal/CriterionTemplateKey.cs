@@ -12,8 +12,8 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// <para>Migration batch 1 of the performance closure made <c>TemplateItemId</c> nullable on the
 /// criterion snapshot and the criterion score, because a goal row (lane L) has no template item.
 /// Lane L-b moved the scoring, the forms, the saves, appeals, calibration and the HR review onto
-/// the criterion key. The appeal page's list of appealable competencies still reads template
-/// items only; it lists no goal row, and lane C6 widens it.</para>
+/// the criterion key, and lane C6 the appeal page's list, which offered competencies only. The
+/// appeal reads and the manager's peer review describe their rows through <c>PerformanceAppraisalService.LoadCriterionRowsAsync</c>.</para>
 ///
 /// <para>A goal row reaching <see cref="TemplateKey(CriterionScore)"/> is therefore a defect, and
 /// it fails there, naming the row, instead of colliding with another row under an empty key.</para>
@@ -101,17 +101,6 @@ internal static class CriterionTemplateKey
         config.TemplateItem?.Competency?.CriteriaName
         ?? config.TemplateItem?.KpiDefinition?.KpiName
         ?? config.ItemLabel
-        ?? string.Empty;
-
-    /// <summary>
-    /// The name a score's row shows, as <see cref="CriterionName(PerformanceAppraisalCriterionConfig)"/>:
-    /// needs the score's template item (with its competency and KPI), or its criterion config for a
-    /// goal row, loaded.
-    /// </summary>
-    public static string CriterionName(this CriterionScore score) =>
-        score.TemplateItem?.Competency?.CriteriaName
-        ?? score.TemplateItem?.KpiDefinition?.KpiName
-        ?? score.CriterionConfig?.ItemLabel
         ?? string.Empty;
 
     /// <summary>

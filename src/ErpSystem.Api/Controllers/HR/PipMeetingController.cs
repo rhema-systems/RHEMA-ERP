@@ -45,6 +45,17 @@ public class PipMeetingController : ControllerBase
         => PipAccess.CanManageAsync(this, _db, _currentUserService, pipId, ct);
 
     /// <summary>
+    /// A plan's rule refused the write — a closed plan, a cancelled or held meeting, a meeting not yet
+    /// due (decision D-73). 422 with the rule's text, as the plan controller answers; these routes
+    /// had no such catch, so every refusal came back as a 500.
+    /// </summary>
+    private IActionResult RuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning("PIP meeting rule rejected while {Action}: {Message}", action, ex.Message);
+        return UnprocessableEntity(new { message = ex.Message });
+    }
+
+    /// <summary>
     /// Performance closure P13: whoever records a meeting holds it. The body's
     /// <c>conductedById</c> is not trusted — the forms post the loaded value back, and a caller
     /// could name anyone.
@@ -78,7 +89,7 @@ public class PipMeetingController : ControllerBase
             var meetings = (await _pipService.GetReviewMeetingsAsync(pipId)).ToList();
             var meeting  = meetings.FirstOrDefault(m => m.Id == meetingId);
             if (meeting == null)
-                return NotFound("Meeting not found");
+                return NotFound(new { message = "Meeting not found" });
 
             var pip  = await _pipService.GetByIdAsync(pipId);
             var goals = (await _pipService.GetPipGoalsAsync(pipId)).ToList();
@@ -123,6 +134,7 @@ public class PipMeetingController : ControllerBase
             {
                 PipId                  = pip.Id,
                 PipNumber              = pip.PipNumber,
+                PipStatus              = pip.Status,
                 EmployeeId             = pip.EmployeeId,
                 EmployeeName           = pip.EmployeeName,
                 PipStartDate           = pip.StartDate,
@@ -176,6 +188,8 @@ public class PipMeetingController : ControllerBase
                 ConductedById = conductorId,
                 MeetingDate   = req.MeetingDate,
                 ProgressNotes = string.Empty,
+                // The record form's default; attendance means something once the meeting is Held (D-73),
+                // and the screens show it for held meetings only.
                 EmployeeAttended = true,
             };
 
@@ -219,23 +233,31 @@ public class PipMeetingController : ControllerBase
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
                 ConductedById    = conductorId,
-                ProgressNotes    = model.ProgressNotes,
+                ProgressNotes    = model.ProgressNotes ?? string.Empty,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
             };
 
+            // Booked as Scheduled (decision D-73); Record meeting makes it Held.
             var meeting = await _pipService.AddReviewMeetingAsync(model.PipId, createDto);
 
             // Update goal progress if any goal updates specified
             await ApplyGoalUpdatesAsync(model.PipId, model.GoalUpdates);
 
             model.MeetingId = meeting.Id;
+            model.Status    = (int)meeting.Status;
             return Ok(model);
         }
         catch (ArgumentException ex)
         {
-            return BadRequest(ex.Message);
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A plan not in force — a draft, out for approval, or closed — takes no meeting: a rule
+            // (422). This answered 500.
+            return RuleRejected(ex, "creating a meeting");
         }
         catch (Exception ex)
         {
@@ -263,22 +285,27 @@ public class PipMeetingController : ControllerBase
                 Id               = id,
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ProgressNotes    = model.ProgressNotes,
+                ProgressNotes    = model.ProgressNotes ?? string.Empty,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
             };
 
-            await _pipService.UpdateReviewMeetingAsync(model.PipId, updateDto);
+            var saved = await _pipService.UpdateReviewMeetingAsync(model.PipId, updateDto);
 
             // Update goal progress if any goal updates specified
             await ApplyGoalUpdatesAsync(model.PipId, model.GoalUpdates);
 
+            model.Status = (int)saved.Status;
             return Ok(model);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return RuleRejected(ex, "updating a meeting");
         }
         catch (Exception ex)
         {
@@ -288,11 +315,13 @@ public class PipMeetingController : ControllerBase
     }
 
     /// <summary>
-    /// Mark a meeting as complete.
+    /// Record meeting: the supervisor's record of a meeting that took place, which stores it as Held
+    /// (decision D-73). It used to save the form and put "completed" in the response only.
     /// </summary>
     [HttpPost("{id:guid}/complete")]
     [ProducesResponseType(typeof(PipMeetingFormResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> CompleteMeeting(Guid id, [FromBody] PipMeetingFormResponse model)
     {
         if (!await CanManageAsync(model.PipId)) return Forbid();
@@ -306,29 +335,65 @@ public class PipMeetingController : ControllerBase
                 Id               = id,
                 PipId            = model.PipId,
                 MeetingDate      = model.MeetingDate,
-                ProgressNotes    = model.ProgressNotes,
+                ProgressNotes    = model.ProgressNotes ?? string.Empty,
                 IssuesDiscussed  = model.IssuesDiscussed,
                 ActionsAgreed    = model.ActionsAgreed,
                 EmployeeAttended = model.EmployeeAttended,
             };
 
-            await _pipService.UpdateReviewMeetingAsync(model.PipId, updateDto);
+            var held = await _pipService.RecordReviewMeetingAsync(model.PipId, updateDto);
 
             // Apply goal progress updates
             await ApplyGoalUpdatesAsync(model.PipId, model.GoalUpdates);
 
-            model.Status      = 2; // Completed
+            model.Status      = (int)held.Status;
             model.CompletedOn = DateTime.UtcNow;
             return Ok(model);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return RuleRejected(ex, "recording a meeting");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error completing meeting {MeetingId}", id);
             return StatusCode(500, "An error occurred while completing the meeting");
+        }
+    }
+
+    /// <summary>
+    /// Cancel a booked meeting that will not take place (decision D-73). A held meeting is the plan's
+    /// record and is not cancelled; a cancelled one takes no more writes.
+    /// </summary>
+    [HttpPost("{id:guid}/cancel")]
+    [ProducesResponseType(typeof(PipReviewMeetingDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<IActionResult> CancelMeeting(Guid id, [FromQuery] Guid pipId)
+    {
+        if (!await CanManageAsync(pipId)) return Forbid();
+
+        try
+        {
+            return Ok(await _pipService.CancelReviewMeetingAsync(pipId, id));
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return RuleRejected(ex, "cancelling a meeting");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error cancelling meeting {MeetingId}", id);
+            return StatusCode(500, new { message = "An error occurred while cancelling the meeting." });
         }
     }
 
@@ -346,17 +411,19 @@ public class PipMeetingController : ControllerBase
             var meetings = (await _pipService.GetReviewMeetingsAsync(pipId))
                 .OrderBy(m => m.MeetingDate)
                 .ToList();
+            var pip = await _pipService.GetByIdAsync(pipId);
 
             var response = new PipMeetingScheduleResponse
             {
                 PipId          = pipId,
-                CanScheduleMore = true,
+                // Meetings are booked while the plan is in force (decision D-73).
+                CanScheduleMore = pip.Status is PipStatus.Active or PipStatus.InProgress,
                 Meetings = meetings.Select((m, idx) => new PipMeetingListItemResponse
                 {
                     MeetingId            = m.Id,
                     MeetingNumber        = idx + 1,
                     MeetingDate          = m.MeetingDate,
-                    Status               = m.MeetingDate <= DateTime.UtcNow ? 2 : 1,
+                    Status               = (int)m.Status,
                     EmployeeAttended     = m.EmployeeAttended,
                     ConductedByName      = m.ConductedByName,
                     ProgressNotesPreview = m.ProgressNotes.Length > 120
@@ -366,6 +433,10 @@ public class PipMeetingController : ControllerBase
             };
 
             return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -387,7 +458,7 @@ public class PipMeetingController : ControllerBase
         {
             var meeting = await _pipService.GetReviewMeetingByIdAsync(meetingId);
             if (meeting == null)
-                return NotFound("Meeting not found");
+                return NotFound(new { message = "Meeting not found" });
 
             // The employee's right of reply is the one write they own on their plan, and it is
             // theirs alone (performance closure P13): not the supervisor's, not the HR owner's, not
@@ -407,6 +478,11 @@ public class PipMeetingController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A closed plan or a cancelled meeting (decision D-73).
+            return RuleRejected(ex, "adding a reply");
         }
         catch (Exception ex)
         {
@@ -449,6 +525,7 @@ public class PipMeetingController : ControllerBase
             MeetingId              = meeting.Id,
             PipId                  = meeting.PipId,
             PipNumber              = pip.PipNumber,
+            PipStatus              = pip.Status,
             EmployeeId             = pip.EmployeeId,
             EmployeeName           = pip.EmployeeName,
             PipStartDate           = pip.StartDate,
@@ -463,7 +540,7 @@ public class PipMeetingController : ControllerBase
             IssuesDiscussed        = meeting.IssuesDiscussed,
             ActionsAgreed          = meeting.ActionsAgreed,
             EmployeeComments       = meeting.EmployeeComments,
-            Status                 = meeting.MeetingDate <= DateTime.UtcNow ? 2 : 1,
+            Status                 = (int)meeting.Status,
             GoalUpdates = goals.Select(g => new PipGoalMeetingUpdateResponse
             {
                 GoalId                 = g.Id,

@@ -80,6 +80,14 @@ public class StaffTravelRequest : TenantEntity
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 
+    /// <summary>
+    /// Travel final closure, lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the
+    /// traveller's passport. Null — the server derives the flag from the register whenever the passport is known; set —
+    /// the flag stands as the requester left it. Also kept as an internal note on the trip.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
+
     [MaxLength(1000)]
     public string? CancellationReason { get; set; }
 
@@ -93,6 +101,36 @@ public class StaffTravelRequest : TenantEntity
 
     public DateTime? CompletedAt { get; set; }
 
+    // ---- Travel final closure, migration batch 1 (2026-10-01) — written by lanes 1 and 2 ----
+
+    /// <summary>The final approver, an Employee, stamped by the approve action (lane 1). The engine's
+    /// own record holds a platform user; this is the person, for the record and the D-2 checks. Null
+    /// when the approver's login has no employee link, and when an instance is completed through the
+    /// generic inbox, which never passes the travel service (cross-module defect #15).</summary>
+    public Guid? ApprovedById { get; set; }               // FK -> Employee
+
+    /// <summary>An approver sent the request back for revision (D-6, lane 1).</summary>
+    public DateTime? ReturnedAt { get; set; }
+
+    public Guid? ReturnedById { get; set; }               // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? ReturnReason { get; set; }
+
+    /// <summary>The trip was closed — by HR, or by the sweep once every claim and advance is settled
+    /// (D-6, lane 1). <see cref="ClosedById"/> is null when the sweep closed it.</summary>
+    public DateTime? ClosedAt { get; set; }
+
+    public Guid? ClosedById { get; set; }                 // FK -> Employee
+
+    /// <summary>A change asked for after approval: the trip goes back for re-approval (D-9, lane 1).</summary>
+    public DateTime? ChangeRequestedAt { get; set; }
+
+    public Guid? ChangeRequestedById { get; set; }        // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? ChangeReason { get; set; }
+
     // Navigation — external aggregates
     [ForeignKey(nameof(EmployeeId))]
     public virtual Employee Employee { get; set; } = null!;
@@ -102,6 +140,18 @@ public class StaffTravelRequest : TenantEntity
 
     [ForeignKey(nameof(CancelledById))]
     public virtual Employee? CancelledBy { get; set; }
+
+    [ForeignKey(nameof(ApprovedById))]
+    public virtual Employee? ApprovedBy { get; set; }
+
+    [ForeignKey(nameof(ReturnedById))]
+    public virtual Employee? ReturnedBy { get; set; }
+
+    [ForeignKey(nameof(ClosedById))]
+    public virtual Employee? ClosedBy { get; set; }
+
+    [ForeignKey(nameof(ChangeRequestedById))]
+    public virtual Employee? ChangeRequestedBy { get; set; }
 
     [ForeignKey(nameof(OrganizationUnitId))]
     public virtual OrganizationUnit? OrganizationUnit { get; set; }
@@ -445,11 +495,28 @@ public class StaffTravelFlightBooking : TenantEntity
     [Column(TypeName = "decimal(14,2)")]
     public decimal? CancellationFee { get; set; }
 
+    // ---- Travel final closure, migration batch 1 — D-8: a second Admin holder authorises an
+    //      above-cap booking (lane 4). None = 0 is every existing booking's value. ----
+
+    public TravelBookingExceptionState ExceptionState { get; set; }
+
+    public Guid? ExceptionRequestedById { get; set; }               // FK -> Employee
+
+    public Guid? ExceptionAuthorisedById { get; set; }              // FK -> Employee
+
+    public DateTime? ExceptionAuthorisedAt { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
     [ForeignKey(nameof(VendorId))]
     public virtual Supplier? Vendor { get; set; }
+
+    [ForeignKey(nameof(ExceptionRequestedById))]
+    public virtual Employee? ExceptionRequestedBy { get; set; }
+
+    [ForeignKey(nameof(ExceptionAuthorisedById))]
+    public virtual Employee? ExceptionAuthorisedBy { get; set; }
 
     public virtual ICollection<StaffTravelFlightSegment> Segments { get; set; } = new List<StaffTravelFlightSegment>();
 }
@@ -574,6 +641,16 @@ public class StaffTravelHotelBooking : TenantEntity
     [Column(TypeName = "decimal(14,2)")]
     public decimal? CancellationFee { get; set; }
 
+    // ---- Travel final closure, migration batch 1 — D-8, as on the flight booking (lane 4). ----
+
+    public TravelBookingExceptionState ExceptionState { get; set; }
+
+    public Guid? ExceptionRequestedById { get; set; }               // FK -> Employee
+
+    public Guid? ExceptionAuthorisedById { get; set; }              // FK -> Employee
+
+    public DateTime? ExceptionAuthorisedAt { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -582,6 +659,12 @@ public class StaffTravelHotelBooking : TenantEntity
 
     [ForeignKey(nameof(VendorId))]
     public virtual Supplier? Vendor { get; set; }
+
+    [ForeignKey(nameof(ExceptionRequestedById))]
+    public virtual Employee? ExceptionRequestedBy { get; set; }
+
+    [ForeignKey(nameof(ExceptionAuthorisedById))]
+    public virtual Employee? ExceptionAuthorisedBy { get; set; }
 }
 
 public class StaffTravelGroundTransport : TenantEntity
@@ -632,6 +715,16 @@ public class StaffTravelGroundTransport : TenantEntity
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// The driver's own travel request, when a company-vehicle leg keeps the driver away overnight
+    /// (travel final closure D-11, lane 6) — raised with the traveller's trip so the driver's
+    /// allowance, attendance and duty of care are covered too.
+    /// </summary>
+    /// <remarks>An FK to <see cref="StaffTravelRequest"/> configured WITHOUT a navigation in
+    /// <c>ApplicationDbContext.HR.cs</c>: a second navigation to the request would leave EF unable to
+    /// tell which one <see cref="StaffTravelRequest.GroundTransports"/> pairs with.</remarks>
+    public Guid? DriverTravelRequestId { get; set; }                // FK -> StaffTravelRequest
 
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
@@ -792,6 +885,33 @@ public class StaffTravelExpenseClaim : TenantEntity
 
     public DateTime? SubmittedAt { get; set; }
 
+    // ---- Travel final closure, migration batch 1 — written by lane 3 ----
+
+    /// <summary>Who recorded the payment — never the claimant, never the reviewer (D-2).</summary>
+    public Guid? PaidById { get; set; }                             // FK -> Employee
+
+    /// <summary>Why the payment went ahead while the traveller held an outstanding advance on the
+    /// trip that the claim does not name (O-2).</summary>
+    [MaxLength(1000)]
+    public string? AdvanceWaiverReason { get; set; }
+
+    /// <summary>A payment voided by a second Admin holder (T-39): the claim's payment and the advance
+    /// settlement it made are reversed.</summary>
+    public DateTime? PaymentVoidedAt { get; set; }
+
+    public Guid? PaymentVoidedById { get; set; }                    // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? PaymentVoidReason { get; set; }
+
+    // ---- Travel final closure, lane 3 migration ----
+
+    /// <summary>The reviewer's words on the outcome — required when a claim is returned or rejected, so the
+    /// claimant is told why (a partly approved claim's cut lines each carry their own reason). The review's notes
+    /// were accepted and dropped.</summary>
+    [MaxLength(2000)]
+    public string? ReviewNotes { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -800,6 +920,12 @@ public class StaffTravelExpenseClaim : TenantEntity
 
     [ForeignKey(nameof(FinanceReviewedById))]
     public virtual Employee? FinanceReviewedBy { get; set; }
+
+    [ForeignKey(nameof(PaidById))]
+    public virtual Employee? PaidBy { get; set; }
+
+    [ForeignKey(nameof(PaymentVoidedById))]
+    public virtual Employee? PaymentVoidedBy { get; set; }
 
     [ForeignKey(nameof(TravelAdvanceId))]
     public virtual StaffTravelAdvance? TravelAdvance { get; set; }
@@ -858,6 +984,17 @@ public class StaffTravelExpenseClaimLine : TenantEntity
 
     public DateTime? ReviewedAt { get; set; }
 
+    // ---- Travel final closure, migration batch 1 — fuel on a claim (D-11, lane 6). Bare ids, no
+    //      FK: Fleet owns the trip and the fuel transaction, as with the ground leg's FleetTripId.
+    //      The claim refers to them; it never copies Fleet's facts. ----
+
+    public Guid? FleetTripId { get; set; }
+
+    /// <summary>Litres, for a fuel line on a company-vehicle trip.</summary>
+    public decimal? FuelQuantity { get; set; }
+
+    public Guid? FleetFuelTransactionId { get; set; }
+
     [ForeignKey(nameof(StaffTravelExpenseClaimId))]
     public virtual StaffTravelExpenseClaim ExpenseClaim { get; set; } = null!;
 
@@ -909,6 +1046,48 @@ public class StaffTravelAdvance : TenantEntity
 
     public Guid? DisbursedById { get; set; }                        // FK -> Employee
 
+    // ---- Travel final closure, migration batch 1 — written by lane 3 ----
+
+    /// <summary>Refused before disbursement (<see cref="TravelAdvanceStatus.Rejected"/>).</summary>
+    public DateTime? RejectedAt { get; set; }
+
+    public Guid? RejectedById { get; set; }                         // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? RejectionReason { get; set; }
+
+    /// <summary>Written off by an Admin holder, with a reason (<see cref="TravelAdvanceStatus.WrittenOff"/>).</summary>
+    public DateTime? WrittenOffAt { get; set; }
+
+    public Guid? WrittenOffById { get; set; }                       // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? WriteOffReason { get; set; }
+
+    /// <summary>Unused cash handed back (O-8). It settles the advance as a claim deduction does, and
+    /// posts through the same adapter. 0 on every existing advance.</summary>
+    [Column(TypeName = "decimal(14,2)")]
+    public decimal RefundedAmount { get; set; }
+
+    public DateTime? RefundedAt { get; set; }
+
+    public Guid? RefundedById { get; set; }                         // FK -> Employee
+
+    [MaxLength(100)]
+    public string? RefundReference { get; set; }
+
+    // ---- Travel final closure, lane 3 migration ----
+
+    /// <summary>Withdrawn before any money went out (<see cref="TravelAdvanceStatus.Cancelled"/>): by the
+    /// desk, or with its trip when the trip is cancelled. Rejected is the desk refusing the request;
+    /// Cancelled is the advance no longer being wanted.</summary>
+    public DateTime? CancelledAt { get; set; }
+
+    public Guid? CancelledById { get; set; }                        // FK -> Employee
+
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
+
     [ForeignKey(nameof(StaffTravelRequestId))]
     public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
 
@@ -920,6 +1099,18 @@ public class StaffTravelAdvance : TenantEntity
 
     [ForeignKey(nameof(DisbursedById))]
     public virtual Employee? DisbursedBy { get; set; }
+
+    [ForeignKey(nameof(RejectedById))]
+    public virtual Employee? RejectedBy { get; set; }
+
+    [ForeignKey(nameof(WrittenOffById))]
+    public virtual Employee? WrittenOffBy { get; set; }
+
+    [ForeignKey(nameof(CancelledById))]
+    public virtual Employee? CancelledBy { get; set; }
+
+    [ForeignKey(nameof(RefundedById))]
+    public virtual Employee? RefundedBy { get; set; }
 
     public virtual ICollection<StaffTravelExpenseClaim> SettlementClaims { get; set; } = new List<StaffTravelExpenseClaim>();
 }
@@ -1024,6 +1215,16 @@ public class StaffTravelPolicy : TenantEntity
     public decimal ReceiptRequiredAbove { get; set; }
 
     public int ExpenseSubmissionDays { get; set; }
+
+    /// <summary>
+    /// The currency the policy's money caps are in (travel final closure C3, lane 4 — the hotel rate
+    /// had none, so a booking in another currency was compared as if it were the same).
+    /// </summary>
+    /// <remarks>Nullable: the base currency is per tenant and no literal default fits. Migration
+    /// batch 1 fills every existing policy with its tenant's base currency, and the guard falls back
+    /// to the base when it is null.</remarks>
+    [Column(TypeName = "char(3)")]
+    public string? CurrencyCode { get; set; }
 
     public Guid? ApprovedById { get; set; }                         // FK -> Employee
 
@@ -1136,7 +1337,9 @@ public class StaffTravelDocument : TenantEntity
 
     [Required]
     [MaxLength(100)]
-    public string DocumentNumber { get; set; } = null!; // encrypted at rest
+    // Lane 7 (O-7): plain text — this said "encrypted at rest" and nothing encrypts it. Reads mask it to the last four
+    // everywhere but the document's own detail; column encryption is a platform item (plan § 6).
+    public string DocumentNumber { get; set; } = null!;
 
     public Guid IssuingCountryId { get; set; }                      // FK -> Country
 
@@ -1212,7 +1415,8 @@ public class StaffTravelVisaApplication : TenantEntity
     public DateOnly? ExpiryDate { get; set; }
 
     [MaxLength(100)]
-    public string? VisaNumber { get; set; }        // encrypted
+    // Lane 7 (O-7): plain text, not encrypted as this said; the summary masks it to the last four (lane 0).
+    public string? VisaNumber { get; set; }
 
     [Column(TypeName = "decimal(14,2)")]
     public decimal? ProcessingFee { get; set; }
@@ -1406,6 +1610,34 @@ public class StaffTravelHealthRequirement : TenantEntity
 }
 
 
+/// <summary>
+/// Travel final closure, lane 7 (D-36, T-25): that a destination's health requirement was checked for a trip's traveller —
+/// a vaccination certificate seen, a test taken — by whom and when. One live row per trip and requirement; removing the
+/// tick soft-deletes it. Nothing is blocked by a missing tick: the trip shows which requirements are cleared.
+/// </summary>
+public class StaffTravelHealthClearance : TenantEntity
+{
+    public Guid StaffTravelRequestId { get; set; }                  // FK -> StaffTravelRequest
+
+    public Guid HealthRequirementId { get; set; }                   // FK -> StaffTravelHealthRequirement
+
+    public Guid ClearedById { get; set; }                           // FK -> Employee — the officer who checked
+
+    public DateTime ClearedAt { get; set; }
+
+    [MaxLength(1000)]
+    public string? Note { get; set; }
+
+    [ForeignKey(nameof(StaffTravelRequestId))]
+    public virtual StaffTravelRequest StaffTravelRequest { get; set; } = null!;
+
+    [ForeignKey(nameof(HealthRequirementId))]
+    public virtual StaffTravelHealthRequirement HealthRequirement { get; set; } = null!;
+
+    [ForeignKey(nameof(ClearedById))]
+    public virtual Employee ClearedBy { get; set; } = null!;
+}
+
 // =========================================================================
 //  GROUP 8 — CONFIGURATION
 // =========================================================================
@@ -1477,4 +1709,11 @@ public class StaffTravelReminderDispatchLog : TenantEntity
     [Required]
     [MaxLength(300)]
     public string DedupeKey { get; set; } = string.Empty;
+
+    /// <summary>
+    /// When the publisher returned without throwing (travel final closure F2, lane 8). Null means the
+    /// key was claimed but the reminder was never published — a failed send used to be logged as
+    /// sent, because the row was written before the publish and nothing recorded the outcome.
+    /// </summary>
+    public DateTime? PublishedAt { get; set; }
 }

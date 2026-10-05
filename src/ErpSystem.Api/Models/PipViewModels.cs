@@ -39,14 +39,31 @@ public class PipUpdateRequest : PipCreateRequest
 
 // ── PIP goal request (mirrors PipGoalFormItem from Blazor frontend) ─────────
 
+/// <remarks>
+/// Performance closure D-76: the entity's own limits, checked before the action runs. The request had
+/// none, so a percent of 150 was stored, and 1000 or a title past 300 characters failed in the
+/// database as a 500.
+/// </remarks>
 public class PipGoalRequest
 {
+    [Required, MaxLength(300)]
     public string Title { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
     public string? Description { get; set; }
+
+    [MaxLength(1000)]
     public string? SuccessCriteria { get; set; }
+
     public DateOnly DueDate { get; set; }
+
+    [EnumDataType(typeof(GoalProgressStatus))]
     public GoalProgressStatus Status { get; set; } = GoalProgressStatus.NotStarted;
+
+    [Range(0, 100)]
     public decimal? ProgressPercent { get; set; }
+
+    [MaxLength(2000)]
     public string? ProgressNotes { get; set; }
 }
 
@@ -143,6 +160,9 @@ public class PipMeetingSummaryResponse
     public bool EmployeeAttended { get; set; }
     public string ConductedByName { get; set; } = string.Empty;
     public string ProgressNotesPreview { get; set; } = string.Empty;
+    /// <summary>Stored (decision D-73): Scheduled, Held or Cancelled.</summary>
+    public PipMeetingStatus Status { get; set; }
+    /// <summary>Held — kept for the screens that read it.</summary>
     public bool IsCompleted { get; set; }
 }
 
@@ -153,6 +173,11 @@ public class PipMeetingFormResponse
     public Guid? MeetingId { get; set; }
     public Guid PipId { get; set; }
     public string PipNumber { get; set; } = string.Empty;
+    /// <summary>
+    /// The plan's status (decision D-73): meetings are booked and recorded while it is in force, and
+    /// a closed plan takes no writes, so the screen offers its actions by it. Read only.
+    /// </summary>
+    public PipStatus PipStatus { get; set; }
     /// <summary>
     /// The employee the plan is about — the one person who writes <see cref="EmployeeComments"/>
     /// (performance closure P13), so the screen offers the reply to them alone.
@@ -173,15 +198,25 @@ public class PipMeetingFormResponse
     public bool EmployeeAttended { get; set; } = true;
     public string? AbsenceReason { get; set; }
 
+    // The meeting's own limits (performance closure D-76): past them the save failed in the database.
+    [MaxLength(2000)]
     public string ProgressNotes { get; set; } = string.Empty;
+    [MaxLength(2000)]
     public string? IssuesDiscussed { get; set; }
+    [MaxLength(2000)]
     public string? ActionsAgreed { get; set; }
+    [MaxLength(2000)]
     public string? EmployeeComments { get; set; }
     public DateTime? EmployeeCommentsLastUpdated { get; set; }
 
     public List<PipGoalMeetingUpdateResponse> GoalUpdates { get; set; } = new();
 
-    public int Status { get; set; } // 1=Scheduled, 2=Completed
+    /// <summary>
+    /// <see cref="PipMeetingStatus"/> as a number — 1 Scheduled, 2 Held, 3 Cancelled — read from the
+    /// stored status (decision D-73). It was worked out from the date (past = 2) and never stored. A
+    /// value posted back is ignored: the record and cancel routes write it.
+    /// </summary>
+    public int Status { get; set; }
     public DateTime? CompletedOn { get; set; }
 }
 
@@ -209,6 +244,7 @@ public class PipMeetingListItemResponse
     public Guid MeetingId { get; set; }
     public int MeetingNumber { get; set; }
     public DateTime MeetingDate { get; set; }
+    /// <summary>The stored <see cref="PipMeetingStatus"/>: 1 Scheduled, 2 Held, 3 Cancelled (D-73).</summary>
     public int Status { get; set; }
     public bool EmployeeAttended { get; set; }
     public string ConductedByName { get; set; } = string.Empty;
@@ -261,6 +297,7 @@ public class ManualAdvanceRequest
 
 public class EmployeeCommentRequest
 {
+    [MaxLength(2000)]
     public string Comment { get; set; } = string.Empty;
 }
 

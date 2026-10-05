@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -63,6 +64,13 @@ public class CheckInService : ICheckInService
             throw new InvalidOperationException("No tenant is associated with the current user.");
         return tenantId;
     }
+
+    /// <summary>
+    /// A check-in's goal update moves the goal, and a goal is moved while its cycle is Open (performance closure
+    /// E-d2b, D-59). The check-in itself is not held to it: a conversation can outlive or precede a running cycle.
+    /// </summary>
+    private Task EnsureGoalCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureCycleOpenAsync(_cycleRepository.GetQueryable(), GetTenantId(), cycleId, action, cancellationToken);
 
     // A check-in owned by another tenant is reported as missing rather than forbidden, so the endpoints do
     // not confirm that the id exists elsewhere.
@@ -179,6 +187,11 @@ public class CheckInService : ICheckInService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCheckInAsync(id, cancellationToken);
+        // A held check-in is the record of a conversation that took place (performance closure E-g1, D-80): the delete
+        // took its notes, its goal updates and its attachments — which its own attachment delete refuses to remove.
+        if (entity.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy}; a held check-in is part of the record and is not deleted.");
         await _checkInRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Check-in deleted: {Id}", id);
@@ -190,6 +203,12 @@ public class CheckInService : ICheckInService
         CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCheckInAsync(checkInId, cancellationToken);
+
+        // Held once (E-g1, D-80): a second complete moved the held date to now and replaced the notes — the private
+        // ones with nothing when the caller was not the conductor. Its notes are edited through the update.
+        if (entity.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy}; it is completed once. Edit its notes instead.");
 
         entity.ConductedDate = DateTime.UtcNow;
         entity.SharedNotes = sharedNotes;
@@ -270,12 +289,20 @@ public class CheckInService : ICheckInService
         var checkIn = await GetOwnedCheckInAsync(checkInId, cancellationToken);
         var tenantId = GetTenantId();
 
+        // A held check-in's goal updates are what was said in it (E-g1, D-80): one added later moved the goal's
+        // progress and status in the name of a conversation that was over.
+        if (checkIn.ConductedDate is DateTime held)
+            throw new InvalidOperationException(
+                $"This check-in was held on {held:d MMM yyyy} and takes no more goal updates. Record the progress on the goal, or in the next check-in.");
+
         // Only a goal of the person the check-in is about (performance closure P7, E10's add-time
         // check brought forward). Anyone could open a check-in about themselves and, through it,
         // move any colleague's goal progress and status — the goal was checked for tenant only.
         var goal = await _goalRepository.GetByIdAsync(dto.EmployeeGoalId);
         if (goal == null || goal.TenantId != tenantId || goal.EmployeeId != checkIn.EmployeeId)
             throw new ArgumentException("Employee goal not found.");
+
+        await EnsureGoalCycleOpenAsync(goal.AppraisalCycleId, "The goal cannot be updated through this check-in", cancellationToken);
 
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
@@ -316,6 +343,8 @@ public class CheckInService : ICheckInService
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
 
+        await EnsureGoalCycleOpenAsync(entity.EmployeeGoal.AppraisalCycleId, "The goal update cannot be changed", cancellationToken);
+
         dto.UpdateEntity(entity);
         await _goalUpdateRepository.UpdateAsync(entity);
 
@@ -340,6 +369,13 @@ public class CheckInService : ICheckInService
 
         if (entity == null)
             throw new ArgumentException("Goal update not found.");
+
+        var goalCycleId = await _goalRepository.GetQueryable()
+            .Where(g => g.Id == entity.EmployeeGoalId && g.TenantId == tenantId)
+            .Select(g => (Guid?)g.AppraisalCycleId)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (goalCycleId is Guid cycleId)
+            await EnsureGoalCycleOpenAsync(cycleId, "The goal update cannot be removed", cancellationToken);
 
         await _goalUpdateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

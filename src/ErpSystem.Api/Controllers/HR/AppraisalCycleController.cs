@@ -16,20 +16,33 @@ namespace ErpSystem.Api.Controllers.HR;
 public class AppraisalCycleController : ControllerBase
 {
     private readonly IAppraisalCycleService _cycleService;
+    private readonly IAppraisalCycleTargetService _targetService;
     private readonly ICycleCoverageService _coverageService;
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<AppraisalCycleController> _logger;
 
     public AppraisalCycleController(
         IAppraisalCycleService cycleService,
+        IAppraisalCycleTargetService targetService,
         ICycleCoverageService coverageService,
         ICurrentUserService currentUser,
         ILogger<AppraisalCycleController> logger)
     {
         _cycleService = cycleService;
+        _targetService = targetService;
         _coverageService = coverageService;
         _currentUser = currentUser;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// A cycle rule refused by the service is a 422 with the rule's own message, as on the appraisal
+    /// routes (performance closure E-c: these answered 400). Expected outcomes, so they log at warning.
+    /// </summary>
+    private IActionResult BusinessRuleRejected(InvalidOperationException ex, string action)
+    {
+        _logger.LogWarning(ex, "Appraisal cycle rule rejected while {Action}", action);
+        return UnprocessableEntity(new { message = ex.Message });
     }
 
     /// <summary>
@@ -152,11 +165,12 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
-    /// Create a new appraisal cycle
+    /// Create a new appraisal cycle — always a Draft; opening and closing are their own actions
     /// </summary>
     [HttpPost]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalCycleDto createDto)
     {
@@ -170,7 +184,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "creating a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -184,11 +198,13 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
-    /// Update an existing appraisal cycle
+    /// Update an existing appraisal cycle. Once it is opened or has appraisals its settings profile, year
+    /// and type are fixed, and once it has appraisals its period; the name and phase deadlines stay editable.
     /// </summary>
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateAppraisalCycleDto updateDto)
     {
@@ -207,7 +223,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "updating a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -226,6 +242,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/open")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> OpenCycle(Guid id)
     {
@@ -249,7 +266,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "opening a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -268,6 +285,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/close")]
     [ProducesResponseType(typeof(AppraisalCycleDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> CloseCycle(Guid id)
     {
@@ -291,7 +309,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "closing a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -311,6 +329,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpPost("{id:guid}/generate-appraisals")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> GenerateAppraisals(Guid id)
     {
@@ -326,7 +345,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "generating appraisals");
         }
         catch (ArgumentException ex)
         {
@@ -348,6 +367,7 @@ public class AppraisalCycleController : ControllerBase
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> SendDeadlineReminders(Guid id, CancellationToken cancellationToken = default)
     {
@@ -358,7 +378,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BusinessRuleRejected(ex, "sending deadline reminders");
         }
         catch (ArgumentException ex)
         {
@@ -451,6 +471,7 @@ public class AppraisalCycleController : ControllerBase
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceAdminPolicy)]
     public async Task<IActionResult> Delete(Guid id)
     {
@@ -461,7 +482,7 @@ public class AppraisalCycleController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "deleting a cycle");
         }
         catch (ArgumentException ex)
         {
@@ -476,13 +497,18 @@ public class AppraisalCycleController : ControllerBase
 
     #region Cycle Target Operations
 
+    // The cycle page's target routes. They and api/AppraisalCycleTarget write through one service
+    // (performance closure E-c): this controller's copy had no duplicate check, took the cycle from the
+    // body on an edit, and wrote to a closed cycle.
+
     /// <summary>
-    /// Add a target to an appraisal cycle
+    /// Add a target to an appraisal cycle — to the cycle the route names
     /// </summary>
     [HttpPost("{cycleId:guid}/targets")]
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> AddCycleTarget(Guid cycleId, [FromBody] CreateAppraisalCycleTargetDto createDto)
     {
@@ -491,16 +517,17 @@ public class AppraisalCycleController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var response = await _cycleService.AddCycleTargetAsync(cycleId, createDto);
+            createDto.AppraisalCycleId = cycleId;
+            var response = await _targetService.CreateAsync(createDto);
             return Ok(response);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "adding a cycle target");
         }
         catch (Exception ex)
         {
@@ -510,16 +537,22 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
-    /// Get all targets for an appraisal cycle
+    /// Get all targets for an appraisal cycle, each with its live count
     /// </summary>
     [HttpGet("{cycleId:guid}/targets")]
     [ProducesResponseType(typeof(IEnumerable<AppraisalCycleTargetDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetCycleTargets(Guid cycleId)
     {
         try
         {
-            var response = await _cycleService.GetCycleTargetsAsync(cycleId);
+            var response = await _targetService.GetByCycleIdAsync(cycleId);
             return Ok(response);
+        }
+        catch (ArgumentException ex)
+        {
+            // An unknown cycle — it fell to the 500 below.
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -529,12 +562,13 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
-    /// Update a cycle target
+    /// Update a cycle target — one of this cycle's; it stays in the cycle
     /// </summary>
     [HttpPut("{cycleId:guid}/targets/{targetId:guid}")]
     [ProducesResponseType(typeof(AppraisalCycleTargetDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> UpdateCycleTarget(Guid cycleId, Guid targetId, [FromBody] UpdateAppraisalCycleTargetDto updateDto)
     {
@@ -548,16 +582,16 @@ public class AppraisalCycleController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var response = await _cycleService.UpdateCycleTargetAsync(cycleId, updateDto);
+            var response = await _targetService.UpdateAsync(updateDto, cycleId);
             return Ok(response);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(ex.Message);
+            return BusinessRuleRejected(ex, "updating a cycle target");
         }
         catch (Exception ex)
         {
@@ -567,22 +601,27 @@ public class AppraisalCycleController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a cycle target
+    /// Delete a cycle target — one of this cycle's
     /// </summary>
     [HttpDelete("{cycleId:guid}/targets/{targetId:guid}")]
     [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     [Authorize(Policy = HrPermissions.PerformanceWritePolicy)]
     public async Task<IActionResult> RemoveCycleTarget(Guid cycleId, Guid targetId)
     {
         try
         {
-            var response = await _cycleService.RemoveCycleTargetAsync(cycleId, targetId);
+            var response = await _targetService.DeleteAsync(targetId, cycleId);
             return Ok(response);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "removing a cycle target");
         }
         catch (Exception ex)
         {

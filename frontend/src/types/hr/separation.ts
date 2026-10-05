@@ -361,6 +361,50 @@ export interface SeparationClearance {
   /** FR-HR-091's gate, stated as an answer rather than left to be inferred. */
   canComplete: boolean;
   blockedReason?: string | null;
+  /** The leaver's staff travel, read live — advisory, outside the gate (travel final closure, lane 9, D-56). */
+  travel?: SeparationTravel | null;
+}
+
+/** What a leaver still has open in staff travel (travel final closure, lane 9, D-56). */
+export interface SeparationTravel {
+  trips: SeparationTravelTrip[];
+  advances: SeparationTravelAdvance[];
+  claims: SeparationTravelClaim[];
+}
+
+export interface SeparationTravelTrip {
+  id: string;
+  requestNumber: string;
+  status: string;
+  travelStartDate: string;
+  travelEndDate: string;
+  destination: string;
+  /** Bookings pending, on hold, confirmed or ticketed. */
+  liveBookings: number;
+  /** What happens to it with this separation. */
+  note: string;
+}
+
+export interface SeparationTravelAdvance {
+  id: string;
+  tripId: string;
+  tripNumber?: string | null;
+  advanceNumber: string;
+  status: string;
+  currencyCode: string;
+  amount: number;
+  unsettled: number;
+  note: string;
+}
+
+export interface SeparationTravelClaim {
+  id: string;
+  tripId: string;
+  tripNumber?: string | null;
+  claimNumber: string;
+  status: string;
+  currencyCode: string;
+  amount: number;
 }
 
 // ── Settlement (FR-HR-184) and its review (FR-HR-185) ────────────────────────

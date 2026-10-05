@@ -11,6 +11,7 @@ using ErpSystem.Shared;
 using ErpSystem.Api.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -22,28 +23,29 @@ public class StaffTravelRequestsController : HrControllerBase
 {
     private readonly IStaffTravelRequestService _service;
     private readonly IHrControlledDocumentService _hrDocuments;
-    private readonly ICentralDocumentRepositoryFileService _centralDocuments;
-    private readonly IFileStorageService _fileStorage;
-    private readonly ApplicationDbContext _db;
+    private readonly IAuthorizationService _authorization;
     private readonly ILogger<StaffTravelRequestsController> _logger;
 
     public StaffTravelRequestsController(
         IStaffTravelRequestService service,
         IHrControlledDocumentService hrDocuments,
-        ICentralDocumentRepositoryFileService centralDocuments,
-        IFileStorageService fileStorage,
-        ApplicationDbContext db,
+        IAuthorizationService authorization,
         ILogger<StaffTravelRequestsController> logger,
         ICurrentUserService currentUser)
         : base(currentUser)
     {
         _service = service;
         _hrDocuments = hrDocuments;
-        _centralDocuments = centralDocuments;
-        _fileStorage = fileStorage;
-        _db = db;
+        _authorization = authorization;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Whether the caller holds <c>HR.Travel.Admin</c> — evaluated against the same policy the
+    /// <c>[Authorize]</c> attributes use. (Since lane 4, D-3, the HR desk holds it.)
+    /// </summary>
+    private async Task<bool> CallerIsTravelAdminAsync()
+        => (await _authorization.AuthorizeAsync(User, HrPermissions.TravelAdminPolicy)).Succeeded;
 
     // =========================================================================
     // QUERIES
@@ -58,9 +60,9 @@ public class StaffTravelRequestsController : HrControllerBase
     public async Task<ActionResult<IEnumerable<StaffTravelRequestSummaryDto>>> GetAll()
         => Ok(await _service.GetAllAsync());
 
-    [HttpGet("{id:guid}")]
-    public async Task<ActionResult<StaffTravelRequestDto>> GetById(Guid id)
-        => Ok(await _service.GetByIdAsync(id));
+    // GET {id}, its comments, its attachments and their download are the approver's door since lane 2
+    // (D-7): StaffTravelApprovalsController, same route, behind InternalOnly — this class's Read policy
+    // would have kept a line manager out.
 
     [HttpGet("number/{requestNumber}")]
     public async Task<ActionResult<StaffTravelRequestDto?>> GetByRequestNumber(string requestNumber)
@@ -99,6 +101,17 @@ public class StaffTravelRequestsController : HrControllerBase
     public async Task<ActionResult<StaffTravelDashboardDto>> GetDashboard([FromQuery] int upcomingDays = 30)
         => Ok(await _service.GetDashboardAsync(upcomingDays));
 
+    /// <summary>
+    /// The approved policy a trip for this traveller would be checked against, and its limits — what
+    /// the request form shows before the desk saves anything (finding T-16).
+    /// </summary>
+    [HttpGet("policy-preview")]
+    public async Task<ActionResult<StaffTravelPolicyPreviewDto>> GetPolicyPreview(
+        [FromQuery] Guid employeeId, [FromQuery] DateOnly departure,
+        [FromQuery] Guid? originCountryId = null, [FromQuery] Guid? destinationCountryId = null,
+        CancellationToken ct = default)
+        => Ok(await _service.GetPolicyPreviewAsync(employeeId, departure, originCountryId, destinationCountryId, ct));
+
     // =========================================================================
     // CRUD
     // =========================================================================
@@ -127,7 +140,9 @@ public class StaffTravelRequestsController : HrControllerBase
         dto.InitiatedById = CurrentUser.EmployeeId ?? dto.EmployeeId;
 
         var created = await _service.CreateAsync(dto, tenantId, userId);
-        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
+        // The read lives on the approver's door since lane 2 — same route, the other controller.
+        return CreatedAtAction(nameof(StaffTravelApprovalsController.GetById), "StaffTravelApprovals",
+            new { id = created.Id }, created);
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
@@ -154,40 +169,34 @@ public class StaffTravelRequestsController : HrControllerBase
     // WORKFLOW
     // =========================================================================
 
+    /// <summary>Send a request for approval.</summary>
+    /// <remarks>
+    /// The body is optional and carries one thing: the desk's reason for submitting a trip whose
+    /// departure date has passed (lane 1). Without it such a trip is refused; with it the reason is
+    /// kept as an internal note in the submitter's name, so the caller must be linked to an employee.
+    /// The answer says where the request now is and lists any warnings — approved leave over the same
+    /// days, for instance.
+    /// </remarks>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/submit")]
-    public async Task<IActionResult> Submit(Guid id)
+    public async Task<ActionResult<StaffTravelSubmitResultDto>> Submit(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] SubmitStaffTravelRequestBodyDto? body)
     {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
 
-        await _service.SubmitAsync(new SubmitStaffTravelRequestDto { RequestId = id, SubmittedById = userId });
-        return Ok(new { message = "Travel request submitted." });
+        return Ok(await _service.SubmitAsync(new SubmitStaffTravelRequestDto
+        {
+            RequestId = id,
+            LateSubmissionReason = body?.LateSubmissionReason,
+            SubmittedByEmployeeId = CurrentUser.EmployeeId,
+        }));
     }
 
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("{id:guid}/approve")]
-    public async Task<IActionResult> Approve(Guid id, [FromBody] ApproveStaffTravelRequestDto dto)
-    {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
-
-        dto.RequestId = id;
-        // ApprovedById is deliberately NOT set. Slice 2 moved approval onto the workflow engine,
-        // which resolves the approver from the authenticated user against the published definition;
-        // the service no longer reads this field. It stays on the DTO for wire compatibility and is
-        // vestigial — a later cleanup should drop it rather than let it look meaningful.
-        await _service.ApproveAsync(dto);
-        return Ok(new { message = "Travel request approved." });
-    }
-
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
-    [HttpPost("{id:guid}/reject")]
-    public async Task<IActionResult> Reject(Guid id, [FromQuery] string? reason = null)
-    {
-        if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
-
-        await _service.RejectAsync(id, userId, reason);
-        return Ok(new { message = "Travel request rejected." });
-    }
+    // Approve, reject and return for revision are the approver's since lane 2 (D-7) — the traveller's
+    // line authority, then HR — and live on StaffTravelApprovalsController, not behind this class's
+    // Read policy and the Write policy they used to carry.
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{id:guid}/cancel")]
@@ -202,7 +211,8 @@ public class StaffTravelRequestsController : HrControllerBase
 
         dto.RequestId = id;
         dto.CancelledById = employeeId;
-        await _service.CancelAsync(dto, userId);
+        // Lane 8 (D-48): this is the desk's door, so a trip under way may be cancelled here as not travelled.
+        await _service.CancelAsync(dto, userId, HttpContext.RequestAborted, callerIsTravelDesk: true);
         return Ok(new { message = "Travel request cancelled." });
     }
 
@@ -216,13 +226,51 @@ public class StaffTravelRequestsController : HrControllerBase
         return Ok(new { message = "Travel request marked as completed." });
     }
 
+    /// <summary>Ask for a change to an approved trip — it goes back for re-approval (D-9, lane 1).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/request-change")]
+    public async Task<IActionResult> RequestChange(Guid id, [FromBody] RequestStaffTravelChangeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.RequestChangeAsync(id, dto.Reason);
+        return Ok(new { message = "The trip is back for revision and will be approved again." });
+    }
+
+    /// <summary>Withdraw a submitted request from approval, back to Draft (lane 1).</summary>
+    /// <remarks>
+    /// The traveller's or whoever raised it — the service checks; with a workflow instance the engine
+    /// also insists on the login that submitted it. The reason is optional.
+    /// </remarks>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/recall")]
+    public async Task<IActionResult> Recall(
+        Guid id, [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] RecallStaffTravelRequestDto? dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.RecallAsync(id, dto?.Reason);
+        return Ok(new { message = "Travel request recalled to draft." });
+    }
+
+    /// <summary>Close a completed trip once every claim and advance on it is finished (D-6, lane 1).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("{id:guid}/close")]
+    public async Task<IActionResult> Close(Guid id)
+    {
+        if (TryGetWriteContext(out _, out _) is { } contextError) return contextError;
+
+        await _service.CloseAsync(id);
+        return Ok(new { message = "Travel request closed." });
+    }
+
     // =========================================================================
     // COMMENTS
     // =========================================================================
 
-    [HttpGet("{requestId:guid}/comments")]
-    public async Task<ActionResult<IEnumerable<StaffTravelRequestCommentDto>>> GetComments(Guid requestId)
-        => Ok(await _service.GetCommentsAsync(requestId));
+    // Reading the comments is the approver's door's (StaffTravelApprovalsController, lane 2).
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("{requestId:guid}/comments")]
@@ -239,6 +287,7 @@ public class StaffTravelRequestsController : HrControllerBase
         return Ok(await _service.AddCommentAsync(dto, tenantId, userId, employeeId));
     }
 
+    /// <summary>Edit a comment — its author's, or a travel administrator's (lane 1, finding A10).</summary>
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPut("comments/{commentId:guid}")]
     public async Task<ActionResult<StaffTravelRequestCommentDto>> UpdateComment(Guid commentId, [FromBody] UpdateStaffTravelRequestCommentDto dto)
@@ -248,14 +297,19 @@ public class StaffTravelRequestsController : HrControllerBase
 
         if (TryGetWriteContext(out _, out var userId) is { } contextError) return contextError;
 
-        return Ok(await _service.UpdateCommentAsync(dto, userId));
+        return Ok(await _service.UpdateCommentAsync(dto, userId, await CallerIsTravelAdminAsync()));
     }
 
-    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    /// <summary>
+    /// Delete a comment — its author's, or a travel administrator's (lane 1, finding A10). It was
+    /// administrators only, so an officer could not take back a comment they had just posted, and any
+    /// officer could edit a colleague's.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpDelete("comments/{commentId:guid}")]
     public async Task<IActionResult> DeleteComment(Guid commentId)
     {
-        await _service.DeleteCommentAsync(commentId);
+        await _service.DeleteCommentAsync(commentId, await CallerIsTravelAdminAsync());
         return NoContent();
     }
 
@@ -263,9 +317,8 @@ public class StaffTravelRequestsController : HrControllerBase
     // ATTACHMENTS
     // =========================================================================
 
-    [HttpGet("{requestId:guid}/attachments")]
-    public async Task<ActionResult<IEnumerable<StaffTravelRequestAttachmentDto>>> GetAttachments(Guid requestId)
-        => Ok(await _service.GetAttachmentsAsync(requestId));
+    // Listing and downloading the attachments are the approver's door's (StaffTravelApprovalsController,
+    // lane 2).
 
     /// <summary>
     /// Attaches a document to a travel request through the controlled-upload gate.
@@ -320,27 +373,6 @@ public class StaffTravelRequestsController : HrControllerBase
                 tenantId, userId, uploadedById, ct),
             cancellationToken: ct,
             category: ControlledFileUploadCategories.HrStaffTravelAttachments);
-    }
-
-    /// <summary>Streams a travel attachment back, byte-for-byte.</summary>
-    [HttpGet("attachments/{attachmentId:guid}/download")]
-    public async Task<IActionResult> DownloadAttachment(Guid attachmentId, CancellationToken ct = default)
-    {
-        if (CurrentUser.TenantId is not Guid tenantId)
-            return BadRequest("Tenant context could not be resolved.");
-
-        var attachment = await _db.Set<Core.Entities.HR.StaffTravel.StaffTravelRequestAttachment>()
-            .AsNoTracking()
-            .SingleOrDefaultAsync(
-                a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, ct);
-        if (attachment is null) return NotFound();
-
-        return await HrDocumentDownload.ServeAsync(
-            this, _centralDocuments, _fileStorage, _db, tenantId,
-            attachment.DocumentRecordId, attachment.DocumentVersionId,
-            attachment.FileUploadRecordId, attachment.FileUrl,
-            attachment.FileName, fallbackContentType: attachment.MimeType,
-            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
@@ -421,4 +453,31 @@ public class StaffTravelRequestsController : HrControllerBase
         var removed = await _service.RemoveGroupParticipantAsync(groupId, requestId);
         return removed ? NoContent() : NotFound();
     }
+
+    /// <summary>
+    /// Put an existing request on the group (lane 1, finding T-30 — the only door used to create a new
+    /// one). A draft or a returned request; it takes the group's destination and dates.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{groupId:guid}/requests/{requestId:guid}")]
+    public async Task<ActionResult<StaffGroupTravelDto>> LinkGroupParticipant(Guid groupId, Guid requestId)
+        => Ok(await _service.LinkGroupParticipantAsync(groupId, requestId));
+
+    /// <summary>Open the group to travellers, or reopen a closed one (lane 1 — the status is no longer the PUT's).</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/open")]
+    public async Task<ActionResult<StaffGroupTravelDto>> OpenGroup(Guid id)
+        => Ok(await _service.OpenGroupTravelAsync(id));
+
+    /// <summary>Close the group to new travellers; their trips carry on.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/close")]
+    public async Task<ActionResult<StaffGroupTravelDto>> CloseGroup(Guid id)
+        => Ok(await _service.CloseGroupTravelAsync(id));
+
+    /// <summary>Call the group off — once none of its travellers has a trip still going ahead.</summary>
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("groups/{id:guid}/cancel")]
+    public async Task<ActionResult<StaffGroupTravelDto>> CancelGroup(Guid id)
+        => Ok(await _service.CancelGroupTravelAsync(id));
 }

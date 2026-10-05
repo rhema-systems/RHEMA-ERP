@@ -12,14 +12,17 @@ import type {
   ReviewStaffTravelExpenseClaim,
   ReviewStaffTravelExpenseClaimLine,
   PayStaffTravelExpenseClaim,
+  VoidStaffTravelClaimPayment,
   TravelClaimStatus,
   StaffTravelAdvance,
   StaffTravelAdvanceSummary,
   CreateStaffTravelAdvance,
   UpdateStaffTravelAdvance,
   ApproveStaffTravelAdvance,
+  RefundStaffTravelAdvance,
   TravelAdvanceStatus,
   StaffTravelPerDiemRate,
+  StaffTravelFleetFuelOptions,
   CreateStaffTravelPerDiemRate,
   UpdateStaffTravelPerDiemRate,
 } from '@/types/hr/travel-finance';
@@ -60,6 +63,11 @@ class TravelFinanceService {
     return apiService.put<StaffTravelBudget>(`${this.baseUrl}/budgets/${payload.id}`, payload);
   }
 
+  /** A travel administrator approves the budget; the approver is the token's employee record, never the traveller. */
+  approveBudget(id: string) {
+    return apiService.post<StaffTravelBudget>(`${this.baseUrl}/budgets/${id}/approve`, {});
+  }
+
   // ── Expense claims ─────────────────────────────────────────────────────────
 
   getClaims() {
@@ -85,7 +93,7 @@ class TravelFinanceService {
       `${this.baseUrl}/claims/status/${status}`);
   }
 
-  /** The finance desk's payment queue: approved and not yet paid. */
+  /** The finance desk's payment queue: approved or partly approved, and not yet paid. */
   getUnpaidApprovedClaims() {
     return apiService.get<StaffTravelExpenseClaimSummary[]>(
       `${this.baseUrl}/claims/unpaid-approved`);
@@ -110,11 +118,9 @@ class TravelFinanceService {
   }
 
   /**
-   * Sets the claim's status outright. The reviewer is the token's employee record, so this endpoint
-   * needs the caller linked to one.
-   *
-   * ⚠ Reviewing the lines does **not** review the claim — the claim's status is set here and
-   * nowhere else, and `payClaim` refuses anything not `Approved`.
+   * The review's outcome. The reviewer is the token's employee record, so this endpoint needs the caller
+   * linked to one. `Approved` approves what the lines' reviews approved — review every expense first; the
+   * server records `Approved` or `PartiallyApproved` from them. Rejecting or returning needs `notes`.
    */
   reviewClaim(id: string, payload: Omit<ReviewStaffTravelExpenseClaim, 'claimId'>) {
     return apiService.post<{ message: string }>(
@@ -122,12 +128,22 @@ class TravelFinanceService {
   }
 
   /**
-   * Records that the money left. The advance recovery has already happened at approval, so
-   * `netPayable` is what is actually paid — do not re-deduct anything on screen.
+   * Records that the money left; the payer is the token's employee record. The linked advance is recovered
+   * HERE, as part of the payment (not at approval), so until this returns `netPayable` still shows the
+   * approved total — the pay dialog shows the anticipated split instead. Accepts `Approved` and
+   * `PartiallyApproved` claims.
    */
   payClaim(id: string, payload: Omit<PayStaffTravelExpenseClaim, 'claimId'>) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/claims/${id}/pay`, { claimId: id, ...payload });
+  }
+
+  /**
+   * Voids a paid claim's payment (lane 3, T-39): its journal reversed, its advance settlement undone, the claim back
+   * to approved — to be paid again, or not. A travel administrator other than the claimant and the payer.
+   */
+  voidClaimPayment(id: string, payload: VoidStaffTravelClaimPayment) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/claims/${id}/void-payment`, payload);
   }
 
   // ── Claim lines ────────────────────────────────────────────────────────────
@@ -151,7 +167,10 @@ class TravelFinanceService {
       `${this.baseUrl}/lines/${payload.id}`, payload);
   }
 
-  /** Approving or rejecting one line. Omitting `amountApproved` approves the full amount. */
+  /**
+   * Approving (in whole or part) or rejecting one expense. Omitting `amountApproved` approves the whole line; the
+   * server works out the rejected part. Any rejected part needs `rejectionReason`.
+   */
   reviewClaimLine(lineId: string, payload: Omit<ReviewStaffTravelExpenseClaimLine, 'lineId'>) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/lines/${lineId}/review`, { lineId, ...payload });
@@ -160,6 +179,14 @@ class TravelFinanceService {
   /** Admin-gated. */
   deleteClaimLine(lineId: string) {
     return apiService.delete<void>(`${this.baseUrl}/lines/${lineId}`);
+  }
+
+  /**
+   * Lane 6 (D-30, D-32): the claim's trip's company-vehicle trips, with the fuel Fleet already logs on each — what a fuel
+   * expense names, read through travel's door (HR holds no Maintenance permission).
+   */
+  getClaimFleetFuel(claimId: string) {
+    return apiService.get<StaffTravelFleetFuelOptions>(`${this.baseUrl}/claims/${claimId}/fleet-fuel`);
   }
 
   // ── Advances ───────────────────────────────────────────────────────────────
@@ -186,7 +213,7 @@ class TravelFinanceService {
       `${this.baseUrl}/advances/employee/${employeeId}/outstanding`);
   }
 
-  /** Disbursed advances past their settlement deadline — the desk's chase list. */
+  /** Advances with cash still out past their settlement deadline — the desk's chase list. */
   getOverdueSettlements() {
     return apiService.get<StaffTravelAdvanceSummary[]>(
       `${this.baseUrl}/advances/overdue-settlements`);
@@ -211,10 +238,30 @@ class TravelFinanceService {
       `${this.baseUrl}/advances/${id}/approve`, { advanceId: id, approvedAmount });
   }
 
-  /** The disburser and the moment are both the server's; there is nothing else to send. */
+  /** The disburser and the moment are both the server's; there is nothing else to send. Never the approver (D-2). */
   disburseAdvance(id: string) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/advances/${id}/disburse`, { advanceId: id });
+  }
+
+  /** A requested advance, refused with a reason. */
+  rejectAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/reject`, { reason });
+  }
+
+  /** A requested or approved advance withdrawn before any money goes out. */
+  cancelAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/cancel`, { reason });
+  }
+
+  /** Unused cash handed back — at most what is outstanding, once per advance. */
+  refundAdvance(id: string, payload: RefundStaffTravelAdvance) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/refund`, payload);
+  }
+
+  /** Admin-gated: writes off what is left on an advance with cash out. */
+  writeOffAdvance(id: string, reason: string) {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/advances/${id}/write-off`, { reason });
   }
 
   // ── Per-diem rates ─────────────────────────────────────────────────────────

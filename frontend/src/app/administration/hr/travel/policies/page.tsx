@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { travelPolicyState } from '@/components/hr/travel/travel-policy-state';
 import { useToast } from '@/hooks/use-toast';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
 
@@ -46,7 +48,7 @@ export default function TravelPoliciesPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies'],
     queryFn: () => travelComplianceService.getPolicies(),
   });
@@ -63,8 +65,9 @@ export default function TravelPoliciesPage() {
 
   const approve = useMutation({
     mutationFn: (id: string) => travelComplianceService.approvePolicy(id),
-    onSuccess: async () => {
-      toast({ title: 'Policy approved and now in force' });
+    // Lane 4, O-4: a version approved to start later is in force from its own date, not today.
+    onSuccess: async (approved) => {
+      toast({ title: 'Policy approved', description: approved ? travelPolicyState(approved).label : undefined });
       await queryClient.invalidateQueries({ queryKey: ['travel-policies'] });
     },
     onError: (e: Error) =>
@@ -121,6 +124,10 @@ export default function TravelPoliciesPage() {
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the travel policies" />
+            </div>
           ) : items.length === 0 ? (
             <EmptyState
               icon={ShieldCheck}
@@ -158,13 +165,9 @@ export default function TravelPoliciesPage() {
                     </TableCell>
                     <TableCell>{p.ruleCount}</TableCell>
                     <TableCell>
-                      {!p.approvedById ? (
-                        <Badge variant="outline">Draft — not enforcing</Badge>
-                      ) : p.isCurrentVersion ? (
-                        <Badge variant="default">In force</Badge>
-                      ) : (
-                        <Badge variant="secondary">Superseded</Badge>
-                      )}
+                      <Badge variant={travelPolicyState(p).variant}>
+                        {travelPolicyState(p).label}
+                      </Badge>
                     </TableCell>
                     <TableCell>{p.approvedByName || '—'}</TableCell>
                     <TableCell>
@@ -198,12 +201,12 @@ export default function TravelPoliciesPage() {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        Approving requires travel administrator rights and an employee record — the approver is
-        stored against your employee profile, so an account with no profile cannot sign a policy
-        even when it holds the permission. Approving also supersedes the policy that covered the
-        same staff levels and organisation unit, so exactly one is ever in force. Withdrawing stands
-        a policy down without unmaking the approval — the record that it governed spending for a
-        period stays.
+        Approving is a travel administrator&apos;s act — the HR desk holds it — and never that of whoever
+        drafted or last changed the policy: a second officer signs. The approver is stored against
+        their employee profile, so an account with no profile cannot sign a policy even when it holds
+        the permission. A version approved for the same staff levels and organisation unit takes over
+        on its own start date, so exactly one is in force on any day. Withdrawing stands a policy down
+        without unmaking the approval — the record that it governed spending for a period stays.
       </p>
     </div>
   );

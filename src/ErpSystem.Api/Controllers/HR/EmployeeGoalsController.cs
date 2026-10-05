@@ -186,7 +186,8 @@ public class EmployeeGoalsController : ControllerBase
 
         try
         {
-            var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, cancellationToken);
+            // B2: each side of the goal assessments follows AppraisalVisibility for this caller.
+            var result = await _employeeGoalService.GetByAppraisalIdAsync(appraisalId, _currentUserService.EmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (Exception ex)
@@ -325,8 +326,9 @@ public class EmployeeGoalsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        // The employee prunes their own drafts and the manager their team's — the service's
-        // status rules decide what may go; the Admin arm covers the desk.
+        // The employee prunes their own goals and the manager their team's; the Admin arm covers the
+        // desk. The service decides what may go: a goal not yet agreed, with its progress entries
+        // (performance closure D-72) — an agreed goal is sent back first.
         if (!await CanAccessGoalAsync(id, HrPermissions.PerformanceAdminPolicy)) return Forbid();
 
         try
@@ -519,6 +521,7 @@ public class EmployeeGoalsController : ControllerBase
     /// <summary>Unlock a goal</summary>
     [HttpPost("{goalId:guid}/unlock")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Unlock(Guid goalId, CancellationToken cancellationToken = default)
     {
@@ -528,13 +531,19 @@ public class EmployeeGoalsController : ControllerBase
 
         try
         {
-            var result = await _employeeGoalService.UnlockGoalAsync(goalId, cancellationToken);
+            // The desk passes the gate above first, so the service holds its subject to the
+            // two-actor rule (performance closure D-72): nobody unlocks their own goal.
+            var result = await _employeeGoalService.UnlockGoalAsync(goalId, _currentUserService.EmployeeId, cancellationToken);
             if (!result) return NotFound(new { message = "Employee goal not found" });
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -684,6 +693,11 @@ public class EmployeeGoalsController : ControllerBase
         {
             return Forbid();
         }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "updating a progress entry");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating progress entry {EntryId} for goal {GoalId}", entryId, goalId);
@@ -715,6 +729,11 @@ public class EmployeeGoalsController : ControllerBase
         catch (UnauthorizedAccessException)
         {
             return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "deleting a progress entry");
         }
         catch (Exception ex)
         {

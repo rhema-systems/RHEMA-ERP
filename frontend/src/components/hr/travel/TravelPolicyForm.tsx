@@ -21,6 +21,8 @@ import { travelComplianceService } from '@/services/hr/travel-compliance.service
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import type { StaffTravelPolicy } from '@/types/hr/travel-compliance';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { TravelQueryError } from './TravelQueryError';
 
 const CABIN_CLASSES = ['Economy', 'PremiumEconomy', 'Business', 'First'] as const;
 const spaced = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -36,14 +38,16 @@ const schema = z.object({
   maxFlightClassInternational: z.enum(CABIN_CLASSES),
   maxHotelRateDomestic: z.coerce.number().min(0),
   maxHotelRateInternational: z.coerce.number().min(0),
+  currencyCode: z.string().optional(),
   advanceBookingDaysFlight: z.coerce.number().int().min(0).max(365),
   advanceBookingDaysHotel: z.coerce.number().int().min(0).max(365),
-  requiresCheapestFare: z.boolean(),
   preferredVendorMandatory: z.boolean(),
   maxSingleTripBudget: z.coerce.number().min(0),
-  maxAnnualTravelBudget: z.coerce.number().min(0),
   receiptRequiredAbove: z.coerce.number().min(0),
   expenseSubmissionDays: z.coerce.number().int().min(0).max(365),
+}).refine((v) => !v.effectiveTo || v.effectiveTo >= v.effectiveFrom, {
+  message: 'The policy cannot end before it starts',
+  path: ['effectiveTo'],
 });
 
 /**
@@ -61,20 +65,26 @@ const toDateInput = (v?: string | null) => (v ? String(v).slice(0, 10) : '');
 /**
  * Drafts or corrects a travel policy — the caps that actually refuse bookings.
  *
- * ⚠ **Three fields are the server's and are absent here on purpose.** `versionNumber` is set at
- * creation and never edited; `isCurrentVersion` and `approvedById`/`approvedAt` are set by
- * approving, because a policy becomes current *by being approved* and "approved but not in force"
- * is a state nobody asked for. The API ignores all three on the way in.
+ * ⚠ **Three fields are the server's and are absent here on purpose.** `versionNumber` is the next for
+ * the policy's name (lane 4, T-50); `isCurrentVersion` and `approvedById`/`approvedAt` are set by
+ * approving, because a policy comes into force *by being approved*. The API no longer accepts them.
  *
  * ⚠ **An approved policy cannot be edited, and this form is not shown for one.** Changing what
  * everyone may spend without anyone approving the change is precisely what approval exists to
- * prevent; the answer is a new version. The API answers 400 either way.
+ * prevent; the answer is a new version. The API answers 400 either way. Whoever drafts or last
+ * changes a draft cannot approve it (lane 4, C3).
  *
- * ⚠ **The hotel caps carry no currency.** `StaffTravelPolicy` stores none alongside them, so they
- * are read in the tenant's own currency and a booking in another one is compared after
- * conversion. Labelled as "per night" rather than with a currency symbol that would be a guess.
+ * **The money limits are in the policy's currency** (lane 4, C3/T-9) — left empty, the base
+ * currency. A hotel booked in another currency is converted at Finance's rate before it is compared.
  */
-export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
+export function TravelPolicyForm({
+  policy,
+  onSaved,
+}: {
+  policy?: StaffTravelPolicy;
+  /** Called after a save instead of navigating — for a host page that renders the form in place. */
+  onSaved?: () => void;
+}) {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -87,7 +97,7 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
    * band. A salary-level id passes TypeScript, fails the foreign key and 500s naming nothing —
    * the shape that broke every equipment-tool save in area 17.
    */
-  const { data: levels } = useQuery({
+  const { data: levels, isError: levelsFailed, error: levelsError } = useQuery({
     queryKey: ['staff-levels', 'active'],
     queryFn: () => staffLevelService.getActive(),
     staleTime: 5 * 60 * 1000,
@@ -106,12 +116,11 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
       maxFlightClassInternational: policy?.maxFlightClassInternational ?? 'Economy',
       maxHotelRateDomestic: policy?.maxHotelRateDomestic ?? 0,
       maxHotelRateInternational: policy?.maxHotelRateInternational ?? 0,
+      currencyCode: policy?.currencyCode ?? '',
       advanceBookingDaysFlight: policy?.advanceBookingDaysFlight ?? 14,
       advanceBookingDaysHotel: policy?.advanceBookingDaysHotel ?? 7,
-      requiresCheapestFare: policy?.requiresCheapestFare ?? false,
       preferredVendorMandatory: policy?.preferredVendorMandatory ?? false,
       maxSingleTripBudget: policy?.maxSingleTripBudget ?? 0,
-      maxAnnualTravelBudget: policy?.maxAnnualTravelBudget ?? 0,
       receiptRequiredAbove: policy?.receiptRequiredAbove ?? 0,
       expenseSubmissionDays: policy?.expenseSubmissionDays ?? 14,
     },
@@ -126,6 +135,7 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
         appliesToLevelToId: values.appliesToLevelToId || null,
         appliesToOrganizationUnitId: values.appliesToOrganizationUnitId || null,
         effectiveTo: values.effectiveTo || null,
+        currencyCode: values.currencyCode || null,
       };
       return isEdit
         ? travelComplianceService.updatePolicy({ ...payload, id: policy.id })
@@ -139,13 +149,17 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           ? undefined
           : 'It caps nothing until a travel administrator approves it.',
       });
-      router.push(`/administration/hr/travel/policies/${saved.id}`);
+      // ⚠ The edit form is rendered INSIDE the policy's own page, so pushing to that page's URL
+      // changed nothing and the form stayed open after "Policy updated" (finding F4). The host
+      // closes it instead; only a new policy navigates.
+      if (onSaved) onSaved();
+      else router.push(`/administration/hr/travel/policies/${saved.id}`);
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: isEdit ? 'Could not save the policy' : 'Could not draft the policy',
-        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+        description: e?.message,
       }),
   });
 
@@ -153,6 +167,8 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
 
   return (
     <form onSubmit={form.handleSubmit((v) => save.mutate(v as Parsed))} className="space-y-6">
+      {/* An empty band picker would otherwise read as "no staff levels exist". */}
+      {levelsFailed && !levels && <TravelQueryError error={levelsError} what="the staff levels" />}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -182,9 +198,10 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           </FieldRow>
           <OrganizationUnitPickerField form={form} name="appliesToOrganizationUnitId" label="Organisation unit" allowEmpty emptyLabel="The whole organisation" />
           <p className="text-xs text-muted-foreground">
-            Scope is what approval supersedes on: approving this policy stands down whichever other
-            policy covers the same unit and level band, so exactly one is ever in force for a
-            traveller.
+            A policy for a unit covers the units under it too; the nearest unit&apos;s policy wins.
+            Approving a policy makes room for it among the others for the same unit and level band
+            by date: one that started earlier stays in force until the day before this one starts,
+            and one that starts on or after it is replaced.
           </p>
           <FieldRow>
             <DateField form={form} name="effectiveFrom" label="Effective from" required />
@@ -214,6 +231,14 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
               options={CABIN_CLASSES.map((c) => ({ value: c, label: spaced(c) }))}
             />
           </FieldRow>
+          <CurrencyField
+            form={form}
+            name="currencyCode"
+            label="Currency of the money limits"
+            allowEmpty
+            emptyLabel="The base currency"
+            hint="The hotel rates, the per-trip limit and the receipt threshold are read in this currency."
+          />
           <FieldRow>
             <NumberField
               form={form}
@@ -229,7 +254,8 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           <p className="text-xs text-muted-foreground">
             Whether a trip is domestic or international is the travel request&apos;s answer, derived
             from its two countries — a booking does not get a second opinion. A booking above either
-            cap is refused unless a travel administrator authorises the breach.
+            cap is refused unless a travel administrator authorises the breach; a hotel booked in
+            another currency is converted at Finance&apos;s rate first.
           </p>
         </CardContent>
       </Card>
@@ -239,10 +265,17 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           <CardTitle className="text-base">Budgets and expenses</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FieldRow>
-            <NumberField form={form} name="maxSingleTripBudget" label="Max per trip" />
-            <NumberField form={form} name="maxAnnualTravelBudget" label="Max per year" />
-          </FieldRow>
+          {/* Finding C1 / D-1: each of these binds where it says, once the policy is approved. The
+              cheapest-fare switch and the annual budget had no reader and left the form (lane 4). */}
+          <p className="text-sm text-muted-foreground">
+            Once the policy is approved: a trip estimated above the per-trip limit is refused at
+            submission; an expense above the receipt threshold needs a receipt, and a claim is
+            submitted within the days allowed after the trip ends; a flight or hotel booked with less
+            notice than below is a breach, as a class or rate above the caps is — saved awaiting a
+            second travel administrator&apos;s authorisation; and with preferred vendors on, every
+            booking names its supplier.
+          </p>
+          <NumberField form={form} name="maxSingleTripBudget" label="Max per trip (0 = no limit)" />
           <FieldRow>
             <NumberField
               form={form}
@@ -269,15 +302,9 @@ export function TravelPolicyForm({ policy }: { policy?: StaffTravelPolicy }) {
           </FieldRow>
           <SwitchField
             form={form}
-            name="requiresCheapestFare"
-            label="Cheapest fare required"
-            description="Travellers must take the lowest available fare that meets the itinerary."
-          />
-          <SwitchField
-            form={form}
             name="preferredVendorMandatory"
             label="Preferred vendors only"
-            description="Bookings must go through a vendor on the approved list."
+            description="Every flight, hotel, car rental and ground-transport booking under this policy names the supplier it is booked with (a company vehicle excepted)."
           />
         </CardContent>
       </Card>

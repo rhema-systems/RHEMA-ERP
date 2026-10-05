@@ -1804,6 +1804,50 @@ public class LeaveService : ILeaveService
         return await GetLeaveRequestByIdAsync(id);
     }
 
+    /// <summary>
+    /// Sets <see cref="LeaveRequestDto.TravelConflicts"/> — the employee's staff travel over each request's days (travel
+    /// final closure, lane 9, D-55): trips awaiting approval, approved or under way whose days overlap the leave's, either end
+    /// inclusive, the reading training's and recruitment's availability checks make of travel. One query for the whole list,
+    /// as <see cref="MarkApprovedPlanMatchesAsync"/>; none for leave cancelled or rejected.
+    /// </summary>
+    private async Task MarkTravelConflictsAsync(List<LeaveRequestDto> requests, Guid tenantId)
+    {
+        var live = requests.Where(r => r.Status is not (LeaveStatus.Cancelled or LeaveStatus.Rejected)).ToList();
+        if (live.Count == 0) return;
+
+        var employeeIds = live.Select(r => r.EmployeeId).Distinct().ToList();
+        var from = live.Min(r => r.StartDate);
+        var to = live.Max(r => r.EndDate);
+        var trips = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffTravel.StaffTravelRequest>()
+            .GetQueryable(t => t.TenantId == tenantId && employeeIds.Contains(t.EmployeeId)
+                            && (t.Status == StaffTravelRequestStatus.Submitted
+                                || t.Status == StaffTravelRequestStatus.Approved
+                                || t.Status == StaffTravelRequestStatus.InProgress)
+                            && t.TravelStartDate <= to && t.TravelEndDate >= from)
+            .Select(t => new { t.EmployeeId, t.RequestNumber, t.Status, t.TravelStartDate, t.TravelEndDate })
+            .ToListAsync();
+        if (trips.Count == 0) return;
+
+        static string Day(DateOnly d) => d.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
+        static string State(StaffTravelRequestStatus s) => s switch
+        {
+            StaffTravelRequestStatus.Submitted => "awaiting approval",
+            StaffTravelRequestStatus.InProgress => "under way",
+            _ => "approved",
+        };
+        foreach (var request in live)
+        {
+            var name = string.IsNullOrWhiteSpace(request.EmployeeName) ? "The employee" : request.EmployeeName.Trim();
+            request.TravelConflicts = trips
+                .Where(t => t.EmployeeId == request.EmployeeId
+                         && t.TravelStartDate <= request.EndDate && t.TravelEndDate >= request.StartDate)
+                .OrderBy(t => t.TravelStartDate)
+                .Select(t => $"{name} has staff travel {t.RequestNumber} ({State(t.Status)}) from {Day(t.TravelStartDate)} to " +
+                             $"{Day(t.TravelEndDate)}, over these days.")
+                .ToList();
+        }
+    }
+
     public async Task<LeaveRequestDto> GetLeaveRequestByIdAsync(Guid id)
     {
         var tenantId = GetTenantId();
@@ -1831,6 +1875,12 @@ public class LeaveService : ILeaveService
             .CountAsync(d => d.TenantId == tenantId
                           && d.LeaveRequestId == request.Id
                           && d.Status == StaffAttendanceStatus.OnLeave);
+
+        // Travel final closure, lane 9 (D-55): the employee's staff travel over these days. Computed on every read, so the
+        // request's creation, an approver's suggested dates and a reschedule all show it to whoever opens it — the employee,
+        // the approver, HR — before anyone decides. Advisory, as training and recruitment read travel; travel warns of
+        // approved leave at its own submission, and this is the other side.
+        await MarkTravelConflictsAsync(new List<LeaveRequestDto> { dto }, tenantId);
 
         // These actor columns are bare Guids with no navigation (see the entity's note on shadow
         // FKs), so their names are resolved here rather than Include()d.
@@ -2134,6 +2184,9 @@ public class LeaveService : ILeaveService
 
         var items = mine.Skip((page - 1) * size).Take(size).ToList().ToDtoList();
         await MarkApprovedPlanMatchesAsync(items, tenantId);
+        // Travel final closure, lane 9 (D-55): an approver deciding from this list — in bulk, without opening a request —
+        // sees the travel over each request's days too (its badge).
+        await MarkTravelConflictsAsync(items, tenantId);
 
         return new PagedResult<LeaveRequestDto>
         {

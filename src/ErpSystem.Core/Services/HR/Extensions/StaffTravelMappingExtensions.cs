@@ -52,6 +52,7 @@ public static class StaffTravelMappingExtensions
             PolicyName = entity.Policy?.PolicyName,
             IsInternational = entity.IsInternational,
             RequiresVisa = entity.RequiresVisa,
+            VisaOverrideReason = entity.VisaOverrideReason,
             RequiresHealthClearance = entity.RequiresHealthClearance,
             RiskLevel = entity.RiskLevel,
             GroupTravelId = entity.GroupTravelId,
@@ -66,6 +67,19 @@ public static class StaffTravelMappingExtensions
             SubmittedAt = entity.SubmittedAt,
             ApprovedAt = entity.ApprovedAt,
             CompletedAt = entity.CompletedAt,
+            ApprovedById = entity.ApprovedById,
+            ApprovedByName = entity.ApprovedBy?.FullName,
+            ReturnedAt = entity.ReturnedAt,
+            ReturnedById = entity.ReturnedById,
+            ReturnedByName = entity.ReturnedBy?.FullName,
+            ReturnReason = entity.ReturnReason,
+            ChangeRequestedAt = entity.ChangeRequestedAt,
+            ChangeRequestedById = entity.ChangeRequestedById,
+            ChangeRequestedByName = entity.ChangeRequestedBy?.FullName,
+            ChangeReason = entity.ChangeReason,
+            ClosedAt = entity.ClosedAt,
+            ClosedById = entity.ClosedById,
+            ClosedByName = entity.ClosedBy?.FullName,
             Budget = entity.Budget?.ToDto(),
             Comments = entity.Comments.Select(c => c.ToDto()).ToList(),
             Attachments = entity.Attachments.Select(a => a.ToDto()).ToList(),
@@ -108,6 +122,10 @@ public static class StaffTravelMappingExtensions
         };
     }
 
+    /// <remarks>
+    /// The organisation unit, <c>IsInternational</c> and the policy are not mapped: the service sets
+    /// them from the traveller's record, the two countries and the policy guard (lane 1 — A5, O-5).
+    /// </remarks>
     public static StaffTravelRequest ToEntity(this CreateStaffTravelRequestDto dto, Guid tenantId, Guid userId)
     {
         return new StaffTravelRequest
@@ -119,7 +137,6 @@ public static class StaffTravelMappingExtensions
             TravelType = dto.TravelType,
             TravelPurpose = dto.TravelPurpose,
             PurposeDescription = dto.PurposeDescription,
-            OrganizationUnitId = dto.OrganizationUnitId,
             Status = StaffTravelRequestStatus.Draft,
             Priority = dto.Priority,
             DestinationCountryId = dto.DestinationCountryId,
@@ -131,24 +148,26 @@ public static class StaffTravelMappingExtensions
             EstimatedDurationDays = Math.Max(0, dto.TravelEndDate.DayNumber - dto.TravelStartDate.DayNumber + 1),
             EstimatedTotalCost = dto.EstimatedTotalCost,
             CurrencyCode = dto.CurrencyCode,
-            PolicyId = dto.PolicyId,
-            IsInternational = dto.IsInternational,
             RequiresVisa = dto.RequiresVisa,
             RequiresHealthClearance = dto.RequiresHealthClearance,
             RiskLevel = dto.RiskLevel,
-            GroupTravelId = dto.GroupTravelId,
             ParentRequestId = dto.ParentRequestId,
             AmendmentReason = dto.AmendmentReason,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <remarks>
+    /// Writes only what the requester may change. The unit, <c>IsInternational</c> and the policy
+    /// are the service's (see <see cref="ToEntity(CreateStaffTravelRequestDto, Guid, Guid)"/>),
+    /// <c>ApprovedBudget</c> is the approver's, and the group link is the group's endpoints' (slice
+    /// 1c) — a plain edit used to overwrite all five.
+    /// </remarks>
     public static void UpdateEntity(this StaffTravelRequest entity, UpdateStaffTravelRequestDto dto, Guid userId)
     {
         entity.TravelType = dto.TravelType;
         entity.TravelPurpose = dto.TravelPurpose;
         entity.PurposeDescription = dto.PurposeDescription;
-        entity.OrganizationUnitId = dto.OrganizationUnitId;
         entity.Priority = dto.Priority;
         entity.DestinationCountryId = dto.DestinationCountryId;
         entity.DestinationCity = dto.DestinationCity;
@@ -158,14 +177,10 @@ public static class StaffTravelMappingExtensions
         entity.TravelEndDate = dto.TravelEndDate;
         entity.EstimatedDurationDays = Math.Max(0, dto.TravelEndDate.DayNumber - dto.TravelStartDate.DayNumber + 1);
         entity.EstimatedTotalCost = dto.EstimatedTotalCost;
-        entity.ApprovedBudget = dto.ApprovedBudget;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.PolicyId = dto.PolicyId;
-        entity.IsInternational = dto.IsInternational;
         entity.RequiresVisa = dto.RequiresVisa;
         entity.RequiresHealthClearance = dto.RequiresHealthClearance;
         entity.RiskLevel = dto.RiskLevel;
-        entity.GroupTravelId = dto.GroupTravelId;
         entity.AmendmentReason = dto.AmendmentReason;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -173,6 +188,70 @@ public static class StaffTravelMappingExtensions
 
     public static IEnumerable<StaffTravelRequestSummaryDto> ToSummaryDtoList(this IEnumerable<StaffTravelRequest> entities)
         => entities.Select(e => e.ToSummaryDto());
+
+    /// <summary>
+    /// A request as its traveller may read it: comments the desk shared, and no policy exceptions.
+    /// </summary>
+    /// <remarks>
+    /// Finding A6 (lane 1, slice 1c): the self-service read returned every comment — internal notes
+    /// included, at any depth of replies — and the desk's policy-exception decisions, and only the
+    /// portal page's own filter hid them. Anything sent to the traveller's browser is theirs to read,
+    /// so the filter is here, on the server.
+    /// </remarks>
+    public static StaffTravelRequestDto ToTravellerView(this StaffTravelRequestDto dto)
+    {
+        dto.Comments = SharedWithTraveller(dto.Comments);
+        dto.PolicyExceptions = new List<StaffTravelPolicyExceptionDto>();
+        dto.GroundTransports = dto.GroundTransports.Select(g => g.ToTravellerView()).ToList();
+        return dto;
+    }
+
+    private static List<StaffTravelRequestCommentDto> SharedWithTraveller(IEnumerable<StaffTravelRequestCommentDto> comments)
+        => comments
+            .Where(c => c.IsVisibleToTraveller)
+            .Select(c => { c.Replies = SharedWithTraveller(c.Replies); return c; })
+            .ToList();
+
+    /// <summary>
+    /// A flight as its traveller reads it (lane 7, 7c1, P3): the exception's state stays — it says why a booking waits —
+    /// but the decision, who asked for it, who authorised it and why, is the desk's, as A6 made the request's policy
+    /// exceptions. The segments in flying order.
+    /// </summary>
+    public static StaffTravelFlightBookingDto ToTravellerView(this StaffTravelFlightBookingDto dto)
+    {
+        dto.ClassExceptionReason = null;
+        dto.ExceptionRequestedById = null;
+        dto.ExceptionRequestedByName = null;
+        dto.ExceptionAuthorisedById = null;
+        dto.ExceptionAuthorisedByName = null;
+        dto.ExceptionAuthorisedAt = null;
+        dto.Segments = dto.Segments.OrderBy(s => s.SegmentOrder).ToList();
+        return dto;
+    }
+
+    /// <summary>A hotel as its traveller reads it — without the rate exception's decision (P3).</summary>
+    public static StaffTravelHotelBookingDto ToTravellerView(this StaffTravelHotelBookingDto dto)
+    {
+        dto.RateExceptionReason = null;
+        dto.ExceptionRequestedById = null;
+        dto.ExceptionRequestedByName = null;
+        dto.ExceptionAuthorisedById = null;
+        dto.ExceptionAuthorisedByName = null;
+        dto.ExceptionAuthorisedAt = null;
+        return dto;
+    }
+
+    /// <summary>
+    /// A ground leg as its traveller reads it: the vehicle and the driver who takes them, not the driver's own travel
+    /// request (lane 6, D-33) — that is a colleague's record.
+    /// </summary>
+    public static StaffTravelGroundTransportDto ToTravellerView(this StaffTravelGroundTransportDto dto)
+    {
+        dto.DriverTravelRequestId = null;
+        dto.DriverTravelRequestNumber = null;
+        dto.DriverTravelRequestStatus = null;
+        return dto;
+    }
 
     #endregion
 
@@ -199,10 +278,17 @@ public static class StaffTravelMappingExtensions
             TravelEndDate = entity.TravelEndDate,
             Status = entity.Status,
             MaxParticipants = entity.MaxParticipants,
-            CurrentParticipantCount = entity.Requests.Count,
+            CurrentParticipantCount = entity.SeatsTaken(),
             Requests = entity.Requests.Select(r => r.ToSummaryDto()).ToList(),
         };
     }
+
+    /// <summary>
+    /// The places a group's travellers hold: every linked trip still going ahead or able to — not a
+    /// cancelled or rejected one, which used to count against <c>MaxParticipants</c> for ever.
+    /// </summary>
+    public static int SeatsTaken(this StaffGroupTravel entity)
+        => entity.Requests.Count(r => r.Status is not (StaffTravelRequestStatus.Cancelled or StaffTravelRequestStatus.Rejected));
 
     public static StaffGroupTravelSummaryDto ToSummaryDto(this StaffGroupTravel entity)
     {
@@ -217,7 +303,7 @@ public static class StaffTravelMappingExtensions
             TravelEndDate = entity.TravelEndDate,
             Status = entity.Status,
             MaxParticipants = entity.MaxParticipants,
-            CurrentParticipantCount = entity.Requests.Count,
+            CurrentParticipantCount = entity.SeatsTaken(),
         };
     }
 
@@ -248,7 +334,7 @@ public static class StaffTravelMappingExtensions
         entity.DestinationCity = dto.DestinationCity;
         entity.TravelStartDate = dto.TravelStartDate;
         entity.TravelEndDate = dto.TravelEndDate;
-        entity.Status = dto.Status;
+        // No status: the group's verbs move it (slice 1c, finding A11).
         entity.MaxParticipants = dto.MaxParticipants;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -406,28 +492,19 @@ public static class StaffTravelMappingExtensions
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            VersionNumber = dto.VersionNumber,
-            IsCurrentVersion = dto.IsCurrentVersion,
+            // Lane 5 (5b): the version, the current flag and the days are the service's; a version starts a Draft.
             Status = TravelItineraryStatus.Draft,
             Title = dto.Title,
-            TotalTravelDays = dto.TotalTravelDays,
-            TotalWorkingDays = dto.TotalWorkingDays,
-            TotalWeekendDays = dto.TotalWeekendDays,
             SummaryNotes = dto.SummaryNotes,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>A version's words — never its status, current flag, days or finalisation (lane 5, D-25).</summary>
     public static void UpdateEntity(this StaffTravelItinerary entity, UpdateStaffTravelItineraryDto dto, Guid userId)
     {
-        entity.Status = dto.Status;
         entity.Title = dto.Title;
-        entity.IsCurrentVersion = dto.IsCurrentVersion;
-        entity.TotalTravelDays = dto.TotalTravelDays;
-        entity.TotalWorkingDays = dto.TotalWorkingDays;
-        entity.TotalWeekendDays = dto.TotalWeekendDays;
         entity.SummaryNotes = dto.SummaryNotes;
-        entity.FinalizedAt = dto.FinalizedAt;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -620,6 +697,14 @@ public static class StaffTravelMappingExtensions
             BookedAt = entity.BookedAt,
             CancelledAt = entity.CancelledAt,
             CancellationFee = entity.CancellationFee,
+            // Lane 4, D-8. The two names are filled by the service with a narrow read — the reads that feed this do
+            // not include two more whole Employee rows (the memory-grant lesson of slice 4a).
+            ExceptionState = entity.ExceptionState,
+            ExceptionRequestedById = entity.ExceptionRequestedById,
+            ExceptionRequestedByName = entity.ExceptionRequestedBy?.FullName,
+            ExceptionAuthorisedById = entity.ExceptionAuthorisedById,
+            ExceptionAuthorisedByName = entity.ExceptionAuthorisedBy?.FullName,
+            ExceptionAuthorisedAt = entity.ExceptionAuthorisedAt,
             Segments = entity.Segments.OrderBy(s => s.SegmentOrder).Select(s => s.ToDto()).ToList(),
         };
     }
@@ -637,6 +722,8 @@ public static class StaffTravelMappingExtensions
             Status = entity.Status,
             TicketNumber = entity.TicketNumber,
             SegmentCount = entity.Segments.Count,
+            VendorName = entity.Vendor?.Name,
+            ExceptionState = entity.ExceptionState,
         };
     }
 
@@ -650,8 +737,7 @@ public static class StaffTravelMappingExtensions
             AirlineCode = dto.AirlineCode,
             AirlineName = dto.AirlineName,
             BookingClass = dto.BookingClass,
-            PolicyAllowedClass = dto.PolicyAllowedClass,
-            ClassExceptionApproved = dto.ClassExceptionApproved,
+            // Lane 5 (D5): the cap, the exception's grant, the status and the stamps are the service's.
             ClassExceptionReason = dto.ClassExceptionReason,
             BookedBy = dto.BookedBy,
             VendorId = dto.VendorId,
@@ -659,19 +745,19 @@ public static class StaffTravelMappingExtensions
             TaxesAndFees = dto.TaxesAndFees,
             CurrencyCode = dto.CurrencyCode,
             TicketNumber = dto.TicketNumber,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), the stamps, the fee or the policy's cap
+    /// (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelFlightBooking entity, UpdateStaffTravelFlightBookingDto dto, Guid userId)
     {
         entity.BookingReference = dto.BookingReference;
         entity.AirlineCode = dto.AirlineCode;
         entity.AirlineName = dto.AirlineName;
         entity.BookingClass = dto.BookingClass;
-        entity.PolicyAllowedClass = dto.PolicyAllowedClass;
-        entity.ClassExceptionApproved = dto.ClassExceptionApproved;
         entity.ClassExceptionReason = dto.ClassExceptionReason;
         entity.BookedBy = dto.BookedBy;
         entity.VendorId = dto.VendorId;
@@ -679,10 +765,6 @@ public static class StaffTravelMappingExtensions
         entity.TaxesAndFees = dto.TaxesAndFees;
         entity.CurrencyCode = dto.CurrencyCode;
         entity.TicketNumber = dto.TicketNumber;
-        entity.Status = dto.Status;
-        entity.BookedAt = dto.BookedAt;
-        entity.CancelledAt = dto.CancelledAt;
-        entity.CancellationFee = dto.CancellationFee;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -808,6 +890,13 @@ public static class StaffTravelMappingExtensions
             BookedAt = entity.BookedAt,
             CancelledAt = entity.CancelledAt,
             CancellationFee = entity.CancellationFee,
+            // Lane 4, D-8 — names filled by the service, as on the flight.
+            ExceptionState = entity.ExceptionState,
+            ExceptionRequestedById = entity.ExceptionRequestedById,
+            ExceptionRequestedByName = entity.ExceptionRequestedBy?.FullName,
+            ExceptionAuthorisedById = entity.ExceptionAuthorisedById,
+            ExceptionAuthorisedByName = entity.ExceptionAuthorisedBy?.FullName,
+            ExceptionAuthorisedAt = entity.ExceptionAuthorisedAt,
         };
     }
 
@@ -824,6 +913,8 @@ public static class StaffTravelMappingExtensions
             TotalCost = entity.TotalCost,
             CurrencyCode = entity.CurrencyCode,
             Status = entity.Status,
+            VendorName = entity.Vendor?.Name,
+            ExceptionState = entity.ExceptionState,
         };
     }
 
@@ -842,22 +933,21 @@ public static class StaffTravelMappingExtensions
             StarRating = dto.StarRating,
             CheckInDate = dto.CheckInDate,
             CheckOutDate = dto.CheckOutDate,
-            NumberOfNights = dto.NumberOfNights,
             RoomType = dto.RoomType,
             RatePerNight = dto.RatePerNight,
-            TotalCost = dto.TotalCost,
             CurrencyCode = dto.CurrencyCode,
-            PolicyMaxRatePerNight = dto.PolicyMaxRatePerNight,
-            RateExceptionApproved = dto.RateExceptionApproved,
+            // Lane 5 (D5): nights, total, the cap, the exception's grant, the status and the stamps are the service's.
             RateExceptionReason = dto.RateExceptionReason,
             VendorId = dto.VendorId,
             BookedBy = dto.BookedBy,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,
             CancellationPolicy = dto.CancellationPolicy,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), what is derived, the stamps, the fee or the
+    /// policy's cap (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelHotelBooking entity, UpdateStaffTravelHotelBookingDto dto, Guid userId)
     {
         entity.BookingReference = dto.BookingReference;
@@ -869,21 +959,13 @@ public static class StaffTravelMappingExtensions
         entity.StarRating = dto.StarRating;
         entity.CheckInDate = dto.CheckInDate;
         entity.CheckOutDate = dto.CheckOutDate;
-        entity.NumberOfNights = dto.NumberOfNights;
         entity.RoomType = dto.RoomType;
         entity.RatePerNight = dto.RatePerNight;
-        entity.TotalCost = dto.TotalCost;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.PolicyMaxRatePerNight = dto.PolicyMaxRatePerNight;
-        entity.RateExceptionApproved = dto.RateExceptionApproved;
         entity.RateExceptionReason = dto.RateExceptionReason;
         entity.VendorId = dto.VendorId;
         entity.BookedBy = dto.BookedBy;
-        entity.Status = dto.Status;
         entity.CancellationPolicy = dto.CancellationPolicy;
-        entity.BookedAt = dto.BookedAt;
-        entity.CancelledAt = dto.CancelledAt;
-        entity.CancellationFee = dto.CancellationFee;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -919,6 +1001,8 @@ public static class StaffTravelMappingExtensions
             CurrencyCode = entity.CurrencyCode,
             Status = entity.Status,
             Notes = entity.Notes,
+            // Lane 6 (D-33): the number and status are read beside it (StaffTravelFleetService.DescribeAsync).
+            DriverTravelRequestId = entity.DriverTravelRequestId,
         };
     }
 
@@ -938,12 +1022,13 @@ public static class StaffTravelMappingExtensions
             EstimatedCost = dto.EstimatedCost,
             ActualCost = dto.ActualCost,
             CurrencyCode = dto.CurrencyCode,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,   // lane 5 (D1): moved by its verbs
             Notes = dto.Notes,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status, which the verbs move (lane 5, D1).</summary>
     public static void UpdateEntity(this StaffTravelGroundTransport entity, UpdateStaffTravelGroundTransportDto dto, Guid userId)
     {
         entity.TransportType = dto.TransportType;
@@ -956,7 +1041,6 @@ public static class StaffTravelMappingExtensions
         entity.EstimatedCost = dto.EstimatedCost;
         entity.ActualCost = dto.ActualCost;
         entity.CurrencyCode = dto.CurrencyCode;
-        entity.Status = dto.Status;
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
@@ -1011,16 +1095,16 @@ public static class StaffTravelMappingExtensions
             VehicleCategory = dto.VehicleCategory,
             VehicleModel = dto.VehicleModel,
             DailyRate = dto.DailyRate,
-            TotalCost = dto.TotalCost,
             CurrencyCode = dto.CurrencyCode,
             InsuranceIncluded = dto.InsuranceIncluded,
             FuelPolicy = dto.FuelPolicy,
             DriverLicenseRequired = dto.DriverLicenseRequired,
-            Status = dto.Status,
+            Status = TravelBookingStatus.Pending,   // lane 5 (D1, D5): moved by its verbs; the total is the service's
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>The fields the desk edits — never the status (the verbs), the total or <c>BookedAt</c> (lane 5, D1, D5).</summary>
     public static void UpdateEntity(this StaffTravelCarRentalBooking entity, UpdateStaffTravelCarRentalBookingDto dto, Guid userId)
     {
         entity.VendorId = dto.VendorId;
@@ -1032,13 +1116,10 @@ public static class StaffTravelMappingExtensions
         entity.VehicleCategory = dto.VehicleCategory;
         entity.VehicleModel = dto.VehicleModel;
         entity.DailyRate = dto.DailyRate;
-        entity.TotalCost = dto.TotalCost;
         entity.CurrencyCode = dto.CurrencyCode;
         entity.InsuranceIncluded = dto.InsuranceIncluded;
         entity.FuelPolicy = dto.FuelPolicy;
         entity.DriverLicenseRequired = dto.DriverLicenseRequired;
-        entity.Status = dto.Status;
-        entity.BookedAt = dto.BookedAt;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1078,15 +1159,17 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelBudget ToEntity(this CreateStaffTravelBudgetDto dto, Guid tenantId, Guid userId)
+    /// <summary>The currency and the total are the service's (lane 3): the trip's currency, and the total it settled.</summary>
+    public static StaffTravelBudget ToEntity(
+        this CreateStaffTravelBudgetDto dto, Guid tenantId, Guid userId, string currencyCode, decimal approvedTotal)
     {
         return new StaffTravelBudget
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
             BudgetYear = dto.BudgetYear,
-            ApprovedTotal = dto.ApprovedTotal,
-            CurrencyCode = dto.CurrencyCode,
+            ApprovedTotal = approvedTotal,
+            CurrencyCode = currencyCode,
             FlightBudget = dto.FlightBudget,
             AccommodationBudget = dto.AccommodationBudget,
             PerDiemBudget = dto.PerDiemBudget,
@@ -1096,11 +1179,11 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static void UpdateEntity(this StaffTravelBudget entity, UpdateStaffTravelBudgetDto dto, Guid userId)
+    /// <summary>The total is the service's, as on create; the currency stays the trip's.</summary>
+    public static void UpdateEntity(this StaffTravelBudget entity, UpdateStaffTravelBudgetDto dto, Guid userId, decimal approvedTotal)
     {
         entity.BudgetYear = dto.BudgetYear;
-        entity.ApprovedTotal = dto.ApprovedTotal;
-        entity.CurrencyCode = dto.CurrencyCode;
+        entity.ApprovedTotal = approvedTotal;
         entity.FlightBudget = dto.FlightBudget;
         entity.AccommodationBudget = dto.AccommodationBudget;
         entity.PerDiemBudget = dto.PerDiemBudget;
@@ -1149,7 +1232,14 @@ public static class StaffTravelMappingExtensions
             FinanceReviewedByName = entity.FinanceReviewedBy?.FullName,
             FinanceReviewedAt = entity.FinanceReviewedAt,
             SubmittedAt = entity.SubmittedAt,
-            Lines = entity.Lines.Select(l => l.ToDto()).ToList(),
+            ReviewNotes = entity.ReviewNotes,
+            PaidById = entity.PaidById,
+            PaidByName = entity.PaidBy?.FullName,
+            AdvanceWaiverReason = entity.AdvanceWaiverReason,
+            PaymentVoidedAt = entity.PaymentVoidedAt,
+            PaymentVoidedByName = entity.PaymentVoidedBy?.FullName,
+            PaymentVoidReason = entity.PaymentVoidReason,
+            Lines = entity.Lines.Where(l => !l.IsDeleted).Select(l => l.ToDto()).ToList(),
         };
     }
 
@@ -1159,6 +1249,7 @@ public static class StaffTravelMappingExtensions
         {
             Id = entity.Id,
             ClaimNumber = entity.ClaimNumber,
+            StaffTravelRequestId = entity.StaffTravelRequestId,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             ClaimType = entity.ClaimType,
@@ -1170,17 +1261,20 @@ public static class StaffTravelMappingExtensions
         };
     }
 
-    public static StaffTravelExpenseClaim ToEntity(this CreateStaffTravelExpenseClaimDto dto, Guid tenantId, Guid userId)
+    /// <summary>The traveller and the currency are the server's (lane 3, B3 and B11): the trip's traveller, and the
+    /// base currency every claim total is kept in.</summary>
+    public static StaffTravelExpenseClaim ToEntity(
+        this CreateStaffTravelExpenseClaimDto dto, Guid tenantId, Guid userId, Guid employeeId, string baseCurrencyCode)
     {
         return new StaffTravelExpenseClaim
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = employeeId,
             ClaimType = dto.ClaimType,
             Status = TravelClaimStatus.Draft,
             TravelAdvanceId = dto.TravelAdvanceId,
-            CurrencyCode = dto.CurrencyCode,
+            CurrencyCode = baseCurrencyCode,
             CreatedBy = userId.ToString(),
             Lines = dto.Lines.Select(l => l.ToEntity(tenantId, userId)).ToList(),
         };
@@ -1190,7 +1284,6 @@ public static class StaffTravelMappingExtensions
     {
         entity.ClaimType = dto.ClaimType;
         entity.TravelAdvanceId = dto.TravelAdvanceId;
-        entity.CurrencyCode = dto.CurrencyCode;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1231,6 +1324,9 @@ public static class StaffTravelMappingExtensions
             ReviewedById = entity.ReviewedById,
             ReviewedByName = entity.ReviewedBy?.FullName,
             ReviewedAt = entity.ReviewedAt,
+            FleetTripId = entity.FleetTripId,
+            FuelQuantity = entity.FuelQuantity,
+            FleetFuelTransactionId = entity.FleetFuelTransactionId,
         };
     }
 
@@ -1253,6 +1349,9 @@ public static class StaffTravelMappingExtensions
             ReceiptAttachmentId = dto.ReceiptAttachmentId,
             IsPerDiem = dto.IsPerDiem,
             PerDiemRateId = dto.PerDiemRateId,
+            // Lane 6 (D-30): checked by the service first. FleetFuelTransactionId is the payment's to write (D-31).
+            FleetTripId = dto.FleetTripId,
+            FuelQuantity = dto.FuelQuantity,
             Status = TravelExpenseLineStatus.Pending,
             CreatedBy = userId.ToString(),
         };
@@ -1273,6 +1372,8 @@ public static class StaffTravelMappingExtensions
         entity.ReceiptAttachmentId = dto.ReceiptAttachmentId;
         entity.IsPerDiem = dto.IsPerDiem;
         entity.PerDiemRateId = dto.PerDiemRateId;
+        entity.FleetTripId = dto.FleetTripId;
+        entity.FuelQuantity = dto.FuelQuantity;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }
@@ -1308,8 +1409,33 @@ public static class StaffTravelMappingExtensions
             ApprovedByName = entity.ApprovedBy?.FullName,
             DisbursedById = entity.DisbursedById,
             DisbursedByName = entity.DisbursedBy?.FullName,
+            RejectedAt = entity.RejectedAt,
+            RejectedByName = entity.RejectedBy?.FullName,
+            RejectionReason = entity.RejectionReason,
+            CancelledAt = entity.CancelledAt,
+            CancelledByName = entity.CancelledBy?.FullName,
+            CancellationReason = entity.CancellationReason,
+            WrittenOffAt = entity.WrittenOffAt,
+            WrittenOffByName = entity.WrittenOffBy?.FullName,
+            WriteOffReason = entity.WriteOffReason,
+            WrittenOffAmount = entity.Status == TravelAdvanceStatus.WrittenOff
+                ? (entity.ApprovedAmount ?? 0m) - entity.SettledAmount
+                : null,
+            RefundedAmount = entity.RefundedAmount,
+            RefundedAt = entity.RefundedAt,
+            RefundedByName = entity.RefundedBy?.FullName,
+            RefundReference = entity.RefundReference,
+            IsOverdue = IsAdvanceOverdue(entity),
         };
     }
+
+    /// <summary>Cash out past its deadline, read from the figures rather than the stored status, which the
+    /// nightly sweep writes (<see cref="ErpSystem.Core.Services.HR.StaffTravelAdvanceRules"/>).</summary>
+    private static bool IsAdvanceOverdue(StaffTravelAdvance entity)
+        => ErpSystem.Core.Services.HR.StaffTravelAdvanceRules.IsCashOutStatus(entity.Status)
+           && entity.UnsettledAmount > 0m
+           && entity.SettlementDeadline is DateOnly deadline
+           && deadline < DateOnly.FromDateTime(DateTime.UtcNow);
 
     public static StaffTravelAdvanceSummaryDto ToSummaryDto(this StaffTravelAdvance entity)
     {
@@ -1317,6 +1443,8 @@ public static class StaffTravelMappingExtensions
         {
             Id = entity.Id,
             AdvanceNumber = entity.AdvanceNumber,
+            StaffTravelRequestId = entity.StaffTravelRequestId,
+            RequestNumber = entity.StaffTravelRequest?.RequestNumber,
             EmployeeId = entity.EmployeeId,
             EmployeeName = entity.Employee?.FullName ?? string.Empty,
             RequestedAmount = entity.RequestedAmount,
@@ -1324,24 +1452,37 @@ public static class StaffTravelMappingExtensions
             CurrencyCode = entity.CurrencyCode,
             AdvanceType = entity.AdvanceType,
             Status = entity.Status,
+            SettledAmount = entity.SettledAmount,
             UnsettledAmount = entity.UnsettledAmount,
+            RefundedAmount = entity.RefundedAmount,
             SettlementDeadline = entity.SettlementDeadline,
+            DisbursedAt = entity.DisbursedAt,
+            IsOverdue = IsAdvanceOverdue(entity),
+            OutcomeReason = entity.Status switch
+            {
+                TravelAdvanceStatus.Rejected => entity.RejectionReason,
+                TravelAdvanceStatus.Cancelled => entity.CancellationReason,
+                TravelAdvanceStatus.WrittenOff => entity.WriteOffReason,
+                _ => null,
+            },
         };
     }
 
-    public static StaffTravelAdvance ToEntity(this CreateStaffTravelAdvanceDto dto, Guid tenantId, Guid userId)
+    /// <summary>The traveller (<paramref name="employeeId"/>) is the trip's, passed in by the service; nothing is
+    /// owed until the advance is disbursed (lane 3, B3 and B8).</summary>
+    public static StaffTravelAdvance ToEntity(this CreateStaffTravelAdvanceDto dto, Guid tenantId, Guid userId, Guid employeeId)
     {
         return new StaffTravelAdvance
         {
             TenantId = tenantId,
             StaffTravelRequestId = dto.StaffTravelRequestId,
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = employeeId,
             RequestedAmount = dto.RequestedAmount,
             CurrencyCode = dto.CurrencyCode,
             AdvanceType = dto.AdvanceType,
             Status = TravelAdvanceStatus.Requested,
             SettlementDeadline = dto.SettlementDeadline,
-            UnsettledAmount = dto.RequestedAmount,
+            UnsettledAmount = 0m,
             CreatedBy = userId.ToString(),
         };
     }
@@ -1349,11 +1490,9 @@ public static class StaffTravelMappingExtensions
     public static void UpdateEntity(this StaffTravelAdvance entity, UpdateStaffTravelAdvanceDto dto, Guid userId)
     {
         entity.RequestedAmount = dto.RequestedAmount;
-        // ⚠ ApprovedAmount is deliberately NOT mapped. Approving an advance is `ApproveAdvanceAsync`,
-        // which stamps ApprovedById from the token and checks the status; a plain PUT that could set
-        // the approved amount was a way round both, leaving an advance with money approved and no
-        // approver on record — and UnsettledAmount is computed off it. The area-5 "DTO owns too
-        // much" shape; slice 4 closed the actor half and this is the amount half.
+        // ⚠ No approved amount: approving an advance is `ApproveAdvanceAsync`, which stamps the approver
+        // from the token and checks the status (the DTO lost the ignored field in lane 3). An edit is a
+        // Requested advance's only, so nothing it changes has been approved, paid or settled.
         entity.CurrencyCode = dto.CurrencyCode;
         entity.AdvanceType = dto.AdvanceType;
         entity.SettlementDeadline = dto.SettlementDeadline;
@@ -1473,12 +1612,11 @@ public static class StaffTravelMappingExtensions
             MaxFlightClassInternational = entity.MaxFlightClassInternational,
             MaxHotelRateDomestic = entity.MaxHotelRateDomestic,
             MaxHotelRateInternational = entity.MaxHotelRateInternational,
+            CurrencyCode = entity.CurrencyCode,
             AdvanceBookingDaysFlight = entity.AdvanceBookingDaysFlight,
             AdvanceBookingDaysHotel = entity.AdvanceBookingDaysHotel,
-            RequiresCheapestFare = entity.RequiresCheapestFare,
             PreferredVendorMandatory = entity.PreferredVendorMandatory,
             MaxSingleTripBudget = entity.MaxSingleTripBudget,
-            MaxAnnualTravelBudget = entity.MaxAnnualTravelBudget,
             ReceiptRequiredAbove = entity.ReceiptRequiredAbove,
             ExpenseSubmissionDays = entity.ExpenseSubmissionDays,
             ApprovedById = entity.ApprovedById,
@@ -1506,14 +1644,13 @@ public static class StaffTravelMappingExtensions
         };
     }
 
+    /// <summary>The version, the currency and whether it is in force are the service's (lane 4).</summary>
     public static StaffTravelPolicy ToEntity(this CreateStaffTravelPolicyDto dto, Guid tenantId, Guid userId)
     {
         return new StaffTravelPolicy
         {
             TenantId = tenantId,
-            PolicyName = dto.PolicyName,
-            VersionNumber = dto.VersionNumber,
-            IsCurrentVersion = dto.IsCurrentVersion,
+            PolicyName = dto.PolicyName.Trim(),
             AppliesToLevelFromId = dto.AppliesToLevelFromId,
             AppliesToLevelToId = dto.AppliesToLevelToId,
             AppliesToOrganizationUnitId = dto.AppliesToOrganizationUnitId,
@@ -1525,20 +1662,18 @@ public static class StaffTravelMappingExtensions
             MaxHotelRateInternational = dto.MaxHotelRateInternational,
             AdvanceBookingDaysFlight = dto.AdvanceBookingDaysFlight,
             AdvanceBookingDaysHotel = dto.AdvanceBookingDaysHotel,
-            RequiresCheapestFare = dto.RequiresCheapestFare,
             PreferredVendorMandatory = dto.PreferredVendorMandatory,
             MaxSingleTripBudget = dto.MaxSingleTripBudget,
-            MaxAnnualTravelBudget = dto.MaxAnnualTravelBudget,
             ReceiptRequiredAbove = dto.ReceiptRequiredAbove,
             ExpenseSubmissionDays = dto.ExpenseSubmissionDays,
             CreatedBy = userId.ToString(),
         };
     }
 
+    /// <summary>As <see cref="ToEntity"/>: the version, the currency and whether it is in force are the service's.</summary>
     public static void UpdateEntity(this StaffTravelPolicy entity, UpdateStaffTravelPolicyDto dto, Guid userId)
     {
-        entity.PolicyName = dto.PolicyName;
-        entity.IsCurrentVersion = dto.IsCurrentVersion;
+        entity.PolicyName = dto.PolicyName.Trim();
         entity.AppliesToLevelFromId = dto.AppliesToLevelFromId;
         entity.AppliesToLevelToId = dto.AppliesToLevelToId;
         entity.AppliesToOrganizationUnitId = dto.AppliesToOrganizationUnitId;
@@ -1550,10 +1685,8 @@ public static class StaffTravelMappingExtensions
         entity.MaxHotelRateInternational = dto.MaxHotelRateInternational;
         entity.AdvanceBookingDaysFlight = dto.AdvanceBookingDaysFlight;
         entity.AdvanceBookingDaysHotel = dto.AdvanceBookingDaysHotel;
-        entity.RequiresCheapestFare = dto.RequiresCheapestFare;
         entity.PreferredVendorMandatory = dto.PreferredVendorMandatory;
         entity.MaxSingleTripBudget = dto.MaxSingleTripBudget;
-        entity.MaxAnnualTravelBudget = dto.MaxAnnualTravelBudget;
         entity.ReceiptRequiredAbove = dto.ReceiptRequiredAbove;
         entity.ExpenseSubmissionDays = dto.ExpenseSubmissionDays;
         entity.UpdatedAt = DateTime.UtcNow;
@@ -1756,6 +1889,10 @@ public static class StaffTravelMappingExtensions
             ProcessingDays = entity.ProcessingDays,
             OfficialSourceUrl = entity.OfficialSourceUrl,
             LastVerifiedAt = entity.LastVerifiedAt,
+            // Lane 7 (T-40): an entry nobody has checked for a year — or ever — is flagged, on a register whose own page
+            // says a wrong entry is worse than a missing one.
+            IsStale = entity.LastVerifiedAt is not DateOnly verified
+                      || verified < DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-365),
             Notes = entity.Notes,
         };
     }
@@ -1835,9 +1972,24 @@ public static class StaffTravelMappingExtensions
             VisaType = entity.VisaType,
             Status = entity.Status,
             SubmittedDate = entity.SubmittedDate,
+            ApprovedDate = entity.ApprovedDate,
             ExpiryDate = entity.ExpiryDate,
+            VisaNumberMasked = MaskAllButLastFour(entity.VisaNumber),
+            ProcessingFee = entity.ProcessingFee,
+            CurrencyCode = entity.CurrencyCode,
         };
     }
+
+    /// <summary>
+    /// "••••••1234": every character but the last four replaced; a value of four or fewer is masked
+    /// whole. Null or blank stays null. Same shape as the bank-account mask on profile changes.
+    /// </summary>
+    internal static string? MaskAllButLastFour(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Length <= 4
+                ? new string('•', value.Length)
+                : $"{new string('•', value.Length - 4)}{value[^4..]}";
 
     public static StaffTravelVisaApplication ToEntity(this CreateStaffTravelVisaApplicationDto dto, Guid tenantId, Guid userId)
     {
@@ -1848,7 +2000,11 @@ public static class StaffTravelMappingExtensions
             EmployeeId = dto.EmployeeId,
             DestinationCountryId = dto.DestinationCountryId,
             VisaType = dto.VisaType,
-            Status = VisaApplicationStatus.NotStarted,
+            Status = dto.Status,
+            SubmittedDate = dto.SubmittedDate,
+            ApprovedDate = dto.ApprovedDate,
+            ExpiryDate = dto.ExpiryDate,
+            VisaNumber = dto.VisaNumber,
             VendorId = dto.VendorId,
             ProcessingFee = dto.ProcessingFee,
             CurrencyCode = dto.CurrencyCode,
@@ -1943,7 +2099,7 @@ public static class StaffTravelMappingExtensions
         entity.MitigationRequired = dto.MitigationRequired;
         entity.MitigationNotes = dto.MitigationNotes;
         entity.DutyOfCareBriefingSent = dto.DutyOfCareBriefingSent;
-        entity.AssessedById = dto.AssessedById;
+        // Lane 7 (E5): the assessor is who made the assessment — set on create from the caller, never from a payload.
         entity.ValidUntil = dto.ValidUntil;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();

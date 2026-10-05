@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { CheckCircle2, Clock, RotateCcw, Scale, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -15,7 +16,11 @@ import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { appraisalAppealService } from '@/services/hr/appeals.service';
-import type { AppraisalAppealStatus } from '@/types/hr/appeals';
+import {
+  formatActualAgainstTarget,
+  formatCriterionScore,
+  type AppraisalAppealStatus,
+} from '@/types/hr/appeals';
 
 /**
  * The employee's own view of their appeal, live from submission through to the verdict.
@@ -24,6 +29,10 @@ import type { AppraisalAppealStatus } from '@/types/hr/appeals';
  * found enough in the appeal to send it back to the manager, and the real outcome is still
  * coming — an employee reading "Remanded" with no explanation would reasonably assume they had
  * won, or lost.
+ *
+ * **Each contested item shows what it scored when the appeal was filed** (closure D-38) and, once
+ * decided, what it scores now. While a remand is open the scores as they stand are withheld: the
+ * manager's re-scoring is provisional until HR decides (the page showed it, drafts included).
  */
 export default function AppealStatusPage() {
   const params = useParams<{ id: string }>();
@@ -67,8 +76,27 @@ export default function AppealStatusPage() {
   const isFinal = data.status === 'Upheld' || data.status === 'Rejected';
   const changed =
     data.originalScore != null &&
-    data.adjustedScore != null &&
-    data.originalScore !== data.adjustedScore;
+    data.currentOverallScore != null &&
+    Number(data.originalScore) !== Number(data.currentOverallScore);
+
+  // The overall now: after the decision it is the outcome, changed or not; while HR has it, it is the
+  // score appealed; while the manager re-evaluates it is withheld.
+  const scoreNowTile = isFinal
+    ? {
+        label: 'Score now',
+        value: data.currentOverallScore != null ? Number(data.currentOverallScore).toFixed(1) : '—',
+        tone: changed ? ('success' as const) : ('default' as const),
+        hint: changed ? 'Changed by the appeal' : 'Unchanged — the score you appealed stands',
+      }
+    : {
+        label: 'Score now',
+        value: data.outcomeReleased && data.currentOverallScore != null
+          ? Number(data.currentOverallScore).toFixed(1)
+          : '—',
+        hint: data.outcomeReleased
+          ? 'Not decided yet'
+          : 'Withheld while your manager re-evaluates',
+      };
 
   return (
     <div className="space-y-6">
@@ -105,15 +133,10 @@ export default function AppealStatusPage() {
       <MetricTiles
         tiles={[
           {
-            label: 'Score before the appeal',
-            value: data.originalScore != null ? data.originalScore.toFixed(1) : '—',
+            label: 'Score when you appealed',
+            value: data.originalScore != null ? Number(data.originalScore).toFixed(1) : '—',
           },
-          {
-            label: 'Score now',
-            value: data.adjustedScore != null ? data.adjustedScore.toFixed(1) : '—',
-            tone: changed ? 'success' : 'default',
-            hint: changed ? 'Changed as a result of the appeal' : 'Unchanged so far',
-          },
+          scoreNowTile,
           { label: 'Items contested', value: data.appealedItems.length },
         ]}
       />
@@ -144,23 +167,67 @@ export default function AppealStatusPage() {
                 <TableRow>
                   <TableHead>Item</TableHead>
                   <TableHead>Your reason</TableHead>
-                  <TableHead className="text-right">Original score</TableHead>
+                  {/* Not shown when the cycle shows the overall only (closure B2). */}
+                  {data.scoreBreakdownShown && (
+                    <TableHead className="text-right">When you appealed</TableHead>
+                  )}
+                  {data.scoreBreakdownShown && isFinal && (
+                    <TableHead className="text-right">Now</TableHead>
+                  )}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.appealedItems.map((item) => (
-                  <TableRow key={item.itemId}>
-                    <TableCell className="font-medium">{item.itemName}</TableCell>
-                    <TableCell className="max-w-md text-sm text-muted-foreground">
-                      {item.reason}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {item.originalScore ?? '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {data.appealedItems.map((item) => {
+                  const measured = item.scoringMethod === 'Measured';
+                  const actual = measured
+                    ? formatActualAgainstTarget(item.actualValue, item.targetValue, item.unit)
+                    : null;
+                  return (
+                    <TableRow key={item.itemId}>
+                      <TableCell>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{item.itemName}</span>
+                          <Badge variant="secondary">{item.itemType}</Badge>
+                        </div>
+                        {item.sectionName && (
+                          <div className="text-xs text-muted-foreground">{item.sectionName}</div>
+                        )}
+                      </TableCell>
+                      <TableCell className="max-w-md text-sm text-muted-foreground">
+                        {item.reason}
+                      </TableCell>
+                      {data.scoreBreakdownShown && (
+                        <TableCell className="text-right tabular-nums">
+                          {formatCriterionScore(item.originalScore, item.scoringMethod)}
+                        </TableCell>
+                      )}
+                      {data.scoreBreakdownShown && isFinal && (
+                        <TableCell className="text-right tabular-nums">
+                          <div className="font-medium">
+                            {formatCriterionScore(item.currentScore, item.scoringMethod)}
+                          </div>
+                          {actual && <div className="text-xs text-muted-foreground">{actual}</div>}
+                          {item.scoreChanged === true && (
+                            <div className="text-xs text-emerald-700 dark:text-emerald-400">
+                              Changed by the appeal
+                            </div>
+                          )}
+                          {item.scoreChanged === false && (
+                            <div className="text-xs text-muted-foreground">Unchanged</div>
+                          )}
+                        </TableCell>
+                      )}
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
+          )}
+          {data.scoreBreakdownShown && !data.outcomeReleased && (
+            <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+              The scores as they stand are withheld while your manager re-evaluates; you will see
+              them once HR has decided.
+            </p>
           )}
         </CardContent>
       </Card>
@@ -218,7 +285,7 @@ function StageNote({ status }: { status: AppraisalAppealStatus }) {
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Upheld</AlertTitle>
           <AlertDescription>
-            HR agreed with your appeal. Open the full outcome for the final scores and their
+            HR agreed with your appeal. The full outcome says whether any score changed, and HR&apos;s
             reasoning.
           </AlertDescription>
         </Alert>

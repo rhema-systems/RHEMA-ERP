@@ -4,6 +4,7 @@ import type {
   CreateStaffTravelDocument,
   UpdateStaffTravelDocument,
   StaffTravelVisaApplication,
+  StaffTravelVisaApplicationSummary,
   CreateStaffTravelVisaApplication,
   UpdateStaffTravelVisaApplication,
   StaffTravelVisaRequirement,
@@ -24,6 +25,7 @@ import type {
   UpdateStaffTravelInsurancePolicy,
   StaffTravelHealthRequirement,
   CreateStaffTravelHealthRequirement,
+  StaffTravelTripHealthRequirement,
   StaffTravelPolicy,
   StaffTravelPolicySummary,
   CreateStaffTravelPolicy,
@@ -71,7 +73,10 @@ class TravelComplianceService {
     return apiService.get<StaffTravelDocument[]>(`${this.baseUrl}/documents/employee/${employeeId}`);
   }
 
-  /** Passports and visas falling due — the reminder sweep chases from 90 days out. */
+  /**
+   * Passports and visas falling due. The reminder sweep sends one reminder when a document comes
+   * within 90 days of expiry and escalates only after it lapses — it does not chase in between.
+   */
   getExpiringDocuments(daysAhead = 90) {
     return apiService.get<StaffTravelDocument[]>(`${this.baseUrl}/documents/expiring`, { daysAhead });
   }
@@ -139,8 +144,9 @@ class TravelComplianceService {
 
   // ── Visa applications ──────────────────────────────────────────────────────
 
+  // ⚠ Every visa LIST answers the summary shape; only the single read returns the full record.
   getVisaApplications() {
-    return apiService.get<StaffTravelVisaApplication[]>(`${this.baseUrl}/visa-applications`);
+    return apiService.get<StaffTravelVisaApplicationSummary[]>(`${this.baseUrl}/visa-applications`);
   }
 
   getVisaApplication(id: string) {
@@ -148,18 +154,18 @@ class TravelComplianceService {
   }
 
   getVisaApplicationsByRequest(requestId: string) {
-    return apiService.get<StaffTravelVisaApplication[]>(
+    return apiService.get<StaffTravelVisaApplicationSummary[]>(
       `${this.baseUrl}/visa-applications/request/${requestId}`);
   }
 
   getVisaApplicationsByStatus(status: VisaApplicationStatus) {
-    return apiService.get<StaffTravelVisaApplication[]>(
+    return apiService.get<StaffTravelVisaApplicationSummary[]>(
       `${this.baseUrl}/visa-applications/status/${status}`);
   }
 
   /** Visas falling due — a trip on an expiring visa is the case this exists to catch. */
   getExpiringVisas(daysAhead = 90) {
-    return apiService.get<StaffTravelVisaApplication[]>(
+    return apiService.get<StaffTravelVisaApplicationSummary[]>(
       `${this.baseUrl}/visa-applications/expiring`, { daysAhead });
   }
 
@@ -259,6 +265,7 @@ class TravelComplianceService {
     return apiService.put<StaffTravelAlert>(`${this.baseUrl}/alerts/${payload.id}`, payload);
   }
 
+  /** Refused once the alert has reached a trip (lane 7, O-15) — deactivate it instead (`isActive: false`). */
   deleteAlert(id: string) {
     return apiService.delete<void>(`${this.baseUrl}/alerts/${id}`);
   }
@@ -291,6 +298,22 @@ class TravelComplianceService {
   acknowledgeAlertNotification(id: string) {
     return apiService.post<{ message: string }>(
       `${this.baseUrl}/alert-notifications/${id}/acknowledge`, {});
+  }
+
+  // ── Health requirements on a trip (lane 7, D-36) ─────────────────────────────
+
+  getTripHealthRequirements(requestId: string) {
+    return apiService.get<StaffTravelTripHealthRequirement[]>(`${this.baseUrl}/requests/${requestId}/health-requirements`);
+  }
+
+  /** The desk ticks a requirement as checked for the traveller — the caller and the clock are the server's. */
+  clearHealthRequirement(requestId: string, healthRequirementId: string, note?: string | null) {
+    return apiService.post<StaffTravelTripHealthRequirement>(
+      `${this.baseUrl}/requests/${requestId}/health-requirements/${healthRequirementId}/clear`, { note: note ?? null });
+  }
+
+  unclearHealthRequirement(requestId: string, healthRequirementId: string) {
+    return apiService.delete<void>(`${this.baseUrl}/requests/${requestId}/health-requirements/${healthRequirementId}/clear`);
   }
 
   // ── Insurance ──────────────────────────────────────────────────────────────

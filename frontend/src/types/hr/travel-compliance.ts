@@ -18,7 +18,7 @@
  */
 
 import type { AuditFields } from './common';
-import type { StaffTravelType } from './travel';
+import type { StaffTravelType, TravelRiskLevel } from './travel';
 import type { TravelExpenseCategory } from './travel-finance';
 
 // ── Travel documents ─────────────────────────────────────────────────────────
@@ -39,12 +39,16 @@ export interface StaffTravelDocument extends AuditFields {
   employeeName: string;
   documentType: TravelDocumentType;
   documentTypeName: string;
+  /** Lane 7 (O-7): masked to its last four in every list (`numberMasked`); in full only on `documents/{id}`. */
   documentNumber: string;
+  numberMasked?: boolean;
   issuingCountryId: string;
   issuingCountryName?: string | null;
   issueDate?: string | null;
   expiryDate?: string | null;
+  /** One primary per type per employee — a new primary stands the old one down (lane 7, E2). */
   isPrimary: boolean;
+  /** An edit takes the verification off; a verified document is not deleted (lane 7, E2, O-15). */
   isVerified: boolean;
   verifiedById?: string | null;
   verifiedByName?: string | null;
@@ -95,6 +99,30 @@ export interface StaffTravelVisaApplication extends AuditFields {
   vendorId?: string | null;
   vendorName?: string | null;
   notes?: string | null;
+}
+
+/**
+ * What every visa LIST returns — `StaffTravelVisaApplicationSummaryDto`, not the full record.
+ *
+ * ⚠ The list reads were typed as the full record, so the Compliance tab read `visaNumber` and
+ * `processingFee` off a shape that had neither and showed "—" for both, always (travel final
+ * closure, lane 0 — finding E3). The number is masked here; the full one is on the single read.
+ */
+export interface StaffTravelVisaApplicationSummary {
+  id: string;
+  employeeId: string;
+  employeeName: string;
+  destinationCountryName?: string | null;
+  visaType?: string | null;
+  status: VisaApplicationStatus;
+  statusName: string;
+  submittedDate?: string | null;
+  approvedDate?: string | null;
+  expiryDate?: string | null;
+  /** All but the last four characters masked, e.g. `••••••1234`. */
+  visaNumberMasked?: string | null;
+  processingFee?: number | null;
+  currencyCode?: string | null;
 }
 
 export interface CreateStaffTravelVisaApplication {
@@ -163,6 +191,8 @@ export interface StaffTravelVisaRequirement extends AuditFields {
   officialSourceUrl?: string | null;
   /** `DateOnly` — 'YYYY-MM-DD'. When the entry was last checked against the official source. */
   lastVerifiedAt?: string | null;
+  /** Lane 7 (T-40): never verified, or not in the last 365 days. */
+  isStale?: boolean;
   notes?: string | null;
 }
 
@@ -198,7 +228,12 @@ export interface UpdateStaffTravelVisaRequirement {
 
 // ── Risk assessments ─────────────────────────────────────────────────────────
 
-export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'Prohibited';
+/**
+ * One definition for the area, in `travel.ts`. There used to be two exports of this name with
+ * different members — this one correct, the request's offering `Extreme` — and which one a file got
+ * depended on its import line (travel final closure, lane 0).
+ */
+export type { TravelRiskLevel };
 
 export type TravelRiskCategory =
   | 'Security'
@@ -271,6 +306,8 @@ export type TravelAlertSeverity = 'Info' | 'Warning' | 'Critical' | 'Emergency';
  * happening at their destination — returns {@link StaffTravelAlert} in full, because the body IS
  * the alert. The client used to type all three as the full record, which is why the compliance
  * panel could bind `body` against a payload that never carried it and TypeScript said nothing.
+ * A trip's destination alerts (the approver's door and the traveller's, lane 7, 7c1) carry `body` and
+ * `effectiveTo` — the reader is deciding or making that one trip.
  */
 export interface StaffTravelAlertSummary {
   id: string;
@@ -283,6 +320,9 @@ export interface StaffTravelAlertSummary {
   title: string;
   effectiveFrom: string;
   isActive: boolean;
+  /** A trip's destination alerts carry the text and the end (lane 7, 7c1); other summaries leave them empty. */
+  body?: string | null;
+  effectiveTo?: string | null;
 }
 
 export interface StaffTravelAlert extends AuditFields {
@@ -425,6 +465,26 @@ export interface StaffTravelHealthRequirement extends AuditFields {
 export type CreateStaffTravelHealthRequirement =
   Omit<StaffTravelHealthRequirement, keyof AuditFields | 'countryName' | 'requirementTypeName'>;
 
+/**
+ * Lane 7 (D-36, T-25): `GET requests/{id}/health-requirements` — the destination's requirements in force over the trip,
+ * mandatory first, each cleared by the desk or not. Nothing is blocked by an uncleared one.
+ */
+export interface StaffTravelTripHealthRequirement {
+  healthRequirementId: string;
+  requirementName: string;
+  requirementType: TravelHealthRequirementType;
+  requirementTypeName: string;
+  isMandatory: boolean;
+  validityDays?: number | null;
+  notes?: string | null;
+  cleared: boolean;
+  clearanceId?: string | null;
+  clearedAt?: string | null;
+  clearedById?: string | null;
+  clearedByName?: string | null;
+  clearanceNote?: string | null;
+}
+
 // ── Policies ─────────────────────────────────────────────────────────────────
 
 export type FlightCabinClassName = 'Economy' | 'PremiumEconomy' | 'Business' | 'First';
@@ -467,12 +527,12 @@ export interface StaffTravelPolicy extends AuditFields {
   maxFlightClassInternational: FlightCabinClassName;
   maxHotelRateDomestic: number;
   maxHotelRateInternational: number;
+  /** The currency the money limits are set in (lane 4, C3/T-9); the base currency on an old policy. */
+  currencyCode?: string | null;
   advanceBookingDaysFlight: number;
   advanceBookingDaysHotel: number;
-  requiresCheapestFare: boolean;
   preferredVendorMandatory: boolean;
   maxSingleTripBudget: number;
-  maxAnnualTravelBudget: number;
   receiptRequiredAbove: number;
   expenseSubmissionDays: number;
   approvedById?: string | null;
@@ -481,9 +541,13 @@ export interface StaffTravelPolicy extends AuditFields {
   rules?: StaffTravelPolicyRule[];
 }
 
+/**
+ * Lane 4: the version is the server's (the next for the name), and so is whether the policy is in force (approval).
+ * `currencyCode` empty takes the base currency. "Cheapest fare" and "max per year" left the contract (D-1).
+ */
 export interface CreateStaffTravelPolicy {
   policyName: string;
-  versionNumber?: number;
+  currencyCode?: string | null;
   appliesToLevelFromId?: string | null;
   appliesToLevelToId?: string | null;
   appliesToOrganizationUnitId?: string | null;
@@ -495,10 +559,8 @@ export interface CreateStaffTravelPolicy {
   maxHotelRateInternational: number;
   advanceBookingDaysFlight: number;
   advanceBookingDaysHotel: number;
-  requiresCheapestFare: boolean;
   preferredVendorMandatory: boolean;
   maxSingleTripBudget: number;
-  maxAnnualTravelBudget: number;
   receiptRequiredAbove: number;
   expenseSubmissionDays: number;
 }

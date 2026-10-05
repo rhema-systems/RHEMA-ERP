@@ -33,7 +33,8 @@ export type ReviewEventType =
 
 /**
  * `InProgress` exists on the enum but nothing writes it — an event goes Pending →
- * EmployeeSubmitted → Completed, and `Cancelled` is only reachable by an explicit edit.
+ * EmployeeSubmitted → Completed. `Cancelled` is written when the appraisal is withdrawn from its
+ * cycle (closure D-74), and closes the event as Completed does: it takes no more work.
  */
 export type AppraisalReviewStatus =
   | 'Pending'

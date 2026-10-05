@@ -4,28 +4,22 @@ import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Save, TriangleAlert } from 'lucide-react';
+import { CheckCircle2, Eye, Save, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Textarea } from '@/components/ui/textarea';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
-import { formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
+import { useAuth } from '@/hooks/use-auth';
+import { formatDate, formatDateTime, humanizeEnum, today } from '@/lib/hr/attendance-format';
 import { appraisalConversationService } from '@/services/hr/conversations.service';
-import { CONVERSATION_TYPE_OPTIONS, type ConversationType } from '@/types/hr/conversations';
+import { CONVERSATION_TYPE_OPTIONS } from '@/types/hr/conversations';
 
 /** `2026-08-08T14:30:00Z` → `2026-08-08T14:30`, which is what a datetime-local input wants. */
 function toLocalInput(value?: string | null): string {
@@ -41,23 +35,29 @@ function toLocalInput(value?: string | null): string {
 /**
  * One appraisal conversation: the agenda before it, the notes and takeaways after.
  *
- * **Completing is a one-way door.** It stamps the held date and notifies the employee that the
- * notes are up, and a completed conversation can no longer be edited — which is the point, since
- * the notes are then the record of what was said.
+ * **Completing is a one-way door.** It stamps the held date and the conductor and notifies the
+ * employee that the notes are up, and a held conversation can no longer be edited or removed —
+ * the notes are then the record of what was said, and the appraisal's steps count it.
+ *
+ * **Who writes it** (performance closure D-74): the appraisee's line manager, whoever booked or
+ * held it, and HR — never the appraisee, who reads it here (an HR officer included, on their own).
+ * Its type is fixed when it is booked: the employee was told which conversation it is. The held
+ * date can be stated — a meeting held last week is recorded with its real date.
  */
 export default function ConversationDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
 
   const [form, setForm] = useState({
-    type: 'KickOff' as ConversationType,
     scheduledDate: '',
     agenda: '',
     postMeetingNotes: '',
     keyTakeaways: '',
   });
+  const [heldDate, setHeldDate] = useState(today());
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ['hr', 'conversation', id],
@@ -69,7 +69,6 @@ export default function ConversationDetailPage() {
   useEffect(() => {
     if (!data) return;
     setForm({
-      type: data.type,
       scheduledDate: toLocalInput(data.scheduledDate),
       agenda: data.agenda ?? '',
       postMeetingNotes: data.postMeetingNotes ?? '',
@@ -88,18 +87,14 @@ export default function ConversationDetailPage() {
   const save = useMutation({
     mutationFn: () => {
       if (!data) throw new Error('The conversation is still loading.');
+      // The meeting's details only: its type, appraisal, scheduler, conductor and held state are
+      // not the edit's (D-74).
       return appraisalConversationService.update(id, {
         id,
-        appraisalId: data.appraisalId,
-        scheduledById: data.scheduledById ?? null,
-        conductedById: data.conductedById ?? null,
-        type: form.type,
         scheduledDate: form.scheduledDate ? new Date(form.scheduledDate).toISOString() : null,
         agenda: form.agenda.trim() || null,
         postMeetingNotes: form.postMeetingNotes.trim() || null,
         keyTakeaways: form.keyTakeaways.trim() || null,
-        // Both ignored by the server on this path — completing is its own action.
-        isCompleted: false,
         reviewEventId: data.reviewEventId ?? null,
       });
     },
@@ -115,6 +110,7 @@ export default function ConversationDetailPage() {
       appraisalConversationService.complete(id, {
         postMeetingNotes: form.postMeetingNotes.trim() || null,
         keyTakeaways: form.keyTakeaways.trim() || null,
+        heldDate: heldDate || null,
       }),
     onSuccess: () => {
       toast({
@@ -156,6 +152,11 @@ export default function ConversationDetailPage() {
   }
 
   const done = data.isCompleted;
+  // D-74: the appraisee reads their conversation; the server refuses them every write.
+  const isAppraisee = !!user?.employeeId && user.employeeId === data.appraiseeEmployeeId;
+  const readOnly = done || isAppraisee;
+  const typeLabel =
+    CONVERSATION_TYPE_OPTIONS.find((o) => o.value === data.type)?.label ?? humanizeEnum(data.type);
 
   return (
     <div className="space-y-6 p-6">
@@ -168,13 +169,26 @@ export default function ConversationDetailPage() {
         }
         backHref="/hr/performance/conversations"
         actions={
-          !done ? (
-            <div className="flex items-center gap-2">
+          !readOnly ? (
+            <div className="flex flex-wrap items-end gap-2">
               <Button variant="outline" onClick={() => save.mutate()} disabled={save.isPending}>
                 <Save className="mr-2 h-4 w-4" />
                 Save
               </Button>
-              <Button onClick={() => complete.mutate()} disabled={complete.isPending}>
+              <div className="space-y-1">
+                <Label htmlFor="cv-held" className="text-xs text-muted-foreground">
+                  Held on
+                </Label>
+                <Input
+                  id="cv-held"
+                  type="date"
+                  className="h-9 w-[150px]"
+                  value={heldDate}
+                  max={today()}
+                  onChange={(e) => setHeldDate(e.target.value)}
+                />
+              </div>
+              <Button onClick={() => complete.mutate()} disabled={complete.isPending || !heldDate}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
                 {complete.isPending ? 'Recording…' : 'Mark held'}
               </Button>
@@ -187,7 +201,7 @@ export default function ConversationDetailPage() {
         <StatusBadge status={done ? 'Completed' : 'Scheduled'} />
         <span className="text-sm text-muted-foreground">
           {done
-            ? `Held ${formatDateTime(data.heldDate)}`
+            ? `Held ${formatDate(data.heldDate)}`
             : `Scheduled for ${formatDateTime(data.scheduledDate)}`}
         </span>
         {data.scheduledByName && (
@@ -195,7 +209,12 @@ export default function ConversationDetailPage() {
             Scheduled by {data.scheduledByName}
           </span>
         )}
-        {data.appraisalId && (
+        {done && data.conductedByName && (
+          <span className="text-sm text-muted-foreground">
+            Held by {data.conductedByName}
+          </span>
+        )}
+        {data.appraisalId && !isAppraisee && (
           <Button variant="link" size="sm" className="h-auto p-0" asChild>
             {/* The subject's own view moved to the portal; this desk screen opens the manager's. */}
             <Link href={`/hr/performance/team-appraisals/${data.appraisalId}`}>Open the appraisal</Link>
@@ -208,8 +227,19 @@ export default function ConversationDetailPage() {
           <CheckCircle2 className="h-4 w-4" />
           <AlertTitle>Held and recorded</AlertTitle>
           <AlertDescription>
-            A completed conversation is read-only: the notes are the record of what was said.
-            Schedule another one if there is more to discuss.
+            A held conversation is read-only and stays on the appraisal: the notes are the record of
+            what was said. Schedule another one if there is more to discuss.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {!done && isAppraisee && (
+        <Alert>
+          <Eye className="h-4 w-4" />
+          <AlertTitle>Your conversation</AlertTitle>
+          <AlertDescription>
+            Your manager books and records this conversation; you can read it here. You are told
+            when it is marked held and its notes are up.
           </AlertDescription>
         </Alert>
       )}
@@ -222,22 +252,8 @@ export default function ConversationDetailPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="cv-type">Type</Label>
-              <Select
-                value={form.type}
-                onValueChange={(v) => setForm((p) => ({ ...p, type: v as ConversationType }))}
-                disabled={done}
-              >
-                <SelectTrigger id="cv-type">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {CONVERSATION_TYPE_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Fixed when it is booked (D-74): the employee was told which conversation it is. */}
+              <Input id="cv-type" value={typeLabel} disabled readOnly />
             </div>
             <div className="space-y-2">
               <Label htmlFor="cv-date">Scheduled for</Label>
@@ -246,7 +262,7 @@ export default function ConversationDetailPage() {
                 type="datetime-local"
                 value={form.scheduledDate}
                 onChange={(e) => setForm((p) => ({ ...p, scheduledDate: e.target.value }))}
-                disabled={done}
+                disabled={readOnly}
               />
             </div>
           </div>
@@ -258,7 +274,7 @@ export default function ConversationDetailPage() {
               maxLength={2000}
               value={form.agenda}
               onChange={(e) => setForm((p) => ({ ...p, agenda: e.target.value }))}
-              disabled={done}
+              disabled={readOnly}
               placeholder="What will be covered, so nobody walks in cold."
             />
           </div>
@@ -278,7 +294,7 @@ export default function ConversationDetailPage() {
               maxLength={4000}
               value={form.postMeetingNotes}
               onChange={(e) => setForm((p) => ({ ...p, postMeetingNotes: e.target.value }))}
-              disabled={done}
+              disabled={readOnly}
               placeholder="What was actually discussed."
             />
           </div>
@@ -290,7 +306,7 @@ export default function ConversationDetailPage() {
               maxLength={2000}
               value={form.keyTakeaways}
               onChange={(e) => setForm((p) => ({ ...p, keyTakeaways: e.target.value }))}
-              disabled={done}
+              disabled={readOnly}
               placeholder="The two or three things to act on. These go into the notification the employee gets."
             />
           </div>

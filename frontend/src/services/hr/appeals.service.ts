@@ -7,6 +7,7 @@ import type {
   AppraisalAppeal,
   AppraisalAppealStatus,
   EmployeeAppealOutcome,
+  ExtendRemandDeadline,
   PostRemandFinalDecision,
   PostRemandReview,
   ResolveAppeal,
@@ -74,8 +75,10 @@ class AppraisalAppealService {
   }
 
   /**
-   * Everything needed to rule: the appealed items with all three evaluation legs, the scores,
-   * and `hrCanModifyScores` from the cycle's settings profile.
+   * Everything needed to rule: the appealed items — competency, KPI or goal rows — with all three
+   * evaluation legs, the scores, and `hrCanModifyScores` from the cycle's settings profile. A decided
+   * appeal answers too, with its decision, for the record (closure D-37); `partyToAppealReason` says
+   * when the reader may not act on it (D-35).
    */
   getAppealReview(appraisalId: string): Promise<AppealReview> {
     return apiService.get<AppealReview>(`${this.baseUrl}/${appraisalId}/appeal-review`);
@@ -94,11 +97,13 @@ class AppraisalAppealService {
    * Rules on the appeal.
    *
    * `Upheld` and `Rejected` are final: the appraisal returns to Completed and the appellant is
-   * notified. `Remanded` is not — it freezes a snapshot of the manager's evaluation, rolls the
-   * appraisal back to Active, sets a re-evaluation deadline and notifies the manager. The final
-   * call then happens on the post-remand screen.
+   * notified. `Remanded` is not — it freezes a snapshot of the manager's evaluation, reopens that
+   * evaluation until a re-evaluation deadline and notifies the manager; the appraisal stays under
+   * appeal. The final call then happens on the post-remand screen.
    *
-   * Score modifications are only accepted when the review reported `hrCanModifyScores`.
+   * Score modifications are only accepted with `Upheld`, and only when the review reported
+   * `hrCanModifyScores`. An officer who is the appellant, or wrote the contested evaluation, is
+   * refused (403).
    */
   resolveAppeal(appraisalId: string, data: ResolveAppeal): Promise<{ message: string }> {
     return apiService.post<{ message: string }>(
@@ -107,12 +112,26 @@ class AppraisalAppealService {
     );
   }
 
-  /** Pre- versus post-remand comparison, once the manager has re-submitted. */
+  /**
+   * Where a remand stands — the deadline, whether it has passed, what HR may do — and, once the
+   * manager has re-submitted, the pre- versus post-remand comparison.
+   */
   getPostRemandReview(appraisalId: string): Promise<PostRemandReview> {
     return apiService.get<PostRemandReview>(`${this.baseUrl}/${appraisalId}/post-remand-review`);
   }
 
-  /** Upheld or Rejected only. 400 while the manager's re-evaluation is outstanding. */
+  /**
+   * Moves the re-evaluation deadline to a later day while the manager has not re-evaluated
+   * (closure D-34). The manager is notified with the reason.
+   */
+  extendRemand(appraisalId: string, data: ExtendRemandDeadline): Promise<{ message: string }> {
+    return apiService.post<{ message: string }>(`${this.baseUrl}/${appraisalId}/extend-remand`, data);
+  }
+
+  /**
+   * Upheld or Rejected only. 422 while the manager's re-evaluation is due and its deadline has not
+   * passed; after a lapsed deadline the decision stands on the scores from before the remand.
+   */
   finalizePostRemand(
     appraisalId: string,
     data: PostRemandFinalDecision,

@@ -59,10 +59,41 @@ public class DeadlineEnforcementController : ControllerBase
 
             return Ok(result);
         }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A cycle that is not open, among others (performance closure E-d2b) — a rule, answered 422 with its
+            // message; it answered 500.
+            _logger.LogWarning(ex, "Advance-overdue refused for cycle {CycleId}", cycleId);
+            return UnprocessableEntity(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error enforcing deadlines for cycle {CycleId}", cycleId);
             return StatusCode(500, "An error occurred while enforcing deadlines");
+        }
+    }
+
+    /// <summary>
+    /// The transition report (performance closure B8): the cycle's in-flight appraisals whose
+    /// records run ahead of where the gates now hold them — an evaluation submitted before a step the
+    /// gates put first. HR waives each through the advance below; this changes nothing.
+    /// </summary>
+    [HttpGet("transition-report/{cycleId:guid}")]
+    [ProducesResponseType(typeof(AppraisalTransitionReportDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetTransitionReport(Guid cycleId, CancellationToken ct = default)
+    {
+        try
+        {
+            return Ok(await _workflowService.GetTransitionReportAsync(cycleId, ct));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error building the transition report for cycle {CycleId}", cycleId);
+            return StatusCode(500, "An error occurred while building the transition report");
         }
     }
 
@@ -123,6 +154,11 @@ public class DeadlineEnforcementController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            // An HR officer's own appraisal — the two-actor rule (performance closure D-62).
+            return StatusCode(403, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

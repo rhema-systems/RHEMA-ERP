@@ -118,6 +118,7 @@ public static class AppraisalMappingExtensions
             Code = entity.Code,
             CriteriaName = entity.CriteriaName,
             Description = entity.Description,
+            RequireEvidence = entity.RequireEvidence,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
@@ -133,6 +134,7 @@ public static class AppraisalMappingExtensions
             Code = dto.Code,
             CriteriaName = dto.CriteriaName,
             Description = dto.Description,
+            RequireEvidence = dto.RequireEvidence,
             IsActive = dto.IsActive
         };
     }
@@ -142,6 +144,7 @@ public static class AppraisalMappingExtensions
         entity.Code = dto.Code;
         entity.CriteriaName = dto.CriteriaName;
         entity.Description = dto.Description;
+        entity.RequireEvidence = dto.RequireEvidence;
         entity.IsActive = dto.IsActive;
     }
 
@@ -254,6 +257,10 @@ public static class AppraisalMappingExtensions
             AppealRemandedDate = entity.AppealRemandedDate,
             AppealRemandDeadline = entity.AppealRemandDeadline,
             IsRemandDeadlineExceeded = entity.AppealRemandDeadline.HasValue && DateTime.UtcNow > entity.AppealRemandDeadline.Value,
+            WithdrawnReason = entity.WithdrawnReason,
+            WithdrawnDate = entity.WithdrawnDate,
+            WithdrawnById = entity.WithdrawnById,
+            WithdrawnByName = entity.WithdrawnBy?.FullName,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
@@ -261,18 +268,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
-    public static PerformanceAppraisal ToEntity(this CreatePerformanceAppraisalDto dto)
-    {
-        return new PerformanceAppraisal
-        {
-            EmployeeId = dto.EmployeeId,
-            Year = dto.Year,
-            AppraisalCycleId = dto.AppraisalCycleId,
-            StartDate = dto.StartDate,
-            EndDate = dto.EndDate,
-            Status = AppraisalStatus.Draft
-        };
-    }
+    // The raw create's ToEntity went with it in performance closure E-d2b (D-20): generation builds each appraisal.
 
     /// <summary>
     /// Applies a header correction. <b>Three fields on the DTO are deliberately ignored.</b>
@@ -291,9 +287,9 @@ public static class AppraisalMappingExtensions
     /// forward-only state machine with per-transition preconditions — a plain edit that assigns
     /// Status walks around the whole of it.</para>
     ///
-    /// <para>They stay on the DTO rather than being removed, because the update is a REPLACE and a
-    /// caller sending the record back unchanged must not be rejected for including them. Ignoring
-    /// them is the behaviour; the DTO shape is unchanged.</para>
+    /// <para>They stayed on the DTO, ignored, so that a caller sending the record back unchanged was
+    /// not rejected for including them. Since performance closure E-a the DTO carries the window
+    /// alone — the serializer ignores a body's other members, so such a caller is still accepted.</para>
     ///
     /// <para><c>OverallScore</c> is ignored the same way (performance closure A6): the settle path
     /// (<c>AppraisalScoreService</c>) is its only writer, and HR restates a score only through
@@ -304,28 +300,13 @@ public static class AppraisalMappingExtensions
     /// </remarks>
     public static void UpdateEntity(this UpdatePerformanceAppraisalDto dto, PerformanceAppraisal entity)
     {
-        // entity.EmployeeId       — NOT assigned. See the remarks above.
-        // entity.AppraisalCycleId — NOT assigned.
-        // entity.Status           — NOT assigned; use UpdateStatusAsync, which enforces the transitions.
+        // The window only (performance closure E-a). The employee, the cycle, the status and the
+        // score were already left alone; the manager's narrative, the recommendations, the ranks, the
+        // next appraisal date and the peer count (a counter the approvals keep) now are too — a
+        // correction that sent none of them blanked them.
         entity.Year = dto.Year;
         entity.StartDate = dto.StartDate;
         entity.EndDate = dto.EndDate;
-        entity.PeerEvaluatorsCount = dto.PeerEvaluatorsCount;
-        // entity.OverallScore     — NOT assigned. See the remarks above.
-        entity.RankInPosition = dto.RankInPosition;
-        entity.RankInUnit = dto.RankInUnit;
-        entity.OverallComments = dto.OverallComments;
-        entity.StrengthsIdentified = dto.StrengthsIdentified;
-        entity.AreasForImprovement = dto.AreasForImprovement;
-        entity.TrainingNeeds = dto.TrainingNeeds;
-        entity.CareerAspirations = dto.CareerAspirations;
-        entity.RecommendPromotion = dto.RecommendPromotion;
-        entity.RecommendIncrement = dto.RecommendIncrement;
-        entity.RecommendTraining = dto.RecommendTraining;
-        entity.RecommendPIP = dto.RecommendPIP;
-        entity.RecommendTermination = dto.RecommendTermination;
-        entity.RecommendationNotes = dto.RecommendationNotes;
-        entity.NextAppraisalDate = dto.NextAppraisalDate;
     }
 
     public static List<PerformanceAppraisalDto> ToDtoList(this IEnumerable<PerformanceAppraisal> entities)
@@ -641,6 +622,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             PipId = entity.PipId,
             MeetingDate = entity.MeetingDate,
+            Status = entity.Status,
             EmployeeAttended = entity.EmployeeAttended,
             ProgressNotes = entity.ProgressNotes,
             IssuesDiscussed = entity.IssuesDiscussed,
@@ -676,7 +658,8 @@ public static class AppraisalMappingExtensions
 
     /// <remarks>
     /// The supervisor's record of the meeting only (P13): not the plan it belongs to, not who
-    /// conducted it, and not the employee's reply.
+    /// conducted it, not the employee's reply, and not its status — the service's record and cancel
+    /// writers own that (decision D-73).
     /// </remarks>
     public static void UpdateEntity(this UpdatePipReviewMeetingDto dto, PipReviewMeeting entity)
     {
@@ -703,6 +686,7 @@ public static class AppraisalMappingExtensions
             Id = entity.Id,
             TenantId = entity.TenantId,
             SettingsName = entity.SettingsName,
+            IsDefault = entity.IsDefault,
             RequireSelfEvaluation = entity.RequireSelfEvaluation,
             AllowSelfSoftSkillRating = entity.AllowSelfSoftSkillRating,
             SelfEvaluationWeight = entity.SelfEvaluationWeight,
@@ -936,7 +920,8 @@ public static class AppraisalMappingExtensions
             StartDate = dto.StartDate,
             EndDate = dto.EndDate,
             AppraisalSettingsId = dto.AppraisalSettingsId,
-            Status = dto.Status,
+            // Created as a Draft, whatever the body says (performance closure E-c); open and close move it.
+            Status = AppraisalCycleStatus.Draft,
             GoalSettingOpenDate = dto.GoalSettingOpenDate,
             GoalSettingDeadline = dto.GoalSettingDeadline,
             Q1ReviewOpenDate = dto.Q1ReviewOpenDate,
@@ -1019,7 +1004,7 @@ public static class AppraisalMappingExtensions
             PositionId = entity.PositionId,
             PositionTitle = entity.Position?.Title,
             EstimatedEmployeeCount = entity.EstimatedEmployeeCount,
-            ActiveEmployeeCount = entity.ActiveEmployeeCount,
+            // ActiveEmployeeCount is resolved live by AppraisalCycleTargetService.
             Notes = entity.Notes,
             IsActive = entity.IsActive,
             CreatedAt = entity.CreatedAt,
@@ -1046,7 +1031,7 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalCycleTargetDto dto, AppraisalCycleTarget entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
+        // The cycle is not copied: a target stays in its cycle (performance closure E-c).
         entity.TargetType = dto.TargetType;
         entity.OrganizationLevelId = dto.OrganizationLevelId;
         entity.OrganizationUnitId = dto.OrganizationUnitId;
@@ -1092,6 +1077,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>A new nomination is Pending (performance closure D1) — approval is its own path, which creates the peer's evaluation.</summary>
     public static PeerNomination ToEntity(this CreatePeerNominationDto dto)
     {
         return new PeerNomination
@@ -1102,19 +1088,18 @@ public static class AppraisalMappingExtensions
             NominationDate = DateTime.UtcNow,
             DueDate = dto.DueDate,
             InstructionsToPeer = dto.InstructionsToPeer,
-            NominationStatus = dto.NominationStatus
+            NominationStatus = PeerNominationStatus.Pending
         };
     }
 
+    /// <summary>
+    /// A pending nomination's due date and instructions (D1). This copied the appraisal, the peer, the
+    /// nominator, the invitation date and the status from the body.
+    /// </summary>
     public static void UpdateEntity(this UpdatePeerNominationDto dto, PeerNomination entity)
     {
-        entity.AppraisalId = dto.AppraisalId;
-        entity.PeerEmployeeId = dto.PeerEmployeeId;
-        entity.NominatedById = dto.NominatedById;
-        entity.InvitationSentDate = dto.InvitationSentDate;
         entity.DueDate = dto.DueDate;
         entity.InstructionsToPeer = dto.InstructionsToPeer;
-        entity.NominationStatus = dto.NominationStatus;
     }
 
     public static List<PeerNominationDto> ToDtoList(this IEnumerable<PeerNomination> entities)
@@ -1124,67 +1109,8 @@ public static class AppraisalMappingExtensions
 
     #endregion
 
-    #region AppraisalAppeal
-
-    public static AppraisalAppealDto ToDto(this AppraisalAppeal entity)
-    {
-        return new AppraisalAppealDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            PerformanceAppraisalId = entity.PerformanceAppraisalId,
-            AppraisalNumber = entity.PerformanceAppraisal?.AppraisalNumber ?? string.Empty,
-            EmployeeId = entity.EmployeeId,
-            EmployeeName = entity.Employee?.FullName ?? string.Empty,
-            SubmittedDate = entity.SubmittedDate,
-            AppealReason = entity.AppealReason,
-            Status = entity.Status,
-            ReviewedById = entity.ReviewedById,
-            ReviewerName = entity.Reviewer?.FullName,
-            ResolutionNotes = entity.ResolutionNotes,
-            ResolvedDate = entity.ResolvedDate,
-            Items = entity.Items?.Select(i => i.ToDto()).ToList() ?? new List<AppraisalAppealItemDto>(),
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy
-        };
-    }
-
-    public static List<AppraisalAppealDto> ToDtoList(this IEnumerable<AppraisalAppeal> entities)
-    {
-        return entities.Select(e => e.ToDto()).ToList();
-    }
-
-    #endregion
-
-    #region AppraisalAppealItem
-
-    public static AppraisalAppealItemDto ToDto(this AppraisalAppealItem entity)
-    {
-        return new AppraisalAppealItemDto
-        {
-            Id = entity.Id,
-            TenantId = entity.TenantId,
-            AppraisalAppealId = entity.AppraisalAppealId,
-            TemplateItemId = entity.TemplateItemId,
-            TemplateItemName = entity.TemplateItem?.Competency?.CriteriaName ?? entity.TemplateItem?.KpiDefinition?.KpiName,
-            Reason = entity.Reason,
-            ResolutionNotes = entity.ResolutionNotes,
-            ScoreAdjusted = entity.ScoreAdjusted,
-            CreatedAt = entity.CreatedAt,
-            CreatedBy = entity.CreatedBy ?? string.Empty,
-            UpdatedAt = entity.UpdatedAt,
-            UpdatedBy = entity.UpdatedBy
-        };
-    }
-
-    public static List<AppraisalAppealItemDto> ToDtoList(this IEnumerable<AppraisalAppealItem> entities)
-    {
-        return entities.Select(e => e.ToDto()).ToList();
-    }
-
-    #endregion
+    // The AppraisalAppeal and AppraisalAppealItem mappers went with the legacy filer, their only
+    // caller (performance closure C1). The appeal endpoints build their DTOs where they read.
 
     #region AppraisalTemplate
 
@@ -1281,7 +1207,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalTemplateSectionDto dto, AppraisalTemplateSection entity)
     {
-        entity.AppraisalTemplateId = dto.AppraisalTemplateId;
+        // A section stays on its template (performance closure E-e): the body's template id moved it — past that
+        // template's lock, and across tenants.
         entity.SectionName = dto.SectionName;
         entity.Description = dto.Description;
         entity.DisplayOrder = dto.DisplayOrder;
@@ -1344,7 +1271,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalTemplateItemDto dto, AppraisalTemplateItem entity)
     {
-        entity.AppraisalTemplateSectionId = dto.AppraisalTemplateSectionId;
+        // An item stays in its section (performance closure E-e): the body's section id moved it into another
+        // template, a goals section, or another tenant, past each check.
         entity.CompetencyId = dto.CompetencyId;
         entity.KpiDefinitionId = dto.KpiDefinitionId;
         entity.KpiTargetValue = dto.KpiTargetValue;
@@ -1489,6 +1417,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalCycleId = entity.AppraisalCycleId,
             CycleCode = entity.AppraisalCycle?.CycleCode,
+            CycleStatus = entity.AppraisalCycle?.Status,
             AppraisalTemplateId = entity.AppraisalTemplateId,
             TemplateName = tmpl?.TemplateName ?? string.Empty,
             OrganizationLevelId = tmpl?.OrganizationLevelId,
@@ -1519,8 +1448,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdateAppraisalCycleTemplateDto dto, AppraisalCycleTemplate entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.AppraisalTemplateId = dto.AppraisalTemplateId;
+        // The link's cycle and template are pinned (performance closure E-e, D-68): re-pointing an Open cycle's link
+        // released the template's lock while its appraisals still read it. A different template is a new link.
         entity.Priority = dto.Priority;
         entity.IsActive = dto.IsActive;
     }
@@ -1810,8 +1739,8 @@ public static class AppraisalMappingExtensions
             MaxValue = dto.MaxValue,
             Unit = dto.Unit,
             StartDate = dto.StartDate,
-            DueDate = dto.DueDate,
-            SubmittedToManagerId = dto.SubmittedToManagerId
+            DueDate = dto.DueDate
+            // SubmittedToManagerId is the submit's, from the HR record (performance closure D-76).
         };
     }
 
@@ -1841,7 +1770,7 @@ public static class AppraisalMappingExtensions
         entity.Unit = dto.Unit;
         entity.StartDate = dto.StartDate;
         entity.DueDate = dto.DueDate;
-        entity.ProgressPercent = dto.ProgressPercent;
+        // ProgressPercent is not copied (performance closure D-72): progress is recorded as entries.
 
         // Status, SubmittedToManagerId and ManagerFeedback are deliberately NOT copied from the
         // update payload. They belong to the approval lifecycle, which IGoalWorkflowCommandService
@@ -1978,7 +1907,8 @@ public static class AppraisalMappingExtensions
         entity.CheckInType = dto.CheckInType;
         entity.Title = dto.Title;
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.ConductedDate = dto.ConductedDate;
+        // The held date is set by the complete, once (performance closure E-g1, D-80): the update copied the body's —
+        // null from a form that never sends it un-held a held check-in, and any date re-dated it.
         entity.Agenda = dto.Agenda;
         entity.SharedNotes = dto.SharedNotes;
         entity.ActionItems = dto.ActionItems;
@@ -2091,9 +2021,8 @@ public static class AppraisalMappingExtensions
 
     public static void UpdateEntity(this UpdatePerformanceJournalEntryDto dto, PerformanceJournalEntry entity)
     {
-        entity.AppraisalCycleId = dto.AppraisalCycleId;
-        entity.SubjectEmployeeId = dto.SubjectEmployeeId;
-        entity.RelatedGoalId = dto.RelatedGoalId;
+        // Whom the note is about, its cycle and its goal stay as written (performance closure E-g1, D-80): the edit moved
+        // a note onto another subject, past the report check the create makes.
         entity.Title = dto.Title;
         entity.Body = dto.Body;
         // The client's update payload has never carried EntryDate, so an unguarded copy
@@ -2325,6 +2254,7 @@ public static class AppraisalMappingExtensions
             TenantId = entity.TenantId,
             AppraisalId = entity.AppraisalId,
             AppraisalNumber = entity.Appraisal?.AppraisalNumber,
+            AppraiseeEmployeeId = entity.Appraisal?.EmployeeId,
             ScheduledById = entity.ScheduledById,
             ScheduledByName = entity.ScheduledBy?.FullName,
             ConductedById = entity.ConductedById,
@@ -2350,26 +2280,24 @@ public static class AppraisalMappingExtensions
         {
             AppraisalId   = dto.AppraisalId,
             ReviewEventId = dto.ReviewEventId,
-            ScheduledById = dto.ScheduledById,
-            ConductedById = dto.ConductedById,
-            Type          = dto.Type,
+            // ScheduledById and ConductedById are the service's, from the token (decision D-74).
+            // The service refuses a missing or unknown type first (B2); never default one.
+            Type          = dto.Type ?? throw new ArgumentException("A conversation needs its type."),
             ScheduledDate = dto.ScheduledDate,
             Agenda        = dto.Agenda
         };
     }
 
+    /// <remarks>
+    /// The meeting's details only (decision D-74): never its appraisal, type, scheduler, conductor,
+    /// held flag or held date.
+    /// </remarks>
     public static void UpdateEntity(this UpdateAppraisalConversationDto dto, AppraisalConversation entity)
     {
-        entity.AppraisalId = dto.AppraisalId;
-        entity.ScheduledById = dto.ScheduledById;
-        entity.ConductedById = dto.ConductedById;
-        entity.Type = dto.Type;
         entity.ScheduledDate = dto.ScheduledDate;
-        entity.HeldDate = dto.HeldDate;
         entity.Agenda = dto.Agenda;
         entity.PostMeetingNotes = dto.PostMeetingNotes;
         entity.KeyTakeaways = dto.KeyTakeaways;
-        entity.IsCompleted = dto.IsCompleted;
         entity.ReviewEventId = dto.ReviewEventId;
     }
 
@@ -2462,6 +2390,7 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>The tenant, the status and the facilitator are the service's — the facilitator from the token (E-b).</summary>
     public static CalibrationSession ToEntity(this CreateCalibrationSessionDto dto)
     {
         return new CalibrationSession
@@ -2471,11 +2400,15 @@ public static class AppraisalMappingExtensions
             OrganizationLevelId = dto.OrganizationLevelId,
             OrganizationUnitId = dto.OrganizationUnitId,
             ScheduledDate = dto.ScheduledDate,
-            FacilitatedById = dto.FacilitatedById,
             Agenda = dto.Agenda
         };
     }
 
+    /// <summary>
+    /// The particulars. The scope fields are refused by the service once the session is open (E-b);
+    /// the facilitator is recorded by creating and opening it, never edited — a body naming one
+    /// recorded the session as run by someone else.
+    /// </summary>
     public static void UpdateEntity(this UpdateCalibrationSessionDto dto, CalibrationSession entity)
     {
         entity.AppraisalCycleId = dto.AppraisalCycleId;
@@ -2485,12 +2418,6 @@ public static class AppraisalMappingExtensions
         entity.ScheduledDate = dto.ScheduledDate;
         entity.Agenda = dto.Agenda;
         entity.MeetingNotes = dto.MeetingNotes;
-
-        // ⚠ Only reassign the facilitator when one is actually named. Opening a session records
-        // who opened it, and a later edit of the session's name or agenda does not mention the
-        // facilitator — so overwriting unconditionally silently blanked the record of who ran it.
-        if (dto.FacilitatedById.HasValue)
-            entity.FacilitatedById = dto.FacilitatedById;
 
         // Status and the started/completed stamps are set only by the lifecycle endpoints.
     }
@@ -2599,12 +2526,13 @@ public static class AppraisalMappingExtensions
         };
     }
 
+    /// <summary>
+    /// The decision's numbers and rationale. The appraisal and the criterion it restates are the
+    /// adjustment's for good (E-b): copied from the body, one decision could be moved onto another
+    /// appraisal in the session or another item.
+    /// </summary>
     public static void UpdateEntity(this UpdateCalibrationRatingAdjustmentDto dto, CalibrationRatingAdjustment entity)
     {
-        entity.PerformanceAppraisalId = dto.PerformanceAppraisalId;
-        entity.TemplateItemId = dto.TemplateItemId;
-        entity.CriterionConfigId = dto.CriterionConfigId;
-        entity.IsOverall = !dto.TemplateItemId.HasValue && !dto.CriterionConfigId.HasValue;
         entity.OriginalScore = dto.OriginalScore;
         entity.AdjustedScore = dto.AdjustedScore;
         entity.Rationale = dto.Rationale;
@@ -2650,13 +2578,15 @@ public static class AppraisalMappingExtensions
             Description = dto.Description,
             SuccessCriteria = dto.SuccessCriteria,
             DueDate = dto.DueDate,
-            Status = dto.Status
+            Status = dto.Status,
+            ProgressPercent = dto.ProgressPercent,
+            ProgressNotes = dto.ProgressNotes
         };
     }
 
+    /// <remarks>Never re-parents the goal: it stays on the plan it was found under.</remarks>
     public static void UpdateEntity(this UpdatePipGoalDto dto, PipGoal entity)
     {
-        entity.PipId = dto.PipId;
         entity.Title = dto.Title;
         entity.Description = dto.Description;
         entity.SuccessCriteria = dto.SuccessCriteria;

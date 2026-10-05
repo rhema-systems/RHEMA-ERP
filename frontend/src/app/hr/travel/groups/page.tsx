@@ -22,8 +22,8 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
-import { HR_ROLES } from '@/components/hr/common/PermissionGate';
-import { useAuth } from '@/hooks/use-auth';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { useTravelAccess } from '@/components/hr/travel/useTravelAccess';
 import { useToast } from '@/hooks/use-toast';
 import { countryService } from '@/services/hr/country.service';
 import { travelService } from '@/services/hr/travel.service';
@@ -57,12 +57,9 @@ export default function TravelGroupsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const { canWrite } = useTravelAccess();
 
-  const canWrite =
-    hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
-
-  const { data: groups, isLoading } = useQuery({
+  const { data: groups, isLoading, isError, error } = useQuery({
     queryKey: ['travel-groups'],
     queryFn: () => travelService.getGroups(),
   });
@@ -115,11 +112,11 @@ export default function TravelGroupsPage() {
       reset();
       router.push(`/hr/travel/groups/${created.id}`);
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: 'Could not create the group',
-        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+        description: e?.message,
       }),
   });
 
@@ -149,6 +146,10 @@ export default function TravelGroupsPage() {
           {isLoading ? (
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : isError && !groups ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the group trips" />
             </div>
           ) : rows.length === 0 ? (
             <EmptyState

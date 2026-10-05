@@ -1347,14 +1347,24 @@ export const navigationItems: NavItem[] = [
             icon: Plane,
             children: [
               { title: 'Register', href: '/hr/travel', icon: Plane, permissions: ['HR.Travel.Read'] },
+              // ⚠ NO permission (travel final closure, lane 2): the traveller's line manager approves the first
+              // stage and holds no travel permission. The server lists only what waits for the caller.
+              { title: 'Approvals', href: '/hr/travel/approvals', icon: CheckSquare },
               // My Travel re-homed to the portal (/me/travel).
               // Claims get their own entry because the finance desk works a queue ACROSS trips —
               // "approved and unpaid" — which no single travel request can show.
               { title: 'Group Travel', href: '/hr/travel/groups', icon: Users2, permissions: ['HR.Travel.Read'] },
               { title: 'Expense Claims', href: '/hr/travel/claims', icon: Receipt, permissions: ['HR.Travel.Read'] },
+              // The desk's chase list across trips (travel final closure, lane 3, D-5): advances with cash
+              // still out past their deadline, and every advance on one screen.
+              { title: 'Advances', href: '/hr/travel/advances', icon: HandCoins, permissions: ['HR.Travel.Read'] },
+              // Bookings that breach their trip's policy, awaiting a second administrator first (lane 4, D-8).
+              { title: 'Policy Breaches', href: '/hr/travel/breaches', icon: ShieldAlert, permissions: ['HR.Travel.Read'] },
               // The visa register had a client and no screen, so eleven fields on its DTOs
               // were unreachable. Reference data rather than day-to-day work, so it sits last.
               { title: 'Visa Requirements', href: '/hr/travel/visa-requirements', icon: Globe2, permissions: ['HR.Travel.Read'] },
+              // Travel final closure, lane 7 (E2): the passports the visa lookup and the passport checks read had no screen.
+              { title: 'Travel Documents', href: '/hr/travel/documents', icon: IdCard, permissions: ['HR.Travel.Read'] },
               // Moved out of Administration → HR alongside the visa register it reads like: an
               // advisory is raised against a destination, expires and is re-issued as conditions
               // change, on the same cadence as the trips it warns about. The policies it used to
@@ -1401,7 +1411,8 @@ export const navigationItems: NavItem[] = [
               { title: 'Calibration', href: '/hr/performance/calibration', icon: Scale, permissions: ['HR.Performance.Read'] },
               { title: 'Appeals', href: '/hr/performance/appeals', icon: Gavel, permissions: ['HR.Performance.Read'] },
               { title: 'Recommendations', href: '/hr/performance/recommendations', icon: Lightbulb, permissions: ['HR.Performance.Read'] },
-              { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake, permissions: ['HR.Performance.Read'] },
+              // The Managing Director decides the proposals and holds only their read (F3, D-94).
+              { title: 'Proposals', href: '/hr/performance/proposals', icon: Handshake, permissions: ['HR.Performance.Read', 'HR.Performance.Proposals.Read'] },
               { title: 'Company Goals', href: '/hr/performance/company-goals', icon: Building2, permissions: ['HR.Performance.Read'] },
               { title: 'Unit Goals', href: '/hr/performance/unit-goals', icon: Layers },
               { title: 'Employee Goals', href: '/hr/performance/employee-goals', icon: Target },

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Loader2, Plus, Plane, Clock, CalendarClock, Globe } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -24,25 +25,24 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import {
+  TRAVEL_REQUEST_STATUS_LABELS,
+  TRAVEL_TYPE_LABELS,
+  enumLabel,
+  enumOptions,
+} from '@/components/hr/travel/travel-enums';
+import { fmtTravelMoney } from '@/components/hr/travel/travel-format';
 import { travelService } from '@/services/hr/travel.service';
 import type { StaffTravelType, StaffTravelRequestSummary } from '@/types/hr/travel';
 
-const TRAVEL_TYPES: StaffTravelType[] = ['Domestic', 'International', 'CrossBorder', 'Regional'];
+/**
+ * ⚠ All eleven types, from the enum. The filter offered four, so a register of Field Visits or
+ * Conferences could not be narrowed to them (travel final closure, lane 0).
+ */
+const TRAVEL_TYPE_OPTIONS = enumOptions(TRAVEL_TYPE_LABELS);
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
-
-/**
- * Money is rendered from the row's OWN currency code — never a hardcoded symbol. Travel spans
- * currencies by nature, and the request carries the one it was costed in.
- */
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency',
-        currency: currency || 'GHS',
-        currencyDisplay: 'code',
-      }).format(amount);
 
 type QuickView = 'all' | 'pending-approval' | 'upcoming';
 
@@ -66,19 +66,26 @@ export default function TravelRegisterPage() {
   const [view, setView] = useState<QuickView>('all');
   const [type, setType] = useState<StaffTravelType | 'all'>('all');
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['travel-requests', view],
+  // The employee profile's Travel tab links here as `?employeeId=…`. The register used to ignore
+  // it and open on everyone's trips (travel final closure, lane 0 — finding F4).
+  const searchParams = useSearchParams();
+  const employeeId = searchParams?.get('employeeId') || null;
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['travel-requests', view, employeeId],
     queryFn: () => {
       if (view === 'pending-approval') return travelService.getPendingApproval();
       if (view === 'upcoming') return travelService.getUpcoming(30);
-      return travelService.getAll();
+      return employeeId ? travelService.getByEmployee(employeeId) : travelService.getAll();
     },
   });
 
   const activeView = VIEWS.find((v) => v.key === view) ?? VIEWS[0];
   const items: StaffTravelRequestSummary[] = (data ?? []).filter(
-    (r) => type === 'all' || r.travelType === type,
+    (r) =>
+      (type === 'all' || r.travelType === type) && (!employeeId || r.employeeId === employeeId),
   );
+  const employeeName = employeeId ? items[0]?.employeeName : null;
 
   return (
     <div className="space-y-6 p-6">
@@ -110,6 +117,17 @@ export default function TravelRegisterPage() {
         ))}
       </div>
 
+      {employeeId && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-4 py-3 text-sm">
+          <span>
+            Showing the trips of <strong>{employeeName || 'one employee'}</strong> only.
+          </span>
+          <Link href="/hr/travel" className="font-medium hover:underline">
+            Show every traveller
+          </Link>
+        </div>
+      )}
+
       <Card>
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -120,9 +138,9 @@ export default function TravelRegisterPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All types</SelectItem>
-                {TRAVEL_TYPES.map((t) => (
-                  <SelectItem key={t} value={t}>
-                    {t.replace(/([A-Z])/g, ' $1').trim()}
+                {TRAVEL_TYPE_OPTIONS.map((t) => (
+                  <SelectItem key={t.value} value={t.value}>
+                    {t.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -137,13 +155,17 @@ export default function TravelRegisterPage() {
             <div className="flex items-center justify-center p-10">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
+          ) : isError && !data ? (
+            <div className="p-4">
+              <TravelQueryError error={error} what="the travel requests" />
+            </div>
           ) : items.length === 0 ? (
             <EmptyState
               title="No travel requests"
               description={
-                view === 'all'
+                view === 'all' && !employeeId && type === 'all'
                   ? 'Nothing has been raised yet.'
-                  : 'Nothing is in this queue at the moment.'
+                  : 'Nothing matches this view at the moment.'
               }
             />
           ) : (
@@ -182,10 +204,10 @@ export default function TravelRegisterPage() {
                       {fmtDate(r.travelStartDate)} – {fmtDate(r.travelEndDate)}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {fmtMoney(r.estimatedTotalCost, r.currencyCode)}
+                      {fmtTravelMoney(r.estimatedTotalCost, r.currencyCode)}
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={r.status} />
+                      <StatusBadge status={enumLabel(TRAVEL_REQUEST_STATUS_LABELS, r.status)} />
                     </TableCell>
                   </TableRow>
                 ))}

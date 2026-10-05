@@ -80,6 +80,8 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   awaitingapproval: 'secondary',
   invalidweight: 'destructive',
   structurallycomplete: 'default',
+  belowminimum: 'destructive',
+  abovemaximum: 'destructive',
 
   // Appraisal cycles and templates. `humanizeEnum` lower-cases everything but the first
   // letter, so "InProgress" arrives as "In progress" and normalises to `inprogress`, which

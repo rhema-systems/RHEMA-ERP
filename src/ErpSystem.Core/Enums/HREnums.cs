@@ -1259,10 +1259,16 @@ public enum TeamGovernanceStatus
     InvalidWeight = 3,
 
     /// <summary>
-    /// No drafts, no pending approvals, total weight == 100.
+    /// No drafts, no pending approvals, the goal count within the cycle's bounds, total weight == 100.
     /// Execution states (InProgress, OnTrack, AtRisk, Completed) do NOT block this status.
     /// </summary>
     StructurallyComplete = 4,
+
+    /// <summary>Fewer goals than the cycle's MinGoalsPerEmployee (performance closure B2).</summary>
+    BelowMinimum = 5,
+
+    /// <summary>More goals than the cycle's MaxGoalsPerEmployee (performance closure B2).</summary>
+    AboveMaximum = 6,
 }
 
 public enum GoalProgressStatus
@@ -1461,20 +1467,30 @@ public enum EmploymentActionProposalStatus
     PendingApproval = 5
 }
 
+/// <summary>
+/// Draft → Open → Closed, moved only by the open and close actions.
+///
+/// <para>3 was <c>InProgress</c>, which only the demo seeder ever wrote and every live-cycle check read
+/// as Open; it is gone and its rows were moved to Open (performance closure D-14). 3 is not reused.</para>
+/// </summary>
 public enum AppraisalCycleStatus
 {
     Draft = 1,                    // Being configured
-    Open = 2,                   // Active, appraisals can be created
-    InProgress = 3,               // Evaluations are happening
+    Open = 2,                     // Running: appraisals are generated and evaluated
     Closed = 4,                   // Finalized, no changes
 }
 
+/// <summary>
+/// What a cycle target covers: everyone in a position, in a unit and the units beneath it, or at an
+/// organisation level. 4 was <c>Employee</c>, which no column could hold and nothing resolved; it is gone
+/// (performance closure D-44), and one person is covered by a position target, or left out by an
+/// exclusion.
+/// </summary>
 public enum AppraisalTargetType
 {
     OrganizationLevel = 1,
     OrganizationUnit = 2,
     Position = 3,
-    Employee = 4,
 }
 
 /// <summary>
@@ -3065,6 +3081,29 @@ public enum ProbationStatus
     /// the work was DONE rather than that anyone approved it.
     /// </remarks>
     ConfirmationApproved = 5
+}
+
+/// <summary>Where a probation extension request stands (performance closure batch 2, D-99).</summary>
+public enum ProbationExtensionRequestStatus
+{
+    /// <summary>Out with the confirming authority.</summary>
+    PendingApproval = 1,
+
+    /// <summary>The authority has approved it, and it has not been applied yet.</summary>
+    /// <remarks>
+    /// Separate from <see cref="Applied"/> for the reason <see cref="ProbationStatus.ConfirmationApproved"/> is: a status
+    /// adapter is synchronous and sees only this row, so it cannot write the extension or move the probation's end date.
+    /// </remarks>
+    Approved = 2,
+
+    /// <summary>The authority refused it; the probation's end date stands.</summary>
+    Rejected = 3,
+
+    /// <summary>Withdrawn by its raiser before a decision.</summary>
+    Recalled = 4,
+
+    /// <summary>Applied: the extension row written and the probation's end date moved.</summary>
+    Applied = 5
 }
 
 public enum ProbationReviewStatus
@@ -9356,74 +9395,9 @@ public enum TravelInitiatorRole
     System = 5
 }
 
-public enum TravelApproverType
-{
-    [Description("Line Manager")]
-    LineManager = 1,
-
-    [Description("Department Head")]
-    DepartmentHead = 2,
-
-    [Description("HR Manager")]
-    HrManager = 3,
-
-    [Description("Finance Manager")]
-    FinanceManager = 4,
-
-    [Description("Travel Desk")]
-    TravelDesk = 5,
-
-    [Description("Executive")]
-    Executive = 6,
-
-    [Description("Specific Person")]
-    SpecificPerson = 7
-}
-
-public enum TravelApprovalDecision
-{
-    [Description("Approved")]
-    Approved = 1,
-
-    [Description("Rejected")]
-    Rejected = 2,
-
-    [Description("Returned For Revision")]
-    ReturnedForRevision = 3,
-
-    [Description("Escalated")]
-    Escalated = 4,
-
-    [Description("Delegated")]
-    Delegated = 5,
-
-    [Description("Abstained")]
-    Abstained = 6
-}
-
-public enum TravelApprovalInstanceStatus
-{
-    [Description("Pending")]
-    Pending = 1,
-
-    [Description("In Progress")]
-    InProgress = 2,
-
-    [Description("Approved")]
-    Approved = 3,
-
-    [Description("Rejected")]
-    Rejected = 4,
-
-    [Description("Withdrawn")]
-    Withdrawn = 5,
-
-    [Description("Escalated")]
-    Escalated = 6,
-
-    [Description("Expired")]
-    Expired = 7
-}
+// TravelApproverType, TravelApprovalDecision and TravelApprovalInstanceStatus were removed on
+// 2026-10-01 (travel final closure, lane 0). They described travel's own four-table approval chain,
+// which slice 2 retired onto the workflow engine; nothing had referenced them since.
 
 #endregion
 
@@ -9490,6 +9464,42 @@ public enum TravelBookingStatus
 
     [Description("On Hold")]
     OnHold = 8
+}
+
+/// <summary>
+/// What the desk does to a booking once it exists (travel final closure, lane 5, finding D1) — the only way a booking's
+/// <see cref="TravelBookingStatus"/> moves. Not stored; the table is <c>StaffTravelBookingRules.Next</c>.
+/// </summary>
+public enum TravelBookingVerb
+{
+    Hold,
+    Confirm,
+    Ticket,
+    Cancel,
+    NoShow,
+    Complete,
+}
+
+/// <summary>
+/// Where an above-cap booking's exception stands (travel final closure decision D-8, lane 4): a
+/// booking above a cap is saved Pending and cannot be confirmed or ticketed until a DIFFERENT
+/// <c>HR.Travel.Admin</c> holder authorises it.
+/// </summary>
+/// <remarks>Stored as int. <see cref="TravelBookingExceptionState.None"/> = 0 is the column default, so every booking made before
+/// migration batch 1 reads as carrying no exception.</remarks>
+public enum TravelBookingExceptionState
+{
+    [Description("None")]
+    None = 0,
+
+    [Description("Pending")]
+    Pending = 1,
+
+    [Description("Authorised")]
+    Authorised = 2,
+
+    [Description("Refused")]
+    Refused = 3
 }
 
 public enum GroundTransportType
@@ -9706,7 +9716,20 @@ public enum TravelAdvanceStatus
     Overdue = 6,
 
     [Description("Written Off")]
-    WrittenOff = 7
+    WrittenOff = 7,
+
+    // Added 2026-10-01 (travel final closure, migration batch 1); int-stored, so no schema change.
+    // Lane 3 gives both their writers. ⚠ The posting retry guard in HrFinancePostingAdminService is a
+    // NEGATIVE list of advance statuses — lane 3 flips it to the positive one, or a Rejected advance
+    // could be re-posted.
+
+    /// <summary>Refused before any money moved.</summary>
+    [Description("Rejected")]
+    Rejected = 8,
+
+    /// <summary>Withdrawn before disbursement — by the traveller, or with the trip.</summary>
+    [Description("Cancelled")]
+    Cancelled = 9
 }
 
 public enum TravelPaymentMethod
@@ -9727,26 +9750,8 @@ public enum TravelPaymentMethod
     CorporateCard = 5
 }
 
-public enum TravelAllowanceType
-{
-    [Description("Daily Subsistence")]
-    DailySubsistence = 1,
-
-    [Description("Accommodation")]
-    Accommodation = 2,
-
-    [Description("Transport")]
-    Transport = 3,
-
-    [Description("Incidental")]
-    Incidental = 4,
-
-    [Description("Meals Only")]
-    MealsOnly = 5,
-
-    [Description("Hardship")]
-    Hardship = 6
-}
+// TravelAllowanceType was removed on 2026-10-01 (travel final closure, lane 0): no entity, DTO or
+// service ever used it. Per-diem allowances live on StaffTravelPerDiemRate's own columns.
 
 #endregion
 
@@ -9810,41 +9815,8 @@ public enum TravelPolicyExceptionStatus
 
 #region Vendors
 
-public enum TravelVendorType
-{
-    [Description("Airline")]
-    Airline = 1,
-
-    [Description("Hotel Chain")]
-    HotelChain = 2,
-
-    [Description("Car Rental")]
-    CarRental = 3,
-
-    [Description("Travel Agency")]
-    TravelAgency = 4,
-
-    [Description("GDS")]
-    Gds = 5,
-
-    [Description("Rideshare")]
-    Rideshare = 6,
-
-    [Description("Insurance")]
-    Insurance = 7,
-
-    [Description("Visa Service")]
-    VisaService = 8,
-
-    [Description("Ground Transport")]
-    GroundTransport = 9,
-
-    [Description("Forex")]
-    Forex = 10,
-
-    [Description("Other")]
-    Other = 11
-}
+// TravelVendorType was removed on 2026-10-01 (travel final closure, lane 0). Slice 3 retired travel's
+// own vendor master onto Procurement's Supplier, and nothing referenced the enum after that.
 
 #endregion
 

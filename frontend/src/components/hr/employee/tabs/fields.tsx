@@ -333,9 +333,13 @@ export function SelectField<T extends FieldValues>({
       <Select
         disabled={disabled}
         value={value}
-        onValueChange={(next) =>
-          form.setValue(name, (next === NONE_VALUE ? '' : next) as any, { shouldValidate: true })
-        }
+        onValueChange={(next) => {
+          // ⚠ Radix reports '' when the value arrives before its async options, which wiped the field
+          // (travel policy form: a cleared staff-level band silently widened the policy — finding C6).
+          // The one real clear is the NONE item, which maps to '' below; no option declares value ''.
+          if (next === '') return;
+          form.setValue(name, (next === NONE_VALUE ? '' : next) as any, { shouldValidate: true });
+        }}
       >
         <SelectTrigger id={name}>
           <SelectValue placeholder={placeholder} />

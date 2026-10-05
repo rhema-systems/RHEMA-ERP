@@ -19,6 +19,7 @@ import {
 } from '@/components/hr/employee/tabs/fields';
 import { CyclePhaseDateFields } from '@/components/hr/performance/CycleFormFields';
 import { appraisalCycleService, appraisalSettingsService } from '@/services/hr/appraisal.service';
+import { useAuth } from '@/hooks/use-auth';
 import { APPRAISAL_TYPE_OPTIONS } from '@/types/hr/appraisal';
 import type { AppraisalCycle, AppraisalType, CreateAppraisalCycle } from '@/types/hr/appraisal';
 import { humanizeEnum } from '@/lib/hr/attendance-format';
@@ -64,6 +65,9 @@ const cycleSchema = z
     hrReviewDeadline: z.string().optional(),
     employeeAcknowledgeDeadline: z.string().optional(),
     finalConversationDeadline: z.string().optional(),
+    // Not sent: whether the cycle being edited has been opened, which fixes its year, type and settings
+    // profile (the server refuses a change, 422 — performance closure E-c).
+    opened: z.boolean().optional(),
   })
   .refine((v) => v.endDate > v.startDate, {
     message: 'The end date must be after the start date',
@@ -103,7 +107,11 @@ const emptyCycle: CycleForm = {
   hrReviewDeadline: '',
   employeeAcknowledgeDeadline: '',
   finalConversationDeadline: '',
+  opened: false,
 };
+
+/** On a cycle that has been opened; the server gives the reason if one is changed anyway. */
+const FIXED_ONCE_OPENED = 'Fixed once the cycle has been opened.';
 
 /** Blank means "this phase has no deadline", which is null on the wire, not an empty string. */
 const nullable = (value?: string) => (value && value.trim() !== '' ? value : null);
@@ -118,9 +126,8 @@ const toPayload = (values: CycleForm): CreateAppraisalCycle => {
     startDate: v.startDate,
     endDate: v.endDate,
     appraisalSettingsId: v.appraisalSettingsId,
-    // A cycle is always created as a Draft; Open and Closed are reached through their own
+    // No status: a cycle is always created as a Draft; Open and Closed are reached through their own
     // endpoints, which run the overlap checks and stamp who did it.
-    status: 'Draft',
     goalSettingOpenDate: nullable(v.goalSettingOpenDate),
     goalSettingDeadline: nullable(v.goalSettingDeadline),
     q1ReviewOpenDate: nullable(v.q1ReviewOpenDate),
@@ -152,6 +159,11 @@ const day = (value?: string | null) => value?.slice(0, 10) ?? '—';
 const dayInput = (value?: string | null) => value?.slice(0, 10) ?? '';
 
 export default function AppraisalCyclesPage() {
+  // Deleting a cycle is admin-tier (a 403 otherwise), and only a never-opened one with nothing but its
+  // configuration can go (performance closure E-d2a) — the server names what else points at it.
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission('HR.Performance.Admin');
+
   const { data: settings } = useQuery({
     queryKey: ['hr', 'appraisal-settings'],
     queryFn: () => appraisalSettingsService.getAll(),
@@ -167,7 +179,7 @@ export default function AppraisalCyclesPage() {
   );
 
   const rows = cycles ?? [];
-  const live = rows.filter((c) => c.status === 'Open' || c.status === 'InProgress');
+  const live = rows.filter((c) => c.status === 'Open');
   const drafts = rows.filter((c) => c.status === 'Draft');
 
   return (
@@ -191,7 +203,7 @@ export default function AppraisalCyclesPage() {
           {
             label: 'In draft',
             value: drafts.length,
-            hint: 'Not yet opened — still editable and deletable.',
+            hint: 'Not yet opened — still editable, and deletable while nothing but its targets and templates points at it.',
             icon: FolderOpen,
           },
           {
@@ -213,13 +225,11 @@ export default function AppraisalCyclesPage() {
         dialogClassName="sm:max-w-[720px]"
         list={() => appraisalCycleService.getAll()}
         create={(values) => appraisalCycleService.create(toPayload(values))}
-        update={(id, values) => {
-          // `status` is deliberately dropped: this payload hardcodes Draft for the create path,
-          // and sending it on an edit is what used to revert an Open cycle to Draft.
-          const { status: _status, ...rest } = toPayload(values);
-          return appraisalCycleService.update(id, { id, ...rest });
-        }}
+        // No status on an edit either: sending one is what used to revert an Open cycle to Draft.
+        update={(id, values) => appraisalCycleService.update(id, { id, ...toPayload(values) })}
         remove={(id) => appraisalCycleService.remove(id)}
+        allowRemove={canDelete}
+        canRemoveItem={(r) => !r.openedDate}
         getId={(r) => r.id}
         columns={[
           {
@@ -275,55 +285,71 @@ export default function AppraisalCyclesPage() {
           hrReviewDeadline: dayInput(r.hrReviewDeadline),
           employeeAcknowledgeDeadline: dayInput(r.employeeAcknowledgeDeadline),
           finalConversationDeadline: dayInput(r.finalConversationDeadline),
+          opened: !!r.openedDate || r.status !== 'Draft',
         })}
-        renderFields={(form) => (
-          <>
-            <FieldRow>
+        renderFields={(form, editing) => {
+          // An opened cycle keeps its type and settings profile (and year); its dates move only
+          // until appraisals exist, which the server says if it refuses.
+          const fixed = editing && !!form.watch('opened');
+          return (
+            <>
+              <FieldRow>
+                <TextField
+                  form={form}
+                  name="cycleCode"
+                  label="Cycle code"
+                  required
+                  placeholder="e.g. FY2026"
+                />
+                <NumberField
+                  form={form}
+                  name="year"
+                  label="Year"
+                  required
+                  description={fixed ? FIXED_ONCE_OPENED : undefined}
+                />
+              </FieldRow>
               <TextField
                 form={form}
-                name="cycleCode"
-                label="Cycle code"
+                name="cycleName"
+                label="Cycle name"
                 required
-                placeholder="e.g. FY2026"
+                placeholder="e.g. Annual appraisal 2026"
               />
-              <NumberField form={form} name="year" label="Year" required />
-            </FieldRow>
-            <TextField
-              form={form}
-              name="cycleName"
-              label="Cycle name"
-              required
-              placeholder="e.g. Annual appraisal 2026"
-            />
-            <FieldRow>
-              <SelectField
-                form={form}
-                name="appraisalType"
-                label="Type"
-                required
-                options={APPRAISAL_TYPE_OPTIONS}
-              />
-              <SelectField
-                form={form}
-                name="appraisalSettingsId"
-                label="Settings profile"
-                required
-                options={settingsOptions}
-                placeholder={
-                  settingsOptions.length === 0 ? 'No profiles configured' : 'Select a profile…'
-                }
-              />
-            </FieldRow>
-            <FieldRow>
-              <DateField form={form} name="startDate" label="Start date" required />
-              <DateField form={form} name="endDate" label="End date" required />
-            </FieldRow>
+              <FieldRow>
+                <SelectField
+                  form={form}
+                  name="appraisalType"
+                  label="Type"
+                  required
+                  options={APPRAISAL_TYPE_OPTIONS}
+                  disabled={fixed}
+                  description={fixed ? FIXED_ONCE_OPENED : undefined}
+                />
+                <SelectField
+                  form={form}
+                  name="appraisalSettingsId"
+                  label="Settings profile"
+                  required
+                  options={settingsOptions}
+                  placeholder={
+                    settingsOptions.length === 0 ? 'No profiles configured' : 'Select a profile…'
+                  }
+                  disabled={fixed}
+                  description={fixed ? FIXED_ONCE_OPENED : undefined}
+                />
+              </FieldRow>
+              <FieldRow>
+                <DateField form={form} name="startDate" label="Start date" required />
+                <DateField form={form} name="endDate" label="End date" required />
+              </FieldRow>
 
-            <div className="border-t pt-4">
-              <CyclePhaseDateFields form={form} />
-            </div>
-          </>
-        )}
+              <div className="border-t pt-4">
+                <CyclePhaseDateFields form={form} />
+              </div>
+            </>
+          );
+        }}
       />
     </div>
   );

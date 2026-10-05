@@ -16,12 +16,15 @@ import type { AppraisalCriterion } from '@/types/hr/appraisal';
  * judged against the grade bands the template item defines and nothing else.
  *
  * Deactivating keeps a criterion out of new template items without disturbing the templates
- * already scoring against it.
+ * already scoring against it. A criterion in use — on a template item or a goal's required
+ * skills — is not deleted and keeps its evidence rule (performance closure E-g1); the server
+ * answers 422 with what uses it.
  */
 const criterionSchema = z.object({
   code: z.string().max(50).optional(),
   criteriaName: z.string().min(1, 'Required').max(200),
   description: z.string().max(1000).optional(),
+  requireEvidence: z.boolean(),
   isActive: z.boolean(),
 });
 
@@ -31,6 +34,7 @@ const emptyCriterion: CriterionForm = {
   code: '',
   criteriaName: '',
   description: '',
+  requireEvidence: false,
   isActive: true,
 };
 
@@ -40,6 +44,7 @@ const toPayload = (values: CriterionForm) => {
     code: v.code || null,
     criteriaName: v.criteriaName,
     description: v.description || null,
+    requireEvidence: v.requireEvidence,
     isActive: v.isActive,
   };
 };
@@ -57,7 +62,7 @@ export default function AppraisalCriteriaPage() {
         title="criteria"
         singular="criterion"
         queryKey={['hr', 'appraisal-criteria']}
-        dialogHint="Describe what the criterion means so two managers grade it the same way."
+        dialogHint="Describe what the criterion means so two managers grade it the same way. A criterion in use keeps its evidence rule."
         emptyDescription="Add the competencies your appraisal forms score."
         list={() => appraisalCriteriaService.getAll()}
         create={(values) => appraisalCriteriaService.create(toPayload(values))}
@@ -73,6 +78,7 @@ export default function AppraisalCriteriaPage() {
               <span className="line-clamp-1 text-muted-foreground">{r.description || '—'}</span>
             ),
           },
+          { header: 'Evidence', cell: (r) => (r.requireEvidence ? 'Required' : '—') },
           { header: 'Status', cell: (r) => <StatusBadge active={r.isActive} /> },
         ]}
         schema={criterionSchema as any}
@@ -81,6 +87,7 @@ export default function AppraisalCriteriaPage() {
           code: r.code ?? '',
           criteriaName: r.criteriaName,
           description: r.description ?? '',
+          requireEvidence: r.requireEvidence ?? false,
           isActive: r.isActive,
         })}
         renderFields={(form) => (
@@ -101,6 +108,13 @@ export default function AppraisalCriteriaPage() {
               label="Description"
               rows={3}
               placeholder="What this criterion is asking about, and what a strong showing looks like."
+            />
+            {/* The entity always had this flag; no screen or DTO could set it (closure B2). */}
+            <SwitchField
+              form={form}
+              name="requireEvidence"
+              label="Require evidence"
+              description="A score on this criterion needs an evidence link before the employee, the manager or a peer can submit."
             />
             <SwitchField
               form={form}

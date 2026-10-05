@@ -287,14 +287,18 @@ export default function CheckInDetailPage() {
             <div>
               <CardTitle className="text-base">Goal updates</CardTitle>
               <p className="mt-1 text-sm text-muted-foreground">
-                Recording an update here moves the goal itself, so it shows up in progress and
-                at-risk reporting.
+                {held
+                  ? 'What was said about each goal in this conversation. A held check-in takes no more updates — record new progress on the goal, or in the next check-in.'
+                  : 'Recording an update here moves the goal itself, so it shows up in progress and at-risk reporting.'}
               </p>
             </div>
-            <Button size="sm" variant="outline" onClick={() => setGoalOpen(true)}>
-              <Plus className="mr-2 h-4 w-4" />
-              Update a goal
-            </Button>
+            {/* A held check-in takes no more goal updates (performance closure E-g1, D-80); the server refuses one. */}
+            {!held && (
+              <Button size="sm" variant="outline" onClick={() => setGoalOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Update a goal
+              </Button>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-0">

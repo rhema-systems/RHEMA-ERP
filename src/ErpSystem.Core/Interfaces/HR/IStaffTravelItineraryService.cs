@@ -17,6 +17,8 @@ public interface IStaffTravelItineraryService
     Task<StaffTravelItineraryDto> CreateAsync(CreateStaffTravelItineraryDto createDto, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<StaffTravelItineraryDto> UpdateAsync(UpdateStaffTravelItineraryDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> SetCurrentVersionAsync(Guid itineraryId, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>The current version, with a leg, becomes Approved and is stamped — the agreed plan (lane 5, D-25).</summary>
+    Task<StaffTravelItineraryDto> FinaliseAsync(Guid itineraryId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Legs

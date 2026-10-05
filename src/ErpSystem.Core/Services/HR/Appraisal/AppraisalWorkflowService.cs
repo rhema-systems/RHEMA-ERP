@@ -21,42 +21,51 @@ namespace ErpSystem.Core.Services.HR;
 public class AppraisalWorkflowService : IAppraisalWorkflowService
 {
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<EvaluatorEvaluation> _evalRepository;
-    private readonly IGenericRepository<PeerNomination> _nominationRepository;
     private readonly IGenericRepository<AppraisalHRReview> _hrReviewRepository;
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<EmployeeGoal> _goalRepository;
     private readonly IGenericRepository<AppraisalManualAdvanceLog> _advanceLogRepository;
+    private readonly IGenericRepository<AppraisalOutcomeRecommendation> _recommendationRepository;
     private readonly IAppraisalScoreService _scores;
     private readonly IAppraisalLifecycleService _lifecycle;
     private readonly IAppraisalGoalRowService _goalRows;
+    private readonly IPeerNominationService _peerNominations;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly ICurrentUserService _currentUser;
     private readonly ILogger<AppraisalWorkflowService> _logger;
 
     public AppraisalWorkflowService(
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<EvaluatorEvaluation> evalRepository,
-        IGenericRepository<PeerNomination> nominationRepository,
         IGenericRepository<AppraisalHRReview> hrReviewRepository,
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<EmployeeGoal> goalRepository,
         IGenericRepository<AppraisalManualAdvanceLog> advanceLogRepository,
+        IGenericRepository<AppraisalOutcomeRecommendation> recommendationRepository,
         IAppraisalScoreService scores,
         IAppraisalLifecycleService lifecycle,
         IAppraisalGoalRowService goalRows,
+        IPeerNominationService peerNominations,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        ICurrentUserService currentUser,
         ILogger<AppraisalWorkflowService> logger)
     {
+        _currentUser          = currentUser;
         _goalRows             = goalRows;
+        _peerNominations      = peerNominations;
         _appraisalRepository  = appraisalRepository;
+        _cycleRepository      = cycleRepository;
         _evalRepository       = evalRepository;
-        _nominationRepository = nominationRepository;
         _hrReviewRepository   = hrReviewRepository;
         _conversationRepository = conversationRepository;
         _goalRepository       = goalRepository;
         _advanceLogRepository = advanceLogRepository;
+        _recommendationRepository = recommendationRepository;
         _scores               = scores;
         _lifecycle            = lifecycle;
         _unitOfWork           = unitOfWork;
@@ -103,6 +112,12 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     // ────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The raw status route: it opens a Draft appraisal or closes a Completed one with a score, and
+    /// nothing else — every other move is its owning action's (performance closure E-a,
+    /// <see cref="AppraisalLifecycle.EnsureRawTransition"/>). It allowed the whole table, and settled
+    /// and published an appraisal it moved to Completed.
+    /// </remarks>
     public async Task TransitionAsync(
         Guid appraisalId,
         AppraisalStatus newStatus,
@@ -110,18 +125,23 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     {
         var appraisal = await GetOwnedAppraisalAsync(appraisalId, cancellationToken);
 
+        // The two-actor rule: an HR officer does not move their own appraisal.
+        if (_currentUser.EmployeeId is Guid me && me != Guid.Empty && me == appraisal.EmployeeId)
+            throw new UnauthorizedAccessException(
+                "You cannot change the status of your own appraisal: another HR officer does.");
+
         var from = appraisal.Status;
-        AppraisalLifecycle.EnsureTransition(from, newStatus);
+        AppraisalLifecycle.EnsureRawTransition(from, newStatus, appraisal.OverallScore.HasValue);
+
+        // Opening a Draft appraisal is work on it, so its cycle must be Open (E-d2b); closing a Completed one is not.
+        if (newStatus == AppraisalStatus.Active)
+            await AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
+                _appraisalRepository.GetQueryable(), GetTenantId(), appraisalId, "The appraisal cannot be opened", cancellationToken);
 
         appraisal.Status = newStatus;
 
         await _appraisalRepository.UpdateAsync(appraisal);
-
-        // Completed by any route settles and publishes in the same save (performance closure A7).
-        if (newStatus == AppraisalStatus.Completed)
-            await _scores.SettleAsync(appraisalId, AppraisalScoreChangeSource.Settle, publish: true, cancellationToken);
-        else
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
             "Appraisal {AppraisalId} transitioned from {From} → {To}.",
@@ -148,6 +168,10 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
     {
         var r = role.ToLowerInvariant();
         var facts = state.Facts;
+
+        // Nobody writes on an appraisal whose cycle is not Open (performance closure E-d2b): every write refuses it.
+        if (!AppraisalLiveCycle.IsLive(facts.CycleStatus))
+            return false;
 
         // A remanded appeal is the manager's to re-evaluate and HR's to decide, whatever the status.
         if (facts.Remanded && facts.CurrentAppealStatus == AppraisalAppealStatus.Remanded)
@@ -213,6 +237,16 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var previousMajorStatus = state.Facts.Status;
         var previousSubStatus   = state.SubStatus;
 
+        // The two-actor rule (performance closure D-62): an HR officer does not advance their own appraisal — waive its
+        // steps, approve its goals, submit its evaluations for them. The sign-off, the return and the correction
+        // already refused them (E-a); the advance did not.
+        if (advancedByEmployeeId != Guid.Empty && advancedByEmployeeId == state.EmployeeId)
+            throw new UnauthorizedAccessException(
+                "You cannot advance your own appraisal: another HR officer or an administrator does.");
+
+        // The advance does the step's work for the appraisal, so its cycle must be Open (E-d2b).
+        AppraisalLiveCycle.EnsureOpen(state.Facts.CycleStatus, state.Facts.CycleName, "HR cannot advance this appraisal");
+
         // Guard: terminal and appeal states cannot be advanced — appeals move by their own decisions.
         if (previousSubStatus is AppraisalSubStatus.Completed
             or AppraisalSubStatus.Closed
@@ -247,6 +281,8 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var appraisal = await LoadForAdvanceAsync(appraisalId, ct);
         var actions = new List<string>();
         var now     = DateTime.UtcNow;
+        IReadOnlyList<PeerNomination> approvedByAdvance = Array.Empty<PeerNomination>();
+        IReadOnlyList<string> leaversRejected = Array.Empty<string>();
 
         // The advance is work on the appraisal, as a first save is: a Draft one is opened.
         if (appraisal.Status == AppraisalStatus.Draft)
@@ -308,18 +344,26 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
 
             case AppraisalSubStatus.PeerNomination:
             {
+                // D-39: through the one approval path — each peer's evaluation, the count, the due
+                // date — and the peers are told once the advance is saved. The status alone was set,
+                // so the "approved" peers had no form to fill in and heard nothing.
                 var pending = appraisal.PeerNominations
                     .Where(n => n.NominationStatus == PeerNominationStatus.Pending)
                     .ToList();
 
-                foreach (var n in pending)
-                {
-                    n.NominationStatus = PeerNominationStatus.Approved;
-                    n.ApprovedDate     = now;
-                    await _nominationRepository.UpdateAsync(n);
-                }
+                // A peer who has left is not asked (performance closure E-g2, D-83): their nomination is rejected with
+                // the reason, and the rest approved. The advance approved it, made the leaver an evaluation and asked them.
+                var rejected = await _peerNominations.StageLeaverRejectionsAsync(pending, appraisal.TenantId, ct);
+                leaversRejected = rejected.Select(r => r.PeerName).ToList();
+                var rejectedIds = rejected.Select(r => r.Nomination.Id).ToHashSet();
 
-                actions.Add($"Approved {pending.Count} pending nomination(s). Minimum peer requirement bypassed by HR.");
+                approvedByAdvance = await _peerNominations.StageApprovalAsync(
+                    appraisal, pending.Where(n => !rejectedIds.Contains(n.Id)).ToList(), null, ct);
+
+                var rejectedNote = leaversRejected.Count == 0
+                    ? string.Empty
+                    : $" Rejected {leaversRejected.Count}: {string.Join(", ", leaversRejected)} — no longer at work.";
+                actions.Add($"Approved {approvedByAdvance.Count} pending nomination(s), each peer asked for their feedback.{rejectedNote} Minimum peer requirement bypassed by HR.");
                 actions.Add($"Waived peer nomination: {state.Block.Reason}.");
                 break;
             }
@@ -369,6 +413,15 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
                         appraisal.PreCalibrationScore = managerEval.TotalScore;
                     await _evalRepository.UpdateAsync(managerEval);
                     actions.Add("Auto-submitted existing manager evaluation draft.");
+
+                    // The draft's ticks are submitted with it, so they become rows as a submission's do (D-100),
+                    // recommended by the manager who ticked them. A placeholder HR creates below carries none.
+                    var (added, dismissed) = await AppraisalRecommendationTicks.StageAsync(
+                        _recommendationRepository, appraisal, managerEval.EvaluatorId, ct);
+                    if (added > 0)
+                        actions.Add($"Raised {added} recommendation(s) from the manager's ticks.");
+                    if (dismissed > 0)
+                        actions.Add($"Dismissed {dismissed} recommendation(s) the manager no longer ticks.");
                 }
                 else
                 {
@@ -393,6 +446,9 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             case AppraisalSubStatus.CalibrationInProgress:
             {
                 appraisal.IsCalibrated = true;
+                // Without a session: a link to the one sitting on it would read as that session's
+                // calibration, and its commit skips what it calibrated (E-b).
+                appraisal.CalibrationSessionId = null;
                 actions.Add("Bypassed calibration requirement — marked appraisal as calibrated without a session.");
                 break;
             }
@@ -495,6 +551,11 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         await _advanceLogRepository.AddAsync(auditLog);
         await _unitOfWork.SaveChangesAsync(ct);
 
+        // The peers the advance approved are asked, as an approval by the manager asks them (D-39); the appraisee hears of
+        // a nomination rejected because its peer has left (D-83).
+        await _peerNominations.NotifyApprovedAsync(appraisalId, approvedByAdvance, null, ct);
+        await _peerNominations.NotifyLeaversRejectedAsync(appraisalId, leaversRejected, ct);
+
         // HR's waiver of goal setting locked the agreed set, so the appraisal's goals section
         // follows it (closure plan L2): one row per locked goal, when the template has one.
         if (stepToComplete == AppraisalSubStatus.GoalSetting)
@@ -558,6 +619,11 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
         var result = new DeadlineEnforcementResult();
 
         var tenantId = GetTenantId();
+
+        // The sweep advances appraisals, so its cycle must be Open (performance closure E-d2b).
+        await AppraisalLiveCycle.EnsureCycleOpenAsync(
+            _cycleRepository.GetQueryable(), tenantId, cycleId, "Overdue appraisals cannot be advanced", ct);
+
         var appraisals = await _appraisalRepository
             .GetQueryable(a => a.TenantId == tenantId
                             && a.AppraisalCycleId == cycleId
@@ -593,6 +659,17 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             if (deadline is null || deadline.Value >= today)
                 continue;
 
+            // The two-actor rule (D-62): the officer running the sweep does not advance their own appraisal.
+            if (appraisal.EmployeeId == advancedByEmployeeId)
+            {
+                _logger.LogInformation(
+                    "Advance-overdue for cycle {CycleId} left appraisal {AppraisalId} alone: it is the officer's own",
+                    cycleId, appraisal.Id);
+                result.Messages.Add(
+                    $"{appraisal.AppraisalNumber ?? appraisal.Id.ToString()}: skipped (your own appraisal — another HR officer advances it)");
+                continue;
+            }
+
             try
             {
                 var advance = await ManuallyAdvanceStepAsync(
@@ -622,6 +699,75 @@ public class AppraisalWorkflowService : IAppraisalWorkflowService
             cycleId, result.Evaluated, result.Advanced);
 
         return result;
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    //  GetTransitionReportAsync (performance closure B8)
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// <inheritdoc/>
+    public async Task<AppraisalTransitionReportDto> GetTransitionReportAsync(Guid cycleId, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+
+        // In flight: what the sweep above examines.
+        var appraisals = await _appraisalRepository
+            .GetQueryable(a => a.TenantId == tenantId
+                            && a.AppraisalCycleId == cycleId
+                            && a.Status != AppraisalStatus.Completed
+                            && a.Status != AppraisalStatus.Closed
+                            && a.Status != AppraisalStatus.Appealed
+                            && a.Status != AppraisalStatus.Withdrawn)
+            .AsNoTracking()
+            .Select(a => new
+            {
+                a.Id,
+                a.AppraisalNumber,
+                a.EmployeeId,
+                a.Status,
+                EmployeeName = a.Employee.FirstName + " " + a.Employee.LastName,
+                a.Employee.EmployeeNumber,
+                CycleName = a.AppraisalCycle.CycleName,
+            })
+            .ToListAsync(ct);
+
+        var report = new AppraisalTransitionReportDto
+        {
+            CycleId = cycleId,
+            CycleName = appraisals.FirstOrDefault()?.CycleName,
+            GeneratedAt = DateTime.UtcNow,
+            Examined = appraisals.Count,
+        };
+        if (appraisals.Count == 0)
+            return report;
+
+        var states = await _lifecycle.GetStatesAsync(appraisals.Select(a => a.Id).ToList(), ct);
+        foreach (var appraisal in appraisals.OrderBy(a => a.EmployeeName))
+        {
+            if (!states.TryGetValue(appraisal.Id, out var state))
+                continue;
+
+            var ahead = AppraisalGates.RecordedAhead(state.Facts, state.Settings, state.SubStatus);
+            if (ahead.Count == 0)
+                continue;
+
+            report.Rows.Add(new AppraisalTransitionRowDto
+            {
+                AppraisalId = appraisal.Id,
+                AppraisalNumber = appraisal.AppraisalNumber,
+                EmployeeId = appraisal.EmployeeId,
+                EmployeeName = appraisal.EmployeeName.Trim(),
+                EmployeeNumber = appraisal.EmployeeNumber,
+                Status = appraisal.Status,
+                SubStatus = state.SubStatus,
+                StepLabel = state.StepLabel,
+                Reason = state.Block.Reason,
+                RecordedAhead = ahead.ToList(),
+                CanWaive = AppraisalGates.CanBeWaived(state.SubStatus),
+            });
+        }
+
+        return report;
     }
 
     /// <summary>Maps a blocking sub-status to the cycle phase deadline that governs it.</summary>

@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Plus, Send, ShieldAlert, Stamp, Umbrella, Check, TriangleAlert } from 'lucide-react';
+import { Loader2, Pencil, Plus, Send, ShieldAlert, Stamp, Stethoscope, Umbrella, Check, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -30,10 +30,16 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { financeDataService } from '@/services/finance/finance-data.service';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
+import { travelBookingsService } from '@/services/hr/travel-bookings.service';
+import { TravelQueryError } from './TravelQueryError';
+import { fmtTravelMoney as fmtMoney } from './travel-format';
 import { VISA_REQUIREMENT_TYPE_LABELS } from '@/types/hr/travel-compliance';
+import type { StaffTravelTripHealthRequirement } from '@/types/hr/travel-compliance';
+import { Textarea } from '@/components/ui/textarea';
 import type { StaffTravelRequest } from '@/types/hr/travel';
 
 const VISA_STATUSES = [
@@ -53,12 +59,6 @@ const humanize = (v: string) => v.replace(/([a-z])([A-Z])/g, '$1 $2');
 const options = (values: readonly string[]) => values.map((v) => ({ value: v, label: humanize(v) }));
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
-const fmtMoney = (amount?: number | null, currency?: string) =>
-  amount === null || amount === undefined
-    ? '—'
-    : new Intl.NumberFormat(undefined, {
-        style: 'currency', currency: currency || 'GHS', currencyDisplay: 'code',
-      }).format(amount);
 
 /** An untouched date field registers as '' — the server's DateOnly binder rejects that. */
 const orNull = (v?: string | null) => (v && v.trim() ? v : null);
@@ -102,11 +102,13 @@ const insuranceSchema = z.object({
 /**
  * A trip's compliance: the visa, the risk assessment the traveller has to read, and the insurance.
  *
- * ⚠ **The acknowledgement is the traveller's alone.** The button is shown to everyone and the
- * server answers 403 for anyone else, because it records that a specific person read a security
- * briefing about where they are going. It was previously settable by any Write holder, which made
- * the record assert something that had not happened. Nothing here should become a desk-side
- * "mark as briefed".
+ * ⚠ **The acknowledgement is the traveller's alone.** The server answers 403 for anyone else,
+ * because it records that a specific person read a security briefing about where they are going.
+ * It was previously settable by any Write holder, which made the record assert something that had
+ * not happened. Nothing here should become a desk-side "mark as briefed". Since lane 7 (slice 7c1,
+ * E1) the traveller records it on their own trip page under My travel, through the token-scoped
+ * `/me` route, and this card only reports it — an HR officer looking at their own trip is pointed
+ * there too.
  *
  * The reference data behind these — visa requirements between two countries, health requirements
  * per destination, the destination alert feed — lives under `/administration/hr/travel`, because it
@@ -116,31 +118,66 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   const requestId = request.id;
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isTraveller = !!user?.employeeId && user.employeeId === request.employeeId;
   const [dialog, setDialog] = useState<'visa' | 'risk' | 'insurance' | null>(null);
 
-  const { data: currencies } = useQuery({
-    queryKey: ['finance', 'currencies', 'active'],
-    queryFn: () => financeDataService.getCurrencies({ isActive: true }),
-  });
+  // ⚠ The currency lists are read through `api/hr/currencies` inside each CurrencyField. This panel
+  // read `api/finance/currencies`, which answers 403 without a Finance permission, so no visa fee
+  // or insurance cover could be recorded by the HR desk (travel final closure, lane 0 — O-19).
 
-  const { data: visas, isLoading } = useQuery({
+  const { data: visas, isLoading, isError: visasFailed, error: visasError } = useQuery({
     queryKey: ['travel-visas', requestId],
     queryFn: () => travelComplianceService.getVisaApplicationsByRequest(requestId),
   });
 
-  const { data: assessment } = useQuery({
+  const {
+    data: assessment, isError: assessmentFailed, error: assessmentError,
+  } = useQuery({
     queryKey: ['travel-risk-assessment', requestId],
     queryFn: () => travelComplianceService.getCurrentRiskAssessment(requestId),
   });
 
-  const { data: insurance } = useQuery({
+  const { data: insurance, isError: insuranceFailed, error: insuranceError } = useQuery({
     queryKey: ['travel-insurance', requestId],
     queryFn: () => travelComplianceService.getInsuranceByRequest(requestId),
   });
 
-  const { data: alerts } = useQuery({
+  const { data: alerts, isError: alertsFailed, error: alertsError } = useQuery({
     queryKey: ['travel-alerts-country', request.destinationCountryId],
     queryFn: () => travelComplianceService.getCurrentAlertsForCountry(request.destinationCountryId),
+  });
+
+  // Lane 6 (D-29, FX-8's read half): what Fleet records against the trip's company vehicles on its fleet trips.
+  const { data: incidents, isError: incidentsFailed, error: incidentsError } = useQuery({
+    queryKey: ['travel-fleet-incidents', requestId],
+    queryFn: () => travelBookingsService.getFleetIncidents(requestId),
+  });
+
+  // Lane 7 (D-36, T-25): the destination's health requirements over the trip, each cleared by the desk or not.
+  const { data: health, isError: healthFailed, error: healthError } = useQuery({
+    queryKey: ['travel-health-requirements', requestId],
+    queryFn: () => travelComplianceService.getTripHealthRequirements(requestId),
+  });
+  const [clearing, setClearing] = useState<StaffTravelTripHealthRequirement | null>(null);
+  const [clearNote, setClearNote] = useState('');
+  const clearHealth = useMutation({
+    mutationFn: ({ id, note }: { id: string; note: string | null }) =>
+      travelComplianceService.clearHealthRequirement(requestId, id, note),
+    onSuccess: async () => {
+      toast({ title: 'Requirement cleared' });
+      setClearing(null);
+      await queryClient.invalidateQueries({ queryKey: ['travel-health-requirements', requestId] });
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not clear it', description: e.message }),
+  });
+  const unclearHealth = useMutation({
+    mutationFn: (id: string) => travelComplianceService.unclearHealthRequirement(requestId, id),
+    onSuccess: async () => {
+      toast({ title: 'Tick taken off' });
+      await queryClient.invalidateQueries({ queryKey: ['travel-health-requirements', requestId] });
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not take the tick off', description: e.message }),
   });
 
   // Who has already been told what, so the desk does not send the same alert twice.
@@ -158,7 +195,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   // ⚠ The passport country is not on the employee record — it is the ISSUING COUNTRY of their
   // Passport travel document. A traveller with no passport on file cannot be looked up at all,
   // which is worth saying out loud here rather than showing an empty answer.
-  const { data: travelDocs } = useQuery({
+  const { data: travelDocs, isError: docsFailed } = useQuery({
     queryKey: ['travel-documents', request.employeeId],
     queryFn: () => travelComplianceService.getDocumentsByEmployee(request.employeeId),
     enabled: !!request.employeeId,
@@ -177,7 +214,9 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
 
   const passportCountryId = passport?.issuingCountryId;
 
-  const { data: requirement, isLoading: requirementLoading } = useQuery({
+  const {
+    data: requirement, isLoading: requirementLoading, isError: requirementFailed,
+  } = useQuery({
     queryKey: ['travel-visa-requirement', passportCountryId, request.destinationCountryId],
     queryFn: () =>
       travelComplianceService.getVisaRequirement(
@@ -201,17 +240,13 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         description: 'They confirm they have read it from their own travel page.',
       });
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: 'Could not send the alert',
-        description: e?.response?.data?.message ?? e?.message,
+        description: e?.message,
       }),
   });
-
-  const currencyOptions = (currencies ?? []).map((c) => ({
-    value: c.currencyCode, label: `${c.currencyCode} — ${c.currencyName}`,
-  }));
 
   const visaForm = useForm<z.input<typeof visaSchema>>({
     resolver: zodResolver(visaSchema),
@@ -238,28 +273,61 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
   const refused = (title: string) => (e: Error) =>
     toast({ variant: 'destructive', title, description: e.message });
 
+  // Lane 7 (E3): a visa application was frozen at creation — the edit had no caller. The same dialog now changes one.
+  const [editingVisaId, setEditingVisaId] = useState<string | null>(null);
+  const openNewVisa = () => {
+    setEditingVisaId(null);
+    visaForm.reset({ status: 'NotStarted', currencyCode: request.currencyCode });
+    setDialog('visa');
+  };
+  // The list shows the number masked; the edit reads the application's own detail, which is in full.
+  const openVisaEdit = async (id: string) => {
+    try {
+      const full = await travelComplianceService.getVisaApplication(id);
+      visaForm.reset({
+        visaType: full.visaType ?? '',
+        status: full.status,
+        submittedDate: full.submittedDate?.slice(0, 10) ?? '',
+        approvedDate: full.approvedDate?.slice(0, 10) ?? '',
+        expiryDate: full.expiryDate?.slice(0, 10) ?? '',
+        visaNumber: full.visaNumber ?? '',
+        processingFee: full.processingFee ?? undefined,
+        currencyCode: full.currencyCode ?? request.currencyCode,
+        notes: full.notes ?? '',
+      });
+      setEditingVisaId(id);
+      setDialog('visa');
+    } catch (e) {
+      refused('Could not open the visa application')(e as Error);
+    }
+  };
+
   const addVisa = useMutation({
     mutationFn: (values: z.input<typeof visaSchema>) => {
       const v = visaSchema.parse(values);
-      return travelComplianceService.createVisaApplication({
+      const payload = {
         ...v,
-        staffTravelRequestId: requestId,
-        employeeId: request.employeeId,
         destinationCountryId: request.destinationCountryId,
         submittedDate: orNull(v.submittedDate),
         approvedDate: orNull(v.approvedDate),
         expiryDate: orNull(v.expiryDate),
         // A currency is only meaningful with a fee, and a present one must be real to Finance.
         currencyCode: v.processingFee ? v.currencyCode || null : null,
-      });
+      };
+      return editingVisaId
+        ? travelComplianceService.updateVisaApplication({ ...payload, id: editingVisaId })
+        : travelComplianceService.createVisaApplication({
+          ...payload, staffTravelRequestId: requestId, employeeId: request.employeeId,
+        });
     },
     onSuccess: async () => {
-      toast({ title: 'Visa application recorded' });
+      toast({ title: editingVisaId ? 'Visa application changed' : 'Visa application recorded' });
       setDialog(null);
+      setEditingVisaId(null);
       visaForm.reset();
       await queryClient.invalidateQueries({ queryKey: ['travel-visas', requestId] });
     },
-    onError: refused('Could not record the visa application'),
+    onError: refused(editingVisaId ? 'Could not change the visa application' : 'Could not record the visa application'),
   });
 
   const addRisk = useMutation({
@@ -294,21 +362,6 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
     onError: refused('Could not record the insurance'),
   });
 
-  const acknowledge = useMutation({
-    mutationFn: (id: string) => travelComplianceService.acknowledgeRiskAssessment(id),
-    onSuccess: async () => {
-      toast({ title: 'Acknowledged' });
-      await queryClient.invalidateQueries({ queryKey: ['travel-risk-assessment', requestId] });
-    },
-    // A 403 here means "this is not your trip" — worth saying plainly rather than as a failure.
-    onError: (e: Error) =>
-      toast({
-        variant: 'destructive',
-        title: 'Only the traveller can acknowledge this',
-        description: e.message,
-      }),
-  });
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center p-10">
@@ -319,6 +372,39 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
 
   return (
     <div className="space-y-4">
+      {/* A failed alert read must not look like "no alerts": this is a duty-of-care card. */}
+      {alertsFailed && !alerts && <TravelQueryError error={alertsError} what="the destination alerts" />}
+      {incidentsFailed && !incidents && <TravelQueryError error={incidentsError} what="the company vehicles' incidents" />}
+
+      {/* Lane 6 (D-29): read-only — Fleet records and closes them; telling anyone of a new one is lane 8's. */}
+      {(incidents ?? []).length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldAlert className="h-4 w-4 text-destructive" />
+              Company vehicle incidents (from Fleet)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {(incidents ?? []).map((i) => (
+              <div key={i.id} className="rounded-md border p-3">
+                <p className="text-sm font-medium">
+                  {i.title}
+                  <span className="text-muted-foreground">
+                    {' '}· {i.incidentType} · {i.severity} · {i.status}
+                  </span>
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {new Date(i.occurredAtUtc).toLocaleString()} · {i.vehicleName}{i.vehiclePlate ? ` (${i.vehiclePlate})` : ''}
+                  {i.driverName ? ` · driver ${i.driverName}` : ''}{i.location ? ` · ${i.location}` : ''}
+                </p>
+                {i.description && <p className="mt-1 text-sm text-muted-foreground">{i.description}</p>}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {(alerts ?? []).length > 0 && (
         <Card>
           <CardHeader className="pb-2">
@@ -378,8 +464,9 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         artefact of the policy RULES mechanism, and rules are not enforced — nothing evaluates one,
         so nothing can breach one. Raising exceptions by hand would manufacture audit records
         implying a control was in force and consciously waived, which is a worse artefact than an
-        empty queue. A breach of the policy's own caps is a different thing and is authorised
-        inline on the booking by an `HR.Travel.Admin` holder.
+        empty queue. A breach of the policy's own caps is a different thing: the booking is saved
+        awaiting authorisation and decided on Staff Travel → Policy breaches by an `HR.Travel.Admin`
+        holder who did not book it (lane 4, D-8).
       */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
@@ -392,10 +479,14 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           </Button>
         </CardHeader>
         <CardContent>
-          {!assessment ? (
+          {assessmentFailed && !assessment ? (
+            <TravelQueryError error={assessmentError} what="the risk assessment" />
+          ) : !assessment ? (
             <EmptyState
               title="Not assessed"
-              description="No risk assessment has been recorded for this destination."
+              description={request.riskLevel === 'Critical'
+                ? 'No risk assessment has been recorded, and this trip is rated Critical: its flight is not ticketed until one is recorded and the traveller has acknowledged it.'
+                : 'No risk assessment has been recorded for this destination.'}
             />
           ) : (
             <div className="space-y-3">
@@ -434,25 +525,29 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                 </div>
               )}
 
+              {/* Lane 7 (D-37): a Critical trip's flight waits for the traveller's acknowledgement of this assessment. */}
+              {(request.riskLevel === 'Critical' || assessment.riskLevel === 'Critical') && !assessment.employeeAcknowledged && (
+                <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950">
+                  This trip is rated Critical: its flight is not ticketed until the traveller acknowledges this assessment.
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-3 border-t pt-3">
                 {assessment.employeeAcknowledged ? (
                   <p className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Check className="h-4 w-4" />
                     Acknowledged by the traveller · {fmtDateTime(assessment.acknowledgedAt)}
                   </p>
+                ) : isTraveller ? (
+                  <p className="text-xs text-muted-foreground">
+                    Not yet acknowledged. This is your trip — confirm it on{' '}
+                    <Link href={`/me/travel/${requestId}`} className="underline">My travel</Link>, under
+                    Before you go.
+                  </p>
                 ) : (
-                  <>
-                    <Button
-                      size="sm"
-                      disabled={acknowledge.isPending}
-                      onClick={() => acknowledge.mutate(assessment.id)}
-                    >
-                      I have read this
-                    </Button>
-                    <p className="text-xs text-muted-foreground">
-                      Only {request.employeeName} can acknowledge their own assessment.
-                    </p>
-                  </>
+                  <p className="text-xs text-muted-foreground">
+                    Not yet acknowledged. Only {request.employeeName} can acknowledge their own
+                    assessment, on their My travel page.
+                  </p>
                 )}
               </div>
             </div>
@@ -466,7 +561,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             <Stamp className="h-4 w-4" />
             Visas
           </CardTitle>
-          <Button variant="outline" size="sm" onClick={() => setDialog('visa')}>
+          <Button variant="outline" size="sm" onClick={openNewVisa}>
             <Plus className="mr-2 h-4 w-4" /> Record a visa
           </Button>
         </CardHeader>
@@ -476,15 +571,24 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             requirement table had a screen to fill it and nothing that read it.
           */}
           <div className="border-b px-6 pb-4">
-            {!passport ? (
+            {docsFailed && !travelDocs ? (
+              <p className="text-sm text-destructive">
+                The traveller&apos;s travel documents could not be read, so the visa requirement
+                cannot be looked up.
+              </p>
+            ) : !passport ? (
               <p className="text-sm text-muted-foreground">
                 No passport is on file for this traveller, so the visa requirement cannot be looked
-                up. Record their passport under travel documents first — the requirement is keyed on
-                the country that issued it.
+                up — it is keyed on the country that issued the passport. Record it under{' '}
+                <Link href="/hr/travel/documents" className="text-primary hover:underline">travel documents</Link>.
               </p>
             ) : requirementLoading ? (
               <p className="text-sm text-muted-foreground">
                 Checking what a {passport.issuingCountryName ?? 'that'} passport needs…
+              </p>
+            ) : requirementFailed && !requirement ? (
+              <p className="text-sm text-destructive">
+                The visa requirements register could not be read.
               </p>
             ) : !requirement ? (
               <p className="text-sm text-muted-foreground">
@@ -533,7 +637,13 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                 */}
                 <p className="text-xs text-muted-foreground">
                   {requirement.lastVerifiedAt ? (
-                    <>Last checked {requirement.lastVerifiedAt.slice(0, 10)}</>
+                    requirement.isStale
+                      ? (
+                        <span className="text-amber-600">
+                          Last checked {requirement.lastVerifiedAt.slice(0, 10)} — over a year ago; confirm it before relying on it.
+                        </span>
+                      )
+                      : <>Last checked {requirement.lastVerifiedAt.slice(0, 10)}</>
                   ) : (
                     <span className="text-amber-600">
                       Never checked against an official source — confirm before relying on it.
@@ -557,7 +667,11 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             )}
           </div>
 
-          {(visas ?? []).length === 0 ? (
+          {visasFailed && !visas ? (
+            <div className="p-4">
+              <TravelQueryError error={visasError} what="the visa applications" />
+            </div>
+          ) : (visas ?? []).length === 0 ? (
             <EmptyState
               title="No visa recorded"
               description={
@@ -576,19 +690,26 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
                   <TableHead>Expires</TableHead>
                   <TableHead className="text-right">Fee</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {(visas ?? []).map((v) => (
                   <TableRow key={v.id}>
                     <TableCell className="font-medium">{v.visaType || '—'}</TableCell>
-                    <TableCell>{v.visaNumber || '—'}</TableCell>
+                    <TableCell className="font-mono text-xs">{v.visaNumberMasked || '—'}</TableCell>
                     <TableCell className="whitespace-nowrap">{fmtDate(v.submittedDate)}</TableCell>
                     <TableCell className="whitespace-nowrap">{fmtDate(v.expiryDate)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {fmtMoney(v.processingFee, v.currencyCode ?? undefined)}
+                      {fmtMoney(v.processingFee, v.currencyCode)}
                     </TableCell>
                     <TableCell><StatusBadge status={humanize(v.statusName)} /></TableCell>
+                    <TableCell>
+                      <Button variant="ghost" size="icon" aria-label="Change this visa application"
+                        onClick={() => openVisaEdit(v.id)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -596,6 +717,92 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           )}
         </CardContent>
       </Card>
+
+      {/* Lane 7 (D-36, T-25): the destination's health requirements over the trip, each ticked off by the desk. */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Stethoscope className="h-4 w-4" />
+            Health requirements for {request.destinationCountryName}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {healthFailed && !health ? (
+            <div className="p-4"><TravelQueryError error={healthError} what="the health requirements" /></div>
+          ) : (health ?? []).length === 0 ? (
+            <EmptyState title="None recorded" description="No health requirement is recorded for this destination over the trip's dates." />
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Requirement</TableHead>
+                  <TableHead>Cleared</TableHead>
+                  <TableHead className="w-28" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(health ?? []).map((h) => (
+                  <TableRow key={h.healthRequirementId}>
+                    <TableCell>
+                      <span className="font-medium">{h.requirementName}</span>
+                      <span className="text-muted-foreground"> · {humanize(h.requirementTypeName)}</span>
+                      {h.isMandatory && <Badge variant="outline" className="ml-2">mandatory</Badge>}
+                      {h.notes && <span className="block text-xs text-muted-foreground">{h.notes}</span>}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {h.cleared
+                        ? (
+                          <span>
+                            <Check className="mr-1 inline h-4 w-4 text-green-600" />
+                            {h.clearedByName} · {fmtDate(h.clearedAt)}
+                            {h.clearanceNote && <span className="block text-xs text-muted-foreground">{h.clearanceNote}</span>}
+                          </span>
+                        )
+                        : <span className="text-muted-foreground">Not yet</span>}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {h.cleared
+                        ? (
+                          <Button variant="ghost" size="sm" disabled={unclearHealth.isPending}
+                            onClick={() => unclearHealth.mutate(h.healthRequirementId)}>
+                            Untick
+                          </Button>
+                        )
+                        : (
+                          <Button variant="outline" size="sm" onClick={() => { setClearing(h); setClearNote(''); }}>
+                            Clear
+                          </Button>
+                        )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!clearing} onOpenChange={(v) => !v && setClearing(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Clear {clearing?.requirementName}</DialogTitle>
+            <DialogDescription>
+              You are recorded as having checked this for {request.employeeName}, today. Say what you saw — a certificate,
+              its validity.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea value={clearNote} maxLength={1000} onChange={(e) => setClearNote(e.target.value)}
+            placeholder="e.g. Yellow-fever certificate seen, valid to 2034" />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setClearing(null)}>Cancel</Button>
+            <Button disabled={clearHealth.isPending}
+              onClick={() => clearing && clearHealth.mutate({ id: clearing.healthRequirementId, note: clearNote.trim() || null })}>
+              {clearHealth.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Clear it
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
@@ -608,7 +815,19 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
           </Button>
         </CardHeader>
         <CardContent className="p-0">
-          {(insurance ?? []).length === 0 ? (
+          {/* Lane 7 (O-16): an international trip's flight waits for cover across every day of it. */}
+          {request.isInternational && !insuranceFailed && !(insurance ?? []).some((p) =>
+            String(p.coverageStart).slice(0, 10) <= String(request.travelStartDate).slice(0, 10)
+            && String(p.coverageEnd).slice(0, 10) >= String(request.travelEndDate).slice(0, 10)) && (
+            <p className="m-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-700 dark:bg-amber-950">
+              This trip is international and no cover recorded here spans every day of it — its flight is not ticketed until one does.
+            </p>
+          )}
+          {insuranceFailed && !insurance ? (
+            <div className="p-4">
+              <TravelQueryError error={insuranceError} what="the insurance cover" />
+            </div>
+          ) : (insurance ?? []).length === 0 ? (
             <EmptyState title="No cover recorded" description="No travel insurance for this trip." />
           ) : (
             <Table>
@@ -697,10 +916,10 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
         </DialogContent>
       </Dialog>
 
-      <Dialog open={dialog === 'visa'} onOpenChange={(v) => setDialog(v ? 'visa' : null)}>
+      <Dialog open={dialog === 'visa'} onOpenChange={(v) => { setDialog(v ? 'visa' : null); if (!v) setEditingVisaId(null); }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Record a visa application</DialogTitle>
+            <DialogTitle>{editingVisaId ? 'Change the visa application' : 'Record a visa application'}</DialogTitle>
             <DialogDescription>
               For {request.employeeName} travelling to {request.destinationCountryName}.
             </DialogDescription>
@@ -731,11 +950,10 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             </FieldRow>
             <FieldRow>
               <NumberField form={visaForm} name="processingFee" label="Processing fee" />
-              <SelectField
+              <CurrencyField
                 form={visaForm}
                 name="currencyCode"
                 label="Currency"
-                options={currencyOptions}
                 allowEmpty
                 emptyLabel="No fee"
               />
@@ -746,7 +964,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
             <Button variant="outline" onClick={() => setDialog(null)}>Cancel</Button>
             <Button type="submit" form="visa-form" disabled={addVisa.isPending}>
               {addVisa.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Record
+              {editingVisaId ? 'Save' : 'Record'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -782,10 +1000,7 @@ export function TravelCompliancePanel({ request }: { request: StaffTravelRequest
               <NumberField form={insuranceForm} name="sumInsured" label="Sum insured" required />
               <NumberField form={insuranceForm} name="premium" label="Premium" required />
             </FieldRow>
-            <SelectField
-              form={insuranceForm} name="currencyCode" label="Currency" required
-              options={currencyOptions}
-            />
+            <CurrencyField form={insuranceForm} name="currencyCode" label="Currency" required />
             <TextField
               form={insuranceForm}
               name="emergencyContact"

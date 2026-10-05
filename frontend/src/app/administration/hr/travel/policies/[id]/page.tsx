@@ -9,9 +9,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { PageHeader } from '@/components/hr/common/PageHeader';
-import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { HR_ROLES } from '@/components/hr/common/PermissionGate';
 import { PolicyRulesPanel } from '@/components/hr/travel/PolicyRulesPanel';
 import { TravelPolicyForm } from '@/components/hr/travel/TravelPolicyForm';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
+import { travelPolicyState } from '@/components/hr/travel/travel-policy-state';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
@@ -52,9 +54,10 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
 
   const canWrite =
     hasAnyPermission(['HR.Travel.Write', 'HR.Travel.Admin']) || hasAnyRole(HR_ROLES);
-  const canAdmin = hasAnyPermission(['HR.Travel.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
+  // Lane 4, D-3: the permission alone — see useTravelAccess.
+  const canAdmin = hasAnyPermission(['HR.Travel.Admin']);
 
-  const { data: policy, isLoading } = useQuery({
+  const { data: policy, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies', id],
     queryFn: () => travelComplianceService.getPolicy(id),
   });
@@ -66,11 +69,11 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
       toast({ title: 'Policy deleted' });
       router.push('/administration/hr/travel/policies');
     },
-    onError: (e: any) =>
+    onError: (e: Error) =>
       toast({
         variant: 'destructive',
         title: 'Could not delete the policy',
-        description: e?.response?.data?.message ?? e?.response?.data ?? e?.message,
+        description: e?.message,
       }),
   });
 
@@ -78,6 +81,13 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (isError && !policy) {
+    return (
+      <div className="p-6">
+        <TravelQueryError error={error} what="this travel policy" />
       </div>
     );
   }
@@ -93,7 +103,7 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
           description="Only a draft can be corrected — an approved policy needs a new version."
           backHref={`/administration/hr/travel/policies/${id}`}
         />
-        <TravelPolicyForm policy={policy} />
+        <TravelPolicyForm policy={policy} onSaved={() => setEditing(false)} />
       </div>
     );
   }
@@ -123,13 +133,7 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        {isDraft ? (
-          <Badge variant="outline">Draft — not enforcing</Badge>
-        ) : policy.isCurrentVersion ? (
-          <Badge>In force</Badge>
-        ) : (
-          <Badge variant="secondary">Superseded</Badge>
-        )}
+        <Badge variant={travelPolicyState(policy).variant}>{travelPolicyState(policy).label}</Badge>
         <Badge variant="outline">
           {fmtDate(policy.effectiveFrom)}
           {policy.effectiveTo ? ` – ${fmtDate(policy.effectiveTo)}` : ' onwards'}
@@ -142,7 +146,8 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
             Approved by {policy.approvedByName ?? 'an administrator'} on{' '}
             {fmtDate(policy.approvedAt)}. An approved policy cannot be edited or deleted — raise a
             new version to change what it allows, or withdraw it from the register to stop it
-            capping bookings.
+            capping bookings. A new version approved for the same scope takes over from its own
+            start date; this one stays in force until the day before.
           </CardContent>
         </Card>
       )}
@@ -185,15 +190,14 @@ export default function TravelPolicyDetailPage({ params }: { params: Promise<{ i
             <Detail label="Hotel — international, per night">
               {money(policy.maxHotelRateInternational)}
             </Detail>
-            <Detail label="Max per trip">{money(policy.maxSingleTripBudget)}</Detail>
-            <Detail label="Max per year">{money(policy.maxAnnualTravelBudget)}</Detail>
+            <Detail label="Currency of the limits">{policy.currencyCode ?? 'The base currency'}</Detail>
+            <Detail label="Max per trip">
+              {policy.maxSingleTripBudget > 0 ? money(policy.maxSingleTripBudget) : 'No limit'}
+            </Detail>
             <Detail label="Receipt required above">{money(policy.receiptRequiredAbove)}</Detail>
             <Detail label="Days to submit expenses">{policy.expenseSubmissionDays}</Detail>
             <Detail label="Book flights ahead">{policy.advanceBookingDaysFlight} days</Detail>
             <Detail label="Book hotels ahead">{policy.advanceBookingDaysHotel} days</Detail>
-            <Detail label="Cheapest fare">
-              {policy.requiresCheapestFare ? 'Required' : 'Not required'}
-            </Detail>
             <Detail label="Preferred vendors">
               {policy.preferredVendorMandatory ? 'Mandatory' : 'Not mandatory'}
             </Detail>

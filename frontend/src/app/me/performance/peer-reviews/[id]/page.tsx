@@ -40,6 +40,10 @@ import { toItemScores, type EvaluationItem } from '@/types/hr/appraisal-run';
  *   • **Anonymity is about the appraisee, not you.** `isAnonymous` means *they* will not see
  *     who said what. Their manager always sees your name, and it is worth saying so plainly
  *     rather than letting the word "anonymous" imply more than it means.
+ *
+ * The due date is the nomination's, else the cycle's peer deadline, and the nominator's
+ * instructions are shown above the form (performance closure D5): they were collected on the
+ * nomination and shown nowhere.
  */
 export default function PeerEvaluationPage() {
   const params = useParams<{ id: string }>();
@@ -227,6 +231,17 @@ export default function PeerEvaluationPage() {
             {data.dueDate && ` Due ${formatDate(data.dueDate)}.`}
           </AlertDescription>
         </Alert>
+      )}
+
+      {data.instructionsToPeer && (
+        <Card>
+          <CardContent className="p-4 text-sm">
+            <p className="font-medium">What you were asked to comment on</p>
+            <p className="mt-1 whitespace-pre-wrap text-muted-foreground">
+              {data.instructionsToPeer}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
       {!data.allowPeerKpiEvaluation && (

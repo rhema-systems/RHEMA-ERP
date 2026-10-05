@@ -67,6 +67,9 @@ const LOCKABLE = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Comple
 // A locked goal's year runs on — a lock freezes what the goal is, not its progress — and a goal
 // the old lock left in the Locked status reads as approved.
 const PROGRESS_OPEN = new Set(['Approved', 'InProgress', 'AtRisk', 'OnTrack', 'Locked']);
+// Agreed with the manager (GoalSetRules.IsAgreed): the only goals whose entries can be corrected
+// or removed (closure D-72).
+const AGREED = new Set(['Approved', 'InProgress', 'OnTrack', 'AtRisk', 'Completed', 'Locked']);
 
 // No `recordedById`: the recorder is the signed-in user, stamped server-side. It used to be a
 // picker defaulting to the goal's owner "so HR could record on someone's behalf", which is the
@@ -174,8 +177,13 @@ export default function EmployeeGoalDetailPage() {
   // goal's owner — the server refuses everyone else, so they are not offered Edit or Remove.
   const me = user?.employeeId ?? null;
   const isDeskWriter = hasAnyPermissionAccess(user, ['HR.Performance.Write', 'HR.Performance.Admin']);
+  // D-72: entries are corrected on an agreed goal only — a goal sent back keeps its entries, and
+  // correcting the latest one carried its status onto the goal.
+  const goalAgreed = AGREED.has(goal.status);
   const mayAmendEntry = (entry: GoalProgressEntry) =>
-    (!!me && entry.recordedById === me) || (isDeskWriter && me !== goal.employeeId);
+    goalAgreed && ((!!me && entry.recordedById === me) || (isDeskWriter && me !== goal.employeeId));
+  // D-72: nobody unlocks their own goal — an HR officer included.
+  const mayUnlock = goal.isLocked && me !== goal.employeeId;
 
   return (
     <div className="space-y-6 p-6">
@@ -216,7 +224,7 @@ export default function EmployeeGoalDetailPage() {
                 Lock
               </Button>
             )}
-            {goal.isLocked && (
+            {mayUnlock && (
               <Button
                 size="sm"
                 variant="outline"
@@ -520,7 +528,7 @@ export default function EmployeeGoalDetailPage() {
         open={confirmLock}
         onOpenChange={setConfirmLock}
         title="Lock this goal?"
-        description="Locking freezes the goal and its progress. It can be unlocked again, but nothing may change while it is locked."
+        description="Locking fixes what the goal measures — title, measure, target and weight. Progress is still recorded while it is locked. The manager or HR can unlock it until it is scored."
         confirmText="Lock"
         isLoading={workflowMutation.isPending}
         onConfirm={async () => {

@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { Loader2, Save, Trash2 } from 'lucide-react';
+import { Copy, Loader2, Lock, Save, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,6 +23,7 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
+import { CloneSettingsProfileDialog } from '@/components/hr/performance/CloneSettingsProfileDialog';
 import { appraisalSettingsService } from '@/services/hr/appraisal.service';
 import {
   evaluationWeightTotal,
@@ -275,9 +276,29 @@ export default function AppraisalSettingsEditorPage() {
   });
   const weightsBalanced = Math.abs(total - 1) <= 0.005;
 
+  // In use (performance closure E-e, D-67): appraisals read its rules, finished ones too, so the
+  // rule fields are disabled and change on a copy. Its name, the deadline-risk bands, the workload
+  // threshold and the default HR reviewer stay editable — they change nothing an appraisal holds.
+  const rulesFrozen = !isNew && !!data?.isInUse;
+  const [cloneOpen, setCloneOpen] = useState(false);
+
   const save = useMutation({
     mutationFn: async (values: SettingsForm) => {
-      const payload = toPayload(values);
+      // In use, the rules go back exactly as loaded (E-e) — the server refuses any change to them —
+      // and only the fields still editable come from the form.
+      const merged: SettingsForm =
+        rulesFrozen && data
+          ? {
+              ...toForm(data),
+              settingsName: values.settingsName,
+              deadlineRiskHighDays: values.deadlineRiskHighDays,
+              deadlineRiskMediumDays: values.deadlineRiskMediumDays,
+              deadlineRiskLowDays: values.deadlineRiskLowDays,
+              managerWorkloadThreshold: values.managerWorkloadThreshold,
+              defaultHRReviewerId: values.defaultHRReviewerId,
+            }
+          : values;
+      const payload = toPayload(merged);
       return isNew
         ? appraisalSettingsService.create(payload)
         : appraisalSettingsService.update(id, { id, ...payload });
@@ -341,6 +362,14 @@ export default function AppraisalSettingsEditorPage() {
         actions={
           <div className="flex items-center gap-2">
             {!isNew && (
+              <Button type="button" variant="outline" onClick={() => setCloneOpen(true)}>
+                <Copy className="mr-2 h-4 w-4" />
+                Copy
+              </Button>
+            )}
+            {/* The default is refused (make another the default first), and so is a profile in
+                use (its cycles hold it) — Delete showed on both and failed. */}
+            {!isNew && !data?.isDefault && !data?.isInUse && (
               <Button
                 type="button"
                 variant="outline"
@@ -362,6 +391,24 @@ export default function AppraisalSettingsEditorPage() {
           </div>
         }
       />
+
+      {rulesFrozen && data && (
+        <Card className="border-amber-500/50">
+          <CardContent className="flex items-start gap-3 p-4">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">This profile is in use</p>
+              <p className="text-muted-foreground">
+                {data.inUseAppraisalCount} appraisal{data.inUseAppraisalCount === 1 ? '' : 's'} on{' '}
+                {data.inUseCycleNames.join(', ')} read its rules, finished ones included, so they
+                cannot change underneath them. Copy the profile to change its rules. Its name, the
+                deadline-risk bands, the workload threshold and the default HR reviewer can still be
+                changed here.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
@@ -395,256 +442,272 @@ export default function AppraisalSettingsEditorPage() {
         </TabsList>
 
         <TabsContent value="evaluation" className="mt-4 space-y-4">
-          <Section
-            title="Self-evaluation"
-            description="The employee's own assessment, and what it contributes to the final score."
-          >
-            <SwitchField
-              form={form}
-              name="requireSelfEvaluation"
-              label="Require a self-evaluation"
-            />
-            <FieldRow>
-              <NumberField
+          <fieldset disabled={rulesFrozen} className="min-w-0 space-y-4">
+            <Section
+              title="Self-evaluation"
+              description="The employee's own assessment, and what it contributes to the final score."
+            >
+              <SwitchField
                 form={form}
-                name="selfEvaluationWeight"
-                label="Weight (0–1)"
-                step="0.05"
+                name="requireSelfEvaluation"
+                label="Require a self-evaluation"
               />
-              <div />
-            </FieldRow>
-            <SwitchField
-              form={form}
-              name="allowSelfSoftSkillRating"
-              label="Employees may rate their own soft skills"
-              description="Off by default — most policies keep behavioural criteria for the manager."
-            />
-          </Section>
+              <FieldRow>
+                <NumberField
+                  form={form}
+                  name="selfEvaluationWeight"
+                  label="Weight (0–1)"
+                  step="0.05"
+                />
+                <div />
+              </FieldRow>
+              {/* The field is named "allow", but what it does is require: employees can always score
+                  the behavioural criteria; with this on, the self-evaluation cannot be submitted until
+                  every one is scored (closure B2 relabelled it — it read "may rate"). */}
+              <SwitchField
+                form={form}
+                name="allowSelfSoftSkillRating"
+                label="Employees must score every behavioural criterion before submitting"
+                description="Employees can always score the behavioural criteria. On, the self-evaluation is refused until every one has a score."
+              />
+            </Section>
 
-          <Section
-            title="Peer review"
-            description="Off in most policies. When on, the nomination and anonymity rules below apply."
-          >
-            <SwitchField form={form} name="requirePeerReviews" label="Require peer reviews" />
-            <FieldRow>
-              <NumberField
-                form={form}
-                name="peerEvaluationWeight"
-                label="Weight (0–1)"
-                step="0.05"
-              />
+            <Section
+              title="Peer review"
+              description="Off in most policies. When on, the nomination and anonymity rules below apply."
+            >
+              <SwitchField form={form} name="requirePeerReviews" label="Require peer reviews" />
+              <FieldRow>
+                <NumberField
+                  form={form}
+                  name="peerEvaluationWeight"
+                  label="Weight (0–1)"
+                  step="0.05"
+                />
+                <SelectField
+                  form={form}
+                  name="peerNominationMode"
+                  label="Who nominates peers"
+                  options={PEER_NOMINATION_MODE_OPTIONS}
+                />
+              </FieldRow>
+              <FieldRow>
+                <NumberField form={form} name="minPeerEvaluators" label="Minimum peers" />
+                <NumberField form={form} name="maxPeerEvaluators" label="Maximum peers" />
+              </FieldRow>
               <SelectField
                 form={form}
-                name="peerNominationMode"
-                label="Who nominates peers"
-                options={PEER_NOMINATION_MODE_OPTIONS}
+                name="peerEvaluationOpenMode"
+                label="Peer window opens"
+                options={PEER_EVALUATION_OPEN_MODE_OPTIONS}
               />
-            </FieldRow>
-            <FieldRow>
-              <NumberField form={form} name="minPeerEvaluators" label="Minimum peers" />
-              <NumberField form={form} name="maxPeerEvaluators" label="Maximum peers" />
-            </FieldRow>
-            <SelectField
-              form={form}
-              name="peerEvaluationOpenMode"
-              label="Peer window opens"
-              options={PEER_EVALUATION_OPEN_MODE_OPTIONS}
-            />
-            <SwitchField
-              form={form}
-              name="peerReviewsAnonymous"
-              label="Peer reviews are anonymous"
-            />
-            <SwitchField
-              form={form}
-              name="allowPeerKpiEvaluation"
-              label="Peers may score KPIs too"
-              description="Normally off — peers speak to behaviour, not to someone else's numbers."
-            />
-          </Section>
-
-          <Section title="Manager evaluation">
-            <SwitchField
-              form={form}
-              name="requireManagerEvaluation"
-              label="Require a manager evaluation"
-            />
-            <FieldRow>
-              <NumberField
+              <SwitchField
                 form={form}
-                name="managerEvaluationWeight"
-                label="Weight (0–1)"
-                step="0.05"
+                name="peerReviewsAnonymous"
+                label="Peer reviews are anonymous"
               />
-              <div />
-            </FieldRow>
-          </Section>
+              <SwitchField
+                form={form}
+                name="allowPeerKpiEvaluation"
+                label="Peers may score KPIs too"
+                description="Normally off — peers speak to behaviour, not to someone else's numbers."
+              />
+            </Section>
 
-          <Section
-            title="Score visibility"
-            description="Who sees which numbers, and when."
-          >
-            <SwitchField
-              form={form}
-              name="showSelfScoreToManager"
-              label="Managers see the self-score"
-            />
-            <SwitchField
-              form={form}
-              name="showPeerScoresToManager"
-              label="Managers see peer scores"
-            />
-            <SwitchField
-              form={form}
-              name="showScoreBreakdownToEmployee"
-              label="Employees see the score breakdown"
-              description="Off shows the employee only their final result, not how it was composed."
-            />
-          </Section>
+            <Section title="Manager evaluation">
+              <SwitchField
+                form={form}
+                name="requireManagerEvaluation"
+                label="Require a manager evaluation"
+              />
+              <FieldRow>
+                <NumberField
+                  form={form}
+                  name="managerEvaluationWeight"
+                  label="Weight (0–1)"
+                  step="0.05"
+                />
+                <div />
+              </FieldRow>
+            </Section>
+
+            <Section
+              title="Score visibility"
+              description="Who sees which numbers, and when."
+            >
+              <SwitchField
+                form={form}
+                name="showSelfScoreToManager"
+                label="Managers see the self-score"
+              />
+              <SwitchField
+                form={form}
+                name="showPeerScoresToManager"
+                label="Managers see peer scores"
+              />
+              <SwitchField
+                form={form}
+                name="showScoreBreakdownToEmployee"
+                label="Employees see the score breakdown"
+                description="Off shows the employee only their final result, not how it was composed."
+              />
+            </Section>
+          </fieldset>
         </TabsContent>
 
         <TabsContent value="signoff" className="mt-4 space-y-4">
-          <Section
-            title="Calibration and HR review"
-            description="The steps between a manager's score and the employee seeing it."
-          >
-            <SwitchField
-              form={form}
-              name="requireCalibration"
-              label="Require a calibration session"
-            />
-            <SwitchField form={form} name="requireHRReview" label="Require an HR review" />
-            <SelectField
-              form={form}
-              name="hrReviewTiming"
-              label="HR reviews"
-              options={HR_REVIEW_TIMING_OPTIONS}
-            />
-            <SwitchField
-              form={form}
-              name="hrCanModifyScores"
-              label="HR may change scores"
-              description="Off keeps HR's role to sign-off; a disputed score goes back to the manager."
-            />
-          </Section>
-
-          <Section title="Employee acknowledgment">
-            <SwitchField
-              form={form}
-              name="requireEmployeeAcknowledgment"
-              label="Require the employee to acknowledge the result"
-            />
-            <SwitchField
-              form={form}
-              name="allowEmployeeResponse"
-              label="Employees may record a written response"
-            />
-            <SwitchField
-              form={form}
-              name="allowAcknowledgmentWithoutConversation"
-              label="Allow acknowledgment before the final conversation"
-              description="Off is the stricter reading: the conversation has to happen first."
-            />
-          </Section>
-
-          <Section
-            title="Appeals"
-            description="Both windows are in days and are counted from the acknowledgment."
-          >
-            <SwitchField form={form} name="enableAppeals" label="Allow appeals" />
-            <FieldRow>
-              <NumberField form={form} name="appealWindowDays" label="Appeal window (days)" />
-              <NumberField
+          <fieldset disabled={rulesFrozen} className="min-w-0 space-y-4">
+            <Section
+              title="Calibration and HR review"
+              description="The steps between a manager's score and the employee seeing it."
+            >
+              <SwitchField
                 form={form}
-                name="appealReevaluationWindowDays"
-                label="Re-evaluation window (days)"
+                name="requireCalibration"
+                label="Require a calibration session"
               />
-            </FieldRow>
-          </Section>
+              <SwitchField form={form} name="requireHRReview" label="Require an HR review" />
+              <SelectField
+                form={form}
+                name="hrReviewTiming"
+                label="HR reviews"
+                options={HR_REVIEW_TIMING_OPTIONS}
+              />
+              <SwitchField
+                form={form}
+                name="hrCanModifyScores"
+                label="HR may change scores"
+                description="Off keeps HR's role to sign-off; a disputed score goes back to the manager."
+              />
+            </Section>
+
+            <Section title="Employee acknowledgment">
+              <SwitchField
+                form={form}
+                name="requireEmployeeAcknowledgment"
+                label="Require the employee to acknowledge the result"
+              />
+              <SwitchField
+                form={form}
+                name="allowEmployeeResponse"
+                label="Employees may record a written response"
+              />
+              <SwitchField
+                form={form}
+                name="allowAcknowledgmentWithoutConversation"
+                label="Allow acknowledgment before the final conversation"
+                description="Off is the stricter reading: the conversation has to happen first."
+              />
+            </Section>
+
+            <Section
+              title="Appeals"
+              description="Both windows are in days and are counted from the acknowledgment."
+            >
+              <SwitchField form={form} name="enableAppeals" label="Allow appeals" />
+              <FieldRow>
+                <NumberField form={form} name="appealWindowDays" label="Appeal window (days)" />
+                <NumberField
+                  form={form}
+                  name="appealReevaluationWindowDays"
+                  label="Re-evaluation window (days)"
+                />
+              </FieldRow>
+            </Section>
+          </fieldset>
         </TabsContent>
 
         <TabsContent value="goals" className="mt-4 space-y-4">
-          <Section
-            title="Goal setting"
-            description="Governs the goal cascade for cycles on this profile."
-          >
-            <SwitchField form={form} name="requireGoalSetting" label="Require goal setting" />
-            <SwitchField
-              form={form}
-              name="requireManagerGoalApproval"
-              label="Goals need manager approval"
-            />
-            <FieldRow>
-              <NumberField
+          <fieldset disabled={rulesFrozen} className="min-w-0 space-y-4">
+            <Section
+              title="Goal setting"
+              description="Governs the goal cascade for cycles on this profile."
+            >
+              <SwitchField form={form} name="requireGoalSetting" label="Require goal setting" />
+              <SwitchField
                 form={form}
-                name="minGoalsPerEmployee"
-                label="Minimum goals per employee"
-                placeholder="Blank for no minimum"
+                name="requireManagerGoalApproval"
+                label="Goals need manager approval"
               />
-              <NumberField
-                form={form}
-                name="maxGoalsPerEmployee"
-                label="Maximum goals per employee"
-                placeholder="Blank for no cap"
-              />
-            </FieldRow>
-          </Section>
+              <FieldRow>
+                <NumberField
+                  form={form}
+                  name="minGoalsPerEmployee"
+                  label="Minimum goals per employee"
+                  placeholder="Blank for no minimum"
+                />
+                <NumberField
+                  form={form}
+                  name="maxGoalsPerEmployee"
+                  label="Maximum goals per employee"
+                  placeholder="Blank for no cap"
+                />
+              </FieldRow>
+            </Section>
 
-          <Section title="Check-ins and journals">
-            <SwitchField form={form} name="enableCheckIns" label="Enable check-ins" />
-            <SwitchField
-              form={form}
-              name="enablePrivateJournal"
-              label="Enable the private performance journal"
-            />
-          </Section>
-
-          <Section
-            title="Conversations"
-            description="Which conversations must be recorded for an appraisal to complete."
-          >
-            <SwitchField
-              form={form}
-              name="requireKickOffConversation"
-              label="Kick-off conversation"
-            />
-            <SwitchField
-              form={form}
-              name="requireMidYearConversation"
-              label="Mid-year conversation"
-            />
-            <SwitchField form={form} name="requireFinalConversation" label="Final conversation" />
-          </Section>
-
-          <Section
-            title="Interim reviews"
-            description="How many review events a cycle generates, and how heavy each one is."
-          >
-            <FieldRow>
-              <SelectField
+            <Section title="Check-ins and journals">
+              <SwitchField form={form} name="enableCheckIns" label="Enable check-ins" />
+              <SwitchField
                 form={form}
-                name="reviewFrequency"
-                label="Frequency"
-                options={REVIEW_FREQUENCY_OPTIONS}
+                name="enablePrivateJournal"
+                label="Enable the private performance journal"
               />
-              <SelectField
+            </Section>
+
+            <Section
+              title="Conversations"
+              description="Which conversations must be recorded for an appraisal to complete."
+            >
+              <SwitchField
                 form={form}
-                name="interimReviewDepth"
-                label="Depth"
-                options={INTERIM_REVIEW_DEPTH_OPTIONS}
+                name="requireKickOffConversation"
+                label="Kick-off conversation"
+                description="Held before the employee can submit the self-evaluation."
               />
-            </FieldRow>
-            <SwitchField
-              form={form}
-              name="requireMidYearSelfAssessment"
-              label="Require a mid-year self-assessment"
-            />
-            <SwitchField
-              form={form}
-              name="requireGoalProgressUpdateAtReview"
-              label="Require a goal progress update at each review"
-            />
-          </Section>
+              <SwitchField
+                form={form}
+                name="requireMidYearConversation"
+                label="Mid-year conversation"
+                description="Held before the manager can submit their evaluation."
+              />
+              <SwitchField
+                form={form}
+                name="requireFinalConversation"
+                label="Final conversation"
+                description="Held before the appraisal completes — and before the acknowledgment, unless that may go first."
+              />
+            </Section>
+
+            <Section
+              title="Interim reviews"
+              description="How many review events a cycle generates, and how heavy each one is."
+            >
+              <FieldRow>
+                <SelectField
+                  form={form}
+                  name="reviewFrequency"
+                  label="Frequency"
+                  options={REVIEW_FREQUENCY_OPTIONS}
+                />
+                <SelectField
+                  form={form}
+                  name="interimReviewDepth"
+                  label="Depth"
+                  options={INTERIM_REVIEW_DEPTH_OPTIONS}
+                />
+              </FieldRow>
+              <SwitchField
+                form={form}
+                name="requireMidYearSelfAssessment"
+                label="Require a mid-year self-assessment"
+              />
+              <SwitchField
+                form={form}
+                name="requireGoalProgressUpdateAtReview"
+                label="Require a goal progress update at each review"
+              />
+            </Section>
+          </fieldset>
         </TabsContent>
 
         <TabsContent value="operations" className="mt-4 space-y-4">
@@ -652,12 +715,14 @@ export default function AppraisalSettingsEditorPage() {
             title="Deadlines"
             description="How many days out a deadline starts counting as a risk. These drive the cycle progress dashboard and the reminders HR sends from it."
           >
-            <SwitchField
-              form={form}
-              name="autoLockOnDeadline"
-              label="Advance overdue appraisals on deadline"
-              description="When on, HR's advance-overdue action moves stalled steps along. When off it changes nothing."
-            />
+            <fieldset disabled={rulesFrozen} className="min-w-0 space-y-4">
+              <SwitchField
+                form={form}
+                name="autoLockOnDeadline"
+                label="Advance overdue appraisals on deadline"
+                description="When on, HR's advance-overdue action moves stalled steps along. When off it changes nothing."
+              />
+            </fieldset>
             <FieldRow>
               <NumberField form={form} name="deadlineRiskHighDays" label="High risk within (days)" />
               <NumberField
@@ -688,20 +753,22 @@ export default function AppraisalSettingsEditorPage() {
               label="Default HR reviewer"
               placeholder="Search for an employee…"
             />
-            <FieldRow>
-              <NumberField
+            <fieldset disabled={rulesFrozen} className="min-w-0 space-y-4">
+              <FieldRow>
+                <NumberField
+                  form={form}
+                  name="probationExtensionMonths"
+                  label="Probation extension (months)"
+                />
+                <TextField form={form} name="successionPoolName" label="Succession pool name" />
+              </FieldRow>
+              <SelectField
                 form={form}
-                name="probationExtensionMonths"
-                label="Probation extension (months)"
+                name="successionDefaultReadiness"
+                label="Default succession readiness"
+                options={READINESS_LEVEL_OPTIONS}
               />
-              <TextField form={form} name="successionPoolName" label="Succession pool name" />
-            </FieldRow>
-            <SelectField
-              form={form}
-              name="successionDefaultReadiness"
-              label="Default succession readiness"
-              options={READINESS_LEVEL_OPTIONS}
-            />
+            </fieldset>
           </Section>
         </TabsContent>
       </Tabs>
@@ -717,6 +784,11 @@ export default function AppraisalSettingsEditorPage() {
         onConfirm={async () => {
           await remove.mutateAsync();
         }}
+      />
+
+      <CloneSettingsProfileDialog
+        profile={cloneOpen && data ? data : null}
+        onOpenChange={setCloneOpen}
       />
     </form>
   );

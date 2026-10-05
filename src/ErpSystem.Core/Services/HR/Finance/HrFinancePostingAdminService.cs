@@ -652,9 +652,32 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                     .GetQueryable(a => a.TenantId == tenantId && a.Id == record.SourceDocumentId && !a.IsDeleted)
                     .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
                     ?? throw new InvalidOperationException($"Travel advance {record.SourceReference} no longer exists; nothing to post.");
-                if (advance.Status is TravelAdvanceStatus.Requested or TravelAdvanceStatus.Approved)
-                    throw new InvalidOperationException($"Travel advance {advance.AdvanceNumber} has not been disbursed; there is nothing to post.");
+                // A positive list (travel final closure, lane 3): the negative one let a Rejected or Cancelled
+                // advance — statuses added later — be posted as though money had gone out.
+                if (advance.Status is not (TravelAdvanceStatus.Disbursed or TravelAdvanceStatus.PartiallySettled
+                        or TravelAdvanceStatus.FullySettled or TravelAdvanceStatus.Overdue or TravelAdvanceStatus.WrittenOff))
+                    throw new InvalidOperationException($"Travel advance {advance.AdvanceNumber} is {advance.Status}; no money went out, so there is nothing to post.");
                 return HrFinancePostingCommandFactory.TravelAdvanceDisbursed(advance);
+            }
+            case HrFinancePostingEventCatalog.TravelAdvanceRefunded:
+            {
+                var advance = await _unitOfWork.Repository<StaffTravelAdvance>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == record.SourceDocumentId && !a.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Travel advance {record.SourceReference} no longer exists; nothing to post.");
+                if (advance.RefundedAt is null || advance.RefundedAmount <= 0m)
+                    throw new InvalidOperationException($"Travel advance {advance.AdvanceNumber} records no refund; there is nothing to post.");
+                return HrFinancePostingCommandFactory.TravelAdvanceRefunded(advance);
+            }
+            case HrFinancePostingEventCatalog.TravelAdvanceWrittenOff:
+            {
+                var advance = await _unitOfWork.Repository<StaffTravelAdvance>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == record.SourceDocumentId && !a.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Travel advance {record.SourceReference} no longer exists; nothing to post.");
+                if (advance.Status != TravelAdvanceStatus.WrittenOff)
+                    throw new InvalidOperationException($"Travel advance {advance.AdvanceNumber} is {advance.Status}, not written off; there is nothing to post.");
+                return HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(advance);
             }
             case HrFinancePostingEventCatalog.LeaveEncashmentProcessed:
             {

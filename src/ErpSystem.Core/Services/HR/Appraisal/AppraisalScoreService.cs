@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Linq.Expressions;
 
 namespace ErpSystem.Core.Services.HR.Appraisal;
 
@@ -14,8 +15,13 @@ namespace ErpSystem.Core.Services.HR.Appraisal;
 /// <param name="Share">The criterion's share of the whole form, 0–100 (<see cref="AppraisalScoring.CriterionShare"/>).</param>
 /// <param name="MaxScore">The top of the criterion's own scale — its highest grade band, or 100 when it has none.</param>
 /// <param name="IsKpi">Measured against a target rather than rated.</param>
+/// <param name="KpiTolerance">
+/// The tolerance the snapshot kept with the target (D-32): an actual within it of the target scores as met. Null on a row
+/// generated before it was kept, and on the live-template fallback — an exact target, as those scored.
+/// </param>
 public sealed record CriterionScoringInfo(
-    decimal Share, decimal MaxScore, bool IsKpi, decimal? KpiTarget, decimal? KpiMin, decimal? KpiMax);
+    decimal Share, decimal MaxScore, bool IsKpi, decimal? KpiTarget, decimal? KpiMin, decimal? KpiMax,
+    decimal? KpiTolerance = null);
 
 /// <summary>The criterion an evaluation input names, resolved against the appraisal's snapshot.</summary>
 /// <param name="Key">The criterion key: a template row's template item, a goal row's own snapshot id.</param>
@@ -74,6 +80,12 @@ public sealed class AppraisalCriterionScoring
     /// <summary>A goal row of this appraisal's snapshot, by its id; null for a template row or an unknown id.</summary>
     public PerformanceAppraisalCriterionConfig? GoalRow(Guid criterionConfigId) =>
         _rowsById.TryGetValue(criterionConfigId, out var row) && row.IsGoalRow() ? row : null;
+
+    /// <summary>
+    /// The criterion is measured work — a KPI item or a measured goal row — by the snapshot (or the
+    /// live item already resolved for an older appraisal); false for a key it does not hold.
+    /// </summary>
+    public bool IsMeasured(Guid criterionKey) => Items.TryGetValue(criterionKey, out var info) && info.IsKpi;
 
     /// <summary>
     /// A score's achievement on its criterion, 0–100, measured as the score is: a rated row against
@@ -202,7 +214,8 @@ public class AppraisalScoreService : IAppraisalScoreService
                     : row.TemplateKpiDefinitionId.HasValue,
                 KpiTarget: c.KpiTargetValue,
                 KpiMin: c.KpiMinValue,
-                KpiMax: c.KpiMaxValue);
+                KpiMax: c.KpiMaxValue,
+                KpiTolerance: c.KpiTolerancePercent);
         }
 
         return new AppraisalCriterionScoring(appraisalId, items, configs.Select(row => row.Config));
@@ -289,7 +302,8 @@ public class AppraisalScoreService : IAppraisalScoreService
         }
         else if (score.ActualValue is decimal actual)
         {
-            achievement = AppraisalScoring.KpiAchievementPercent(actual, info.KpiTarget, info.KpiMin, info.KpiMax) / 100m;
+            achievement = AppraisalScoring.KpiAchievementPercent(
+                actual, info.KpiTarget, info.KpiMin, info.KpiMax, info.KpiTolerance) / 100m;
         }
         else
         {
@@ -351,8 +365,11 @@ public class AppraisalScoreService : IAppraisalScoreService
     /// <para>⚠ The calibration condition came with B1, which made <c>HRReviewTiming</c> real: with
     /// HR's review before calibration, a sign-off is not the last word, and the sign-off published
     /// the pre-calibration score to the talent pools.</para>
+    ///
+    /// <para>The withdrawal reads it too (performance closure E-d1, D-52): a final appraisal is not
+    /// withdrawn. It needs <c>HRReviews</c> and the cycle's <c>AppraisalSettings</c> loaded.</para>
     /// </summary>
-    private static bool IsFinal(PerformanceAppraisal appraisal)
+    internal static bool IsFinal(PerformanceAppraisal appraisal)
         => appraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed
            || (appraisal.Status == AppraisalStatus.Governance
                && appraisal.AppealRemandedDate == null
@@ -516,22 +533,56 @@ public class AppraisalScoreService : IAppraisalScoreService
     {
         var tenantId = GetTenantId();
 
-        var targets = await _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId
+        var targets = await LoadSettleTargetsAsync(a => a.TenantId == tenantId
                      && (a.Status == AppraisalStatus.Completed || a.Status == AppraisalStatus.Closed)
-                     && (cycleId == null || a.AppraisalCycleId == cycleId))
+                     && (cycleId == null || a.AppraisalCycleId == cycleId), cancellationToken);
+
+        var report = new AppraisalSettleDryRunReportDto { GeneratedAt = DateTime.UtcNow, CycleId = cycleId };
+        report.Rows.AddRange(await PreviewRowsAsync(tenantId, targets, cancellationToken));
+
+        report.Examined = report.Rows.Count;
+        report.Changed = report.Rows.Count(r => r.Changed);
+        return report;
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The calculate-score route's read half (performance closure E-a): the route stored the settle
+    /// and published it, at any status. This computes the same number and writes nothing.
+    /// </remarks>
+    public async Task<AppraisalSettleDryRunRowDto> PreviewAsync(Guid appraisalId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+
+        var targets = await LoadSettleTargetsAsync(a => a.TenantId == tenantId && a.Id == appraisalId, cancellationToken);
+        if (targets.Count == 0)
+            throw new ArgumentException($"Performance appraisal with ID '{appraisalId}' not found.");
+
+        return (await PreviewRowsAsync(tenantId, targets, cancellationToken))[0];
+    }
+
+    /// <summary>An appraisal a settle is previewed for, as the dry run lists it.</summary>
+    private sealed record SettleTarget(
+        Guid Id, string AppraisalNumber, Guid EmployeeId, string EmployeeName, string CycleName, AppraisalStatus Status);
+
+    private async Task<List<SettleTarget>> LoadSettleTargetsAsync(
+        Expression<Func<PerformanceAppraisal, bool>> filter, CancellationToken cancellationToken)
+        => await _appraisalRepository.GetQueryable()
+            .Where(filter)
             .OrderBy(a => a.AppraisalCycle.CycleName).ThenBy(a => a.AppraisalNumber)
-            .Select(a => new
-            {
+            .Select(a => new SettleTarget(
                 a.Id,
                 a.AppraisalNumber,
                 a.EmployeeId,
-                EmployeeName = a.Employee.FirstName + " " + a.Employee.LastName,
+                a.Employee.FirstName + " " + a.Employee.LastName,
                 a.AppraisalCycle.CycleName,
-                a.Status,
-            })
+                a.Status))
             .ToListAsync(cancellationToken);
 
+    /// <summary>What a settle would store for each target, beside what is stored — untracked, so nothing reaches a save.</summary>
+    private async Task<List<AppraisalSettleDryRunRowDto>> PreviewRowsAsync(
+        Guid tenantId, List<SettleTarget> targets, CancellationToken cancellationToken)
+    {
         var gradeNames = await _gradeDefinitionRepository.GetQueryable()
             .Where(g => g.TenantId == tenantId)
             .ToDictionaryAsync(g => g.Id, g => g.GradeName, cancellationToken);
@@ -545,7 +596,7 @@ public class AppraisalScoreService : IAppraisalScoreService
             .ToDictionary(g => g.Key, g => g.Select(m => m.LatestPerformanceRating).FirstOrDefault(r => r != null));
 
         var mapRating = await _ratingResolver.GetMapperAsync(cancellationToken);
-        var report = new AppraisalSettleDryRunReportDto { GeneratedAt = DateTime.UtcNow, CycleId = cycleId };
+        var rows = new List<AppraisalSettleDryRunRowDto>();
 
         foreach (var t in targets)
         {
@@ -575,11 +626,9 @@ public class AppraisalScoreService : IAppraisalScoreService
             };
             row.Changed = row.StoredScore != row.SettledScore || row.StoredGrade != row.SettledGrade;
 
-            report.Rows.Add(row);
+            rows.Add(row);
         }
 
-        report.Examined = report.Rows.Count;
-        report.Changed = report.Rows.Count(r => r.Changed);
-        return report;
+        return rows;
     }
 }

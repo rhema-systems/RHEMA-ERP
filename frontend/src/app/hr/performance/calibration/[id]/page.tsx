@@ -5,9 +5,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
+  Ban,
   CheckCircle2,
   ClipboardCheck,
-  Gavel,
   Lock,
   PlayCircle,
   Scale,
@@ -47,13 +47,16 @@ import type { CalibrationCriterion, CalibrationMatrixRow } from '@/types/hr/cali
 /**
  * One calibration session: the grid, the panel, and the decisions it took.
  *
- * **The lifecycle is four steps, and the last two are different decisions.** Opening links every
- * appraisal in scope to the session so their phase reads "calibration in progress". Completing
- * closes the room. *Committing* is separate and irreversible: it writes the agreed ratings onto
- * the appraisals at the calibration step (their manager has submitted) and lifts the gate on them —
- * including the people the panel discussed and left alone, who are calibrated too and would
- * otherwise sit blocked. Appraisals not at that step are left alone and listed in the commit's
- * result with the reason (performance closure A4).
+ * **The lifecycle is three steps, and the last two are different decisions.** Opening convenes
+ * the session and links every appraisal in scope waiting for calibration, so their phase reads
+ * "calibration in progress". Completing closes the room. *Committing* is separate and
+ * irreversible: it writes the agreed ratings onto the appraisals at the calibration step (their
+ * manager has submitted) and lifts the gate on them — including the people the panel discussed and
+ * left alone, who are calibrated too and would otherwise sit blocked. Appraisals not at that step
+ * are left alone and listed in the commit's result with the reason (performance closure A4); the
+ * grid shows each row's reason before the commit, and the Commit button counts only what it would
+ * take. A commit takes each appraisal once, and only the evaluation the panel sat over (E-b).
+ * Until it completes, a session can be *cancelled*, which releases its appraisals.
  *
  * ⚠ Adjustments are only accepted while the session is open. Once it is completed the grid is
  * read-only, and the only remaining action is to commit it.
@@ -77,6 +80,8 @@ export default function CalibrationSessionDetailPage() {
   const [completeOpen, setCompleteOpen] = useState(false);
   const [meetingNotes, setMeetingNotes] = useState('');
   const [commitOpen, setCommitOpen] = useState(false);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   const [addPanelist, setAddPanelist] = useState('');
   const [panelistRole, setPanelistRole] = useState('Manager');
 
@@ -136,13 +141,18 @@ export default function CalibrationSessionDetailPage() {
     onError: fail('Could not open the session'),
   });
 
-  const start = useMutation({
-    mutationFn: () => calibrationSessionService.start(sessionId),
+  const cancel = useMutation({
+    mutationFn: () => calibrationSessionService.cancel(sessionId, cancelReason.trim()),
     onSuccess: () => {
-      toast({ title: 'Session started' });
+      toast({
+        title: 'Session cancelled',
+        description: 'Its appraisals are free for another session. Nothing of this one is applied.',
+      });
+      setCancelOpen(false);
+      setCancelReason('');
       refresh();
     },
-    onError: fail('Could not start the session'),
+    onError: fail('Could not cancel the session'),
   });
 
   const complete = useMutation({
@@ -300,23 +310,20 @@ export default function CalibrationSessionDetailPage() {
   const data = session.data;
   const grid = matrix.data;
 
-  // Only appraisals at the calibration step are committed; the rest are reported as skipped.
-  const uncommitted = useMemo(
-    () => (grid?.rows ?? []).filter((r) => !r.isCalibrated && r.appraisalStatus === 'Governance').length,
-    [grid],
-  );
-
-  // What a commit will do, for its confirmation: the server calibrates what is in governance (and a
-  // final appraisal only when this session adjusted it), and lists everything else as skipped.
+  // What a commit would take, as the server says on each row: at the calibration step (or final and
+  // adjusted here), not calibrated by this session already, and submitted by its manager before the
+  // panel closed. Counting "in governance" offered a Commit that re-applied the session over an
+  // upheld appeal, and over an appraisal HR had returned and its manager re-evaluated.
   const commitCounts = useMemo(() => {
     const rows = grid?.rows ?? [];
-    const atStep = rows.filter((r) => r.appraisalStatus === 'Governance');
+    const taken = rows.filter((r) => !r.commitSkipReason);
     return {
-      atStep: atStep.length,
-      leftAlone: atStep.filter((r) => (r.adjustments ?? []).length === 0).length,
-      notAtStep: rows.length - atStep.length,
+      taken: taken.length,
+      leftAlone: taken.filter((r) => (r.adjustments ?? []).length === 0).length,
+      notTaken: rows.length - taken.length,
     };
   }, [grid]);
+  const uncommitted = commitCounts.taken;
 
   if (session.isLoading) {
     return (
@@ -346,7 +353,11 @@ export default function CalibrationSessionDetailPage() {
 
   const isOpen = data.status === 'InProgress';
   const isCompleted = data.status === 'Completed';
+  const isCancelled = data.status === 'Cancelled';
+  // The panel's record is fixed once the session has completed or been called off.
+  const isClosed = isCompleted || isCancelled;
   const canAdjust = isOpen;
+  const canCancel = data.status === 'Pending' || isOpen;
 
   return (
     <div className="space-y-6 p-6">
@@ -362,10 +373,10 @@ export default function CalibrationSessionDetailPage() {
                 {open.isPending ? 'Opening…' : 'Open session'}
               </Button>
             )}
-            {isOpen && !data.startedDate && (
-              <Button variant="outline" onClick={() => start.mutate()} disabled={start.isPending}>
-                <Gavel className="mr-2 h-4 w-4" />
-                Mark convened
+            {canCancel && (
+              <Button variant="outline" onClick={() => setCancelOpen(true)}>
+                <Ban className="mr-2 h-4 w-4" />
+                Cancel session
               </Button>
             )}
             {isOpen && (
@@ -408,6 +419,18 @@ export default function CalibrationSessionDetailPage() {
           <AlertDescription>
             Add the panel first, then open the session. Opening records you as facilitator and
             links every appraisal in scope, so no ratings can be recorded before it.
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {isCancelled && (
+        <Alert>
+          <Ban className="h-4 w-4" />
+          <AlertTitle>Cancelled</AlertTitle>
+          <AlertDescription>
+            This session was called off — the reason is in its meeting notes. Its appraisals were
+            released for another session, and none of its adjustments is applied. The grid, the
+            panel and the decisions stay as its record.
           </AlertDescription>
         </Alert>
       )}
@@ -505,7 +528,16 @@ export default function CalibrationSessionDetailPage() {
                             {row.managerName ?? '—'}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {score(row.managerProposedScore)}
+                            {row.managerReevaluating ? (
+                              <span
+                                className="text-xs text-muted-foreground"
+                                title="HR returned this appraisal to the manager; the earlier total no longer stands."
+                              >
+                                Being re-evaluated
+                              </span>
+                            ) : (
+                              score(row.managerProposedScore)
+                            )}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {score(row.preCalibrationScore)}
@@ -521,6 +553,15 @@ export default function CalibrationSessionDetailPage() {
                               <StatusBadge status="Calibrated" />
                             ) : (
                               <span className="text-xs text-muted-foreground">Not yet</span>
+                            )}
+                            {/* Why a commit would leave the row alone, where it matters: a row still
+                                waiting for calibration, or one this panel moved — so the panel sees
+                                whom the commit will not take, and why. */}
+                            {!isCancelled && row.commitSkipReason &&
+                              (!row.isCalibrated || (row.adjustments ?? []).length > 0) && (
+                              <div className="mt-1 max-w-[16rem] text-xs text-muted-foreground">
+                                {row.commitSkipReason}
+                              </div>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
@@ -562,7 +603,7 @@ export default function CalibrationSessionDetailPage() {
 
         {/* ── Panel ────────────────────────────────────────────────────────── */}
         <TabsContent value="panel" className="mt-4 space-y-4">
-          {!isCompleted && (
+          {!isClosed && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Add a panelist</CardTitle>
@@ -621,7 +662,7 @@ export default function CalibrationSessionDetailPage() {
                         <TableCell>
                           <Checkbox
                             checked={p.attended}
-                            disabled={isCompleted}
+                            disabled={isClosed}
                             onCheckedChange={(checked) =>
                               markAttendance.mutate({ id: p.id, attended: checked === true })
                             }
@@ -629,7 +670,7 @@ export default function CalibrationSessionDetailPage() {
                           />
                         </TableCell>
                         <TableCell className="text-right">
-                          {!isCompleted && (
+                          {!isClosed && (
                             <Button
                               variant="ghost"
                               size="sm"
@@ -750,7 +791,9 @@ export default function CalibrationSessionDetailPage() {
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <div className="text-muted-foreground">Manager proposed</div>
-                <div className="tabular-nums">{score(adjustRow?.managerProposedScore)}</div>
+                <div className="tabular-nums">
+                  {adjustRow?.managerReevaluating ? 'Being re-evaluated' : score(adjustRow?.managerProposedScore)}
+                </div>
               </div>
               <div>
                 <div className="text-muted-foreground">Pre-calibration</div>
@@ -909,11 +952,11 @@ export default function CalibrationSessionDetailPage() {
           <DialogHeader>
             <DialogTitle>Commit the ratings</DialogTitle>
             <DialogDescription>
-              This writes the agreed scores onto the {commitCounts.atStep} appraisal(s) whose manager
-              has submitted and marks them calibrated — including the {commitCounts.leftAlone} the
+              This writes the agreed scores onto {commitCounts.taken} appraisal(s) at the
+              calibration step and marks them calibrated — including the {commitCounts.leftAlone} the
               panel left as they are.
-              {commitCounts.notAtStep > 0 &&
-                ` The other ${commitCounts.notAtStep} are not at the calibration step yet and are left alone; the result lists them.`}{' '}
+              {commitCounts.notTaken > 0 &&
+                ` The other ${commitCounts.notTaken} are left as they are, each for the reason on its row; the result lists them.`}{' '}
               It cannot be undone.
             </DialogDescription>
           </DialogHeader>
@@ -923,6 +966,43 @@ export default function CalibrationSessionDetailPage() {
             </Button>
             <Button onClick={() => commit.mutate()} disabled={commit.isPending}>
               {commit.isPending ? 'Committing…' : 'Commit'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Cancel dialog ──────────────────────────────────────────────────── */}
+      <Dialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Cancel the session</DialogTitle>
+            <DialogDescription>
+              The session is called off. The appraisals it holds are released, so another session
+              can calibrate them; its panel and any adjustments stay as the record, and none of
+              them is applied. It cannot be reopened.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="cancelReason">Reason</Label>
+            <Textarea
+              id="cancelReason"
+              rows={3}
+              maxLength={1000}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Why the panel is not going ahead. Kept in its meeting notes."
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelOpen(false)}>
+              Keep it
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => cancel.mutate()}
+              disabled={!cancelReason.trim() || cancel.isPending}
+            >
+              {cancel.isPending ? 'Cancelling…' : 'Cancel session'}
             </Button>
           </DialogFooter>
         </DialogContent>

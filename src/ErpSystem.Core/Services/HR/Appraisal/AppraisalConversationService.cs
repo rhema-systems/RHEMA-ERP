@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +16,7 @@ public class AppraisalConversationService : IAppraisalConversationService
 {
     private readonly IGenericRepository<AppraisalConversation> _conversationRepository;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
+    private readonly IGenericRepository<AppraisalReviewEvent> _reviewEventRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IAppraisalNotificationService _notifications;
     private readonly IAppraisalLifecycleService _lifecycle;
@@ -24,6 +26,7 @@ public class AppraisalConversationService : IAppraisalConversationService
     public AppraisalConversationService(
         IGenericRepository<AppraisalConversation> conversationRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
+        IGenericRepository<AppraisalReviewEvent> reviewEventRepository,
         ICurrentUserProvider currentUserProvider,
         IAppraisalNotificationService notifications,
         IAppraisalLifecycleService lifecycle,
@@ -32,6 +35,7 @@ public class AppraisalConversationService : IAppraisalConversationService
     {
         _conversationRepository = conversationRepository;
         _appraisalRepository = appraisalRepository;
+        _reviewEventRepository = reviewEventRepository;
         _currentUserProvider = currentUserProvider;
         _notifications = notifications;
         _lifecycle = lifecycle;
@@ -75,6 +79,43 @@ public class AppraisalConversationService : IAppraisalConversationService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new ArgumentException($"Conversation with ID '{id}' not found.");
         return entity;
+    }
+
+    /// <summary>
+    /// A withdrawn appraisal holds no more conversations (performance closure E-d1): the ones held
+    /// stay as its history, and the rest leave the manager's diary.
+    /// </summary>
+    private async Task EnsureAppraisalNotWithdrawnAsync(Guid appraisalId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if (await _appraisalRepository.GetQueryable(a => a.Id == appraisalId && a.TenantId == tenantId)
+                .AnyAsync(a => a.Status == AppraisalStatus.Withdrawn, cancellationToken))
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
+    }
+
+    /// <summary>The appraisal's work is done while its cycle is Open (performance closure E-d2b, D-59).</summary>
+    private Task EnsureCycleOpenAsync(Guid appraisalId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureAppraisalCycleOpenAsync(
+            _appraisalRepository.GetQueryable(), GetTenantId(), appraisalId, action, cancellationToken);
+
+    /// <summary>
+    /// Decision D-76: the refusal names every type the enum defines — it listed six, while the
+    /// PIP discussion and the ad-hoc meeting were accepted too.
+    /// </summary>
+    private static string TypeRequiredMessage() =>
+        "Say which conversation this is: " + string.Join(", ", Enum.GetNames<ConversationType>()) + ".";
+
+    /// <summary>
+    /// Decision D-76: a conversation logged at a review event is logged at one of its own appraisal's.
+    /// The id was saved as sent — another appraisal's event, or another tenant's.
+    /// </summary>
+    private async Task EnsureReviewEventBelongsAsync(Guid? reviewEventId, Guid appraisalId, CancellationToken cancellationToken)
+    {
+        if (reviewEventId is not Guid eventId) return;
+        var tenantId = GetTenantId();
+        if (!await _reviewEventRepository.ExistsAsync(r => r.Id == eventId && r.TenantId == tenantId && r.PerformanceAppraisalId == appraisalId))
+            throw new InvalidOperationException("The review event is not one of this appraisal's review events.");
     }
 
     private IQueryable<AppraisalConversation> BaseQuery
@@ -124,11 +165,21 @@ public class AppraisalConversationService : IAppraisalConversationService
     /// list the moment its date passed. The one thing a manager needs from this screen is the
     /// meeting they were supposed to hold last week; a diary that only shows the future hides
     /// exactly the rows that need action.</para>
+    ///
+    /// <para>A withdrawn appraisal's unheld conversations are not outstanding (performance closure
+    /// E-d1): no one will hold them.</para>
+    ///
+    /// <para>The line manager's reports' conversations are theirs too (D-74): the conductor is now
+    /// whoever marks it held, so one HR booked for the manager would otherwise be in nobody's diary
+    /// — HR named the manager as conductor to put it there.</para>
     /// </summary>
     public async Task<IEnumerable<AppraisalConversationDto>> GetScheduledByManagerAsync(Guid managerId, CancellationToken cancellationToken = default)
     {
         var entities = await BaseQuery
-            .Where(c => (c.ScheduledById == managerId || c.ConductedById == managerId) && !c.IsCompleted)
+            .Where(c => (c.ScheduledById == managerId || c.ConductedById == managerId
+                         || c.Appraisal.Employee.ManagerId == managerId)
+                        && !c.IsCompleted
+                        && c.Appraisal.Status != AppraisalStatus.Withdrawn)
             .OrderBy(c => c.ScheduledDate)
             .ToListAsync(cancellationToken);
         return entities.ToDtoList();
@@ -161,23 +212,39 @@ public class AppraisalConversationService : IAppraisalConversationService
         };
     }
 
-    public async Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default)
+    public async Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, Guid? actorEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+
+        // B2: the type is what the gates count — a kick-off holds the self-evaluation, a mid-year the
+        // manager's submission, a final review the acknowledgment — so it is never assumed. It
+        // defaulted to KickOff, and a number the enum does not define was stored as it came.
+        if (createDto.Type is not ConversationType type || !Enum.IsDefined(type))
+            throw new ArgumentException(TypeRequiredMessage());
 
         // The appraisal is the conversation's whole context — who it is about, and which cycle it
         // belongs to. An id from another tenant, or none at all, would save happily and then read
         // back as a conversation about nobody.
         var appraisal = await _appraisalRepository
             .GetQueryable(a => a.Id == createDto.AppraisalId && a.TenantId == tenantId)
-            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber })
+            .Select(a => new { a.Id, a.EmployeeId, a.AppraisalNumber, a.Status, CycleStatus = a.AppraisalCycle.Status, a.AppraisalCycle.CycleName })
             .FirstOrDefaultAsync(cancellationToken);
         if (appraisal == null)
             throw new ArgumentException("Appraisal not found.");
+        if (appraisal.Status == AppraisalStatus.Withdrawn)
+            throw new InvalidOperationException(
+                "This appraisal was withdrawn from its cycle, so it holds no more conversations.");
+        // The appraisal's work is done while its cycle is Open (performance closure E-d2b).
+        AppraisalLiveCycle.EnsureOpen(appraisal.CycleStatus, appraisal.CycleName, "A conversation cannot be booked");
+        await EnsureReviewEventBelongsAsync(createDto.ReviewEventId, appraisal.Id, cancellationToken);
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.IsCompleted = false;
+        // Decision D-74: the scheduler is who booked it, from the token; the conductor is who marks it
+        // held. Both came from the body, and naming someone made them a writer of the conversation.
+        entity.ScheduledById = actorEmployeeId is Guid me && me != Guid.Empty ? me : null;
+        entity.ConductedById = null;
 
         await _conversationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -208,14 +275,17 @@ public class AppraisalConversationService : IAppraisalConversationService
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Cannot update a completed conversation.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be changed", cancellationToken);
 
+        if (updateDto.ReviewEventId != entity.ReviewEventId)
+            await EnsureReviewEventBelongsAsync(updateDto.ReviewEventId, entity.AppraisalId, cancellationToken);
+
+        // Decision D-74: an edit changes the meeting's details — when, the agenda, the notes, the
+        // review event — and nothing that says what it is or who it belongs to. The DTO no longer
+        // carries the type (the employee was told which conversation was booked), the appraisal (B2),
+        // the scheduler and conductor (the token's), or held and its date (CompleteAsync's).
         updateDto.UpdateEntity(entity);
-
-        // The update DTO carries IsCompleted and HeldDate, which would let an edit close a
-        // conversation behind CompleteAsync's back — without the held date being stamped and
-        // without anyone being told. Completing is its own action.
-        entity.IsCompleted = false;
-        entity.HeldDate = null;
 
         await _conversationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -228,6 +298,16 @@ public class AppraisalConversationService : IAppraisalConversationService
     {
         var entity = await GetOwnedAsync(id);
 
+        // Decision D-74: a held conversation is what the gates count — deleting a held kick-off moved
+        // the appraisal back to goal setting, and deleting HR's held placeholder undid an audited
+        // advance — so it is never removed. A withdrawn appraisal's are its record (its unheld ones went
+        // with the withdrawal).
+        if (entity.IsCompleted)
+            throw new InvalidOperationException(
+                "This conversation was held, so it is part of the appraisal's record and cannot be removed.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be removed", cancellationToken);
+
         await _conversationRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Appraisal conversation deleted: {Id}", id);
@@ -236,15 +316,29 @@ public class AppraisalConversationService : IAppraisalConversationService
 
     public async Task<AppraisalConversationDto> CompleteAsync(
         Guid conversationId, string? postMeetingNotes, string? keyTakeaways,
+        DateTime? heldDate, Guid? actorEmployeeId,
         CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(conversationId);
 
         if (entity.IsCompleted)
             throw new InvalidOperationException("Conversation is already completed.");
+        await EnsureAppraisalNotWithdrawnAsync(entity.AppraisalId, cancellationToken);
+        await EnsureCycleOpenAsync(entity.AppraisalId, "The conversation cannot be marked held", cancellationToken);
+
+        // Decision D-74: the date it was held can be stated — a meeting held last week is recorded with
+        // its real date — never in the future, and today when none is given. It was always today.
+        var now = DateTime.UtcNow;
+        if (heldDate is DateTime stated && stated.Date > now.Date)
+            throw new InvalidOperationException(
+                $"A conversation cannot be recorded as held on {stated:d MMM yyyy}, which has not come yet.");
 
         entity.IsCompleted = true;
-        entity.HeldDate = DateTime.UtcNow;
+        entity.HeldDate = heldDate ?? now;
+        // The conductor is who marks it held (D-74), from the token; an account with no employee
+        // record leaves whatever was there.
+        if (actorEmployeeId is Guid conductor && conductor != Guid.Empty)
+            entity.ConductedById = conductor;
         entity.PostMeetingNotes = postMeetingNotes;
         entity.KeyTakeaways = keyTakeaways;
 

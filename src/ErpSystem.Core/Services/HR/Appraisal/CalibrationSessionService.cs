@@ -31,8 +31,11 @@ public class CalibrationSessionService : ICalibrationSessionService
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CalibrationSessionService> _logger;
 
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+
     public CalibrationSessionService(
         IGenericRepository<CalibrationSession> sessionRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<CalibrationParticipant> participantRepository,
         IGenericRepository<CalibrationRatingAdjustment> adjustmentRepository,
         IGenericRepository<PerformanceAppraisal> appraisalRepository,
@@ -50,6 +53,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         ILogger<CalibrationSessionService> logger)
     {
         _sessionRepository = sessionRepository;
+        _cycleRepository = cycleRepository;
         _participantRepository = participantRepository;
         _adjustmentRepository = adjustmentRepository;
         _appraisalRepository = appraisalRepository;
@@ -77,6 +81,13 @@ public class CalibrationSessionService : ICalibrationSessionService
             throw new InvalidOperationException("No tenant is associated with the current user.");
         return tenantId;
     }
+
+    /// <summary>
+    /// A panel sits on a running cycle's appraisals (performance closure E-d2b, D-59): refused unless the cycle is Open.
+    /// An unknown cycle, or another tenant's, is not found — creating a session checked neither.
+    /// </summary>
+    private Task EnsureCycleOpenAsync(Guid cycleId, string action, CancellationToken cancellationToken)
+        => AppraisalLiveCycle.EnsureCycleOpenAsync(_cycleRepository.GetQueryable(), GetTenantId(), cycleId, action, cancellationToken);
 
     // A calibration session owned by another tenant is reported as missing rather than forbidden, so the
     // endpoints do not confirm that the id exists elsewhere.
@@ -162,11 +173,19 @@ public class CalibrationSessionService : ICalibrationSessionService
         };
     }
 
-    public async Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// A new session, Pending, facilitated by its creator until someone opens it (performance
+    /// closure E-b). The facilitator came from the body, so any caller could record a session as
+    /// run by someone else — and a facilitator reads the session's grid (P3).
+    /// </summary>
+    public async Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, Guid? facilitatorId, CancellationToken cancellationToken = default)
     {
+        await EnsureCycleOpenAsync(createDto.AppraisalCycleId, "A calibration session cannot be set up", cancellationToken);
+
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
         entity.Status = CalibrationStatus.Pending;
+        entity.FacilitatedById = facilitatorId is Guid me && me != Guid.Empty ? me : null;
 
         await _sessionRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -175,12 +194,33 @@ public class CalibrationSessionService : ICalibrationSessionService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <summary>
+    /// The session's particulars (performance closure E-b). Its scope — cycle, unit and level — is
+    /// fixed once it is open: opening linked every appraisal in it, and a re-scoped session kept
+    /// appraisals it no longer covered while covering others it had never linked. The facilitator
+    /// is the opener, not a field. A completed or cancelled session is not edited at all.
+    /// </summary>
     public async Task<CalibrationSessionDto> UpdateAsync(UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(updateDto.Id);
 
-        if (entity.Status == CalibrationStatus.Completed)
-            throw new InvalidOperationException("Cannot update a completed calibration session.");
+        switch (entity.Status)
+        {
+            case CalibrationStatus.Completed:
+                throw new InvalidOperationException("A completed calibration session is not edited: it is the record of the panel's decisions.");
+            case CalibrationStatus.Cancelled:
+                throw new InvalidOperationException("A cancelled calibration session is not edited.");
+        }
+
+        var rescoped = updateDto.AppraisalCycleId != entity.AppraisalCycleId
+            || updateDto.OrganizationUnitId != entity.OrganizationUnitId
+            || updateDto.OrganizationLevelId != entity.OrganizationLevelId;
+        if (rescoped && entity.Status != CalibrationStatus.Pending)
+            throw new InvalidOperationException(
+                "A session's scope is fixed once it is open: every appraisal in it is linked to it. Cancel it and set up another.");
+
+        if (updateDto.AppraisalCycleId != entity.AppraisalCycleId)
+            await EnsureCycleOpenAsync(updateDto.AppraisalCycleId, "The session cannot move to that cycle", cancellationToken);
 
         updateDto.UpdateEntity(entity);
         await _sessionRepository.UpdateAsync(entity);
@@ -190,29 +230,64 @@ public class CalibrationSessionService : ICalibrationSessionService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <summary>
+    /// Removes a session that has not completed — a completed one is the record of a panel's
+    /// decisions. The appraisals its opening linked are released with it (performance closure
+    /// E-b): the link outlived the session, and the next session's opening passed them over as
+    /// linked already.
+    /// </summary>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(id);
 
         if (entity.Status == CalibrationStatus.Completed)
-            throw new InvalidOperationException("Cannot delete a completed calibration session.");
+            throw new InvalidOperationException("A completed calibration session is not deleted: it is the record of the panel's decisions.");
 
+        var released = await ReleaseAppraisalsAsync(entity, cancellationToken);
         await _sessionRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Calibration session deleted: {Id}", id);
+        _logger.LogInformation("Calibration session deleted: {Id}; {Released} appraisal(s) released", id, released);
         return true;
+    }
+
+    /// <summary>
+    /// Frees the appraisals a session holds without having calibrated them — its opening's links
+    /// (E-b). The link is what reads as "in a calibration session", and one to a session that will
+    /// never commit kept its appraisals from the next session's opening. Saved by the caller.
+    /// </summary>
+    private async Task<int> ReleaseAppraisalsAsync(CalibrationSession session, CancellationToken cancellationToken)
+    {
+        var held = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == session.TenantId && a.CalibrationSessionId == session.Id && !a.IsCalibrated)
+            .ToListAsync(cancellationToken);
+
+        foreach (var appraisal in held)
+        {
+            appraisal.CalibrationSessionId = null;
+            await _appraisalRepository.UpdateAsync(appraisal);
+        }
+
+        return held.Count;
     }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Convenes the session: Pending → InProgress, the opener recorded as its facilitator and the
+    /// start stamped. A separate "start" stamped only that date, from a session already open, and
+    /// changed nothing else (performance closure E-b).
+    /// </summary>
     public async Task<CalibrationSessionDto> OpenSessionAsync(Guid sessionId, Guid facilitatedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(sessionId);
 
         if (entity.Status != CalibrationStatus.Pending)
-            throw new InvalidOperationException($"Session must be in Pending status to open. Current: {entity.Status}");
+            throw new InvalidOperationException($"Only a pending session is opened. This one is {entity.Status}.");
+
+        await EnsureCycleOpenAsync(entity.AppraisalCycleId, "The calibration session cannot be opened", cancellationToken);
 
         entity.Status = CalibrationStatus.InProgress;
+        entity.StartedDate = DateTime.UtcNow;
         if (facilitatedById != Guid.Empty)
             entity.FacilitatedById = facilitatedById;
 
@@ -222,34 +297,67 @@ public class CalibrationSessionService : ICalibrationSessionService
         // sub-status resolver has no way to tell "waiting for a calibration session" from
         // "sitting in one" — CalibrationInProgress was unreachable, because the only thing that
         // ever set CalibrationSessionId was the commit at the very end.
+        //
+        // Only those waiting for calibration (E-b): a link on one already calibrated read as this
+        // session's calibration of it, and the commit skips what its session calibrated. A panel
+        // restating a calibrated appraisal reaches it through its adjustment.
+        //
+        // One holder at a time (performance closure E-g2, D-81): an appraisal another panel links is taken when that
+        // panel no longer sits — completed and never committed, it pinned the appraisal to a panel that had sat, and
+        // every later opening passed it over. One a sitting panel holds stays with that panel.
         var scoped = await GetScopedAppraisalsAsync(entity, cancellationToken);
-        foreach (var appraisal in scoped.Where(a => a.CalibrationSessionId == null))
+        var holders = await HoldersAsync(scoped, sessionId, cancellationToken);
+        var linked = 0;
+        foreach (var appraisal in scoped.Where(a => !a.IsCalibrated
+                     && (a.CalibrationSessionId == null
+                         || !holders.TryGetValue(a.CalibrationSessionId.Value, out var holder)
+                         || !IsSitting(holder.Status))))
         {
             appraisal.CalibrationSessionId = sessionId;
             await _appraisalRepository.UpdateAsync(appraisal);
+            linked++;
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Calibration session {Id} opened by {FacilitatedById} over {Count} appraisal(s)",
-            sessionId, facilitatedById, scoped.Count);
+            "Calibration session {Id} opened by {FacilitatedById} over {Count} appraisal(s), {Linked} linked",
+            sessionId, facilitatedById, scoped.Count, linked);
         return await GetByIdAsync(sessionId, cancellationToken);
     }
 
-    public async Task<CalibrationSessionDto> StartSessionAsync(Guid sessionId, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Calls off a session that has not completed (performance closure E-b, D-46) — <c>Cancelled</c>
+    /// had no door. The appraisals its opening linked are released, so the next session's opening
+    /// takes them; its panel and any adjustments stay as the record, and nothing of them is ever
+    /// applied. The reason is kept at the head of the session's meeting notes.
+    /// </summary>
+    public async Task<CalibrationSessionDto> CancelSessionAsync(Guid sessionId, string reason, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedSessionAsync(sessionId);
 
-        if (entity.Status != CalibrationStatus.InProgress)
-            throw new InvalidOperationException("Session must be opened before it can be started.");
+        switch (entity.Status)
+        {
+            case CalibrationStatus.Completed:
+                throw new InvalidOperationException("This session has completed: its decisions stand, to be committed, not cancelled.");
+            case CalibrationStatus.Cancelled:
+                throw new InvalidOperationException("This session is cancelled already.");
+        }
 
-        entity.StartedDate = DateTime.UtcNow;
+        var why = reason?.Trim();
+        if (string.IsNullOrEmpty(why))
+            throw new InvalidOperationException("A cancellation needs a reason.");
 
+        entity.Status = CalibrationStatus.Cancelled;
+        var line = $"Cancelled: {why}";
+        var notes = string.IsNullOrWhiteSpace(entity.MeetingNotes) ? line : $"{line}\n\n{entity.MeetingNotes}";
+        entity.MeetingNotes = notes.Length <= 4000 ? notes : notes[..4000];
         await _sessionRepository.UpdateAsync(entity);
+
+        var released = await ReleaseAppraisalsAsync(entity, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Calibration session {Id} started", sessionId);
+        _logger.LogInformation("Calibration session {Id} cancelled; {Released} appraisal(s) released", sessionId, released);
         return await GetByIdAsync(sessionId, cancellationToken);
     }
 
@@ -327,6 +435,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<CalibrationParticipantDto> AddParticipantAsync(Guid sessionId, CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default)
     {
         var session = await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(session, "added");
 
         var duplicate = await _participantRepository.ExistsAsync(p =>
             p.CalibrationSessionId == sessionId && p.EmployeeId == dto.EmployeeId);
@@ -361,7 +470,7 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> RemoveParticipantAsync(Guid sessionId, Guid participantId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(await GetOwnedSessionAsync(sessionId), "removed");
         var entity = await _participantRepository.GetQueryable()
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
 
@@ -376,7 +485,7 @@ public class CalibrationSessionService : ICalibrationSessionService
     public async Task<bool> RecordAttendanceAsync(
         Guid sessionId, Guid participantId, bool attended, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        EnsurePanelOpen(await GetOwnedSessionAsync(sessionId), "marked");
         var entity = await _participantRepository.GetQueryable()
             .Include(p => p.Employee)
             .FirstOrDefaultAsync(p => p.Id == participantId && p.CalibrationSessionId == sessionId, cancellationToken);
@@ -398,20 +507,8 @@ public class CalibrationSessionService : ICalibrationSessionService
         Guid sessionId, CreateCalibrationRatingAdjustmentDto dto, Guid adjustedById, CancellationToken cancellationToken = default)
     {
         var session = await GetOwnedSessionAsync(sessionId);
-
-        // Guard: adjustments can only be recorded on an in-progress session
-        if (session.Status == CalibrationStatus.Completed)
-            throw new InvalidOperationException(
-                "Rating adjustments cannot be added to a completed calibration session. " +
-                "Reopen the session to make further adjustments.");
-
-        if (session.Status == CalibrationStatus.Cancelled)
-            throw new InvalidOperationException(
-                "Rating adjustments cannot be added to a cancelled calibration session.");
-
-        if (session.Status == CalibrationStatus.Pending)
-            throw new InvalidOperationException(
-                "Open the calibration session before recording adjustments.");
+        EnsureSitting(session, "recorded");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "An adjustment cannot be recorded", cancellationToken);
 
         // The appraisal has to be one this session actually covers — otherwise a session for one
         // department could quietly restate a score in another.
@@ -446,6 +543,40 @@ public class CalibrationSessionService : ICalibrationSessionService
             .FirstOrDefaultAsync(a => a.Id == entity.Id, cancellationToken);
 
         return entity!.ToDto();
+    }
+
+    /// <summary>
+    /// The panel — who sits on a session and who attended — changes until the session completes or is cancelled
+    /// (performance closure E-g1, § 5): the screen hid the controls on a closed session, and the service took the
+    /// writes, so a completed session's record of who calibrated could be rewritten after the fact.
+    /// </summary>
+    private static void EnsurePanelOpen(CalibrationSession session, string action)
+    {
+        switch (session.Status)
+        {
+            case CalibrationStatus.Completed:
+                throw new InvalidOperationException($"This calibration session has completed: its panel members are no longer {action}.");
+            case CalibrationStatus.Cancelled:
+                throw new InvalidOperationException($"This calibration session is cancelled: its panel members are no longer {action}.");
+        }
+    }
+
+    /// <summary>
+    /// Panel decisions are recorded, changed and removed while the session sits, and at no other
+    /// time (performance closure E-b: the removal had no check, so a completed session's decisions
+    /// could be taken back before its commit read them, and a cancelled one's record thinned).
+    /// </summary>
+    private static void EnsureSitting(CalibrationSession session, string action)
+    {
+        switch (session.Status)
+        {
+            case CalibrationStatus.Pending:
+                throw new InvalidOperationException($"Open the calibration session first: adjustments are {action} while it sits.");
+            case CalibrationStatus.Completed:
+                throw new InvalidOperationException($"This calibration session has completed: its adjustments are no longer {action}.");
+            case CalibrationStatus.Cancelled:
+                throw new InvalidOperationException($"This calibration session is cancelled: its adjustments are no longer {action}.");
+        }
     }
 
     /// <summary>
@@ -597,7 +728,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                     : score.NumericScore.HasValue
                         ? (decimal?)score.NumericScore.Value
                         : score.ActualValue is decimal actual
-                            ? AppraisalScoring.KpiAchievementPercent(actual, c.KpiTargetValue, c.KpiMinValue, c.KpiMaxValue)
+                            ? AppraisalScoring.KpiAchievementPercent(actual, c.KpiTargetValue, c.KpiMinValue, c.KpiMaxValue, c.KpiTolerancePercent)
                             : null,
                 AdjustmentId = adjustment?.Id,
                 AdjustedScore = adjustment?.AdjustedScore,
@@ -611,6 +742,12 @@ public class CalibrationSessionService : ICalibrationSessionService
             .ToList();
     }
 
+    /// <summary>
+    /// Restates a recorded panel decision — its score and rationale (performance closure E-b). An
+    /// adjustment stays on the appraisal and the criterion it was recorded against: the edit copied
+    /// both from the body, so one decision could be moved onto another appraisal in the session or
+    /// another item. That is a removal and a new record, and a body naming anything else is refused.
+    /// </summary>
     public async Task<CalibrationRatingAdjustmentDto> UpdateRatingAdjustmentAsync(
         Guid sessionId, UpdateCalibrationRatingAdjustmentDto dto, Guid adjustedById, CancellationToken cancellationToken = default)
     {
@@ -624,24 +761,21 @@ public class CalibrationSessionService : ICalibrationSessionService
         if (entity == null)
             throw new ArgumentException("Rating adjustment not found in this session.");
 
-        // Guard: cannot edit adjustments on a closed session
-        if (session.Status == CalibrationStatus.Completed)
-            throw new InvalidOperationException("Cannot modify adjustments on a completed calibration session.");
-        if (session.Status == CalibrationStatus.Cancelled)
-            throw new InvalidOperationException("Cannot modify adjustments on a cancelled calibration session.");
+        EnsureSitting(session, "changed");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The adjustment cannot be changed", cancellationToken);
 
-        // The same rules as a new adjustment: an appraisal this session covers (the body names the
-        // appraisal, so an edit could otherwise move the decision out of scope), on the item's scale.
-        var scopedIds = await GetScopedAppraisalIdsAsync(sessionId, cancellationToken);
-        if (!scopedIds.Contains(dto.PerformanceAppraisalId))
-            throw new InvalidOperationException("That appraisal is not in this calibration session's scope.");
+        if (dto.PerformanceAppraisalId != entity.PerformanceAppraisalId)
+            throw new InvalidOperationException(
+                "An adjustment stays on the appraisal it was recorded for. Remove it and record one on the other appraisal.");
+
+        // The new score on the adjustment's own scale; the body's criterion has to be the one it restates.
         var criterion = await ValidateAdjustmentAsync(
-            dto.PerformanceAppraisalId, dto.TemplateItemId, dto.CriterionConfigId, dto.AdjustedScore, cancellationToken);
+            entity.PerformanceAppraisalId, dto.TemplateItemId, dto.CriterionConfigId, dto.AdjustedScore, cancellationToken);
+        if (criterion?.Key != entity.CriterionKey())
+            throw new InvalidOperationException(
+                "An adjustment stays on what it restated — the overall score, or its one criterion. Remove it and record a new one.");
 
         dto.UpdateEntity(entity);
-        entity.TemplateItemId = criterion?.TemplateItemId;
-        entity.CriterionConfigId = criterion?.CriterionConfigId;
-        entity.IsOverall = criterion == null;
         // A restated decision is still this caller's decision — the audit trail follows the edit.
         if (adjustedById != Guid.Empty)
             entity.AdjustedById = adjustedById;
@@ -656,12 +790,15 @@ public class CalibrationSessionService : ICalibrationSessionService
 
     public async Task<bool> DeleteRatingAdjustmentAsync(Guid sessionId, Guid adjustmentId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedSessionAsync(sessionId);
+        var session = await GetOwnedSessionAsync(sessionId);
         var entity = await _adjustmentRepository.GetQueryable()
             .FirstOrDefaultAsync(a => a.Id == adjustmentId && a.CalibrationSessionId == sessionId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException("Rating adjustment not found in this session.");
+
+        EnsureSitting(session, "removed");
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The adjustment cannot be removed", cancellationToken);
 
         await _adjustmentRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -684,6 +821,10 @@ public class CalibrationSessionService : ICalibrationSessionService
     ///
     /// <para>Anything already adjusted or already linked to the session is unioned back in, so a
     /// row cannot vanish from the grid because someone was moved to another unit mid-cycle.</para>
+    ///
+    /// <para>A withdrawn appraisal is out of every session (performance closure E-d1), the union
+    /// included: its adjustments stay on record, but it left the grid, the matrix's counts and
+    /// average, the opening's links and the commit. Only the commit skipped it before.</para>
     /// </summary>
     private async Task<List<PerformanceAppraisal>> GetScopedAppraisalsAsync(
         CalibrationSession session, CancellationToken cancellationToken)
@@ -691,7 +832,8 @@ public class CalibrationSessionService : ICalibrationSessionService
         var tenantId = session.TenantId;
 
         var query = _appraisalRepository.GetQueryable()
-            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == session.AppraisalCycleId);
+            .Where(a => a.TenantId == tenantId && a.AppraisalCycleId == session.AppraisalCycleId
+                        && a.Status != AppraisalStatus.Withdrawn);
 
         if (session.OrganizationUnitId.HasValue)
         {
@@ -728,7 +870,7 @@ public class CalibrationSessionService : ICalibrationSessionService
         if (extraIds.Count > 0)
         {
             var extras = await _appraisalRepository.GetQueryable()
-                .Where(a => a.TenantId == tenantId && extraIds.Contains(a.Id))
+                .Where(a => a.TenantId == tenantId && extraIds.Contains(a.Id) && a.Status != AppraisalStatus.Withdrawn)
                 .Include(a => a.Employee)
                     .ThenInclude(e => e.Position)
                 .Include(a => a.Employee)
@@ -790,8 +932,16 @@ public class CalibrationSessionService : ICalibrationSessionService
     /// panel found it.</para>
     ///
     /// <para>Each appraisal commits on its own save — its adjustments, its calibration stamp and
-    /// its settled score together — and a final one is published to the talent pools. A commit
-    /// that fails part-way can be run again: every step is idempotent.</para>
+    /// its settled score together — and a final one is published to the talent pools.</para>
+    ///
+    /// <para><b>Once per appraisal</b> (performance closure E-b). A session commits an appraisal
+    /// once, and only the evaluation its panel sat over. Run again — after a failure part-way, or
+    /// once more of its scope has reached the step — it skips what it calibrated, and anything
+    /// whose manager submitted after the panel closed. Re-running re-applied every adjustment to a
+    /// final appraisal it had adjusted: after an upheld appeal it wrote the manager's criterion
+    /// back, restored the restated overall, re-settled and published, and appended its rationale
+    /// again. And an appraisal HR returned to its manager, re-evaluated and back at the step, took
+    /// the old panel's decisions onto an evaluation that panel never saw.</para>
     /// </summary>
     public async Task<CalibrationApplyResultDto> ApplyAllAdjustmentsAsync(
         Guid sessionId, Guid appliedById, CancellationToken cancellationToken = default)
@@ -800,6 +950,8 @@ public class CalibrationSessionService : ICalibrationSessionService
 
         if (session.Status != CalibrationStatus.Completed)
             throw new InvalidOperationException("Adjustments can only be applied to a completed session.");
+
+        await EnsureCycleOpenAsync(session.AppraisalCycleId, "The panel's ratings cannot be committed", cancellationToken);
 
         var scoped = await GetScopedAppraisalsAsync(session, cancellationToken);
         if (scoped.Count == 0)
@@ -819,19 +971,13 @@ public class CalibrationSessionService : ICalibrationSessionService
         // adjustments": the manager's evaluation total, which is the number the panel was looking
         // at on the grid.
         var scopedIds = scoped.Select(a => a.Id).ToList();
-        var managerTotals = (await _appraisalRepository.GetQueryable()
-                .Where(a => scopedIds.Contains(a.Id))
-                .SelectMany(a => a.EvaluatorEvaluations)
-                .Where(e => e.EvaluatorRole == EvaluatorRole.Manager && !e.IsDeleted)
-                .Select(e => new { e.AppraisalId, e.TotalScore })
-                .ToListAsync(cancellationToken))
-            .GroupBy(x => x.AppraisalId)
-            .ToDictionary(g => g.Key, g => g.Max(x => x.TotalScore));
+        var managers = await ManagerEvaluationsAsync(scopedIds, cancellationToken);
 
         var result = new CalibrationApplyResultDto();
 
         // Where each appraisal is, by the same gates every other write is held to (B1).
         var gateStates = await _lifecycle.GetStatesAsync(scopedIds, cancellationToken);
+        var holders = await HoldersAsync(scoped, sessionId, cancellationToken);
 
         foreach (var appraisal in scoped)
         {
@@ -847,7 +993,8 @@ public class CalibrationSessionService : ICalibrationSessionService
             var adjustedHere = itemAdjustments.Count > 0 || overallAdjustment != null;
 
             gateStates.TryGetValue(appraisal.Id, out var gateState);
-            var skip = CalibrationSkipReason(appraisal, gateState, adjustedHere);
+            managers.TryGetValue(appraisal.Id, out var manager);
+            var skip = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate, HolderOf(appraisal, holders));
             if (skip != null)
             {
                 // Opening the session linked every appraisal in its scope to it; one it does not
@@ -870,9 +1017,7 @@ public class CalibrationSessionService : ICalibrationSessionService
             // Capture the manager's number once, the first time this appraisal is calibrated.
             if (!appraisal.IsCalibrated && appraisal.PreCalibrationScore == null)
             {
-                appraisal.PreCalibrationScore =
-                    (managerTotals.TryGetValue(appraisal.Id, out var managerTotal) ? managerTotal : null)
-                    ?? appraisal.OverallScore;
+                appraisal.PreCalibrationScore = manager?.Total ?? appraisal.OverallScore;
             }
 
             if (itemAdjustments.Count > 0)
@@ -919,23 +1064,55 @@ public class CalibrationSessionService : ICalibrationSessionService
     /// Why the commit leaves an appraisal in the session's scope alone, or null when it calibrates
     /// it: at the calibration step by the gates (B1); already calibrated and adjusted again by this
     /// session before it is final — a later panel restating it (lane A); or final with an adjustment
-    /// from this session (A7).
+    /// from this session (A7). The grid shows it on each row, so the panel sees who a commit takes.
     ///
     /// <para>It calibrated any appraisal in Governance. With HR's review before calibration that
     /// took appraisals HR had not reviewed yet, and on a cycle with no calibration step it stamped
     /// appraisals calibrated that no gate would ever ask about.</para>
+    ///
+    /// <para>Two reasons come first (E-b). What this session calibrated, it does not calibrate
+    /// again — only its own commit writes the link and the stamp together (opening links only
+    /// appraisals waiting for calibration, and HR's advance past the step releases the link). And
+    /// a panel calibrates the evaluation it sat over: once the session has closed, a manager's
+    /// submission after it — a first one, or a revision after HR's return or an appeal's remand —
+    /// is a number no panel saw.</para>
     /// </summary>
-    private static string? CalibrationSkipReason(PerformanceAppraisal appraisal, AppraisalGateState? state, bool adjustedHere)
+    private static string? CommitSkipReason(
+        CalibrationSession session, PerformanceAppraisal appraisal, AppraisalGateState? state,
+        bool adjustedHere, DateTime? managerSubmittedDate, PanelHolder? holder)
     {
+        if (appraisal.IsCalibrated && appraisal.CalibrationSessionId == session.Id)
+            return "Already calibrated by this session: what has happened to it since stands.";
+
+        // One holder at a time (performance closure E-g2, D-81): another panel still sitting over the appraisal decides
+        // it — two panels each restated one score, and the last commit won; and a panel that sat after this one decides
+        // it — an old panel committed late overwrote the newer one's calibration. A panel that sat before this one does
+        // not stop it: a later panel restating a calibrated appraisal through its own adjustment is how one is corrected.
+        if (holder is { } h)
+        {
+            if (IsSitting(h.Status))
+                return $"Held by the panel '{h.Name}', still sitting: that panel decides it.";
+            if ((h.CompletedDate ?? DateTime.MinValue) > (session.CompletedDate ?? DateTime.MaxValue))
+                return appraisal.IsCalibrated
+                    ? $"Calibrated by the panel '{h.Name}', which sat after this one: its calibration stands."
+                    : $"Held by the panel '{h.Name}', which sat after this one: that panel decides it.";
+        }
+
         switch (appraisal.Status)
         {
-            case AppraisalStatus.Completed or AppraisalStatus.Closed:
-                return adjustedHere ? null : "Already final, and this session made no adjustment to it.";
+            case AppraisalStatus.Completed or AppraisalStatus.Closed when !adjustedHere:
+                return "Already final, and this session made no adjustment to it.";
             case AppraisalStatus.Appealed:
                 return "Under appeal: the appeal decides its score.";
             case AppraisalStatus.Withdrawn:
                 return "Withdrawn: it is not being appraised.";
         }
+
+        if (session.CompletedDate is DateTime closed && managerSubmittedDate > closed)
+            return "Its manager submitted after this panel closed: the panel did not see that evaluation, and a panel that sits on it calibrates it.";
+
+        if (appraisal.Status is AppraisalStatus.Completed or AppraisalStatus.Closed)
+            return null;
 
         if (state == null)
             return "Its cycle's appraisal settings could not be read.";
@@ -954,6 +1131,53 @@ public class CalibrationSessionService : ICalibrationSessionService
             ? $"Not at the calibration step: it is at {state.StepLabel} — {reason}."
             : $"Not at the calibration step: it is at {state.StepLabel}.";
     }
+
+    /// <summary>What a manager evaluation contributes to calibration: its total, and when it was last submitted.</summary>
+    /// <summary>
+    /// A submitted manager evaluation's total and when it was last submitted. <paramref name="Reevaluating"/>: HR returned
+    /// it — it holds a total from its earlier submission and is open again — so it has no total to show until the manager
+    /// submits again (performance closure E-g2, D-82: the grid read the old total as the manager's proposal).
+    /// </summary>
+    private sealed record ManagerEvaluationFacts(decimal? Total, DateTime? SubmittedDate, bool Reevaluating);
+
+    /// <summary>The panel that links an appraisal, when it is not the session at hand.</summary>
+    private sealed record PanelHolder(string Name, CalibrationStatus Status, DateTime? CompletedDate);
+
+    private static bool IsSitting(CalibrationStatus status) => status is CalibrationStatus.Pending or CalibrationStatus.InProgress;
+
+    /// <summary>The panels other than <paramref name="sessionId"/> that link any of <paramref name="appraisals"/>, by id.</summary>
+    private async Task<Dictionary<Guid, PanelHolder>> HoldersAsync(
+        IEnumerable<PerformanceAppraisal> appraisals, Guid sessionId, CancellationToken cancellationToken)
+    {
+        var ids = appraisals
+            .Where(a => a.CalibrationSessionId is Guid other && other != sessionId)
+            .Select(a => a.CalibrationSessionId!.Value)
+            .Distinct()
+            .ToList();
+        if (ids.Count == 0) return new Dictionary<Guid, PanelHolder>();
+
+        var tenantId = GetTenantId();
+        return await _sessionRepository.GetQueryable()
+            .Where(s => s.TenantId == tenantId && ids.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => new PanelHolder(s.SessionName, s.Status, s.CompletedDate), cancellationToken);
+    }
+
+    private static PanelHolder? HolderOf(PerformanceAppraisal appraisal, Dictionary<Guid, PanelHolder> holders)
+        => appraisal.CalibrationSessionId is Guid holderId && holders.TryGetValue(holderId, out var holder) ? holder : null;
+
+    private async Task<Dictionary<Guid, ManagerEvaluationFacts>> ManagerEvaluationsAsync(
+        List<Guid> appraisalIds, CancellationToken cancellationToken)
+        => (await _appraisalRepository.GetQueryable()
+                .Where(a => appraisalIds.Contains(a.Id))
+                .SelectMany(a => a.EvaluatorEvaluations)
+                .Where(e => e.EvaluatorRole == EvaluatorRole.Manager && !e.IsDeleted)
+                .Select(e => new { e.AppraisalId, e.TotalScore, e.SubmittedDate })
+                .ToListAsync(cancellationToken))
+            .GroupBy(x => x.AppraisalId)
+            .ToDictionary(g => g.Key, g => new ManagerEvaluationFacts(
+                g.Where(x => x.SubmittedDate != null).Max(x => x.TotalScore),
+                g.Max(x => x.SubmittedDate),
+                g.All(x => x.SubmittedDate == null) && g.Any(x => x.TotalScore != null)));
 
     /// <summary>
     /// Writes item-level panel decisions onto the manager's criterion scores. A criterion the
@@ -1028,15 +1252,11 @@ public class CalibrationSessionService : ICalibrationSessionService
         // The manager's own submitted total, per appraisal — the number the panel is arguing
         // about. It was hardcoded to null, so the "manager proposed" column was always blank.
         var appraisalIds = appraisals.Select(a => a.Id).ToList();
-        var managerTotals = await _appraisalRepository.GetQueryable()
-            .Where(a => appraisalIds.Contains(a.Id))
-            .SelectMany(a => a.EvaluatorEvaluations)
-            .Where(e => e.EvaluatorRole == EvaluatorRole.Manager)
-            .Select(e => new { e.AppraisalId, e.TotalScore })
-            .ToListAsync(cancellationToken);
-        var managerTotalByAppraisal = managerTotals
-            .GroupBy(x => x.AppraisalId)
-            .ToDictionary(g => g.Key, g => g.Max(x => x.TotalScore));
+        var managers = await ManagerEvaluationsAsync(appraisalIds, cancellationToken);
+
+        // Where each row is, so it can say what a commit would do with it (E-b).
+        var gateStates = await _lifecycle.GetStatesAsync(appraisalIds, cancellationToken);
+        var holders = await HoldersAsync(appraisals, session.Id, cancellationToken);
 
         var managerIds = appraisals
             .Where(a => a.Employee?.ManagerId != null)
@@ -1060,14 +1280,30 @@ public class CalibrationSessionService : ICalibrationSessionService
             // single criterion and is shown in the detail list instead. The flag, not a missing
             // template item: a goal row has none (lane L3), and read as the overall here.
             var latestOverall = appraisalAdjustments.FirstOrDefault(a => a.IsOverall);
-            var calibratedScore = latestOverall?.AdjustedScore;
 
-            // Same fallback as the commit: before HR sign-off the appraisal has no OverallScore,
-            // so the manager's evaluation total is the number standing to be calibrated. Without
-            // it the "pre-calibration" column read blank on exactly the appraisals a panel is
-            // convened to look at.
-            var managerTotal = managerTotalByAppraisal.TryGetValue(appraisal.Id, out var mt) ? mt : null;
-            var preCalibration = appraisal.PreCalibrationScore ?? appraisal.OverallScore ?? managerTotal;
+            // P-41 (E-b): a calibrated appraisal reads its own settled score — the restated overall,
+            // or the overall its restated items give — unless this session is still proposing a new
+            // one for it. The grid read the adjustment record alone, so a row this session committed
+            // with item adjustments showed no calibrated score, and one whose score an appeal or a
+            // later panel moved kept showing the number the panel had typed.
+            var committedHere = appraisal.IsCalibrated && appraisal.CalibrationSessionId == session.Id;
+            var calibratedScore = appraisal.IsCalibrated && (committedHere || latestOverall == null)
+                ? appraisal.OverallScore
+                : latestOverall?.AdjustedScore;
+
+            // The commit's own fallback, in the commit's order: the number it captured, else the
+            // manager's evaluation total — before HR's sign-off there is no settled score, and the
+            // "pre-calibration" column read blank on exactly the appraisals a panel is convened to
+            // look at — else a settled score. The settled score came before the manager's total, so
+            // an appraisal HR returned showed the old panel's result as the new panel's starting point.
+            managers.TryGetValue(appraisal.Id, out var manager);
+            var managerTotal = manager?.Total;
+            // Returned by HR (E-g2, D-82): no proposal and no starting point until the manager submits again.
+            var reevaluating = manager?.Reevaluating == true;
+            var preCalibration = reevaluating ? null : appraisal.PreCalibrationScore ?? managerTotal ?? appraisal.OverallScore;
+
+            gateStates.TryGetValue(appraisal.Id, out var gateState);
+            var adjustedHere = appraisalAdjustments.Any(a => a.AdjustedScore.HasValue && (a.IsOverall || a.CriterionKey().HasValue));
 
             rows.Add(new CalibrationMatrixRowDto
             {
@@ -1079,6 +1315,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                 DepartmentName = appraisal.Employee?.OrganizationUnit?.Name,
                 AppraisalStatus = appraisal.Status,
                 ManagerProposedScore = managerTotal,
+                ManagerReevaluating = reevaluating,
                 PreCalibrationScore = preCalibration,
                 CalibratedScore = calibratedScore,
                 ScoreAdjustment = calibratedScore.HasValue && preCalibration.HasValue
@@ -1086,6 +1323,7 @@ public class CalibrationSessionService : ICalibrationSessionService
                     : null,
                 AdjustmentRationale = latestOverall?.Rationale,
                 IsCalibrated = appraisal.IsCalibrated,
+                CommitSkipReason = CommitSkipReason(session, appraisal, gateState, adjustedHere, manager?.SubmittedDate, HolderOf(appraisal, holders)),
                 ManagerName = appraisal.Employee?.ManagerId != null
                     && managerNameById.TryGetValue(appraisal.Employee.ManagerId.Value, out var managerName)
                         ? managerName

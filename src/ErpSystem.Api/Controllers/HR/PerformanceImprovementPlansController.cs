@@ -100,6 +100,15 @@ public class PerformanceImprovementPlansController : ControllerBase
         => PipAccess.CanManageAsync(this, _db, _currentUserService, pipId, ct);
 
     /// <summary>
+    /// Decision D-75: the plan's subject — HR included — does not approve, reject, close or delete
+    /// their own plan. Answered 403 with the reason, before the service is asked.
+    /// </summary>
+    private async Task<IActionResult?> RefuseSubjectAsync(Guid pipId, string action, CancellationToken ct = default)
+        => await PipAccess.IsSubjectAsync(_db, _currentUserService, pipId, ct)
+            ? StatusCode(StatusCodes.Status403Forbidden, new { message = $"You cannot {action} your own improvement plan." })
+            : null;
+
+    /// <summary>
     /// Whether the caller may open — or prepare — a plan about this employee (performance closure
     /// P4): the employee's line manager, or the performance desk; never the employee themselves.
     /// The author roles admitted any Manager for any employee, so a manager could raise a plan on
@@ -344,11 +353,19 @@ public class PerformanceImprovementPlansController : ControllerBase
         if (hrOwnerId is Guid named && !await PipAccess.EmployeeHoldsDeskAsync(_db, tenantId, named, ct))
             return UnprocessableEntity(new { message = "The HR owner has to be an HR officer with an active login." });
 
-        // A plan raised off an appraisal is raised off one of this employee's.
-        if (req.AppraisalId is Guid appraisalId && appraisalId != Guid.Empty
-            && !await _db.Set<PerformanceAppraisal>().AsNoTracking()
-                .AnyAsync(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == req.EmployeeId, ct))
-            return BadRequest(new { message = "That appraisal is not this employee's." });
+        // A plan raised off an appraisal is raised off one of this employee's — and one still in its
+        // cycle: a withdrawn appraisal has no result to act on (performance closure E-d1).
+        if (req.AppraisalId is Guid appraisalId && appraisalId != Guid.Empty)
+        {
+            var source = await _db.Set<PerformanceAppraisal>().AsNoTracking()
+                .Where(a => a.Id == appraisalId && a.TenantId == tenantId && a.EmployeeId == req.EmployeeId)
+                .Select(a => new { a.Status })
+                .FirstOrDefaultAsync(ct);
+            if (source is null)
+                return BadRequest(new { message = "That appraisal is not this employee's." });
+            if (source.Status == AppraisalStatus.Withdrawn)
+                return UnprocessableEntity(new { message = "That appraisal was withdrawn from its cycle, so no plan is raised off it." });
+        }
 
         try
         {
@@ -371,7 +388,7 @@ public class PerformanceImprovementPlansController : ControllerBase
                 ReviewSchedule    = req.ReviewSchedule,
             };
 
-            var response = await _improvementPlanService.CreateAsync(createDto);
+            var response = await _improvementPlanService.CreateAsync(createDto, ActorEmployeeId);
             return Ok(response.Id);
         }
         catch (InvalidOperationException ex)
@@ -443,13 +460,14 @@ public class PerformanceImprovementPlansController : ControllerBase
     }
 
     // ── Approval workflow ─────────────────────────────────────────────────────
-    // Submit / approve / reject / recall run on the generic workflow engine. There is no role
-    // attribute on approve and reject on purpose: the authority to approve comes from the published
-    // PerformanceImprovementPlan definition, and the service refuses anyone the engine has not
-    // routed the step to.
-    //
-    // ⚠ All four are inoperable until such a definition is published and
-    // POST api/Workflow/entity-types/seed has been re-run after this build.
+    // Submit / approve / reject / recall run on the generic workflow engine when a definition is
+    // published, and through the fallback when none is. There is no role attribute on approve and
+    // reject on purpose: the service decides from the record (F3, D-12, D-102) — whoever submitted
+    // the plan does not decide it; a plan the line manager put forward is HR's, one HR put forward
+    // the line manager's or a tenant administrator's — and the line manager holds no HR role.
+
+    /// <summary>The acting employee, from the token — the plan's author recorded, and the decider compared.</summary>
+    private Guid? ActorEmployeeId => _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : null;
 
     /// <summary>Send a draft plan out for approval.</summary>
     [HttpPost("{id:guid}/submit")]
@@ -463,11 +481,15 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.SubmitForApprovalAsync(id, ct));
+            return Ok(await _improvementPlanService.SubmitForApprovalAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -487,9 +509,11 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Approve(Guid id, CancellationToken ct = default)
     {
+        if (await RefuseSubjectAsync(id, "approve", ct) is { } refused) return refused;
+
         try
         {
-            return Ok(await _improvementPlanService.ApproveAsync(id, ct));
+            return Ok(await _improvementPlanService.ApproveAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
@@ -517,9 +541,11 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Reject(Guid id, [FromBody] PipRejectionRequest? request, CancellationToken ct = default)
     {
+        if (await RefuseSubjectAsync(id, "reject", ct) is { } refused) return refused;
+
         try
         {
-            return Ok(await _improvementPlanService.RejectAsync(id, request?.Reason, ct));
+            return Ok(await _improvementPlanService.RejectAsync(id, request?.Reason, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
@@ -552,11 +578,15 @@ public class PerformanceImprovementPlansController : ControllerBase
 
         try
         {
-            return Ok(await _improvementPlanService.RecallAsync(id, ct));
+            return Ok(await _improvementPlanService.RecallAsync(id, ActorEmployeeId, ct));
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -587,7 +617,7 @@ public class PerformanceImprovementPlansController : ControllerBase
         {
             if (id != statusDto.PipId)
             {
-                return BadRequest("ID mismatch");
+                return BadRequest(new { message = "ID mismatch" });
             }
 
             if (!ModelState.IsValid)
@@ -622,11 +652,13 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Complete(Guid id, [FromBody] CompletePipDto completeDto)
     {
+        if (await RefuseSubjectAsync(id, "record the outcome of") is { } refused) return refused;
+
         try
         {
             if (id != completeDto.PipId)
             {
-                return BadRequest("ID mismatch");
+                return BadRequest(new { message = "ID mismatch" });
             }
 
             if (!ModelState.IsValid)
@@ -660,6 +692,8 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Delete(Guid id)
     {
+        if (await RefuseSubjectAsync(id, "delete") is { } refused) return refused;
+
         try
         {
             var response = await _improvementPlanService.DeleteAsync(id);
@@ -726,11 +760,13 @@ public class PerformanceImprovementPlansController : ControllerBase
             // an appraisal shows what prompted it.
             if (appraisalId is Guid sourceAppraisalId)
             {
+                // Not a withdrawn one (performance closure E-d1): its score is no result.
                 var appraisal = await _db.Set<PerformanceAppraisal>()
                     .AsNoTracking()
                     .Where(a => a.Id == sourceAppraisalId
                              && a.TenantId == tenantId
-                             && a.EmployeeId == employeeId)
+                             && a.EmployeeId == employeeId
+                             && a.Status != AppraisalStatus.Withdrawn)
                     .Select(a => new
                     {
                         a.Id,
@@ -827,12 +863,15 @@ public class PerformanceImprovementPlansController : ControllerBase
                     EmployeeAttended    = m.EmployeeAttended,
                     ConductedByName     = m.ConductedByName,
                     ProgressNotesPreview = m.ProgressNotes.Length > 120 ? m.ProgressNotes[..120] + "..." : m.ProgressNotes,
-                    IsCompleted         = m.MeetingDate <= DateTime.UtcNow,
+                    // Decision D-73: the stored status. "Completed" used to mean the date had passed.
+                    Status              = m.Status,
+                    IsCompleted         = m.Status == PipMeetingStatus.Held,
                 }).ToList(),
             };
 
+            // The next meeting still to be held — booked and neither held nor cancelled (D-73).
             detail.NextScheduledMeeting = detail.ReviewMeetings
-                .Where(m => !m.IsCompleted)
+                .Where(m => m.Status == PipMeetingStatus.Scheduled)
                 .OrderBy(m => m.MeetingDate)
                 .FirstOrDefault();
 
@@ -863,6 +902,10 @@ public class PerformanceImprovementPlansController : ControllerBase
             var goals = await _improvementPlanService.GetPipGoalsAsync(pipId);
             return Ok(goals);
         }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving goals for PIP {PipId}", pipId);
@@ -892,6 +935,9 @@ public class PerformanceImprovementPlansController : ControllerBase
                 SuccessCriteria = req.SuccessCriteria,
                 DueDate         = req.DueDate,
                 Status          = req.Status,
+                // P-55: the form's starting progress was dropped here.
+                ProgressPercent = req.ProgressPercent,
+                ProgressNotes   = req.ProgressNotes,
             };
 
             var result = await _improvementPlanService.AddPipGoalAsync(pipId, dto);
@@ -899,7 +945,13 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // D-73/D-76: a plan out for approval, in force or closed takes no new goal — a rule (422),
+            // not the 500 every refusal here used to be.
+            return BusinessRuleRejected(ex, "adding a goal");
         }
         catch (Exception ex)
         {
@@ -919,10 +971,12 @@ public class PerformanceImprovementPlansController : ControllerBase
         {
             var existingGoal = await _improvementPlanService.GetGoalByIdAsync(goalId);
             if (existingGoal == null)
-                return NotFound("Goal not found");
+                return NotFound(new { message = "Goal not found" });
 
             if (!await CanManagePlanAsync(existingGoal.PipId)) return Forbid();
 
+            // PipGoalRequest's field checks run before the action ([ApiController]); D-76 added them —
+            // a percent of 150 was stored, and one of 1000 or a long title failed in the database.
             var dto = new UpdatePipGoalDto
             {
                 Id              = goalId,
@@ -941,7 +995,11 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "updating a goal");
         }
         catch (Exception ex)
         {
@@ -961,7 +1019,7 @@ public class PerformanceImprovementPlansController : ControllerBase
         {
             var existingGoal = await _improvementPlanService.GetGoalByIdAsync(goalId);
             if (existingGoal == null)
-                return NotFound("Goal not found");
+                return NotFound(new { message = "Goal not found" });
 
             if (!await CanManagePlanAsync(existingGoal.PipId)) return Forbid();
 
@@ -970,7 +1028,11 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "removing a goal");
         }
         catch (Exception ex)
         {
@@ -1053,7 +1115,10 @@ public class PerformanceImprovementPlansController : ControllerBase
             await _hrDocuments.RollbackAsync(document, tenantId, actorUserId, ct);
 
             if (ex is ArgumentException)
-                return NotFound(ex.Message);
+                return NotFound(new { message = ex.Message });
+            // A closed plan takes no more documents (decision D-73); the stored file is rolled back.
+            if (ex is InvalidOperationException rule)
+                return BusinessRuleRejected(rule, "attaching a document");
 
             _logger.LogError(ex, "Error uploading attachment for PIP {PipId}", pipId);
             return StatusCode(500, "An error occurred while uploading the attachment");
@@ -1115,11 +1180,14 @@ public class PerformanceImprovementPlansController : ControllerBase
         {
             var attachment = await _improvementPlanService.GetAttachmentByIdAsync(attachmentId);
             if (attachment == null)
-                return NotFound("Attachment not found");
+                return NotFound(new { message = "Attachment not found" });
 
             if (!await CanManagePlanAsync(attachment.PipId)) return Forbid();
 
-            // Delete file from storage
+            // The record first, then the file: a closed plan's documents stay (decision D-73), and the
+            // file used to be deleted from storage before the service was asked.
+            var result = await _improvementPlanService.DeletePipAttachmentAsync(attachmentId);
+
             if (!string.IsNullOrWhiteSpace(attachment.FilePath))
             {
                 try { await _fileStorageService.DeleteFileAsync(attachment.FilePath); }
@@ -1129,12 +1197,15 @@ public class PerformanceImprovementPlansController : ControllerBase
                 }
             }
 
-            var result = await _improvementPlanService.DeletePipAttachmentAsync(attachmentId);
             return Ok(result);
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BusinessRuleRejected(ex, "removing a document");
         }
         catch (Exception ex)
         {
@@ -1156,6 +1227,8 @@ public class PerformanceImprovementPlansController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> RecordOutcome(Guid pipId, [FromBody] PipOutcomeRequest req)
     {
+        if (await RefuseSubjectAsync(pipId, "record the outcome of") is { } refused) return refused;
+
         try
         {
             var completeDto = new CompletePipDto
@@ -1296,6 +1369,10 @@ public class PerformanceImprovementPlansController : ControllerBase
             var response = await _improvementPlanService.GetReviewMeetingsAsync(pipId);
             return Ok(response);
         }
+        catch (ArgumentException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving review meetings for PIP {PipId}", pipId);
@@ -1321,7 +1398,7 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
         }
         catch (Exception ex)
         {
@@ -1347,7 +1424,7 @@ public class PerformanceImprovementPlansController : ControllerBase
         {
             if (meetingId != updateDto.Id)
             {
-                return BadRequest("ID mismatch");
+                return BadRequest(new { message = "ID mismatch" });
             }
 
             if (!ModelState.IsValid)
@@ -1358,7 +1435,12 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A closed plan or a cancelled meeting (decision D-73) — a rule, not a 500.
+            return BusinessRuleRejected(ex, "updating a review meeting");
         }
         catch (Exception ex)
         {
@@ -1386,7 +1468,12 @@ public class PerformanceImprovementPlansController : ControllerBase
         }
         catch (ArgumentException ex)
         {
-            return NotFound(ex.Message);
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A held meeting, or a closed plan's (decision D-73).
+            return BusinessRuleRejected(ex, "removing a review meeting");
         }
         catch (Exception ex)
         {

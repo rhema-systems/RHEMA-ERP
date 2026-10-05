@@ -199,10 +199,13 @@ export default function PerformanceAnalyticsPage() {
         description="Where a cycle has got to, how its scores fell out, and what is still waiting on somebody."
         backHref="/hr/performance"
         actions={
+          // Only a running cycle has deadlines to chase: the server refuses a Draft or a Closed one
+          // (performance closure E-d2a), and a Closed cycle was reminded as readily as an Open one.
           <Button
             variant="outline"
             onClick={() => reminders.mutate()}
-            disabled={!cycleId || reminders.isPending}
+            disabled={!cycleId || reminders.isPending || d?.cycleStatus !== 'Open'}
+            title={d && d.cycleStatus !== 'Open' ? 'Reminders are sent for an open cycle.' : undefined}
           >
             <Send className="mr-2 h-4 w-4" />
             {reminders.isPending ? 'Sending…' : 'Send reminders'}
@@ -475,8 +478,9 @@ export default function PerformanceAnalyticsPage() {
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">What managers asked for</CardTitle>
                   <CardDescription>
-                    Boxes ticked on the appraisal form. Intent — not a record that anything
-                    happened.
+                    Appraisals with a recommendation of each kind still standing — proposed,
+                    approved or actioned; a rejected or dismissed one no longer counts. Award
+                    counts recognition.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -657,8 +661,8 @@ export default function PerformanceAnalyticsPage() {
                     Recent activity
                   </CardTitle>
                   <CardDescription>
-                    Manual pipeline advances, acknowledgments, and appeals filed or resolved —
-                    newest first, capped at 30.
+                    Manual pipeline advances, withdrawals, acknowledgments, and appeals filed or
+                    resolved — newest first, capped at 30.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>

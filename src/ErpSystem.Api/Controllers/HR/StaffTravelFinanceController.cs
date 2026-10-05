@@ -61,6 +61,17 @@ public class StaffTravelFinanceController : HrControllerBase
         return Ok(await _service.UpdateBudgetAsync(dto, ctx.Value.userId));
     }
 
+    /// <summary>A travel administrator's verb (lane 3, B10): the budget's approver is an Employee FK, and is never the traveller.</summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("budgets/{id:guid}/approve")]
+    public async Task<ActionResult<StaffTravelBudgetDto>> ApproveBudget(Guid id)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Approving a travel budget") is { } contextError) return contextError;
+
+        return Ok(await _service.ApproveBudgetAsync(id, employeeId));
+    }
+
     // =========================================================================
     // EXPENSE CLAIMS
     // =========================================================================
@@ -101,7 +112,7 @@ public class StaffTravelFinanceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        var created = await _service.CreateClaimAsync(dto, ctx.Value.tenantId, ctx.Value.userId);
+        var created = await _service.CreateClaimAsync(dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId);
         return CreatedAtAction(nameof(GetClaimById), new { id = created.Id }, created);
     }
 
@@ -155,9 +166,30 @@ public class StaffTravelFinanceController : HrControllerBase
     public async Task<IActionResult> PayClaim(Guid id, [FromBody] PayStaffTravelExpenseClaimDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
+        // PaidById is an Employee FK, and the two-person rule compares the payer with the claimant and the
+        // reviewers (lane 3, D-2) — so paying, like reviewing, needs the caller's employee link.
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Paying an expense claim") is { } contextError) return contextError;
+
         dto.ClaimId = id;
-        await _service.PayClaimAsync(dto);
+        await _service.PayClaimAsync(dto, employeeId);
         return Ok(new { message = "Expense claim paid." });
+    }
+
+    /// <summary>
+    /// A travel administrator's verb (lane 3, T-39): the payment's journal reversed, its advance settlement undone, the
+    /// claim back to approved. Never the claimant's or the payer's own — so it needs the caller's employee link.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("claims/{id:guid}/void-payment")]
+    public async Task<IActionResult> VoidClaimPayment(Guid id, [FromBody] VoidStaffTravelClaimPaymentDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Voiding a claim's payment") is { } contextError) return contextError;
+
+        await _service.VoidClaimPaymentAsync(id, dto, employeeId);
+        return Ok(new { message = "Payment voided." });
     }
 
     // ---- Expense claim lines -----------------------------------------------
@@ -175,7 +207,7 @@ public class StaffTravelFinanceController : HrControllerBase
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
         dto.StaffTravelExpenseClaimId = claimId;
-        return Ok(await _service.AddClaimLineAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
+        return Ok(await _service.AddClaimLineAsync(dto, ctx.Value.tenantId, ctx.Value.userId, CurrentUser.EmployeeId));
     }
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
@@ -187,8 +219,16 @@ public class StaffTravelFinanceController : HrControllerBase
         var ctx = ResolveContext();
         if (ctx is null) return BadRequest("User/tenant context could not be resolved.");
 
-        return Ok(await _service.UpdateClaimLineAsync(dto, ctx.Value.userId));
+        return Ok(await _service.UpdateClaimLineAsync(dto, ctx.Value.userId, CurrentUser.EmployeeId));
     }
+
+    /// <summary>
+    /// Lane 6 (D-30, D-32): the claim's trip's company-vehicle trips, with the fuel Fleet already logs on each — what a
+    /// fuel expense names. Through travel's door: HR holds no Maintenance permission.
+    /// </summary>
+    [HttpGet("claims/{claimId:guid}/fleet-fuel")]
+    public async Task<ActionResult<StaffTravelFleetFuelOptionsDto>> GetClaimFleetFuel(Guid claimId)
+        => Ok(await _service.GetClaimFleetFuelAsync(claimId));
 
     [Authorize(Policy = HrPermissions.TravelWritePolicy)]
     [HttpPost("lines/{lineId:guid}/review")]
@@ -309,6 +349,58 @@ public class StaffTravelFinanceController : HrControllerBase
         dto.AdvanceId = id;
         await _service.DisburseAdvanceAsync(dto, employeeId);
         return Ok(new { message = "Advance disbursed." });
+    }
+
+    // Lane 3: an advance's other verbs. Each records an Employee actor, so each needs the caller's employee link;
+    // the service refuses the traveller on their own advance (D-2).
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/reject")]
+    public async Task<IActionResult> RejectAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Rejecting a travel advance") is { } contextError) return contextError;
+
+        await _service.RejectAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance rejected." });
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/cancel")]
+    public async Task<IActionResult> CancelAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Cancelling a travel advance") is { } contextError) return contextError;
+
+        await _service.CancelAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance cancelled." });
+    }
+
+    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    [HttpPost("advances/{id:guid}/refund")]
+    public async Task<IActionResult> RecordAdvanceRefund(Guid id, [FromBody] RefundStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Recording cash handed back on a travel advance") is { } contextError) return contextError;
+
+        await _service.RecordAdvanceRefundAsync(id, dto, employeeId);
+        return Ok(new { message = "Refund recorded." });
+    }
+
+    /// <summary>A travel administrator's verb: what is written off is money the organisation gives up.</summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
+    [HttpPost("advances/{id:guid}/write-off")]
+    public async Task<IActionResult> WriteOffAdvance(Guid id, [FromBody] DecideStaffTravelAdvanceDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Writing off a travel advance") is { } contextError) return contextError;
+
+        await _service.WriteOffAdvanceAsync(id, dto.Reason, employeeId);
+        return Ok(new { message = "Advance written off." });
     }
 
     // =========================================================================

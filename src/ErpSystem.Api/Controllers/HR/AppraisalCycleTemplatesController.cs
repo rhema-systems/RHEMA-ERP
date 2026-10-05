@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using ErpSystem.Shared;
@@ -52,6 +53,11 @@ public class AppraisalCycleTemplatesController : ControllerBase
             var result = await _cycleTemplateService.GetByCycleIdAsync(cycleId, cancellationToken);
             return Ok(result);
         }
+        catch (ArgumentException ex)
+        {
+            // An unknown cycle, or another tenant's: it answered 500.
+            return NotFound(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving cycle templates for cycle {CycleId}", cycleId);
@@ -92,6 +98,11 @@ public class AppraisalCycleTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // A closed cycle's links are frozen (performance closure E-e, D-68): a conflict with its state, 409.
+            return Conflict(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {
@@ -141,6 +152,11 @@ public class AppraisalCycleTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // A closed cycle's link, or one its appraisals are scored on (performance closure E-e, D-68): 409.
+            return Conflict(new { message = ex.Message });
+        }
         catch (InvalidOperationException ex)
         {
             return BusinessRuleRejected(ex, "updating a template assignment");
@@ -169,6 +185,11 @@ public class AppraisalCycleTemplatesController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            // A closed cycle's link, or one its appraisals are scored on (performance closure E-e, D-68): 409.
+            return Conflict(new { message = ex.Message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting appraisal cycle template {Id}", id);
@@ -191,6 +212,10 @@ public class AppraisalCycleTemplatesController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (AppraisalConfigurationLockedException ex)
+        {
+            return Conflict(new { message = ex.Message });
         }
         catch (InvalidOperationException ex)
         {

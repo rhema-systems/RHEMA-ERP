@@ -683,7 +683,7 @@ builder.Services.AddErpSystemWebFarm(builder.Configuration);
 builder.Services.AddErpSystemSearch(builder.Configuration);
 builder.Services.AddErpSystemLifecycle();
 builder.Services.AddErpSystemCors(builder.Configuration);
-builder.Services.AddErpSystemRateLimiting(builder.Environment);
+builder.Services.AddErpSystemRateLimiting(builder.Environment, builder.Configuration);
 
 // Forwarded headers so the app sees the REAL client IP behind a proxy/load balancer — used by rate
 // limiting (per-caller partitions) and audit logging. SECURE DEFAULT: trust NO proxies, so the

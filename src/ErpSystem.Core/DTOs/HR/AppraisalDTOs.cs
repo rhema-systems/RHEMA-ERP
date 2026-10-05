@@ -181,6 +181,11 @@ public class EffectiveAppraisalCriterionDto
     public decimal? KpiTargetValue { get; set; }
     public decimal? KpiMinValue { get; set; }
     public decimal? KpiMaxValue { get; set; }
+    /// <summary>
+    /// The KPI's tolerance, kept with the target so a later edit of the definition restates nothing (D-32). Null with
+    /// no target, or no tolerance on the definition — an exact target.
+    /// </summary>
+    public decimal? KpiTolerancePercent { get; set; }
     public KpiTargetSource? KpiTargetSource { get; set; }
     public List<EffectiveGradeRangeDto> GradeRanges { get; set; } = new();
 }
@@ -256,6 +261,14 @@ public class AppraisalCompetencyDto : BaseDto
     public string? Code { get; set; }
     public string CriteriaName { get; set; } = string.Empty;
     public string? Description { get; set; }
+
+    /// <summary>
+    /// A score on this criterion needs an evidence link before an evaluation can be submitted — the
+    /// employee's, the manager's or a peer's (performance closure B2). The entity had it; no DTO
+    /// carried it, so nothing could set it.
+    /// </summary>
+    public bool RequireEvidence { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -271,6 +284,9 @@ public class CreateAppraisalCompetencyDto : CreateDtoBase
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    /// <summary>See <see cref="AppraisalCompetencyDto.RequireEvidence"/>.</summary>
+    public bool RequireEvidence { get; set; }
+
     public bool IsActive { get; set; } = true;
 }
 
@@ -285,6 +301,9 @@ public class UpdateAppraisalCompetencyDto : UpdateDtoBase
 
     [MaxLength(1000)]
     public string? Description { get; set; }
+
+    /// <summary>See <see cref="AppraisalCompetencyDto.RequireEvidence"/>.</summary>
+    public bool RequireEvidence { get; set; }
 
     public bool IsActive { get; set; } = true;
 }
@@ -342,91 +361,51 @@ public class PerformanceAppraisalDto : BaseDto
     public string? EmployeeAcknowledgmentComments { get; set; }
     public bool HasAppeal { get; set; }
     public AppraisalAppealStatus? CurrentAppealStatus { get; set; }
-    
+
     // Appeal Remand Tracking
     public bool IsRemandedAppeal { get; set; }
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
+
+    // Withdrawal (D-10, performance closure E-d1) — set with Status = Withdrawn. A withdrawn
+    // appraisal's scores and grade are left off every reader's copy: they are not a result.
+    public string? WithdrawnReason { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    /// <summary>The employee who withdrew it; null when no person did.</summary>
+    public Guid? WithdrawnById { get; set; }
+    public string? WithdrawnByName { get; set; }
 }
 
-public class CreatePerformanceAppraisalDto : CreateDtoBase
+/// <summary>Withdrawing an appraisal from its cycle (D-10): the reason is required, and kept.</summary>
+public class WithdrawAppraisalDto
 {
     [Required]
-    public Guid AppraisalCycleId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    [Required]
-    [Range(2000, 2100)]
-    public int Year { get; set; }
-    
-    [Required]
-    public DateOnly StartDate { get; set; }
-    
-    [Required]
-    public DateOnly EndDate { get; set; }
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
+// CreatePerformanceAppraisalDto went with the raw create in performance closure E-d2b (D-20): an appraisal is
+// generated, on an Open cycle.
+
+/// <summary>
+/// HR's correction of a generated appraisal's window — its year and dates — and nothing else
+/// (performance closure E-a). It carried the whole record: the employee, the cycle, the status, the
+/// score, the ranks, the manager's narrative and recommendations and the peer count, and the HR
+/// review's <i>Correct dates</i> sends none of the manager's fields, so every correction blanked them.
+/// Anything else in a body is ignored.
+/// </summary>
 public class UpdatePerformanceAppraisalDto : UpdateDtoBase
 {
     [Required]
-    public Guid AppraisalCycleId { get; set; }
-
-    [Required]
-    public Guid EmployeeId { get; set; }
-
-    [Required]
     [Range(2000, 2100)]
     public int Year { get; set; }
-    
+
     [Required]
     public DateOnly StartDate { get; set; }
-    
+
     [Required]
     public DateOnly EndDate { get; set; }
-
-    public AppraisalStatus Status { get; set; }
-
-    public int PeerEvaluatorsCount { get; set; }
-
-    [Range(0, 100)]
-    public decimal? OverallScore { get; set; }
-
-    public int? RankInPosition { get; set; }
-    
-    public int? RankInUnit { get; set; }
-
-    [MaxLength(2000)]
-    public string? OverallComments { get; set; }
-
-    [MaxLength(2000)]
-    public string? StrengthsIdentified { get; set; }
-    
-    [MaxLength(2000)]
-    public string? AreasForImprovement { get; set; }
-    
-    [MaxLength(2000)]
-    public string? TrainingNeeds { get; set; }
-    
-    [MaxLength(2000)]
-    public string? CareerAspirations { get; set; }
-    
-    public bool RecommendPromotion { get; set; }
-    
-    public bool RecommendIncrement { get; set; }
-    
-    public bool RecommendTraining { get; set; }
-    
-    public bool RecommendPIP { get; set; }
-    
-    public bool RecommendTermination { get; set; }
-    
-    [MaxLength(2000)]
-    public string? RecommendationNotes { get; set; }
-
-    public DateOnly? NextAppraisalDate { get; set; }
 }
 
 public class UpdateAppraisalStatusDto
@@ -455,33 +434,9 @@ public class AppraisalAppealDto : BaseDto
     public List<AppraisalAppealItemDto> Items { get; set; } = new();
 }
 
-public class CreateAppraisalAppealDto : CreateDtoBase
-{
-    [Required]
-    public Guid PerformanceAppraisalId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string AppealReason { get; set; } = string.Empty;
-
-    public List<CreateAppraisalAppealItemDto> Items { get; set; } = new();
-}
-
-public class UpdateAppraisalAppealDto : UpdateDtoBase
-{
-    [Required]
-    public Guid PerformanceAppraisalId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string AppealReason { get; set; } = string.Empty;
-
-    [Required]
-    public AppraisalAppealStatus Status { get; set; }
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-}
+// The legacy appeal DTOs — CreateAppraisalAppealDto, UpdateAppraisalAppealDto, their item DTOs,
+// ResolveAppraisalAppealDto and ResolveAppealItemDto — went with the legacy pair (performance
+// closure C1). An appeal is filed with SubmitAppealDto and decided with ResolveAppealDto.
 
 public class AppraisalAppealItemDto : BaseDto
 {
@@ -495,18 +450,6 @@ public class AppraisalAppealItemDto : BaseDto
     public string? ResolutionNotes { get; set; }
     public bool? ScoreAdjusted { get; set; }
     public decimal? OriginalScore { get; set; }
-}
-
-public class CreateAppraisalAppealItemDto : CreateDtoBase
-{
-    [Required]
-    public Guid AppraisalAppealId { get; set; }
-
-    public Guid? TemplateItemId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -528,28 +471,75 @@ public class AppealStatusViewDto
     public string? ResolutionNotes { get; set; }
     
     // Scores
+    /// <summary>The overall the appeal was filed against.</summary>
     public decimal? OriginalScore { get; set; }
+    /// <summary>The new overall when the decision moved it; null when it did not, or before the decision (A5).</summary>
     public decimal? AdjustedScore { get; set; }
     public bool HasScoreAdjustment => OriginalScore.HasValue && AdjustedScore.HasValue && OriginalScore != AdjustedScore;
-    
+
+    /// <summary>
+    /// The overall now — null while it is withheld: during a remand the manager's re-evaluation is
+    /// provisional until HR decides (the release rule, P2 and C3).
+    /// </summary>
+    public decimal? CurrentOverallScore { get; set; }
+
+    /// <summary>
+    /// The appraisal's outcome is released to the employee. False while a remand is open: the items'
+    /// scores now (<see cref="AppealedItemViewDto.CurrentScore"/>) are withheld until HR decides.
+    /// </summary>
+    public bool OutcomeReleased { get; set; }
+
+    /// <summary>
+    /// The appealed items carry the manager's scores. False when the profile shows the employee only
+    /// the overall (<c>ShowScoreBreakdownToEmployee</c> off — performance closure B2).
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
     // Appealed items
     public List<AppealedItemViewDto> AppealedItems { get; set; } = new();
 }
 
 /// <summary>
-/// Individual appealed item for viewing
+/// One appealed item, as the appellant follows it (performance closure C6): what it is, what it
+/// scored when the appeal was filed, and what it scores now.
 /// </summary>
 public class AppealedItemViewDto
 {
     public Guid ItemId { get; set; }
-    public string ItemType { get; set; } = string.Empty; // "KPI" or "Competency"
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>. Every template item read "Competency".</summary>
+    public string ItemType { get; set; } = string.Empty;
+    /// <summary>Measured against a target, or rated on the row's own scale.</summary>
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, as the forms show it.</summary>
+    public int? Weight { get; set; }
     public string Reason { get; set; } = string.Empty;
-    
-    // Original evaluation details
+
+    /// <summary>
+    /// What the manager scored the item when the appeal was filed (D-38): a rated row's score on its
+    /// scale, a measured row's achievement %. Null when the profile hides the breakdown, or — on an
+    /// appeal filed before it was kept, with no remand to recall it — not known.
+    /// </summary>
     public decimal? OriginalScore { get; set; }
+
+    /// <summary>What it scores now, on the same terms. Null while withheld (a remand) or hidden (the breakdown).</summary>
+    public decimal? CurrentScore { get; set; }
+
+    /// <summary>After the decision: whether the appeal moved the item's score. Null before it, or when either side is not known.</summary>
+    public bool? ScoreChanged { get; set; }
+
+    /// <summary>A measured row's target; null on a rated row.</summary>
     public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
+    /// <summary>A measured row's actual now, beside <see cref="CurrentScore"/>; withheld and hidden with it.</summary>
     public decimal? ActualValue { get; set; }
+    /// <summary>The measured row's achievement was restated by calibration or an appeal rather than read from its actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
 }
 
 /// <summary>
@@ -567,58 +557,6 @@ public class AppealListItemDto
     public DateTime SubmittedDate { get; set; }
     public int AppealedItemsCount { get; set; }
     public AppraisalAppealStatus Status { get; set; }
-}
-
-public class UpdateAppraisalAppealItemDto : UpdateDtoBase
-{
-    [Required]
-    public Guid AppraisalAppealId { get; set; }
-
-    public Guid? TemplateItemId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string Reason { get; set; } = string.Empty;
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-
-    public bool? ScoreAdjusted { get; set; }
-}
-
-public class ResolveAppraisalAppealDto
-{
-    [Required]
-    public Guid AppealId { get; set; }
-
-    [Required]
-    [MaxLength(2000)]
-    public string ResolutionNotes { get; set; } = string.Empty;
-
-    [Required]
-    public AppraisalAppealStatus Status { get; set; }
-
-    /// <summary>
-    /// Optional override score to apply to the appraisal when the appeal is upheld.
-    /// When provided and the appeal status is <see cref="AppraisalAppealStatus.Upheld"/>,
-    /// this value is persisted as <see cref="PerformanceAppraisal.AdjustedScore"/>.
-    /// Leave null if no score change is warranted.
-    /// </summary>
-    [Range(0, 100)]
-    public decimal? AdjustedScore { get; set; }
-
-    public List<ResolveAppealItemDto> ItemResolutions { get; set; } = new();
-}
-
-public class ResolveAppealItemDto
-{
-    [Required]
-    public Guid AppealItemId { get; set; }
-
-    [MaxLength(2000)]
-    public string? ResolutionNotes { get; set; }
-
-    public bool? ScoreAdjusted { get; set; }
 }
 
 public class EvaluatorEvaluationDto : BaseDto
@@ -926,6 +864,8 @@ public class PipReviewMeetingDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid PipId { get; set; }
     public DateTime MeetingDate { get; set; }
+    /// <summary>Stored (decision D-73): Scheduled until recorded as held or cancelled.</summary>
+    public PipMeetingStatus Status { get; set; }
     public bool EmployeeAttended { get; set; }
     public string ProgressNotes { get; set; } = string.Empty;
     public string? IssuesDiscussed { get; set; }
@@ -1057,6 +997,22 @@ public class AppraisalSettingsDto : BaseDto
     public Guid TenantId { get; set; }
     public string SettingsName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tenant's default profile — at most one (performance closure B6, P-2). Moved only by
+    /// <c>POST …/{id}/make-default</c>; the create and update bodies do not carry it.
+    /// </summary>
+    public bool IsDefault { get; set; }
+
+    /// <summary>
+    /// Appraisals read this profile's rules (performance closure E-e, D-67): it is in use once any appraisal sits on
+    /// a cycle using it — finished ones too, which still read its visibility, anonymity and outcome settings. An
+    /// in-use profile's rules are changed on a clone; its name, deadline-risk bands, workload threshold and default
+    /// HR reviewer stay editable.
+    /// </summary>
+    public bool IsInUse { get; set; }
+    public int InUseAppraisalCount { get; set; }
+    public List<string> InUseCycleNames { get; set; } = new();
+
     // Self-evaluation
     public bool RequireSelfEvaluation { get; set; }
     public bool AllowSelfSoftSkillRating { get; set; }
@@ -1132,6 +1088,17 @@ public class AppraisalSettingsDto : BaseDto
     public int DeadlineRiskLowDays { get; set; } = 7;
     public string SuccessionPoolName { get; set; } = "Appraisal Nominations";
     public ReadinessLevel SuccessionDefaultReadiness { get; set; } = ReadinessLevel.ReadyIn12Months;
+}
+
+/// <summary>
+/// Copies a profile under a new name (performance closure E-e, D-46/D-67): the door to changing the rules of one in
+/// use. The copy is not the default; a cycle takes it when created, or once it is made the default.
+/// </summary>
+public class CloneAppraisalSettingsDto
+{
+    [Required]
+    [MaxLength(100)]
+    public string SettingsName { get; set; } = string.Empty;
 }
 
 public class CreateAppraisalSettingsDto : CreateDtoBase
@@ -1381,7 +1348,9 @@ public class CreateAppraisalCycleDto : CreateDtoBase
     [Required]
     public Guid AppraisalSettingsId { get; set; }
 
-    public AppraisalCycleStatus Status { get; set; } = AppraisalCycleStatus.Draft;
+    // Status is deliberately absent (performance closure E-c): a cycle is created as a Draft. The body's
+    // status was stored as sent, so a cycle created Open was never overlap-checked, carried no opened
+    // date and stayed deletable.
 
     public DateOnly? GoalSettingOpenDate { get; set; }
     public DateOnly? GoalSettingDeadline { get; set; }
@@ -1480,7 +1449,9 @@ public class AppraisalCycleTargetDto : BaseDto
     public string? OrganizationUnitName { get; set; }
     public Guid? PositionId { get; set; }
     public string? PositionTitle { get; set; }
+    /// <summary>HR's own planning figure, as typed.</summary>
     public int EstimatedEmployeeCount { get; set; }
+    /// <summary>How many of the target's staff the cycle appraises, resolved live; 0 for an inactive target.</summary>
     public int ActiveEmployeeCount { get; set; }
     public string? Notes { get; set; }
     public bool IsActive { get; set; }
@@ -1509,11 +1480,13 @@ public class CreateAppraisalCycleTargetDto : CreateDtoBase
     public bool IsActive { get; set; } = true;
 }
 
+/// <summary>
+/// A target's edit. No cycle (performance closure E-c): a target stays in its cycle — the body's cycle id
+/// was copied, so an edit moved a target into any cycle, even another tenant's, and it vanished from its
+/// own.
+/// </summary>
 public class UpdateAppraisalCycleTargetDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalCycleId { get; set; }
-
     [Required]
     public AppraisalTargetType TargetType { get; set; }
 
@@ -1566,35 +1539,26 @@ public class CreatePeerNominationDto : CreateDtoBase
     
     [MaxLength(500)]
     public string? InstructionsToPeer { get; set; }
-    
+
+    /// <summary>
+    /// Pending, or the nomination is refused (422, performance closure D1): it was stored as sent, so
+    /// a raw POST made an Approved nomination with no peer evaluation behind it. Approval is the
+    /// manager's (or, in Manager mode, the nomination itself).
+    /// </summary>
     public PeerNominationStatus NominationStatus { get; set; } = PeerNominationStatus.Pending;
 }
 
+/// <summary>
+/// What may change on a pending nomination (performance closure D1): its due date and its
+/// instructions. It carried the appraisal, the peer, the nominator, the invitation date and the
+/// status, all copied as sent.
+/// </summary>
 public class UpdatePeerNominationDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalId { get; set; }
-    
-    [Required]
-    public Guid PeerEmployeeId { get; set; }
-    
-    [Required]
-    public Guid NominatedById { get; set; }
-    
-    public DateTime? InvitationSentDate { get; set; }
-    
     public DateTime? DueDate { get; set; }
-    
+
     [MaxLength(500)]
     public string? InstructionsToPeer { get; set; }
-    
-    public PeerNominationStatus NominationStatus { get; set; }
-}
-
-public class SendPeerEvaluationInvitationDto
-{
-    [Required]
-    public Guid PeerNominationId { get; set; }
 }
 
 public class BatchCreatePeerNominationsDto
@@ -1641,15 +1605,26 @@ public class RejectPeerNominationsDto
 public class PeerNominationSummaryDto
 {
     public Guid AppraisalId { get; set; }
+    /// <summary>Every nomination, rejected ones included.</summary>
     public int TotalNominations { get; set; }
+    /// <summary>Pending and approved — what the minimum and the maximum count (D2: a rejected one leaves room for a replacement).</summary>
+    public int ActiveNominations { get; set; }
     public int PendingCount { get; set; }
     public int ApprovedCount { get; set; }
     public int RejectedCount { get; set; }
     public int MinRequired { get; set; }
     public int MaxAllowed { get; set; }
+    /// <summary>The active nominations are within the cycle's range.</summary>
     public bool CanSubmit { get; set; }
+    /// <summary>Nominations may be made or decided: in Employee mode while Draft or Active, in Manager mode until completed or closed.</summary>
     public bool CanEdit { get; set; }
     public PeerNominationMode NominationMode { get; set; }
+
+    /// <summary>
+    /// The list is withheld from this reader (D-40): the appraisee, in Manager mode with anonymous peer
+    /// reviews — the manager chose the peers, so the appraisee is told the counts only.
+    /// </summary>
+    public bool PeersWithheld { get; set; }
     public List<PeerNominationDto> Nominations { get; set; } = new();
 }
 
@@ -1684,8 +1659,13 @@ public class AppraisalCycleProgressDto
     public ProgressMetricDto HRReviewProgress { get; set; } = new();
     
     // Participation Coverage
+    /// <summary>The scope: active staff the active targets reach, less the excluded (E-d1; it was the appraisal count).</summary>
     public int TotalEmployeesTargeted { get; set; }
     public int TotalEmployeesExcluded { get; set; }
+    /// <summary>The cycle's appraisals in play — every progress denominator (performance closure E-d1).</summary>
+    public int TotalAppraisals { get; set; }
+    /// <summary>Appraisals withdrawn from the cycle, which no count above includes (E-d1).</summary>
+    public int TotalWithdrawn { get; set; }
     public TargetBreakdownDto TargetBreakdown { get; set; } = new();
     
     // Bottlenecks & Risks
@@ -1709,7 +1689,6 @@ public class TargetBreakdownDto
     public int OrganizationLevelTargets { get; set; }
     public int OrganizationUnitTargets { get; set; }
     public int PositionTargets { get; set; }
-    public int IndividualEmployeeTargets { get; set; }
 }
 
 public class DeadlineRiskDto
@@ -1882,6 +1861,11 @@ public class EvaluationItemDto
     public decimal? KpiTargetValue { get; set; }
     public decimal? KpiMinValue { get; set; }
     public decimal? KpiMaxValue { get; set; }
+    /// <summary>
+    /// The snapshot's tolerance (D-32): an actual within it of the target scores as met. The form's live preview
+    /// reads it, so the figure it shows is the one the server scores.
+    /// </summary>
+    public decimal? KpiTolerancePercent { get; set; }
     public KpiTargetSource? KpiTargetSource { get; set; }
 
     /// <summary>Grade bands from the appraisal criterion snapshot (PerformanceAppraisalCriterionConfigGradeRange).</summary>
@@ -2114,17 +2098,24 @@ public class SelfEvaluationContextDto
     public DateTime? SelfEvaluationSubmittedDate { get; set; }
     public bool IsEditable { get; set; }
     public DateOnly? SelfEvaluationDeadline { get; set; }
-    
+
+    /// <summary>
+    /// The self-evaluation is submitted but its entries are not this reader's to see yet — the line
+    /// manager, while the profile hides self scores until they have submitted their own evaluation
+    /// (performance closure B2). The entries on the items are then empty.
+    /// </summary>
+    public bool SelfEntriesWithheld { get; set; }
+
     /// <summary>
     /// Settings that control self-evaluation behavior
     /// </summary>
     public bool AllowSelfSoftSkillRating { get; set; }
-    
+
     /// <summary>
     /// Full appraisal settings (includes peer review configuration)
     /// </summary>
     public AppraisalSettingsDto? Settings { get; set; }
-    
+
     /// <summary>
     /// Template sections in display order. Each section carries its weight
     /// and contains the items the employee must score.
@@ -2293,11 +2284,11 @@ public class ManagerEvaluationContextDto
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
-    public List<Guid> AppealedKpiIds { get; set; } = new();
 
     /// <summary>
     /// The appealed criteria's keys — the template item for a template row, the snapshot row for a
-    /// goal row (lane L). Named for the template item it held before goal rows existed.
+    /// goal row (lane L) — KPI rows among them. Named for the template item it held before goal rows
+    /// existed. (<c>AppealedKpiIds</c>, always empty since employee KPI targets went, was removed in C6.)
     /// </summary>
     public List<Guid> AppealedTemplateItemIds { get; set; } = new();
     
@@ -2308,6 +2299,20 @@ public class ManagerEvaluationContextDto
     public bool IsManagerEvaluationSubmitted { get; set; }
     public DateTime? ManagerEvaluationSubmittedDate { get; set; }
     public bool IsEditable { get; set; }
+
+    /// <summary>
+    /// The employee has submitted their self-evaluation. Until they have, no self score is on this
+    /// form — a draft is theirs alone (P12, B2).
+    /// </summary>
+    public bool SelfEvaluationSubmitted { get; set; }
+
+    /// <summary>
+    /// The employee's self-evaluation is submitted, but the profile shows self scores to the manager
+    /// only after they have submitted their own evaluation (<c>ShowSelfScoreToManager</c> off —
+    /// performance closure B2). The <c>EmployeeSelf*</c> fields on every item are then empty. A
+    /// self-evaluation that is still a draft is never on this form.
+    /// </summary>
+    public bool SelfScoresWithheld { get; set; }
     
     /// <summary>
     /// Weight breakdown
@@ -2334,13 +2339,35 @@ public class ManagerEvaluationContextDto
     public bool RecommendTraining { get; set; }
     public bool RecommendPIP { get; set; }
     public bool RecommendTermination { get; set; }
+    /// <summary>The Award tick — raises a Recognition recommendation at the submission (F2, D-92).</summary>
+    public bool RecommendAward { get; set; }
     public string? RecommendationNotes { get; set; }
-    
+
+    /// <summary>
+    /// The appraisal's interim reviews, as context for the year-end judgement (D-90): when each was due, where it
+    /// stands, and the period score a full interim appraisal gave. Read-only; cancelled reviews are left out.
+    /// </summary>
+    public List<InterimReviewContextDto> InterimReviews { get; set; } = new();
+
     /// <summary>
     /// Template sections in display order. Each section carries its weight
     /// and contains the items the manager must score (including employee self-scores as reference).
     /// </summary>
     public List<ManagerEvaluationSectionDto> Sections { get; set; } = new();
+}
+
+/// <summary>
+/// One interim review on the manager's year-end form (D-90). The period score is the one a full interim appraisal
+/// gave; a light-touch review has none. No new store holds interim scores — they are goal progress entries.
+/// </summary>
+public class InterimReviewContextDto
+{
+    public Guid Id { get; set; }
+    public ReviewEventType Type { get; set; }
+    public DateOnly EventDate { get; set; }
+    public AppraisalReviewStatus Status { get; set; }
+    public bool IsFullAppraisal { get; set; }
+    public decimal? OverallPeriodScore { get; set; }
 }
 
 // ManagerEvaluationKpiItemDto + ManagerEvaluationCompetencyItemDto removed — superseded by ManagerEvaluationItemDto / section-based model.
@@ -2400,10 +2427,13 @@ public class SaveManagerEvaluationDto
     public bool RecommendPIP { get; set; }
     
     public bool RecommendTermination { get; set; }
-    
+
+    /// <summary>The Award tick (F2, D-92): a Recognition recommendation at the submission.</summary>
+    public bool RecommendAward { get; set; }
+
     [MaxLength(2000)]
     public string? RecommendationNotes { get; set; }
-    
+
     /// <summary>
     /// Whether this is a draft save or final submission
     /// </summary>
@@ -2458,6 +2488,13 @@ public class ViewSubmittedEvaluationDto
     // Settings
     public bool AllowSelfSoftSkillRating { get; set; }
 
+    /// <summary>
+    /// The entries are withheld from this reader — the line manager, while the profile hides self
+    /// scores until they have submitted their own evaluation (performance closure B2). The sections
+    /// keep their items, without the employee's scores, actuals, notes or evidence.
+    /// </summary>
+    public bool EntriesWithheld { get; set; }
+
     // Self-Evaluation Data — sections in DisplayOrder (replaces flat SoftSkillScores + KpiEvaluations)
     public List<SubmittedEvaluationSectionDto> Sections { get; set; } = new();
     public List<SubmittedAttachmentDto> Attachments { get; set; } = new();
@@ -2503,8 +2540,14 @@ public class PeerEvaluationAssignmentDto
     public string Status { get; set; } = string.Empty; // Not Started, In Progress, Submitted
     public DateTime? StartedDate { get; set; }
     public DateTime? SubmittedDate { get; set; }
+    /// <summary>
+    /// The nomination's due date, else the cycle's peer deadline (performance closure D5): it was
+    /// always the cycle's, though the approval told the peer the nomination's.
+    /// </summary>
     public DateOnly? DueDate { get; set; }
     public decimal EvaluatorWeight { get; set; }
+    /// <summary>What the nominator asked this peer to comment on — collected on the nomination, and shown nowhere.</summary>
+    public string? InstructionsToPeer { get; set; }
 }
 
 /// <summary>
@@ -2524,8 +2567,11 @@ public class PeerEvaluationDetailDto
     public bool AllowPeerKpiEvaluation { get; set; }
     public bool IsAnonymous { get; set; }
     public bool IsSubmitted { get; set; }
+    /// <summary>The nomination's due date, else the cycle's peer deadline (D5).</summary>
     public DateOnly? DueDate { get; set; }
-    
+    /// <summary>What the nominator asked this peer to comment on.</summary>
+    public string? InstructionsToPeer { get; set; }
+
     /// <summary>Template sections in display order, containing scoreable items.</summary>
     public List<PeerEvaluationSectionDto> Sections { get; set; } = new();
 }
@@ -2568,6 +2614,27 @@ public class HRReviewDto
     /// score, grade or HR remarks; HR and the manager see them throughout.
     /// </summary>
     public bool OutcomeReleased { get; set; }
+
+    /// <summary>
+    /// The appraisee's copy carries the score breakdown — each evaluator's criteria and totals.
+    /// False before the outcome is released, and after it when the profile shows the employee only
+    /// the overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off — B2).
+    /// Always true for HR and the manager.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
+    /// <summary>
+    /// The self-evaluation is withheld from this reader: the line manager before they have submitted
+    /// their own evaluation when the profile hides self scores (B2), or anyone but the employee while
+    /// it is still a draft (P12).
+    /// </summary>
+    public bool SelfScoresWithheld { get; set; }
+
+    /// <summary>
+    /// The peer scores are withheld from the line manager until they have submitted their own
+    /// evaluation (<c>ShowPeerScoresToManager</c> off — B2).
+    /// </summary>
+    public bool PeerScoresWithheld { get; set; }
 
     // Precondition Flags
     public bool IsSelfEvaluationComplete { get; set; }
@@ -2614,6 +2681,23 @@ public class HRReviewDto
     public DateTime? AppealRemandedDate { get; set; }
     public DateTime? AppealRemandDeadline { get; set; }
     public bool IsRemandDeadlineExceeded { get; set; }
+
+    // Withdrawal (performance closure E-d1): set once the appraisal is taken out of its cycle.
+    public string? WithdrawnReason { get; set; }
+    public DateTime? WithdrawnDate { get; set; }
+    public string? WithdrawnByName { get; set; }
+
+    /// <summary>
+    /// HR may withdraw it: Draft, Active, or Governance before it is final (D-52). The page's
+    /// Withdraw button reads it; the server decides again on the write.
+    /// </summary>
+    public bool CanWithdraw { get; set; }
+
+    /// <summary>
+    /// Its form has no rows and nobody has scored it, so HR may rebuild the form from its template (performance closure
+    /// E-g2, D-86). The page's *Rebuild form* button reads it; the server decides again on the write.
+    /// </summary>
+    public bool CanRebuildForm { get; set; }
 }
 
 /// <summary>
@@ -2758,11 +2842,19 @@ public class HRReviewListItemDto
 /// </summary>
 public class ManagerPeerEvaluationReviewDto
 {
-    public Guid AppraisalId { get; set; }  
+    public Guid AppraisalId { get; set; }
     public bool IsAnonymous { get; set; } // Indicates if appraisee can see peer details, not whether manager can
     public bool AllowKpiEvaluation { get; set; }
     public int TotalPeerEvaluators { get; set; }
     public int SubmittedEvaluations { get; set; }
+
+    /// <summary>
+    /// The peers' scores and comments are withheld from the line manager until they have submitted
+    /// their own evaluation (<c>ShowPeerScoresToManager</c> off — performance closure B2). Who the
+    /// peers are and whether each has submitted are still listed.
+    /// </summary>
+    public bool ScoresWithheld { get; set; }
+
     public List<PeerEvaluatorDetailDto> PeerEvaluations { get; set; } = new();
 }
 
@@ -2781,50 +2873,51 @@ public class PeerEvaluatorDetailDto
     public bool IsSubmitted { get; set; }
     public DateTime? SubmittedDate { get; set; }
     public decimal? TotalScore { get; set; }
-    
-    // Competency evaluations
-    public List<PeerCompetencyScoreDto> CompetencyScores { get; set; } = new();
-    
-    // KPI evaluations (if allowed)
-    public List<PeerKpiEvaluationDto> KpiEvaluations { get; set; } = new();
+
+    /// <summary>
+    /// Every criterion the peer scored — competency, and KPI or goal rows where the cycle lets peers
+    /// score them — in the forms' order (performance closure lane D). It listed competencies only, so
+    /// a peer's KPI or goal score never reached the manager; its KPI list was always empty.
+    /// </summary>
+    public List<PeerCriterionScoreDto> CriterionScores { get; set; } = new();
 }
 
-/// <summary>
-/// Peer's competency score detail
-/// </summary>
-public class PeerCompetencyScoreDto
+/// <summary>One criterion a peer scored, named, weighted and scored as the appeal reads describe a row (C6).</summary>
+public class PeerCriterionScoreDto
 {
     public Guid CriterionScoreId { get; set; }
-    public string CriteriaName { get; set; } = string.Empty;
-    public string? CriteriaDescription { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
+    public string ItemName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, from the snapshot (it was 0).</summary>
     public int Weight { get; set; }
-    public int NumericScore { get; set; }
+    /// <summary>A rated row's score on its scale, a measured row's achievement %.</summary>
+    public decimal? Score { get; set; }
+    /// <summary>A measured row's actual, and its target; null on a rated row.</summary>
+    public decimal? ActualValue { get; set; }
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public decimal WeightedScore { get; set; }
     public string? Comments { get; set; }
-    public string? AchievedGrade { get; set; }
-}
-
-/// <summary>
-/// Peer's KPI evaluation detail
-/// </summary>
-public class PeerKpiEvaluationDto
-{
-    public Guid KpiEvaluationRecordId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string? KpiDescription { get; set; }
-    public decimal? TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public decimal? AchievementPercent { get; set; }
-    public string? Unit { get; set; }
-    public string? Notes { get; set; }
-    public string? AchievedGrade { get; set; }
 }
 /// <summary>
 /// DTO for employee to acknowledge their appraisal
 /// </summary>
 public class AcknowledgeAppraisalDto
 {
+    /// <summary>Ignored: the acknowledging employee is the caller.</summary>
     public Guid EmployeeId { get; set; }
+
+    /// <summary>The employee's comment on acknowledging, kept on the appraisal (performance closure E-a).</summary>
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
 }
 
 /// <summary>
@@ -2839,37 +2932,59 @@ public class AppealPageDataDto
     public string? FinalGrade { get; set; }
     public bool CanAppeal { get; set; }
     public string? CannotAppealReason { get; set; }
-    
-    public List<AppealableKpiDto> AppealableKpis { get; set; } = new();
-    public List<AppealableCompetencyDto> AppealableCompetencies { get; set; } = new();
+
+    /// <summary>
+    /// Each item carries the manager's score. False when the profile shows the employee only the
+    /// overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off — performance
+    /// closure B2): the items are listed to appeal, without their scores. Before the outcome is
+    /// released nothing is listed and there is no score to show.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+
+    /// <summary>
+    /// Every criterion the manager's submitted evaluation scored — competency, KPI and goal rows, in
+    /// the forms' order — the list the submit accepts (C8). Performance closure C6: it offered
+    /// competencies only, and a separate KPI list that was always empty.
+    /// </summary>
+    public List<AppealableCriterionDto> AppealableCriteria { get; set; } = new();
 }
 
 /// <summary>
-/// Appealable KPI item
+/// One criterion an employee may appeal (performance closure C6). Sent back on the appeal by
+/// <see cref="CriterionConfigId"/> — and <see cref="TemplateItemId"/> too on a template row, as the
+/// forms send their rows.
 /// </summary>
-public class AppealableKpiDto
+public class AppealableCriterionDto
 {
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string? Description { get; set; }
-    public decimal? TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public decimal? AchievementPercentage { get; set; }
-    public string? Unit { get; set; }
-    public int Weight { get; set; }
-    public decimal? WeightedScore { get; set; }
-}
-
-/// <summary>
-/// Appealable competency/criterion item
-/// </summary>
-public class AppealableCompetencyDto
-{
-    public Guid TemplateItemId { get; set; }
+    /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
+    public Guid CriterionKey { get; set; }
+    /// <summary>Null on a goal row.</summary>
+    public Guid? TemplateItemId { get; set; }
+    public Guid? CriterionConfigId { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public int? NumericScore { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>The section's weight on the form, as scored (A0).</summary>
+    public int? SectionWeight { get; set; }
+    /// <summary>The row's weight within its section, as scored (A12).</summary>
     public int Weight { get; set; }
+    /// <summary>The top of the row's own scale: its highest grade band, or 100 for a measured row's achievement %.</summary>
+    public decimal ScaleTop { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
+
+    // The manager's score — withheld when the profile shows the employee only the overall (B2).
+    /// <summary>A rated row's score on its scale, a measured row's achievement %.</summary>
+    public decimal? Score { get; set; }
+    /// <summary>A measured row's actual.</summary>
+    public decimal? ActualValue { get; set; }
+    /// <summary>The measured row's achievement was restated by calibration or an appeal rather than read from its actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
+    /// <summary>What the row contributes to the manager's evaluation: its achievement × its share of the whole form.</summary>
     public decimal? WeightedScore { get; set; }
 }
 
@@ -2897,12 +3012,10 @@ public class AppealItemSubmissionDto
 
     /// <summary>
     /// The snapshot row appealed. A goal row has no template item and is named only by this
-    /// (lane L3); a template row may be named by either.
+    /// (lane L3); a template row may be named by either, or both — which must then name one row.
     /// </summary>
     public Guid? CriterionConfigId { get; set; }
 
-    public Guid? EmployeeKpiTargetId { get; set; }
-    
     [Required]
     [MaxLength(2000)]
     public string Reason { get; set; } = string.Empty;
@@ -2934,24 +3047,44 @@ public class AppealReviewDto
     public DateOnly CycleStartDate { get; set; }
     public DateOnly CycleEndDate { get; set; }
     
-    // Appraisal scores
+    // Appraisal scores — what this reader may see of each leg (AppraisalVisibility, B2): the desk
+    // reads a self-evaluation only once it is submitted, and every submitted peer.
     public decimal? SelfEvaluationScore { get; set; }
+    /// <summary>The employee submitted a self-evaluation. A draft — one HR waived — is not read here.</summary>
+    public bool SelfEvaluationSubmitted { get; set; }
     public decimal? PeerEvaluationScore { get; set; }
     public decimal? ManagerEvaluationScore { get; set; }
-    public decimal OverallScore { get; set; }
-    
+    /// <summary>The overall now. Null only for an appellant reading their own appeal while a remand withholds it.</summary>
+    public decimal? OverallScore { get; set; }
+
     // Settings that control HR actions
     public bool HRCanModifyScores { get; set; }
     public Guid AppraisalSettingsId { get; set; }
     public string AppraisalSettingsName { get; set; } = string.Empty;
-    
+
+    /// <summary>
+    /// Why the reader may not act on this appeal — they are its appellant, wrote the contested
+    /// evaluation, or are the appellant's line manager (D-35) — or null. The page offers no action then.
+    /// </summary>
+    public string? PartyToAppealReason { get; set; }
+
+    // The decision, once made (D-37: a decided appeal opens read-only; the read refused it). A remand
+    // records its reasoning here too.
+    public string? ReviewedByName { get; set; }
+    public DateTime? ResolvedDate { get; set; }
+    public string? ResolutionNotes { get; set; }
+    /// <summary>The overall the appeal was filed against.</summary>
+    public decimal? OriginalOverallScore { get; set; }
+    /// <summary>The new overall when the decision moved it; null when it did not (A5).</summary>
+    public decimal? AdjustedScore { get; set; }
+
     // Appealed items with full evaluation details
     public List<AppealedCriterionReviewDto> AppealedCriteria { get; set; } = new();
-    public List<AppealedKpiReviewDto> AppealedKpis { get; set; } = new();
 }
 
 /// <summary>
-/// Appealed soft skill/competency criterion for review
+/// One appealed criterion on HR's review — competency, KPI or goal row (performance closure C6, C9):
+/// named and weighted from the snapshot, with every leg's score on the row's own terms.
 /// </summary>
 public class AppealedCriterionReviewDto
 {
@@ -2961,62 +3094,48 @@ public class AppealedCriterionReviewDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
+    /// <summary>The row's weight within its section, from the snapshot (C9: it was 0 on every row).</summary>
     public decimal Weight { get; set; }
+    /// <summary>The top of a new score on this row: its highest grade band, or 100 — a measured row's new score is an achievement % (D-22).</summary>
+    public decimal ScaleTop { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public string AppealReason { get; set; } = string.Empty;
-    
-    // Original evaluation scores
-    public int? SelfScore { get; set; }
-    public decimal? PeerAverageScore { get; set; }
-    public int? ManagerScore { get; set; }
-    
-    // Weighted scores
-    public decimal? SelfWeightedScore { get; set; }
-    public decimal? PeerWeightedScore { get; set; }
-    public decimal? ManagerWeightedScore { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    
-    // Supporting evidence
-    public string? ManagerComments { get; set; }
-    public string? SelfComments { get; set; }
-}
 
-/// <summary>
-/// Appealed KPI for review
-/// </summary>
-public class AppealedKpiReviewDto
-{
-    public Guid AppealItemId { get; set; }
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string KpiDescription { get; set; } = string.Empty;
-    public decimal Weight { get; set; }
-    public string AppealReason { get; set; } = string.Empty;
-    
-    // KPI target details
-    public decimal TargetValue { get; set; }
-    public decimal? ActualValue { get; set; }
-    public string MeasurementUnit { get; set; } = string.Empty;
-    
-    // Evaluation scores
+    /// <summary>What the manager scored it when the appeal was filed (D-38); null when not known.</summary>
+    public decimal? ScoreWhenAppealed { get; set; }
+
+    // Each leg's score: a rated row's score on its scale, a measured row's achievement % — with the
+    // actual behind it. A self draft is not read (B2).
     public decimal? SelfScore { get; set; }
+    public decimal? SelfActualValue { get; set; }
+    /// <summary>The submitted peers' average, on the same terms (C9: it was never set).</summary>
     public decimal? PeerAverageScore { get; set; }
     public decimal? ManagerScore { get; set; }
-    
-    // Weighted scores
+    public decimal? ManagerActualValue { get; set; }
+    /// <summary>The manager's measured score was restated by calibration or an appeal rather than read from the actual (D-22).</summary>
+    public bool AchievementOverridden { get; set; }
+
+    // Weighted scores: the row's achievement × its share of the whole form
     public decimal? SelfWeightedScore { get; set; }
-    public decimal? PeerWeightedScore { get; set; }
+    /// <summary>What the row contributes to the manager's evaluation — the contribution under appeal.</summary>
     public decimal? ManagerWeightedScore { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    
+
     // Supporting evidence
     public string? ManagerComments { get; set; }
     public string? SelfComments { get; set; }
 }
 
 /// <summary>
-/// Score modification for criterion during appeal resolution
+/// A score HR restates on an upheld appeal — on one of the criteria the appeal contests (C-b). A
+/// measured row's new score is an achievement % (D-22), not a new actual.
 /// </summary>
 public class CriterionScoreModificationDto
 {
@@ -3024,20 +3143,7 @@ public class CriterionScoreModificationDto
     public Guid? TemplateItemId { get; set; }
     public Guid? CriterionConfigId { get; set; }
     public int NewScore { get; set; }
-    
-    [Required]
-    [MaxLength(1000)]
-    public string Justification { get; set; } = string.Empty;
-}
 
-/// <summary>
-/// Score modification for KPI during appeal resolution
-/// </summary>
-public class KpiScoreModificationDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public decimal NewActualValue { get; set; }
-    
     [Required]
     [MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
@@ -3048,16 +3154,20 @@ public class KpiScoreModificationDto
 /// </summary>
 public class ResolveAppealDto
 {
+    /// <summary>
+    /// Upheld, Rejected or Remanded (C4). Nullable so a body without one is refused — [Required] on
+    /// a non-nullable enum is a no-op, and a missing decision arrived as 0.
+    /// </summary>
     [Required]
-    public AppraisalAppealStatus ResolutionDecision { get; set; }
+    public AppraisalAppealStatus? ResolutionDecision { get; set; }
     
     [Required]
     [MaxLength(4000)]
     public string ResolutionNotes { get; set; } = string.Empty;
     
-    // Optional score modifications (only if HRCanModifyScores = true)
+    // Optional score modifications (only with Upheld, only if HRCanModifyScores = true, only on a
+    // contested criterion). A KPI or goal row is restated here too, by its achievement % (D-22).
     public List<CriterionScoreModificationDto>? CriteriaModifications { get; set; }
-    public List<KpiScoreModificationDto>? KpiModifications { get; set; }
 }
 
 /// <summary>
@@ -3088,27 +3198,43 @@ public class PostRemandReviewDto
     // Appeal timeline
     public DateTime AppealSubmittedDate { get; set; }
     public DateTime AppealRemandedDate { get; set; }
-    public DateTime AppealRemandDeadline { get; set; }
+    /// <summary>The re-evaluation deadline while the manager owes it; null once they have re-evaluated.</summary>
+    public DateTime? AppealRemandDeadline { get; set; }
     public DateTime? ManagerReevaluationDate { get; set; }
-    
+
+    // Where the remand stands (performance closure C3, D-34)
+    /// <summary>The manager has not re-evaluated yet; the comparison waits for it.</summary>
+    public bool AwaitingReevaluation { get; set; }
+    /// <summary>The deadline has passed without a re-evaluation.</summary>
+    public bool DeadlinePassed { get; set; }
+    /// <summary>HR can make the final decision: the manager has re-evaluated, or the deadline passed without it.</summary>
+    public bool CanDecide { get; set; }
+    /// <summary>HR can move the deadline: the manager has not re-evaluated.</summary>
+    public bool CanExtend { get; set; }
+
     // Appeal summary
     public string OverallAppealReason { get; set; } = string.Empty;
     public string HRRemandJustification { get; set; } = string.Empty;
-    
-    // Score comparisons
+
+    // Score comparisons — every criterion the manager scored, KPI and goal rows among them (C6)
     public List<CriterionScoreComparisonDto> CriteriaComparisons { get; set; } = new();
-    public List<KpiScoreComparisonDto> KpiComparisons { get; set; } = new();
-    
-    // Overall score comparison
+
+    // Overall score comparison: the overall the appeal was filed against, and the overall now
     public decimal PreRemandOverallScore { get; set; }
     public decimal PostRemandOverallScore { get; set; }
+    // The manager's total before the remand, and after the re-evaluation
+    public decimal? PreRemandManagerScore { get; set; }
+    public decimal? PostRemandManagerScore { get; set; }
     
     // Settings
     public bool HRCanModifyScores { get; set; }
 }
 
 /// <summary>
-/// Comparison of criterion scores before and after remand
+/// One criterion before the remand and after the re-evaluation — competency, KPI or goal row
+/// (performance closure C6). A score is a rated row's score on its scale or a measured row's
+/// achievement %, with the actual behind it: a measured row compared <c>NumericScore</c>, which it
+/// holds only when restated, so a KPI whose actual moved read "— → —" and unchanged.
 /// </summary>
 public class CriterionScoreComparisonDto
 {
@@ -3117,61 +3243,35 @@ public class CriterionScoreComparisonDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = string.Empty;
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = string.Empty;
     public string ItemDescription { get; set; } = string.Empty;
+    public string? SectionName { get; set; }
     public decimal Weight { get; set; }
+    /// <summary>A measured row's target; null on a rated row.</summary>
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public bool WasAppealed { get; set; }
     public string? AppealReason { get; set; }
-    
-    // Pre-remand (from snapshot)
-    public int? PreRemandScore { get; set; }
-    public decimal? PreRemandWeightedScore { get; set; }
-    public string? PreRemandComments { get; set; }
-    
-    // Post-remand (current manager evaluation)
-    public int? PostRemandScore { get; set; }
-    public decimal? PostRemandWeightedScore { get; set; }
-    public string? PostRemandComments { get; set; }
-    
-    // Change indicators
-    public bool ScoreChanged => PreRemandScore != PostRemandScore;
-    public int? ScoreDifference => PostRemandScore.HasValue && PreRemandScore.HasValue 
-        ? PostRemandScore.Value - PreRemandScore.Value 
-        : null;
-}
 
-/// <summary>
-/// Comparison of KPI scores before and after remand
-/// </summary>
-public class KpiScoreComparisonDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = string.Empty;
-    public string KpiDescription { get; set; } = string.Empty;
-    public decimal Weight { get; set; }
-    public bool WasAppealed { get; set; }
-    public string? AppealReason { get; set; }
-    
-    // Target details
-    public decimal TargetValue { get; set; }
-    public string MeasurementUnit { get; set; } = string.Empty;
-    
     // Pre-remand (from snapshot)
+    public decimal? PreRemandScore { get; set; }
     public decimal? PreRemandActualValue { get; set; }
-    public decimal? PreRemandAchievementPercent { get; set; }
     public decimal? PreRemandWeightedScore { get; set; }
     public string? PreRemandComments { get; set; }
-    
+
     // Post-remand (current manager evaluation)
+    public decimal? PostRemandScore { get; set; }
     public decimal? PostRemandActualValue { get; set; }
-    public decimal? PostRemandAchievementPercent { get; set; }
     public decimal? PostRemandWeightedScore { get; set; }
     public string? PostRemandComments { get; set; }
-    
-    // Change indicators
-    public bool ScoreChanged => PreRemandActualValue != PostRemandActualValue;
-    public decimal? ActualValueDifference => PostRemandActualValue.HasValue && PreRemandActualValue.HasValue 
-        ? PostRemandActualValue.Value - PreRemandActualValue.Value 
+
+    // Change indicators — the score or, on a measured row, the actual behind it
+    public bool ScoreChanged => PreRemandScore != PostRemandScore || PreRemandActualValue != PostRemandActualValue;
+    public decimal? ScoreDifference => PostRemandScore.HasValue && PreRemandScore.HasValue
+        ? PostRemandScore.Value - PreRemandScore.Value
         : null;
 }
 
@@ -3180,12 +3280,28 @@ public class KpiScoreComparisonDto
 /// </summary>
 public class PostRemandFinalDecisionDto
 {
+    /// <summary>Upheld or Rejected. Nullable so a body without one is refused (see ResolveAppealDto).</summary>
     [Required]
-    public AppraisalAppealStatus FinalDecision { get; set; } // Must be Upheld or Rejected
-    
+    public AppraisalAppealStatus? FinalDecision { get; set; }
+
     [Required]
     [MaxLength(4000)]
     public string HRFinalNotes { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// HR moves a remand's re-evaluation deadline (performance closure D-34) — while the manager has
+/// not re-evaluated, to a later day. The manager is told, with the reason.
+/// </summary>
+public class ExtendRemandDeadlineDto
+{
+    /// <summary>The new last day for the re-evaluation; the deadline is the end of that day (UTC).</summary>
+    [Required]
+    public DateOnly? NewDeadline { get; set; }
+
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -3211,23 +3327,37 @@ public class EmployeeAppealOutcomeDto
     // Employee's Original Appeal
     public DateTime AppealSubmittedDate { get; set; }
     public string EmployeeAppealReason { get; set; } = "";
+    /// <summary>The contested criteria, each as "&lt;kind&gt;: &lt;name&gt;" — "KPI: …", "Competency: …", "Goal: …" (a KPI read "Criterion: …").</summary>
     public List<string> AppealedItems { get; set; } = new();
-    
+
     // HR Final Decision
     public string HRFinalNotes { get; set; } = "";
+    /// <summary>
+    /// The outcome in words, saying whether the appeal moved a score (C-b). An upheld appeal said the
+    /// scores "were adjusted" whether or not anything had moved.
+    /// </summary>
     public string OutcomeMessage { get; set; } = "";
-    
+
     // Final Scores
     public decimal FinalOverallScore { get; set; }
     /// <summary>The overall score the appeal was filed against; null on appeals filed before it was kept.</summary>
     public decimal? OriginalOverallScore { get; set; }
+
+    /// <summary>
+    /// <see cref="FinalCriteriaScores"/> is filled. False when the profile shows the employee only
+    /// the overall, the grade and the narrative (<c>ShowScoreBreakdownToEmployee</c> off —
+    /// performance closure B2); the list is then empty.
+    /// </summary>
+    public bool ScoreBreakdownShown { get; set; } = true;
+    /// <summary>Every criterion the manager scored — competency, KPI and goal rows, in the forms' order.</summary>
     public List<FinalCriterionScoreDto> FinalCriteriaScores { get; set; } = new();
-    public List<FinalKpiScoreDto> FinalKpiScores { get; set; } = new();
-    
+
     // Change Indicators
+    /// <summary>The appeal moved the overall, or a score it contested (D-38).</summary>
     public bool ScoresChangedAfterAppeal { get; set; }
 }
 
+/// <summary>One criterion on the appeal's outcome — competency, KPI or goal row (performance closure C6).</summary>
 public class FinalCriterionScoreDto
 {
     /// <summary>Null on a goal row (lane L3).</summary>
@@ -3235,14 +3365,30 @@ public class FinalCriterionScoreDto
     public Guid? CriterionConfigId { get; set; }
     /// <summary>The criterion's key: the template item for a template row, the snapshot row for a goal row.</summary>
     public Guid CriterionKey { get; set; }
+    /// <summary><c>Competency</c>, <c>KPI</c>, <c>Goal</c> or <c>Question</c>.</summary>
+    public string ItemType { get; set; } = "";
+    public CriterionScoringMethod ScoringMethod { get; set; }
     public string ItemName { get; set; } = "";
     public string ItemDescription { get; set; } = "";
-    public int? FinalScore { get; set; }
+    public string? SectionName { get; set; }
+    /// <summary>
+    /// A rated row's score on its scale, a measured row's achievement %. A measured row read its
+    /// <c>NumericScore</c>, so a KPI scored by its actual read "—".
+    /// </summary>
+    public decimal? FinalScore { get; set; }
+    /// <summary>A measured row's actual, and its target; null on a rated row.</summary>
+    public decimal? FinalActualValue { get; set; }
+    public decimal? TargetValue { get; set; }
+    public string? Unit { get; set; }
     public decimal FinalWeightedScore { get; set; }
     public int Weight { get; set; }
     public string ManagerComments { get; set; } = "";
     public bool WasAppealed { get; set; }
-    /// <summary>A KPI whose achievement calibration or an appeal restated to <see cref="FinalScore"/> percent (D-22, A14).</summary>
+    /// <summary>On a contested row: what it scored when the appeal was filed (D-38); null when not known.</summary>
+    public decimal? ScoreWhenAppealed { get; set; }
+    /// <summary>On a contested row: whether the appeal moved it. Null on a row not contested, or when not known.</summary>
+    public bool? ChangedOnAppeal { get; set; }
+    /// <summary>A measured row whose achievement calibration or an appeal restated to <see cref="FinalScore"/> percent (D-22, A14).</summary>
     public bool AchievementOverridden { get; set; }
 }
 
@@ -3266,6 +3412,15 @@ public class AppraisalTemplateDto : BaseDto
     public DateTime? SubmittedDate { get; set; }
     public DateTime? ApprovalDate { get; set; }
     public string? RejectionReason { get; set; }
+
+    /// <summary>
+    /// The template's structure is frozen (performance closure E-e, D-66): appraisals are scored on it, or it is
+    /// assigned to an open cycle. Its name and description stay editable; a structural change is made on a copy.
+    /// </summary>
+    public bool IsLocked { get; set; }
+
+    /// <summary>Why it is locked, e.g. "107 appraisals are scored on it, and it is assigned to the open cycle 'X'".</summary>
+    public string? LockReason { get; set; }
 }
 
 public class CreateAppraisalTemplateDto : CreateDtoBase
@@ -3334,6 +3489,10 @@ public class AppraisalTemplateSummaryDto : BaseDto
     public int SectionsCount { get; set; }
     public int TotalItemsCount { get; set; }
     public bool HasCycleAssignments { get; set; }
+
+    /// <summary>As <see cref="AppraisalTemplateDto.IsLocked"/>: appraisals are scored on it, or an open cycle has it.</summary>
+    public bool IsLocked { get; set; }
+    public string? LockReason { get; set; }
 }
 
 /// <summary>Reason payload for rejecting a submitted appraisal template.</summary>
@@ -3420,6 +3579,9 @@ public class AppraisalOutcomeRecommendationDto : BaseDto
     public DateTime? RecommendedDate { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedDate { get; set; }
+    /// <summary>Who rejected or dismissed it, and when (performance closure batch 2, D-45).</summary>
+    public Guid? DecidedById { get; set; }
+    public DateTime? DecidedDate { get; set; }
     public DateTime? ActionedDate { get; set; }
     public string? Notes { get; set; }
     public string? ResolutionNotes { get; set; }
@@ -3523,6 +3685,16 @@ public class UpdateSalaryReviewProposalDto
     [Range(0, double.MaxValue)]
     public decimal? ProposedAmount { get; set; }
 
+    [MaxLength(1000)]
+    public string? Notes { get; set; }
+}
+
+/// <summary>
+/// A note on a salary review proposal's decision or receipt — a rejection's reason, or what payroll changed. Its
+/// reject and mark-applied routes borrowed the employment action's DTO (F9); the body is the same <c>{ notes }</c>.
+/// </summary>
+public class SalaryReviewProposalNotesDto
+{
     [MaxLength(1000)]
     public string? Notes { get; set; }
 }
@@ -3870,6 +4042,16 @@ public class AppraisalCycleTemplateDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AppraisalCycleId { get; set; }
     public string? CycleCode { get; set; }
+
+    /// <summary>The cycle's status (P-7): a Closed cycle's links are frozen, an Open cycle's pinned while used.</summary>
+    public AppraisalCycleStatus? CycleStatus { get; set; }
+
+    /// <summary>
+    /// Appraisals in this cycle are scored on this template (performance closure E-e, D-68), so the link is neither
+    /// removed nor changed — removing it was a way round the template's lock.
+    /// </summary>
+    public bool TemplateInUseInCycle { get; set; }
+
     public Guid AppraisalTemplateId { get; set; }
     public string TemplateName { get; set; } = string.Empty;
     // Scope — sourced from AppraisalTemplate
@@ -4353,7 +4535,9 @@ public class CreateEmployeeGoalDto : CreateDtoBase
     [Required]
     public DateOnly DueDate { get; set; }
 
-    public Guid? SubmittedToManagerId { get; set; }
+    // No SubmittedToManagerId (performance closure D-76): the manager a goal goes to is the one the
+    // submit reads from the employee's HR record. The body's id was saved unchecked, so a goal could
+    // be filed in another tenant's employee's approval queue.
 }
 
 public class UpdateEmployeeGoalDto : UpdateDtoBase
@@ -4406,8 +4590,10 @@ public class UpdateEmployeeGoalDto : UpdateDtoBase
     [Required]
     public DateOnly DueDate { get; set; }
 
-    [Range(0, 100)]
-    public decimal ProgressPercent { get; set; }
+    // No ProgressPercent (performance closure D-72): a goal's progress is what its progress entries
+    // say, with who recorded it and when. The edit wrote it straight onto the goal — no entry, no
+    // recorder, no status — and both forms sent back the value they had loaded, so an entry made while
+    // the dialog was open was overwritten on save.
 
     // No Status / SubmittedToManagerId / ManagerFeedback here on purpose. Those move only through
     // the submit / approve / reject / lock commands on EmployeeGoalsController, which enforce the
@@ -4828,6 +5014,49 @@ public class DeadlineEnforcementResult
     public List<string> Messages { get; set; } = new();
 }
 
+/// <summary>
+/// The transition report (performance closure B8): a cycle's in-flight appraisals whose recorded
+/// state runs ahead of where the gates now hold them — an evaluation submitted before a step the
+/// gates put before it, typically because the gates arrived (lane B) or a profile changed after the
+/// work was done. For HR to waive through the audited advance; nothing is moved automatically.
+/// </summary>
+public class AppraisalTransitionReportDto
+{
+    public Guid CycleId { get; set; }
+    public string? CycleName { get; set; }
+    public DateTime GeneratedAt { get; set; }
+
+    /// <summary>In-flight appraisals examined: not completed, closed, appealed or withdrawn.</summary>
+    public int Examined { get; set; }
+
+    public List<AppraisalTransitionRowDto> Rows { get; set; } = new();
+}
+
+/// <summary>One appraisal whose records run ahead of the gates.</summary>
+public class AppraisalTransitionRowDto
+{
+    public Guid AppraisalId { get; set; }
+    public string? AppraisalNumber { get; set; }
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public AppraisalStatus Status { get; set; }
+
+    /// <summary>Where the gates hold it, and why.</summary>
+    public AppraisalSubStatus SubStatus { get; set; }
+    public string StepLabel { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+
+    /// <summary>What is recorded for steps the gates put after it — "the self-evaluation is submitted", ….</summary>
+    public List<string> RecordedAhead { get; set; } = new();
+
+    /// <summary>
+    /// HR's audited advance can move it past the step (the four before the manager's evaluation).
+    /// Otherwise the step itself has to be completed — the reason says what is missing.
+    /// </summary>
+    public bool CanWaive { get; set; }
+}
+
 public class CreateEmployeeDevelopmentObjectiveDto : CreateDtoBase
 {
     [Required]
@@ -4956,6 +5185,11 @@ public class AppraisalConversationDto : BaseDto
     public Guid TenantId { get; set; }
     public Guid AppraisalId { get; set; }
     public string? AppraisalNumber { get; set; }
+    /// <summary>
+    /// The appraisee (decision D-74): they read their conversations and write none, so the screens
+    /// offer Save and Mark held to everyone else on it.
+    /// </summary>
+    public Guid? AppraiseeEmployeeId { get; set; }
     public Guid? ScheduledById { get; set; }
     public string? ScheduledByName { get; set; }
     public Guid? ConductedById { get; set; }
@@ -4975,11 +5209,19 @@ public class CreateAppraisalConversationDto : CreateDtoBase
     [Required]
     public Guid AppraisalId { get; set; }
 
+    /// <summary>One of this appraisal's review events (D-76), when it is logged at one.</summary>
     public Guid? ReviewEventId { get; set; }
-    public Guid? ScheduledById { get; set; }
-    public Guid? ConductedById { get; set; }
 
-    public ConversationType Type { get; set; } = ConversationType.KickOff;
+    // No ScheduledById / ConductedById (decision D-74): the scheduler is who books it and the
+    // conductor who marks it held, both from the token.
+
+    /// <summary>
+    /// Which conversation this is — required (performance closure B2). It defaulted to KickOff, so
+    /// a body that named no type booked a kick-off, which the goal-setting gate then counted.
+    /// Nullable so that <c>[Required]</c> can see it missing: on a plain enum it is a no-op.
+    /// </summary>
+    [Required]
+    public ConversationType? Type { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
 
@@ -4987,18 +5229,15 @@ public class CreateAppraisalConversationDto : CreateDtoBase
     public string? Agenda { get; set; }
 }
 
+/// <remarks>
+/// Decision D-74: the meeting's details only. The type (the employee was told which conversation was
+/// booked; an edit with none wrote 0 — B2), the appraisal (B2), the scheduler and conductor (the
+/// token's), and held with its date (<c>CompleteAsync</c>'s) are not the edit's, so the DTO no longer
+/// carries them; a body that sends them is read without them.
+/// </remarks>
 public class UpdateAppraisalConversationDto : UpdateDtoBase
 {
-    [Required]
-    public Guid AppraisalId { get; set; }
-
-    public Guid? ScheduledById { get; set; }
-    public Guid? ConductedById { get; set; }
-
-    public ConversationType Type { get; set; }
-
     public DateTime? ScheduledDate { get; set; }
-    public DateTime? HeldDate { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5009,7 +5248,7 @@ public class UpdateAppraisalConversationDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? KeyTakeaways { get; set; }
 
-    public bool IsCompleted { get; set; }
+    /// <summary>One of this appraisal's review events (D-76), or none.</summary>
     public Guid? ReviewEventId { get; set; }
 }
 
@@ -5083,6 +5322,11 @@ public class CalibrationSessionDto : BaseDto
     public string? MeetingNotes { get; set; }
 }
 
+/// <summary>
+/// A new session. It carries no facilitator: the creator facilitates until someone opens it, and
+/// the opener after that (performance closure E-b — the body named one, so a session could be
+/// recorded as run by someone else).
+/// </summary>
 public class CreateCalibrationSessionDto : CreateDtoBase
 {
     [Required]
@@ -5096,7 +5340,6 @@ public class CreateCalibrationSessionDto : CreateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
-    public Guid? FacilitatedById { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5104,9 +5347,10 @@ public class CreateCalibrationSessionDto : CreateDtoBase
 
 /// <summary>
 /// Edits the session's own particulars. Deliberately carries no lifecycle fields: status and the
-/// started/completed stamps belong to the open/start/complete endpoints, which enforce the order
+/// started/completed stamps belong to the open/complete/cancel endpoints, which enforce the order
 /// and record who acted. Accepting them here let a caller mark a session Completed — and so lift
-/// the calibration gate on every appraisal in it — with a plain PUT.
+/// the calibration gate on every appraisal in it — with a plain PUT. The scope — cycle, unit,
+/// level — changes only while the session is Pending (E-b), and the facilitator not at all.
 /// </summary>
 public class UpdateCalibrationSessionDto : UpdateDtoBase
 {
@@ -5121,7 +5365,6 @@ public class UpdateCalibrationSessionDto : UpdateDtoBase
     public Guid? OrganizationUnitId { get; set; }
 
     public DateTime? ScheduledDate { get; set; }
-    public Guid? FacilitatedById { get; set; }
 
     [MaxLength(2000)]
     public string? Agenda { get; set; }
@@ -5135,6 +5378,14 @@ public class CompleteCalibrationSessionDto
 {
     [MaxLength(4000)]
     public string? MeetingNotes { get; set; }
+}
+
+/// <summary>Why a session that has not completed is called off (performance closure E-b, D-46).</summary>
+public class CancelCalibrationSessionDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>Attendance mark for one participant.</summary>
@@ -5351,6 +5602,11 @@ public class CreateCalibrationRatingAdjustmentDto : CreateDtoBase
     public string? Rationale { get; set; }
 }
 
+/// <summary>
+/// A new score and rationale for a recorded adjustment. The appraisal and the criterion must be
+/// the adjustment's own (performance closure E-b): an adjustment stays on what it was recorded
+/// against, and a body naming anything else is refused.
+/// </summary>
 public class UpdateCalibrationRatingAdjustmentDto : UpdateDtoBase
 {
     [Required]
@@ -5411,6 +5667,13 @@ public class CreatePipGoalDto : CreateDtoBase
     public DateOnly DueDate { get; set; }
 
     public GoalProgressStatus Status { get; set; } = GoalProgressStatus.NotStarted;
+
+    /// <summary>The goal's starting point (P-55), as the form sends it.</summary>
+    [Range(0, 100)]
+    public decimal? ProgressPercent { get; set; }
+
+    [MaxLength(2000)]
+    public string? ProgressNotes { get; set; }
 }
 
 public class UpdatePipGoalDto : UpdateDtoBase
@@ -5439,21 +5702,6 @@ public class UpdatePipGoalDto : UpdateDtoBase
     [MaxLength(2000)]
     public string? ProgressNotes { get; set; }
 }
-public class FinalKpiScoreDto
-{
-    public Guid EmployeeKpiTargetId { get; set; }
-    public string KpiName { get; set; } = "";
-    public string KpiDescription { get; set; } = "";
-    public decimal TargetValue { get; set; }
-    public decimal? FinalActualValue { get; set; }
-    public decimal FinalAchievementPercent { get; set; }
-    public decimal FinalWeightedScore { get; set; }
-    public int Weight { get; set; }
-    public string MeasurementUnit { get; set; } = "";
-    public string ManagerComments { get; set; } = "";
-    public bool WasAppealed { get; set; }
-}
-
 // ============================================================
 // AppraisalEvaluationSnapshot (read-only — immutable audit snapshot)
 // ============================================================
@@ -5637,11 +5885,28 @@ public class CalibrationMatrixRowDto
     public AppraisalStatus AppraisalStatus { get; set; }
     /// <summary>The manager's own evaluation total, before any calibration.</summary>
     public decimal? ManagerProposedScore { get; set; }
+    /// <summary>
+    /// HR returned the appraisal to its manager, who has not submitted again: there is no proposal or starting point to
+    /// show (performance closure E-g2, D-82 — the grid read the returned evaluation's old total).
+    /// </summary>
+    public bool ManagerReevaluating { get; set; }
     public decimal? PreCalibrationScore { get; set; }
+
+    /// <summary>
+    /// A calibrated appraisal's settled score, unless this session is still proposing another for
+    /// it; otherwise this session's proposed overall (P-41, E-b — it was always the proposal).
+    /// </summary>
     public decimal? CalibratedScore { get; set; }
     public decimal? ScoreAdjustment { get; set; }
     public string? AdjustmentRationale { get; set; }
     public bool IsCalibrated { get; set; }
+
+    /// <summary>
+    /// Why committing this session would leave the row alone — not at the calibration step, final
+    /// and unadjusted, calibrated by this session already, its manager's evaluation submitted after
+    /// the panel closed — or null when a commit would calibrate it (E-b).
+    /// </summary>
+    public string? CommitSkipReason { get; set; }
     public string? ManagerName { get; set; }
     public List<CalibrationRatingAdjustmentDto> Adjustments { get; set; } = new();
 }
@@ -5679,8 +5944,15 @@ public class CoveragePreviewDto
     /// <summary>Covered / Total * 100, rounded to 1 decimal place.</summary>
     public decimal CoveragePercentage { get; set; }
 
-    /// <summary>True only when EmployeesWithoutTemplate == 0 and ConflictCount == 0.</summary>
+    /// <summary>
+    /// True only when generation would go through: the cycle is Open (performance closure E-d2b), nobody resolves to no
+    /// template or to a tie, and nobody it would create is already covered by another open cycle of the same type and
+    /// year (D-60). <see cref="GenerationBlockedBy"/> says why not.
+    /// </summary>
     public bool IsGenerationSafe { get; set; }
+
+    /// <summary>Why generation would be refused, in the order it checks; empty when it would go through.</summary>
+    public List<string> GenerationBlockedBy { get; set; } = new();
 
     /// <summary>False if no active template assignments exist for the cycle.</summary>
     public bool HasActiveTemplates { get; set; }
@@ -5697,9 +5969,10 @@ public class CoveragePreviewDto
     public List<TemplateCoverageBreakdownDto> TemplateBreakdown { get; set; } = new();
 
     /// <summary>
-    /// Other cycles of the same type and year whose scope overlaps this one's.
+    /// Other cycles of the same type and year whose scope overlaps this one's — for an Open one, also whoever
+    /// already holds an appraisal there (D-60).
     ///
-    /// Advisory only — opening is refused solely by the Open / InProgress entries, because a
+    /// Advisory only for a Draft entry — opening, and generation, are refused solely by the Open entries, because a
     /// Draft cycle appraises nobody and may never be opened. Draft entries are reported here
     /// so the clash is visible while there is still time to re-scope, rather than surfacing
     /// as a refusal at the moment someone tries to open.
@@ -5715,7 +5988,10 @@ public class CycleScopeOverlapDto
     public string CycleName { get; set; } = string.Empty;
     public AppraisalCycleStatus Status { get; set; }
     public int SharedEmployeeCount { get; set; }
-    /// <summary>True when this overlap would refuse an attempt to open the cycle.</summary>
+    /// <summary>
+    /// True when this overlap would refuse an attempt to open the cycle — the other cycle is Open — and so, once this
+    /// one is open, generation for the people it shares (D-60).
+    /// </summary>
     public bool BlocksOpening { get; set; }
 }
 

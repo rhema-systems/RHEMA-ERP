@@ -90,6 +90,23 @@ internal static class PipAccess
     }
 
     /// <summary>
+    /// Decision D-75: whether the caller is the plan's subject. The subject — an HR officer included —
+    /// does not decide, close or delete their own plan: approve, reject, the outcome and delete reach
+    /// the service past <see cref="CanManageAsync"/> (their authority is the workflow's or the desk
+    /// policy's), so the desk test let an HR officer on a plan record their own outcome.
+    /// </summary>
+    internal static async Task<bool> IsSubjectAsync(
+        ApplicationDbContext db, ICurrentUserService currentUser, Guid pipId, CancellationToken ct = default)
+    {
+        if (currentUser.TenantId is not Guid tenantId) return false;
+        if (currentUser.EmployeeId is not Guid me || me == Guid.Empty) return false;
+
+        return await db.Set<PerformanceImprovementPlan>()
+            .AsNoTracking()
+            .AnyAsync(p => p.Id == pipId && p.TenantId == tenantId && p.EmployeeId == me, ct);
+    }
+
+    /// <summary>
     /// Whether the plan's subject may see it: once it has left Draft and approval. Shared by the
     /// single-plan gate and the subject's own lists.
     /// </summary>

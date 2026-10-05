@@ -70,9 +70,7 @@ export function ConversationsPanel({ appraisalId, canSchedule = false }: Convers
         type: form.type,
         scheduledDate: form.scheduledDate ? new Date(form.scheduledDate).toISOString() : null,
         agenda: form.agenda.trim() || null,
-        // Left null so the server stamps the signed-in employee as the scheduler.
-        scheduledById: null,
-        conductedById: null,
+        // The server stamps the signed-in employee as the scheduler (closure D-74).
       }),
     onSuccess: () => {
       toast({ title: 'Conversation scheduled', description: 'The employee has been notified.' });

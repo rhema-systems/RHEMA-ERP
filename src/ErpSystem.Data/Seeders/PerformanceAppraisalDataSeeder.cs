@@ -143,11 +143,16 @@ public sealed class PerformanceAppraisalDataSeeder
         }
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 4. Appraisal Settings
+        // 4. Appraisal Settings — the tenant's default profile when it has none yet (performance
+        // closure B6/S1): the flag answers GET /default, which read "the newest profile" and so
+        // crowned whatever a test run created last. At most one per tenant (a filtered unique index).
+        var tenantHasDefault = await _context.AppraisalSettings
+            .AnyAsync(s => s.TenantId == tenantId && s.IsDefault, cancellationToken);
         var settings = new AppraisalSettings
         {
             TenantId = tenantId,
             SettingsName = "Standard Annual Appraisal",
+            IsDefault = !tenantHasDefault,
             RequireSelfEvaluation = true,
             SelfEvaluationWeight = 0.1m,
             RequirePeerReviews = true,
@@ -298,7 +303,25 @@ public sealed class PerformanceAppraisalDataSeeder
         }
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 6. Appraisal Cycle (2026 annual cycle, currently in progress at mid-year)
+        // The form's free-text question, built with the template before anything is scored on it (performance closure
+        // E-e). It was added afterwards, through EF, by a separate step — to an approved template already on an open
+        // cycle, the edit the template lock forbids. Weight 0: it is answered, not scored, so it takes no bands (P-8);
+        // the forms read it live from the template, so every appraisal shows it.
+        _context.AppraisalTemplateItems.Add(new AppraisalTemplateItem
+        {
+            TenantId = tenantId,
+            AppraisalTemplateSectionId = competencySection.Id,
+            CustomQuestion = "What did you contribute this year that you are most proud of, and what support do you need "
+                           + "from the Corporation next year?",
+            DisplayOrder = 3,
+            Weight = 0,
+            CreatedAt = now
+        });
+        await _context.SaveChangesAsync(cancellationToken);
+        totalCreated++;
+
+        // 6. Appraisal Cycle (the 2026 annual cycle, open since January). Open, not InProgress: that status
+        // is gone (performance closure D-14), and this seeder was its only writer.
         var cycle = new AppraisalCycle
         {
             TenantId = tenantId,
@@ -309,7 +332,7 @@ public sealed class PerformanceAppraisalDataSeeder
             StartDate = new DateOnly(2026, 1, 1),
             EndDate = new DateOnly(2026, 12, 31),
             AppraisalSettingsId = settings.Id,
-            Status = AppraisalCycleStatus.InProgress,
+            Status = AppraisalCycleStatus.Open,
             GoalSettingOpenDate = new DateOnly(2026, 1, 5),
             GoalSettingDeadline = new DateOnly(2026, 1, 31),
             MidYearOpenDate = new DateOnly(2026, 6, 1),
@@ -429,6 +452,43 @@ public sealed class PerformanceAppraisalDataSeeder
             _context.PerformanceAppraisals.Add(appraisal);
             await _context.SaveChangesAsync(cancellationToken);
             totalCreated++;
+
+            // The form's snapshot, as generation writes it (performance closure E-g2, D-86): the four scored items, their
+            // weights, the KPI targets and the bands. These appraisals were written without one, so their forms opened
+            // empty (the system guide's Rule 8) and every rebuild recreated them so. The free-text question carries no
+            // weight and is not snapshotted, as generation skips it.
+            foreach (var item in templateItems)
+            {
+                var measured = item.KpiDefinitionId != null && item.KpiTargetValue != null;
+                _context.PerformanceAppraisalCriterionConfigs.Add(new PerformanceAppraisalCriterionConfig
+                {
+                    TenantId = tenantId,
+                    PerformanceAppraisalId = appraisal.Id,
+                    TemplateItemId = item.Id,
+                    WeightUsed = item.Weight,
+                    AppraisalTemplateSectionId = item.AppraisalTemplateSectionId,
+                    SectionWeightUsed = item.AppraisalTemplateSectionId == kpiSection.Id ? kpiSection.Weight : competencySection.Weight,
+                    KpiTargetValue = measured ? item.KpiTargetValue : null,
+                    KpiMinValue = measured ? item.KpiMinValue : null,
+                    KpiMaxValue = measured ? item.KpiMaxValue : null,
+                    // The KPI's tolerance kept with its target, as generation keeps it (D-32).
+                    KpiTolerancePercent = measured
+                        ? kpis.Values.FirstOrDefault(k => k.Id == item.KpiDefinitionId)?.TolerancePercent
+                        : null,
+                    KpiTargetSource = measured ? KpiTargetSource.Template : null,
+                    GradeRanges = gradeData.Select(g => new PerformanceAppraisalCriterionConfigGradeRange
+                    {
+                        TenantId = tenantId,
+                        GradeDefinitionId = grades[g.Name].Id,
+                        LowScore = (int)g.Min,
+                        HighScore = (int)g.Max,
+                        CreatedAt = now
+                    }).ToList(),
+                    CreatedAt = now
+                });
+                totalCreated += 1 + gradeData.Length;
+            }
+            await _context.SaveChangesAsync(cancellationToken);
 
             var goal1 = new EmployeeGoal
             {

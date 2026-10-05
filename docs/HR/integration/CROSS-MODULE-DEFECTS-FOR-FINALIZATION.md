@@ -36,7 +36,7 @@ file carrying the defect received no change in this range.
 | 12 | Payroll payslip snapshots (FYI) | n/a | informational entry |
 | 13 | Payroll profile create never worked | **Open** | `PayrollService.cs` untouched |
 | 14 | Workflow pending feeds die mid-stream | **Open** | no `ReferenceHandler`/`IgnoreCycles` anywhere; master's only `WorkflowController` change is an unrelated new endpoint |
-| 15 | Generic approval strands the entity | **Partly mitigated, Finance only** | master added a `SupplierDebitNote` guard returning 409 `FINANCE_DOMAIN_APPROVAL_REQUIRED` pointing at the domain route. The generic hole is unchanged and **no HR entity is protected** — but this is now the precedent pattern for protecting one |
+| 15 | Generic approval strands the entity | **Partly mitigated, Finance only** | master added a `SupplierDebitNote` guard returning 409 `FINANCE_DOMAIN_APPROVAL_REQUIRED` pointing at the domain route. The generic hole is unchanged and **no HR entity is protected** — but this is now the precedent pattern for protecting one. *(2026-10-04: staff travel and separation named in § 15 — what a trip and a separation lose when approved there.)* |
 | 16 | Notification feed planting | **Open upstream** | `NotificationsController` untouched (HR gated its own path in slice 11) |
 | 17 | Fixed-asset approval links to a dead route | **Open** | `ActionUrl` still `/finance/fixed-assets/register/{id}`; `register/[id]/` still contains only `edit/` |
 | 18 | Payroll loans readable by anyone | **Open** | `PayrollController.cs` untouched |
@@ -282,8 +282,9 @@ recorded in `StaffTravelCurrencyBridge.GetRateToBaseAsync`, and the travel harne
    seeded pairs, and correct any existing rows.
 3. Check every other writer of `ExchangeRate` for the same transposition — the seeder is unlikely
    to be the only place the ambiguity was resolved the wrong way.
-4. Re-run `dev-harness/hr-travel/run-slice6.mjs`; it prints the effective rate and warns when it is
-   implausible, so it will confirm the fix without needing an edit.
+4. ~~Re-run `dev-harness/hr-travel/run-slice6.mjs`~~ — retired with the old travel suites (2026-10-04, travel closure
+   D-59; it could no longer start on UAT). The rate travel uses is now checked by `run-final-truth.mjs` §1 and
+   `run-final-money.mjs` (the expense date's rate, B12).
 
 ---
 
@@ -1107,6 +1108,19 @@ module on the engine is affected. The HR portal inbox (slice 11) is READ-AND-NAV
 exactly this reason: rows deep-link to the record page, whose module commands do the whole
 job.
 
+**Staff travel, named (2026-10-04, travel closure lane 10).** A trip approved from the generic inbox stays
+**Submitted**. It also skips everything travel's own approve does after the engine:
+- the checks travel's approve makes before the engine — at stage 1 the traveller's line authority, and never the
+  traveller themselves (D-7; the route leaves `PreventInitiatorApproval` off because the service is the control). By
+  the route's design, then, an HR officer who is travelling could approve their own trip at the HR stage from the inbox
+  (read from the code, not tried);
+- the final approver's `ApprovedById`;
+- the trip's working days on attendance;
+- the traveller's and desk's notices.
+
+An **employee separation** approved there stays PendingApproval and cancels none of the leaver's trips (travel closure
+9c). Travel's own door is the desk's *Approvals* queue and the trip page, whose verbs carry the whole outcome.
+
 ### What a fix needs
 
 The generic process endpoints must apply the entity's status adapter after a successful
@@ -1904,6 +1918,332 @@ lookups they were built for.
 Drop the redundant filters in a follow-up migration, or declare `HasFilter` on the model if they are
 intentional. `has-pending-model-changes` will not surface this: the snapshot follows the model,
 not the SQL.
+
+## 33. Platform — the 90-day notification clean-up runs every 30 seconds, as a bulk UPDATE over the whole table (2026-09-30)
+
+**Owner:** Platform (notifications — `NotificationDispatcherBackgroundService`,
+`UnifiedNotificationService.CleanupExpiredNotificationsAsync`).
+**Severity:** medium — no data is wrong, but it takes locks and query memory that every other
+request competes for. **Found:** HR performance closure, slice E-d1's regression on UAT.
+
+### What is broken
+
+`ArchiveExpiredNotificationsAsync` runs on every dispatch cycle — `Notifications:DispatchIntervalSeconds`,
+30 seconds by default — and ends by calling `CleanupExpiredNotificationsAsync`, which soft-deletes
+notifications older than **90 days** with one `ExecuteUpdateAsync` over `Notifications`. A 90-day
+rule needs a daily run, not one every 30 seconds.
+
+### What was proven
+
+- The API's log shows the clean-up **53 times in one hour**, each *"Deleted 0 expired notifications"*:
+  UAT holds 151,116 notifications, none older than 90 days, so every run scans the table to change
+  nothing.
+- A read-only monitor of `sys.dm_exec_requests` during a harness run (2 s samples, 18:04–18:30):
+  the clean-up's `UPDATE` **blocked notification inserts** (`LCK_M_IX`, up to several seconds, 23
+  samples), and **waited in SQL Server's memory-grant queue itself** (`RESOURCE_SEMAPHORE`, 31
+  samples); it failed once. Every request that raises a notification waits behind it.
+- In the same window, heavy reads elsewhere waited for memory grants too, and HR's manager
+  evaluation form timed out at 30 s five times — its own defect (HR's, recorded in the performance
+  closure plan's § 5), made likelier by a table-wide `UPDATE` every half minute.
+
+- **Seen again at slice E-d2a (2026-09-30, the same monitor over a 23-minute regression):** the
+  clean-up had nothing to scan by then, but the dispatcher's own claim query (`SELECT TOP(@n) … WHERE
+  … @maxRetryAttempts …`, running in parallel — `CXSYNC_PORT`) held a **range lock that blocked a
+  notification insert for about 3 s** (`LCK_M_RIn_NL`); an HR template's submit-for-approval took 10 s
+  in that window. It was the only blocking the monitor saw. UAT's unsent notifications are claimed
+  200 at a time every 31 s, each failing at once for want of SMTP settings (8,110 failures in the
+  run's 34-minute log).
+- **Once the harness's rate-limit waits were lifted (the same evening), it was the slowest thing left:**
+  every workflow submit that raises notifications took 11–13 s — five template submits and a PIP
+  submit, 6 of 6, in a regression whose other calls answered in well under a second. The monitor had
+  caught one such insert waiting on the claim query's range lock for about 10 s (`LCK_M_RIn_NL`).
+
+### What it blocks
+
+Nothing outright; it degrades every request that writes a notification, and adds to the memory
+pressure that times out large reads.
+
+### What a fix needs
+
+Run the clean-up on its own daily schedule (or at most hourly), not inside the 30-second dispatch
+loop; and index `Notifications (IsDeleted, CreatedAt)` so the `WHERE CreatedAt < @cutoff` finds its
+rows without a scan. The claim query should not hold range locks over the table the rest of the
+application inserts into (read committed with a claim `UPDATE … OUTPUT`, or `READPAST`).
+
+## 34. Workflow designer — an approval stage's "person named by the record" approvers are invisible, and saving the route deletes them (2026-10-02)
+
+**Owner:** Platform (workflow — `frontend/src/components/workflow/WorkflowDesigner.tsx`).
+**Severity:** high for any route that relies on them: the route works until someone edits it in the
+designer, and is then silently rewired. Today that is one route, **Staff Travel Approval**, since HR's
+travel closure lane 2 (2026-10-02). **Found:** HR, checking whether the travel route would survive an
+administrator's edit. **Evidence:** read in source on 2026-10-02; not yet reproduced in the browser
+(steps below).
+
+> **Status: the minimum fix is in — made by HR on 2026-10-02 (travel closure slice 2b), after the issue was
+> raised with the workflow developer.** The designer now keeps, shows and saves back the approver rules it does not edit,
+> and keeps the step's required role as their fallback. See *What HR changed* below. The fuller fix — an
+> approval stage *assigned* to a person from the record in the designer — stays with the workflow owner.
+
+### What the engine supports
+
+An approval stage's approver rules (`approvalConfig.approverRules`) can be `Role`, `User`, `Dynamic`,
+`RequestorManager` or `PreviousStepUser` (`WorkflowAssignmentType`). `WorkflowEngine.ResolveApproversAsync`
+(`WorkflowEngine.cs:1561`) resolves each; a `Dynamic` rule reads a user id from the record's workflow
+context under its `dynamicExpression` (l.1593), and when no rule resolves the engine falls back to the
+step's `RequiredRole` (l.1455). The context is what the entity's block in
+`SimpleWorkflowService.BuildEntityContextAsync` puts there.
+
+Staff travel uses this: the *Line manager approval* stage carries two `Dynamic` rules
+(`lineApproverUserId`, `lineApproverUserId2`), which the travel context fills with the logins of the
+traveller's two nearest line authorities (`SimpleWorkflowService.cs:1932-1938`), and `RequiredRole = HR`
+as the fallback. So the task, the *Approval Required* notification and the inbox row go to the
+traveller's own supervisor or head of unit — not to every holder of the Manager role — and to HR only
+when nobody in the traveller's line can sign in.
+
+### What is broken
+
+The designer understands only `Role` and `User` approver rules on an approval stage:
+
+- **Loading** (`WorkflowDesigner.tsx:1433-1446`) keeps the `Role` and `User` rules and drops every other
+  kind; when no `Role` rule is left, it shows the step's `RequiredRole` as the stage's approver role. The
+  travel stage therefore shows **"HR"** as its approver — the fallback, not who is actually asked.
+- **Saving** (from l.1623; `requiredRole` at l.1250) rebuilds `approverRules` from the roles and users it
+  showed. The `Dynamic` rules are gone, and "HR" is written back as an explicit `Role` rule.
+- Nothing warns, on load or on save.
+
+Task steps are not affected — they already offer *Dynamic User From Context* (l.2866). The gap is approval
+stages only.
+
+### What happens when someone edits the travel route (steps to reproduce)
+
+1. Workflow designer → *Staff Travel Approval* → new version → change nothing, or add a stage → publish.
+2. Read the new version's *Line manager approval* step: `approverRules` is `[Role: HR]`; the two `Dynamic`
+   rules are gone.
+3. Submit a travel request: every HR officer gets the first-stage task and notification; the traveller's
+   line manager gets nothing and can no longer decide it. HR's travel service then lets the travel desk
+   decide the stage (its rule for "no line manager can"), so nothing errors — the route has quietly become
+   HR-only.
+
+### What a fix needs
+
+**Minimum (enough for travel):** on load, keep every approver rule the designer does not edit, unchanged,
+in the node's data; on save, write those rules back after the role and user rules; show them read-only on
+the stage (for example *Named by the record: lineApproverUserId*); and do not present `RequiredRole` as an
+approver role when the stage's rules are of another kind. A round-trip test — load a stage with a `Dynamic`
+rule, save it, get the same rules back — and a check that `Role`/`User`-only routes save exactly as before.
+
+**Fuller:** let an approval stage be assigned *Person from the record (context field)*, as a task step
+already can, listing the context fields the entity's `BuildEntityContextAsync` block provides.
+
+**HR's proposal** (as first recorded): HR makes the minimum change in its next travel slice (2b), with the
+round-trip test, unless the workflow owner prefers to make it. Until then, do not publish a new version of
+*Staff Travel Approval* from the designer. — *Done by HR; see below.*
+
+### What HR changed (2026-10-02, travel closure slice 2b)
+
+The minimum fix, and nothing else in the designer or the engine:
+
+- **New `frontend/src/components/workflow/WorkflowDesigner.approvers.ts`** — the approval stage's approver
+  mapping, moved out of the component into pure functions so it can be tested. It is part of the
+  designer — named for it, and the designer's import and its load and save points say where it is:
+  - `readApprovalStageApprovers(rules, requiredRole)` — **load.** Roles and users go to the designer's
+    editors as before. Every other kind of rule is kept **exactly as stored** (`preservedApproverRules`).
+    When there are such rules, the step's required role is kept as their fallback
+    (`fallbackRequiredRole`) and is **no longer shown as an approver role**. A stage of roles and users
+    loads exactly as before — including the old behaviour of showing the required role when no role
+    rule is left.
+  - `buildApprovalStageRules(...)` — **save.** Roles and users are built exactly as the designer always
+    built them (same groups and priorities); the preserved rules follow, unchanged (their kind written
+    as the enum number, as the designer writes its own).
+  - `stageRequiredRole(...)` — a stage with preserved rules keeps the required role it was stored with;
+    any other stage takes its first role, as before.
+  - `approverSlotCount(...)` — the designer's "at least one approver" and minimum-approvals checks count
+    preserved approvers (travel's line-manager stage has no role or user, and would otherwise fail
+    validation and could not be saved at all).
+  - `describePreservedApprover(rule)` — the words the designer shows for one.
+- **`WorkflowDesigner.tsx`** — `buildNodeDataFromStep` reads the stage through the helper and keeps
+  `preservedApproverRules` and `fallbackRequiredRole` on the node; `buildStepConfiguration` saves through
+  `buildApprovalStageRules`; the step's `requiredRole` comes from `stageRequiredRole`; validation counts
+  preserved approvers. The stage's properties panel shows them read-only under **Named by the record**
+  ("Person named by the record (lineApproverUserId)"), with "When none of them can be found, the HR role
+  is asked instead". **`nodes/ApprovalNode.tsx`** counts them on the canvas card.
+- **Proof:** `WorkflowDesigner.approvers.test.ts`, 8 tests — the travel stage **exactly as
+  `GET api/Workflow/definitions/{id}` returned it on UAT** round-trips unchanged, twice, with HR kept as
+  its fallback; a stage of roles and users saves **exactly as the code before the fix did** (that code is
+  copied into the test as the reference, for parallel and sequential stages); the old seed shape (no
+  rules, a required role only) is unchanged; a mixed stage keeps both kinds; the kind is read whether the
+  API sends its name or its number. All 47 workflow component tests pass; type-check and lint clean.
+  Not yet walked in the browser.
+
+**What it means now:** the *Staff Travel Approval* route can be opened, edited (a stage added, for
+instance) and republished in the designer; its *Line manager approval* stage keeps its two named-approver
+rules and its HR fallback.
+
+**Still the workflow owner's:** letting an author *assign* an approval stage to a person from the record
+in the designer (task steps already offer *Dynamic User From Context*), and #3 below.
+
+### Related
+
+- **#3 — conditional routing does not route** (still open): a stage cannot yet depend on the record, e.g.
+  "the Managing Director only above GHS 50,000".
+- **`RequestorManager` never resolves.** The engine reads `requestorManagerId` from the context
+  (`WorkflowEngine.cs:1600`, `ProcedureCaseService.cs:6848`), and no entity's context supplies it, so a
+  stage assigned to "the requestor's manager" has no approver. HR built its own line-manager lookup for
+  travel for this reason (`HrLineAuthority`).
+
+## 35. Finance — on a database seeded with the v2 accounting books, the V1 book resolver names a book that does not exist, so no HR (or Procurement) posting can land (2026-10-02)
+
+**Owner:** Finance (`ErpSystem.Core/Finance/Integration/FinanceAccountingBookCodeResolver.cs`, the V1 compatibility
+boundary of `docs/Finance/ACCOUNTING_BOOK_V2_PRODUCER_MIGRATION.md`), with the HR, Payroll and Procurement owners for
+the V2 cut-over that document schedules. **Severity:** high the day any producer's posting rule is switched on — with
+HR's strict adapter the HR action itself is refused, not merely left unposted. **Found:** HR's travel closure, lane 3
+(D-17), proving travel's posted path on a scratch copy of UAT. **Evidence:** reproduced against the running API on that
+copy, 2026-10-02.
+
+### What is broken
+
+`HrFinancePostingStore.GetTenantContextAsync` takes the book from Finance's own resolver,
+`FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(FinanceSettings.SubledgerPostingMode, …)`, which answers only
+`IFRS`, `LOCAL_STATUTORY` or `MANAGEMENT` (and `IFRS` when there are no settings). UAT's `FinanceSettings` say
+`SubledgerPostingMode = IFRS`. But UAT — seeded on Finance's book model v2 (`a5baaf88f`, `0e3b1580b`, 2026-09-21) —
+has the books **`BASE`** (default, primary, active, posting), **`IFRS_ADJUSTMENTS`** and **`USD_PARALLEL`**, and no
+`IFRS`. `FinancePostingEngine` (`FinancePostingEngine.cs:1330`) looks the book up by tenant and code, finds none,
+records a `BOOK_UNAVAILABLE` denial and throws *"Accounting book is unavailable for this tenant."*
+
+Reproduced: with travel's five rules switched on and every role mapped, disbursing an advance answered **422 —
+"Finance did not accept 'Travel advance disbursed' for ADV-2026-00002: Accounting book is unavailable for this
+tenant."**; the register row is `Failed`, and — the adapter being strict — the advance stayed Approved. A claim's
+approval was refused the same way. Every HR event goes through the same store, so medical, benefits, awards, leave
+encashment, separation and receivables are affected alike. Procurement's supplier-onboarding fee and tender fee
+(`ProcurementSupplierOnboardingTokenService.cs:1535`, `TenderBidService.cs:2136`) call the same resolver.
+
+HR's posting design (`HR-FINANCE-POSTING-DESIGN.md` § 5.1) and `dev-harness/hr-finance/prep-uat-finance-authority.sql`
+were written when UAT had an `IFRS` book; the prep's `UPDATE … WHERE Code = 'IFRS'` now matches nothing. (UAT's three
+books are already active and postable — that step of the prep is obsolete.)
+
+### What it blocks
+
+Switching on any HR posting rule on a database built today. UAT keeps no HR rule, so nothing fails there now — every
+HR money event is recorded `Unposted`, as designed.
+
+### What a fix needs
+
+The V2 cut-over the migration note describes: producers submit a concrete `AccountingBookCode` that exists — for a v2
+tenant, presumably its default primary book — rather than the V1 setting. Until then, either the resolver (or
+`FinanceSettings`) must be able to name `BASE`, or a v2 seed must keep a book the resolver names. Not HR's to choose:
+the book a subledger posts to is Finance's decision.
+
+**How HR proved its own path meanwhile:** on the scratch copy only, the primary book `BASE` was renamed `IFRS`
+(`l3c/d17/scratch-book.sql`); travel's posted path then ran 70/70 twice (`dev-harness/hr-travel/run-final-posting.mjs`)
+and the copy was dropped.
+
+## 36. Platform — the notification dispatcher writes back whole rows, undoing a soft delete made while its batch runs (2026-10-03)
+
+**Owner:** Platform (notifications — `UnifiedNotificationService.ProcessPendingNotificationsAsync`, run by
+`NotificationDispatcherBackgroundService`). **Severity:** low for users (a notification someone deleted can come back to
+their list), but it makes any clean-up of `Notifications` unreliable while the dispatcher is working. **Found:** HR's
+travel closure, lane 8, reading why notices of deleted harness trips were still live on UAT.
+
+### What is broken
+
+The dispatcher claims each due notification, loads it **tracked** (`_dbContext.Notifications.FirstOrDefaultAsync(n =>
+n.Id == id && !n.IsDeleted)`), sends it, sets its status, and calls `Repository<Notification>().UpdateAsync(notification)`
+— which marks every column modified — then saves the whole batch with one `SaveChangesAsync` at the end of the loop. A
+row soft-deleted by anyone else between its load and that save is written back with `IsDeleted = 0` and `DeletedAt =
+NULL`. The window is the batch's processing time, which on a database with no mail server is wide: each email fails
+after several seconds (see #33 — 200 claimed every 31 s, each failing at once for want of SMTP settings).
+
+### What was proven
+
+On UAT, 2026-10-03: two trips of a harness run (TR-2026-03111 and -03112, policy suite run 343424) were soft-deleted at
+02:09:14.867 with their notices; 45 of those notices were live again, each stamped `SentAt` between 02:09:14.967 and
+02:09:15.0 — written by the dispatcher a tenth of a second after the delete. The other 21 notices of one trip, not in that
+batch, stayed deleted. (The harness now deletes a run's notices again one dispatcher cycle later; the 45 were removed by
+hand.)
+
+### What it blocks
+
+Nothing outright. Any module that removes notifications in bulk — a user clearing their list, a record's deletion
+cascading to its notices, a test teardown — can be partly undone.
+
+### What a fix needs
+
+Save only what the dispatcher changed: set the status, attempt count and sent time on the tracked entity and let change
+tracking write those columns (no `Update` on an already-tracked entity), or use one `ExecuteUpdateAsync … WHERE Id = @id
+AND IsDeleted = 0` per outcome; and save per notification, not once per batch.
+
+## 37. Payroll — no intake for a one-off amount owed to an employee, so a claim "paid through payroll" reaches nobody (2026-10-04)
+
+**Owner:** Payroll. **Severity:** medium — a missing capability, not broken code; until it exists HR must not offer
+payment through payroll. **Found:** HR's travel closure, finding O-6 (2026-10-01), decided as D-10 in lane 3; written up in
+lane 9. **Full report:** `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`.
+
+### What is broken
+
+Two HR claim screens let an officer settle an approved claim through payroll — travel's **Payroll offset**
+(`TravelPaymentMethod.PayrollOffset`) and medical's **Salary deduction** (`PaymentMethod.SalaryDeduction`). Both mark the
+claim *Paid*; neither sends anything to payroll, because payroll has no intake for "pay this employee this one-off amount
+in the next period". Bonus, back-pay and promotion arrears have their own policies; `PayrollEmployeeComponent` is a
+standing per-employee setting; `PayrollImportBatch` reconciles legacy staff numbers. HR's Finance posting already leaves
+the staff claims payable for payroll's journal to clear — the amount never reaches a payslip.
+
+### What was proven
+
+Read 2026-10-04: `TravelPaymentMethod.PayrollOffset` and `PaymentMethod.SalaryDeduction` have no reader outside HR's
+posting factory, which posts nothing for them beyond the advance a travel claim set off. On UAT no claim has used either
+method (the paid travel claims are bank transfers; one medical claim, by bank transfer).
+
+### What it blocks
+
+Paying staff claims through payroll. **Travel is protected:** since 2026-10-02 its pay dialog hides the option and the
+API refuses it (D-10). **Medical is not:** its claim page still offers *Salary deduction* — HR will decide separately
+whether to switch it off the same way.
+
+### What a fix needs
+
+First a decision from payroll (and TDC): should claims be paid through payroll at all? If not, nothing is built — travel's
+refusal stays and medical's option is switched off. If so, a payroll intake for a one-off amount per employee, with a
+reference back to the claim, a way to withdraw an item not yet paid, and the pay period that paid it reported back, so HR
+marks the claim *Paid* only once it is. Currency and tax treatment are payroll's to rule. The hand-off lists exactly what
+HR would send.
+
+## 38. Fleet — a vehicle or driver can be double-booked, and a submitted fleet trip is approved by nobody (2026-10-04)
+
+**Owner:** Fleet (`src/ErpSystem.Core/Services/Maintenance/Fleet/FleetTripService.cs`). **Severity:** medium — both
+put trips and vehicles wrong on Fleet's own screens, whoever books them. **Found:** HR's travel closure, the Fleet review
+(FX-2, FX-7, FX-9, 2026-10-01), handed off under D-12, D-27 and D-62. **Full report:**
+`docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md`.
+
+### What is broken
+
+- **The clash check sees dispatched trips only, and no dates** (`EnsureNoDispatchedConflictAsync`, l.885-901). Planned
+  trips for the same hours are all accepted. A vehicle that is out refuses every other trip for it, next month's too.
+- **A driver is checked for a licence only** — not for approved leave, or another trip not yet dispatched.
+- **No `FLEET_TRIP` approval route is seeded**, and `SubmitForApprovalAsync` (l.346) has no guard for a missing route.
+  The engine then approves the submission at once, with nobody asked.
+
+### What was proven
+
+Read from the code, 2026-10-01 and again 2026-10-04 (the lines above).
+
+Travel's own legs are protected on travel's side (`StaffTravelFleetService`):
+- strict overlap against planned trips;
+- compliance at drop-off;
+- driver leave and other trips;
+- submission only under a published route (D-27).
+
+### What it blocks
+
+Nothing in travel. In Fleet: double-booked vehicles and drivers, and fleet trips approved without an approver.
+
+### What a fix needs
+
+- Compare overlapping planned windows of live trips.
+- Seed a route and refuse submission without one.
+
+HR offers a read-only availability read (approved leave and staff travel) for the driver check. The hand-off also asks
+for a Fleet-owned read of a trip's incidents: travel reads the `FleetIncidents` table directly today, because Fleet's
+reads need `MaintenanceRead`.
 
 ## How to use this file
 

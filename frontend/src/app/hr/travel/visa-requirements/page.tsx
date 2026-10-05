@@ -29,6 +29,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { TravelQueryError } from '@/components/hr/travel/TravelQueryError';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { countryService } from '@/services/hr/country.service';
@@ -151,7 +152,7 @@ export default function VisaRequirementsPage() {
     onError: (e: any) =>
       toast({
         title: editing ? 'Could not update it' : 'Could not add it',
-        description: e?.data?.message ?? e?.message,
+        description: e?.message,
         variant: 'destructive',
       }),
   });
@@ -163,7 +164,7 @@ export default function VisaRequirementsPage() {
       toast({ title: 'Requirement removed' });
     },
     onError: (e: any) =>
-      toast({ title: 'Could not remove it', description: e?.data?.message ?? e?.message, variant: 'destructive' }),
+      toast({ title: 'Could not remove it', description: e?.message, variant: 'destructive' }),
   });
 
   const startAdd = () => {
@@ -248,6 +249,10 @@ export default function VisaRequirementsPage() {
               <div className="flex items-center justify-center py-10">
                 <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
               </div>
+            ) : requirements.isError && !requirements.data ? (
+              <div className="p-4">
+                <TravelQueryError error={requirements.error} what="the visa requirements" />
+              </div>
             ) : rows.length === 0 ? (
               <div className="py-8">
                 <EmptyState
@@ -296,7 +301,10 @@ export default function VisaRequirementsPage() {
                       </TableCell>
                       <TableCell className="text-sm">
                         {r.lastVerifiedAt ? (
-                          <span className="text-muted-foreground">{r.lastVerifiedAt.slice(0, 10)}</span>
+                          // Lane 7 (T-40): an entry not checked for a year is flagged, as one never checked is.
+                          <span className={r.isStale ? 'text-amber-600' : 'text-muted-foreground'}>
+                            {r.lastVerifiedAt.slice(0, 10)}{r.isStale ? ' · over a year ago' : ''}
+                          </span>
                         ) : (
                           <span className="text-amber-600">Never</span>
                         )}

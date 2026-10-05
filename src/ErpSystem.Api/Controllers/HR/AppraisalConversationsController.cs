@@ -19,7 +19,8 @@ namespace ErpSystem.Api.Controllers.HR;
 /// are the cycle's own scheduled conversations and hang off the appraisal record.</para>
 ///
 /// <para>Entitlement follows the appraisal: HR, the appraisee, the appraisee's line manager, and
-/// whoever scheduled or is holding the conversation. <c>/mine</c> and <c>/my-diary</c> take the
+/// whoever scheduled or is holding the conversation read it; all of them but the appraisee write it
+/// (performance closure D-74 — the subject reads, HR included). <c>/mine</c> and <c>/my-diary</c> take the
 /// employee from the token so no screen has to pass an employee id — passing one is how the
 /// earlier version let anybody read anybody's diary.</para>
 /// </summary>
@@ -71,7 +72,7 @@ public class AppraisalConversationsController : ControllerBase
             .AnyAsync(a => a.EmployeeId == me || a.Employee.ManagerId == me, ct);
     }
 
-    /// <summary>As above, plus whoever scheduled or is holding this particular conversation.</summary>
+    /// <summary>As above, plus whoever scheduled or is holding this particular conversation. Reads only.</summary>
     private async Task<bool> CanAccessConversationAsync(Guid conversationId, string policy, CancellationToken ct = default)
     {
         if (await HoldsPolicyAsync(policy)) return true;
@@ -85,6 +86,58 @@ public class AppraisalConversationsController : ControllerBase
                         || c.ConductedById == me
                         || c.Appraisal.EmployeeId == me
                         || c.Appraisal.Employee.ManagerId == me, ct);
+    }
+
+    // ── Decision D-74: who writes a conversation ─────────────────────────────
+    //
+    // The appraisee's line manager, the conversation's scheduler or conductor, or the HR desk — and
+    // never its subject. The appraisee reads their conversations. The read helpers above admitted the
+    // appraisee to every write: create through the appraisal's helper, and edit, hold and delete
+    // through the conversation's — where the booker became the scheduler, so dropping one clause was
+    // not enough. The subject is tested first, before the desk, as the two-actor rule has it: an HR
+    // officer could book, hold and delete their own.
+
+    private Guid? CallerEmployeeId =>
+        _currentUserService.EmployeeId is Guid id && id != Guid.Empty ? id : null;
+
+    /// <summary>Who may book a conversation on this appraisal: its line manager, or the desk when not the subject.</summary>
+    private async Task<bool> CanWriteForAppraisalAsync(Guid appraisalId, CancellationToken ct = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = CallerEmployeeId;
+
+        var appraisal = await _db.Set<PerformanceAppraisal>()
+            .AsNoTracking()
+            .Where(a => a.Id == appraisalId && a.TenantId == tenantId)
+            .Select(a => new { a.EmployeeId, a.Employee.ManagerId })
+            .FirstOrDefaultAsync(ct);
+
+        // An unknown appraisal falls to the desk, so the service reports it missing.
+        if (appraisal is null) return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+        if (me is Guid subject && subject == appraisal.EmployeeId) return false;
+        if (me is Guid manager && manager == appraisal.ManagerId) return true;
+        return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+    }
+
+    /// <summary>Who may edit, hold or delete this conversation: the line manager, its scheduler or
+    /// conductor, or the desk — never its subject.</summary>
+    private async Task<bool> CanWriteConversationAsync(Guid conversationId, CancellationToken ct = default)
+    {
+        if (_currentUserService.TenantId is not Guid tenantId) return false;
+        var me = CallerEmployeeId;
+
+        var conversation = await _db.Set<AppraisalConversation>()
+            .AsNoTracking()
+            .Where(c => c.Id == conversationId && c.TenantId == tenantId)
+            .Select(c => new { Subject = c.Appraisal.EmployeeId, c.Appraisal.Employee.ManagerId, c.ScheduledById, c.ConductedById })
+            .FirstOrDefaultAsync(ct);
+
+        if (conversation is null) return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
+        if (me is Guid subject && subject == conversation.Subject) return false;
+        if (me is Guid party
+            && (party == conversation.ManagerId || party == conversation.ScheduledById || party == conversation.ConductedById))
+            return true;
+        return await HoldsPolicyAsync(HrPermissions.PerformanceWritePolicy);
     }
 
     /// <summary>Get an appraisal conversation by ID</summary>
@@ -221,21 +274,12 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     public async Task<IActionResult> Create([FromBody] CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessAppraisalAsync(createDto.AppraisalId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
-
-        // Whoever books the conversation is the one holding it unless they say otherwise, and the
-        // client has no employee id of its own to send.
-        if (_currentUserService.EmployeeId is Guid me)
-        {
-            if (createDto.ScheduledById is null || createDto.ScheduledById == Guid.Empty)
-                createDto.ScheduledById = me;
-            if (createDto.ConductedById == Guid.Empty)
-                createDto.ConductedById = null;
-        }
+        if (!await CanWriteForAppraisalAsync(createDto.AppraisalId, cancellationToken)) return Forbid();
 
         try
         {
-            var result = await _conversationService.CreateAsync(createDto, cancellationToken);
+            // The booker is the scheduler (D-74); the service takes it from here, not the body.
+            var result = await _conversationService.CreateAsync(createDto, CallerEmployeeId, cancellationToken);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         catch (ArgumentException ex)
@@ -264,7 +308,7 @@ public class AppraisalConversationsController : ControllerBase
         // The service keys off the body's Id, so a mismatch would silently edit another meeting.
         if (id != updateDto.Id)
             return BadRequest(new { message = "The id in the route does not match the id in the body." });
-        if (!await CanAccessConversationAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
+        if (!await CanWriteConversationAsync(id, cancellationToken)) return Forbid();
 
         try
         {
@@ -293,17 +337,22 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessConversationAsync(id, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
+        if (!await CanWriteConversationAsync(id, cancellationToken)) return Forbid();
 
         try
         {
-            var result = await _conversationService.DeleteAsync(id, cancellationToken);
-            if (!result) return NotFound(new { message = "Conversation not found" });
+            await _conversationService.DeleteAsync(id, cancellationToken);
             return NoContent();
         }
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A held conversation, a withdrawn appraisal's (D-74), or a cycle that is not open
+            // (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "deleting a conversation");
         }
         catch (Exception ex)
         {
@@ -313,8 +362,9 @@ public class AppraisalConversationsController : ControllerBase
     }
 
     /// <summary>
-    /// Mark a conversation as complete. This is the only way it closes — an update cannot do it,
-    /// because completing stamps the held date and tells the employee the notes are up.
+    /// Mark a conversation as held. This is the only way it closes — an update cannot do it, because
+    /// holding stamps the held date and the conductor and tells the employee the notes are up. The
+    /// held date can be stated (not in the future; today when omitted) — decision D-74.
     /// </summary>
     [HttpPost("{conversationId:guid}/complete")]
     [ProducesResponseType(typeof(AppraisalConversationDto), StatusCodes.Status200OK)]
@@ -323,11 +373,13 @@ public class AppraisalConversationsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> Complete(Guid conversationId, [FromBody] CompleteConversationRequest request, CancellationToken cancellationToken = default)
     {
-        if (!await CanAccessConversationAsync(conversationId, HrPermissions.PerformanceWritePolicy, cancellationToken)) return Forbid();
+        if (!await CanWriteConversationAsync(conversationId, cancellationToken)) return Forbid();
 
         try
         {
-            var result = await _conversationService.CompleteAsync(conversationId, request.PostMeetingNotes, request.KeyTakeaways, cancellationToken);
+            var result = await _conversationService.CompleteAsync(
+                conversationId, request.PostMeetingNotes, request.KeyTakeaways, request.HeldDate,
+                CallerEmployeeId, cancellationToken);
             return Ok(result);
         }
         catch (ArgumentException ex)
@@ -346,5 +398,8 @@ public class AppraisalConversationsController : ControllerBase
     }
 }
 
-/// <summary>Request body for completing a conversation</summary>
-public record CompleteConversationRequest(string? PostMeetingNotes, string? KeyTakeaways);
+/// <summary>
+/// Request body for completing a conversation. <c>HeldDate</c> is when it was held (decision D-74) —
+/// not in the future; today when omitted.
+/// </summary>
+public record CompleteConversationRequest(string? PostMeetingNotes, string? KeyTakeaways, DateTime? HeldDate = null);

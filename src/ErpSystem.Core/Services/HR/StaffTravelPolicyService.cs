@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Application.HR.Extensions;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -25,6 +26,8 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     private readonly IStaffTravelRequestRepository _requestRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly HrCurrencyBridge _currency;
+    private readonly IHrAudienceResolver _audience;
     private readonly ILogger<StaffTravelPolicyService> _logger;
 
     public StaffTravelPolicyService(
@@ -34,8 +37,12 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         IStaffTravelRequestRepository requestRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        HrCurrencyBridge currency,
+        IHrAudienceResolver audience,
         ILogger<StaffTravelPolicyService> logger)
     {
+        _currency = currency;
+        _audience = audience;
         _policyRepository = policyRepository;
         _ruleRepository = ruleRepository;
         _exceptionRepository = exceptionRepository;
@@ -88,6 +95,77 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         return entity;
     }
 
+    // ---- Policy rules of shape (lane 4) ----------------------------------------
+
+    /// <summary>
+    /// The currency a policy's money limits are set in (C3/T-9): the one given, checked against HR's list; else the
+    /// policy's own; else the base currency. The hotel cap was a bare number compared with a rate in any currency.
+    /// </summary>
+    private async Task<string> ResolvePolicyCurrencyAsync(string? given, string? current, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(given))
+        {
+            var code = given.Trim().ToUpperInvariant();
+            await _currency.RequireKnownCurrencyAsync(code, cancellationToken);
+            return code;
+        }
+        if (!string.IsNullOrWhiteSpace(current)) return current.Trim().ToUpperInvariant();
+        return await _currency.GetBaseCurrencyCodeAsync(cancellationToken)
+               ?? throw new InvalidOperationException(
+                   "Finance marks no base currency, so the policy's limits have no currency. Choose one, or set the base currency in Finance.");
+    }
+
+    /// <summary>
+    /// What a policy must be to cap anything sensibly (lane 4, C2, C3): real cabin classes — an omitted class was
+    /// stored as 0, under every booked class, so once approved every flight exceeded the cap; an end not before the
+    /// start; a unit and a level band that are this organisation's; and a band that runs from the lower rank to
+    /// the higher, which the guard's band test assumes.
+    /// </summary>
+    private async Task RequirePolicyShapeAsync(StaffTravelPolicy entity, CancellationToken cancellationToken)
+    {
+        if (!Enum.IsDefined(entity.MaxFlightClassDomestic) || !Enum.IsDefined(entity.MaxFlightClassInternational))
+            throw new InvalidOperationException(
+                "Choose the highest cabin class allowed for domestic and for international flights — Economy, Premium " +
+                "Economy, Business or First.");
+
+        if (entity.EffectiveTo is DateOnly to && to < entity.EffectiveFrom)
+            throw new InvalidOperationException(
+                $"The policy ends ({to:d MMM yyyy}) before it starts ({entity.EffectiveFrom:d MMM yyyy}).");
+
+        var tenantId = entity.TenantId;
+        if (entity.AppliesToOrganizationUnitId is Guid unitId
+            && !await _unitOfWork.Repository<OrganizationUnit>()
+                .GetQueryable(u => u.Id == unitId && u.TenantId == tenantId).AnyAsync(cancellationToken))
+            throw new ArgumentException($"Organisation unit '{unitId}' not found.");
+
+        var levelIds = new[] { entity.AppliesToLevelFromId, entity.AppliesToLevelToId }.OfType<Guid>().Distinct().ToList();
+        if (levelIds.Count == 0) return;
+        var ranks = await _unitOfWork.Repository<StaffLevel>()
+            .GetQueryable(l => levelIds.Contains(l.Id) && l.TenantId == tenantId)
+            .Select(l => new { l.Id, l.Rank, l.Name })
+            .ToListAsync(cancellationToken);
+        var missing = levelIds.FirstOrDefault(id => ranks.All(r => r.Id != id));
+        if (missing != Guid.Empty)
+            throw new ArgumentException($"Staff level '{missing}' not found.");
+
+        var from = ranks.FirstOrDefault(r => r.Id == entity.AppliesToLevelFromId);
+        var upTo = ranks.FirstOrDefault(r => r.Id == entity.AppliesToLevelToId);
+        if (from is not null && upTo is not null && from.Rank > upTo.Rank)
+            throw new InvalidOperationException(
+                $"The staff-level band runs backwards: from {from.Name} (rank {from.Rank}) to {upTo.Name} (rank {upTo.Rank}). " +
+                "Put the lower rank first.");
+    }
+
+    /// <summary>The next version of a policy name in this organisation — deleted drafts included, so none is reused (T-50).</summary>
+    private async Task<int> NextVersionAsync(Guid tenantId, string policyName, CancellationToken cancellationToken)
+    {
+        var highest = await _policyRepository
+            .GetQueryableIncludingDeleted(p => p.TenantId == tenantId && p.PolicyName == policyName)
+            .Select(p => (int?)p.VersionNumber)
+            .MaxAsync(cancellationToken);
+        return (highest ?? 0) + 1;
+    }
+
 
     // ---- Policies ----------------------------------------------------------
 
@@ -121,13 +199,44 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
             .ToList();
     }
 
+    /// <summary>The policies covering a level, a unit (or any unit above it — lane 4, O-5) and a date, most specific first.</summary>
     public async Task<IEnumerable<StaffTravelPolicySummaryDto>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        return (await _policyRepository.GetApplicablePoliciesAsync(staffLevelId, organizationUnitId, onDate))
+        var chain = organizationUnitId is Guid unitId
+            ? await _audience.UnitAncestryAsync(tenantId, unitId, cancellationToken)
+            : Array.Empty<Guid>();
+        var applicable = (await _policyRepository.GetApplicablePoliciesAsync(staffLevelId, chain, onDate))
             .Where(p => p.TenantId == tenantId)
-            .Select(p => p.ToSummaryDto())
             .ToList();
+        if (applicable.Count == 0) return Array.Empty<StaffTravelPolicySummaryDto>();
+
+        // The approver's name and the rule count, read narrowly — the resolution query carries neither (see
+        // GetApplicablePoliciesAsync's remarks: the includes cost a ~600 MB memory grant).
+        var ids = applicable.Select(p => p.Id).ToList();
+        var extras = await _policyRepository.GetQueryable()
+            .Where(p => ids.Contains(p.Id))
+            .Select(p => new
+            {
+                p.Id,
+                RuleCount = p.Rules.Count(r => !r.IsDeleted),
+                First = p.ApprovedBy != null ? p.ApprovedBy.FirstName : null,
+                Middle = p.ApprovedBy != null ? p.ApprovedBy.MiddleName : null,
+                Last = p.ApprovedBy != null ? p.ApprovedBy.LastName : null,
+            })
+            .ToDictionaryAsync(x => x.Id, cancellationToken);
+
+        return applicable.Select(p =>
+        {
+            var dto = p.ToSummaryDto();
+            if (extras.TryGetValue(p.Id, out var x))
+            {
+                dto.RuleCount = x.RuleCount;
+                dto.ApprovedByName = x.First is null ? null
+                    : string.IsNullOrEmpty(x.Middle) ? $"{x.First} {x.Last}" : $"{x.First} {x.Middle} {x.Last}";
+            }
+            return dto;
+        }).ToList();
     }
 
     /// <summary>
@@ -143,6 +252,12 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
     {
         tenantId = RequireCurrentTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
+        entity.CurrencyCode = await ResolvePolicyCurrencyAsync(createDto.CurrencyCode, null, cancellationToken);
+        await RequirePolicyShapeAsync(entity, cancellationToken);
+
+        // T-50 (lane 4): the version is the next for the name — it was the payload's, so two drafts could both be
+        // version 1 (409 against batch 1's index) or skip numbers at will.
+        entity.VersionNumber = await NextVersionAsync(tenantId, entity.PolicyName, cancellationToken);
 
         // A new policy never arrives current — approval is what puts one in force (ApprovePolicyAsync).
         // Accepting the payload's word for it let two policies covering the same scope both claim to
@@ -186,32 +301,54 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
         if (entity.ApprovedById is not null)
             throw new InvalidOperationException("This policy has already been approved.");
 
+        // C3 (lane 4): the rule that caps everyone's travel is not signed by the officer who wrote it. Anyone who
+        // drafted or last changed the draft is its author. A 403 with the sentence, as the money chain's D-2.
+        var caller = _currentUserProvider.UserId.ToString();
+        if (string.Equals(entity.CreatedBy, caller, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entity.UpdatedBy, caller, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                $"You drafted or last changed {entity.PolicyName} v{entity.VersionNumber}, so another travel administrator " +
+                "must approve it — the officer who writes a spending rule does not also sign it.");
+
+        // A draft written before lane 4 was never held to the policy's shape — approval is where it is.
+        await RequirePolicyShapeAsync(entity, cancellationToken);
+        if (entity.EffectiveTo is DateOnly end && end < DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new InvalidOperationException(
+                $"{entity.PolicyName} v{entity.VersionNumber} ended on {end:d MMM yyyy}; there is nothing left to approve it for.");
+        entity.CurrencyCode ??= await ResolvePolicyCurrencyAsync(null, null, cancellationToken);
+
         entity.ApprovedById = approverEmployeeId;
         entity.ApprovedAt = DateTime.UtcNow;
-        await SupersedeSiblingsAsync(entity, cancellationToken);
+        var superseded = await SupersedeSiblingsAsync(entity, cancellationToken);
         entity.IsCurrentVersion = true;
+        entity.UpdatedAt = DateTime.UtcNow;
 
-        await _policyRepository.UpdateAsync(entity);
+        // Tracked — `UpdateAsync` on a policy read with its rules and approver marks them modified too.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation(
-            "Travel policy approved and now in force: {PolicyName} v{Version}",
-            entity.PolicyName, entity.VersionNumber);
+            "Travel policy approved: {PolicyName} v{Version}, in force from {From}; {Superseded}",
+            entity.PolicyName, entity.VersionNumber, entity.EffectiveFrom, string.Join("; ", superseded));
 
         var refreshed = await _policyRepository.GetWithRulesAsync(entity.Id);
         return (refreshed ?? entity).ToDto();
     }
 
     /// <summary>
-    /// Stands down every other current policy covering the same scope, so exactly one is in force.
+    /// Makes room for an approved version among the other versions in force for the same scope, by date (lane 4, O-4).
     /// </summary>
     /// <remarks>
-    /// Scope is the pair the guard resolves on — the organisation unit and the staff-level band.
-    /// Two policies covering different units may both be current; two covering the same one may
-    /// not, because the guard would then pick between them by ordering alone and which cap applied
-    /// would be an accident.
+    /// <para>Scope is the pair the guard resolves on — the organisation unit and the staff-level band. Two
+    /// policies covering different units may both be in force; two covering the same one may not cover the same
+    /// day, because the guard would then pick between them by ordering alone.</para>
+    ///
+    /// <para><b>By date, not at once.</b> Approving stood every sibling down the moment it was signed, and resolution
+    /// needs a version in force — so a version approved today to start next year left every trip before then with
+    /// no policy and no cap (O-4). Now a sibling that starts before the new version keeps going until the day
+    /// before it starts; one that starts on or after it (and overlaps it) is replaced; one whose dates do not
+    /// meet it is left alone. The guard picks the version in force on the trip's own departure date.</para>
     /// </remarks>
-    private async Task SupersedeSiblingsAsync(
+    private async Task<List<string>> SupersedeSiblingsAsync(
         StaffTravelPolicy entity, CancellationToken cancellationToken)
     {
         var siblings = (await _policyRepository.GetCurrentVersionsAsync())
@@ -222,28 +359,53 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
                      && p.AppliesToLevelToId == entity.AppliesToLevelToId)
             .ToList();
 
+        var outcome = new List<string>();
         foreach (var sibling in siblings)
         {
-            sibling.IsCurrentVersion = false;
-            await _policyRepository.UpdateAsync(sibling);
+            var endsBefore = sibling.EffectiveTo is DateOnly sEnd && sEnd < entity.EffectiveFrom;
+            var startsAfter = entity.EffectiveTo is DateOnly nEnd && nEnd < sibling.EffectiveFrom;
+            if (endsBefore || startsAfter)
+            {
+                outcome.Add($"v{sibling.VersionNumber} untouched (no common day)");
+                continue;
+            }
+
+            if (sibling.EffectiveFrom < entity.EffectiveFrom)
+            {
+                sibling.EffectiveTo = entity.EffectiveFrom.AddDays(-1);
+                outcome.Add($"v{sibling.VersionNumber} in force until {sibling.EffectiveTo:yyyy-MM-dd}");
+            }
+            else
+            {
+                sibling.IsCurrentVersion = false;
+                outcome.Add($"v{sibling.VersionNumber} stood down");
+            }
+            sibling.UpdatedAt = DateTime.UtcNow;
+            // Tracked: saved with the approval. No `UpdateAsync` — the sibling was read with its rules and approver.
         }
+        return outcome;
     }
 
     public async Task<StaffTravelPolicyDto> UpdatePolicyAsync(UpdateStaffTravelPolicyDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
-        await GetOwnedPolicyAsync(updateDto.Id);
-
-        var entity = await _policyRepository.GetByIdAsync(updateDto.Id);
+        var entity = await GetOwnedPolicyAsync(updateDto.Id);
 
         // Editing an approved policy would change what everyone may spend without anyone approving
         // the change. Raise a new version instead — that is what versions are for.
-        if (entity!.ApprovedById is not null)
+        if (entity.ApprovedById is not null)
             throw new InvalidOperationException(
                 "An approved policy cannot be edited. Raise a new version and have it approved.");
 
         var wasCurrent = entity.IsCurrentVersion;
+        var previousName = entity.PolicyName;
+        var previousCurrency = entity.CurrencyCode;
         entity.UpdateEntity(updateDto, updatedByUserId);
         entity.IsCurrentVersion = wasCurrent;   // not the payload's to change; approval sets it
+        entity.CurrencyCode = await ResolvePolicyCurrencyAsync(updateDto.CurrencyCode, previousCurrency, cancellationToken);
+        await RequirePolicyShapeAsync(entity, cancellationToken);
+        // A draft renamed is the next version of its new name (T-50).
+        if (!string.Equals(previousName, entity.PolicyName, StringComparison.OrdinalIgnoreCase))
+            entity.VersionNumber = await NextVersionAsync(entity.TenantId, entity.PolicyName, cancellationToken);
 
         await _policyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -470,10 +632,17 @@ public class StaffTravelPolicyService : IStaffTravelPolicyService
 
         if (entity.Status != TravelPolicyExceptionStatus.Pending)
             throw new InvalidOperationException("Only pending exceptions can be decided.");
+        // Lane 4, C4: approve or reject — "Pending" or "Expired" are not decisions.
+        if (decideDto.Status is not (TravelPolicyExceptionStatus.Approved or TravelPolicyExceptionStatus.Rejected))
+            throw new InvalidOperationException("Approve the exception or reject it.");
+        // ...and not by whoever raised it (its CreatedBy, the platform user) — the two-person rule of D-2 and D-8.
+        if (string.Equals(entity.CreatedBy, _currentUserProvider.UserId.ToString(), StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException(
+                "You raised this policy exception, so another travel administrator decides it.");
 
         entity.Status = decideDto.Status;
         entity.ApprovedById = deciderEmployeeId;   // the caller, not a payload value
-        entity.DecidedAt = decideDto.DecidedAt;
+        entity.DecidedAt = DateTime.UtcNow;         // the clock, not the payload (C4)
         entity.DecisionNotes = decideDto.DecisionNotes;
         // Audit field: the USER id, not the Employee FK stamped above.
         entity.UpdatedBy = _currentUserProvider.UserId.ToString();

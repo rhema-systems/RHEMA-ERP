@@ -59,13 +59,11 @@ public interface IPerformanceAppraisalService
     Task<IEnumerable<PerformanceAppraisalDto>> GetByEmployeeIdAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceAppraisalDto>> GetByYearAsync(int year, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceAppraisalDto>> GetByStatusAsync(AppraisalStatus status, CancellationToken cancellationToken = default);
-    Task<PerformanceAppraisalDto> CreateAsync(CreatePerformanceAppraisalDto createDto, CancellationToken cancellationToken = default);
+    // CreateAsync (the raw create) went in performance closure E-d2b (D-20): generation, on an Open cycle, is the only door.
     Task<PerformanceAppraisalDto> UpdateAsync(UpdatePerformanceAppraisalDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> UpdateStatusAsync(UpdateAppraisalStatusDto statusDto, CancellationToken cancellationToken = default);
-    Task<AppraisalAppealDto> FileAppealAsync(CreateAppraisalAppealDto appealDto, CancellationToken cancellationToken = default);
-    Task<bool> ResolveAppealAsync(ResolveAppraisalAppealDto resolveDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> CalculateOverallScoreAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    // CalculateOverallScoreAsync went in performance closure E-a: IAppraisalScoreService.PreviewAsync reads the same arithmetic and stores nothing.
     Task<bool> ProgressToHRReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 
     // The raw EvaluatorEvaluation / CriterionScore CRUD was removed in performance closure lane P1:
@@ -94,16 +92,17 @@ public interface IPerformanceAppraisalService
     Task<IEnumerable<MyAppraisalDto>> GetMyAppraisalsAsync(Guid employeeId, string? cycleFilter = null, CancellationToken cancellationToken = default);
     
     // Self-evaluation operations
-    Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <param name="viewerEmployeeId">The caller's employee id: what the entries show depends on who reads them (AppraisalVisibility).</param>
+    Task<SelfEvaluationContextDto> GetSelfEvaluationContextAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     Task<SelfEvaluationResultDto> SaveSelfEvaluationAsync(SaveSelfEvaluationDto saveDto, CancellationToken cancellationToken = default);
-    Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    Task<ViewSubmittedEvaluationDto> GetViewSubmittedEvaluationAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     
     // Manager evaluation operations
     Task<IEnumerable<TeamAppraisalCycleSummaryDto>> GetTeamAppraisalCyclesAsync(Guid managerId, CancellationToken cancellationToken = default);
     Task<IEnumerable<TeamMemberAppraisalDto>> GetTeamMemberAppraisalsAsync(Guid cycleId, Guid managerId, CancellationToken cancellationToken = default);
     Task<ManagerEvaluationContextDto> GetManagerEvaluationContextAsync(Guid appraisalId, Guid managerId, CancellationToken cancellationToken = default);
     Task<ManagerEvaluationResultDto> SaveManagerEvaluationAsync(SaveManagerEvaluationDto saveDto, CancellationToken cancellationToken = default);
-    Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    Task<ManagerPeerEvaluationReviewDto> GetManagerPeerEvaluationReviewAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     
     // HR Review operations
     Task<HRReviewDto> GetHRReviewAsync(Guid appraisalId, Guid? requestingEmployeeId = null, CancellationToken cancellationToken = default);
@@ -112,14 +111,20 @@ public interface IPerformanceAppraisalService
     Task<HRReviewDto> ReturnToManagerAsync(Guid appraisalId, ReturnAppraisalDto dto, Guid? reviewerId = null, CancellationToken cancellationToken = default);
     
     // Employee actions
-    Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>The employee acknowledges their appraisal; <paramref name="comments"/> is kept on it (E-a).</summary>
+    Task AcknowledgeAppraisalAsync(Guid appraisalId, Guid employeeId, string? comments = null, CancellationToken cancellationToken = default);
     Task<AppealPageDataDto> GetAppealPageDataAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
     Task<AppraisalAppealDto> SubmitAppealAsync(SubmitAppealDto submitDto, Guid employeeId, CancellationToken cancellationToken = default);
     Task<AppealStatusViewDto> GetAppealStatusAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
     
     // HR/Manager actions
     Task<List<AppealListItemDto>> GetAppealsListAsync(Guid? cycleId = null, AppraisalAppealStatus? status = null, CancellationToken cancellationToken = default);
-    Task<AppealReviewDto> GetAppealReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// HR's review of an appeal — a decided one too, read-only (D-37). <paramref name="viewerEmployeeId"/>
+    /// is the reader: the visibility rule decides what of each leg they see (B2), and the two-actor
+    /// rule whether they may act (D-35).
+    /// </summary>
+    Task<AppealReviewDto> GetAppealReviewDataAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     /// <summary>Moves a Submitted appeal to UnderReview and records who picked it up.</summary>
     Task<AppraisalAppealDto> BeginAppealReviewAsync(Guid appraisalId, Guid reviewerId, CancellationToken cancellationToken = default);
     Task ResolveAppealAsync(Guid appraisalId, ResolveAppealDto resolveDto, Guid reviewerId, CancellationToken cancellationToken = default);
@@ -127,7 +132,9 @@ public interface IPerformanceAppraisalService
     // Post-remand HR final decision
     Task<PostRemandReviewDto> GetPostRemandReviewDataAsync(Guid appraisalId, CancellationToken cancellationToken = default);
     Task FinalizePostRemandAppealAsync(Guid appraisalId, PostRemandFinalDecisionDto decisionDto, Guid reviewerId, CancellationToken cancellationToken = default);
-    
+    /// <summary>Moves a remand's re-evaluation deadline while the manager has not re-evaluated (D-34).</summary>
+    Task ExtendRemandDeadlineAsync(Guid appraisalId, ExtendRemandDeadlineDto extendDto, Guid reviewerId, CancellationToken cancellationToken = default);
+
     // Employee appeal outcome view
     Task<EmployeeAppealOutcomeDto> GetEmployeeAppealOutcomeAsync(Guid appraisalId, Guid employeeId, CancellationToken cancellationToken = default);
 }
@@ -146,28 +153,33 @@ public interface IPerformanceImprovementPlanService
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetBySupervisorAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetByStatusAsync(PipStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<PerformanceImprovementPlanDto>> GetActivePipsAsync(CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, CancellationToken cancellationToken = default);
+    /// <summary>Creates a Draft plan; <paramref name="authoredById"/> is the employee who wrote it (D-102).</summary>
+    Task<PerformanceImprovementPlanDto> CreateAsync(CreatePerformanceImprovementPlanDto createDto, Guid? authoredById, CancellationToken cancellationToken = default);
     Task<PerformanceImprovementPlanDto> UpdateAsync(UpdatePerformanceImprovementPlanDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> UpdateStatusAsync(UpdatePipStatusDto statusDto, CancellationToken cancellationToken = default);
     Task<bool> CompletePipAsync(CompletePipDto completeDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Approval workflow — Draft → PendingApproval → Active on the generic workflow engine.
-    // ⚠ This used to say "Inoperable until a PerformanceImprovementPlan workflow definition has
-    // been published". It was NOT inoperable — it auto-approved, putting an unreviewed plan into
-    // force against the employee (corrected 2026-09-15). With no definition published, submitting
-    // now lands the plan at PendingApproval and a HR.Performance.Admin holder rules on it. See
-    // HrWorkflowFallbackAuthority.
-    Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    // Approval workflow — Draft → PendingApproval → Active on the generic workflow engine, or the
+    // fallback when no definition is published (HrWorkflowFallbackAuthority). Who decides is the
+    // record's rule on both paths (F3, D-12, D-102): whoever submits becomes the plan's author and
+    // does not decide it; a plan the line manager put forward is HR's to decide (the
+    // HR.Performance.Approve tier), one HR put forward the line manager's or a tenant
+    // administrator's. Only the author recalls (F9).
+    Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<PerformanceImprovementPlanDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // PipReviewMeeting operations
     Task<PipReviewMeetingDto> AddReviewMeetingAsync(Guid pipId, CreatePipReviewMeetingDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<PipReviewMeetingDto>> GetReviewMeetingsAsync(Guid pipId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto?> GetReviewMeetingByIdAsync(Guid meetingId, CancellationToken cancellationToken = default);
     Task<PipReviewMeetingDto> UpdateReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default);
+    // Decision D-73: a meeting's status is stored. Record writes the record and makes it Held (a plan
+    // in force, not ahead of its date); Cancel makes a booked one Cancelled (never a held one).
+    Task<PipReviewMeetingDto> RecordReviewMeetingAsync(Guid pipId, UpdatePipReviewMeetingDto updateDto, CancellationToken cancellationToken = default);
+    Task<PipReviewMeetingDto> CancelReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default);
     // P13: the plan's subject only (actorEmployeeId from the token); UnauthorizedAccessException otherwise.
     Task<PipReviewMeetingDto> SetEmployeeCommentsAsync(Guid pipId, Guid meetingId, Guid actorEmployeeId, string? comments, CancellationToken cancellationToken = default);
     Task<bool> DeleteReviewMeetingAsync(Guid pipId, Guid meetingId, CancellationToken cancellationToken = default);
@@ -274,6 +286,12 @@ public interface IAppraisalSettingsService
     Task<AppraisalSettingsDto> UpdateAsync(UpdateAppraisalSettingsDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
     Task<AppraisalSettingsDto?> GetDefaultSettingsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Makes the profile the tenant's default, and no other (closure B6).</summary>
+    Task<AppraisalSettingsDto> MakeDefaultAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Copies the profile under a new name, not the default (closure E-e): how an in-use profile's rules change.</summary>
+    Task<AppraisalSettingsDto> CloneAsync(Guid id, CloneAppraisalSettingsDto dto, CancellationToken cancellationToken = default);
     Task<bool> ValidateWeightsAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
@@ -297,6 +315,7 @@ public interface IAppraisalCycleService
     Task<AppraisalCycleProgressDto> GetCycleProgressAsync(Guid cycleId, CancellationToken cancellationToken = default);
     /// <summary>Builds a read-only calendar of activity dates (deadlines, windows, review events, check-ins) for a cycle.</summary>
     Task<IEnumerable<AppraisalCalendarEventDto>> GetCalendarAsync(Guid cycleId, CancellationToken cancellationToken = default);
+    /// <summary>Who the cycle appraises: the active staff its active targets cover, less its exclusions — generation's scope.</summary>
     Task<IEnumerable<Guid>> GetEmployeesInScopeAsync(Guid cycleId, CancellationToken cancellationToken = default);
     Task<(int Created, int EvaluationsCreated, int ReviewEventsCreated)> GenerateAppraisalsAsync(Guid cycleId, Guid generatedById, CancellationToken cancellationToken = default);
 
@@ -307,12 +326,9 @@ public interface IAppraisalCycleService
     /// Returns how many notifications were written.
     /// </summary>
     Task<int> SendDeadlineRemindersAsync(Guid cycleId, CancellationToken cancellationToken = default);
-    
-    // AppraisalCycleTarget operations
-    Task<AppraisalCycleTargetDto> AddCycleTargetAsync(Guid cycleId, CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default);
-    Task<IEnumerable<AppraisalCycleTargetDto>> GetCycleTargetsAsync(Guid cycleId, CancellationToken cancellationToken = default);
-    Task<AppraisalCycleTargetDto> UpdateCycleTargetAsync(Guid cycleId, UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> RemoveCycleTargetAsync(Guid cycleId, Guid targetId, CancellationToken cancellationToken = default);
+
+    // A cycle's targets are written through IAppraisalCycleTargetService, from both route sets
+    // (performance closure E-c: this service kept a second copy of the target writes).
 }
 
 #endregion Appraisal Cycle
@@ -325,8 +341,10 @@ public interface IAppraisalCycleTargetService
     Task<IEnumerable<AppraisalCycleTargetDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default);
     Task<IEnumerable<AppraisalCycleTargetDto>> GetByTargetTypeAsync(AppraisalTargetType targetType, CancellationToken cancellationToken = default);
     Task<AppraisalCycleTargetDto> CreateAsync(CreateAppraisalCycleTargetDto createDto, CancellationToken cancellationToken = default);
-    Task<AppraisalCycleTargetDto> UpdateAsync(UpdateAppraisalCycleTargetDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Edits a target in place; through a cycle's nested route, <paramref name="cycleId"/> is that cycle, and another cycle's target is not found.</summary>
+    Task<AppraisalCycleTargetDto> UpdateAsync(UpdateAppraisalCycleTargetDto updateDto, Guid? cycleId = null, CancellationToken cancellationToken = default);
+    /// <summary>Removes a target; through a cycle's nested route, <paramref name="cycleId"/> is that cycle, and another cycle's target is not found.</summary>
+    Task<bool> DeleteAsync(Guid id, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<bool> ValidateTargetAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Exclusion operations
@@ -349,14 +367,43 @@ public interface IPeerNominationService
     Task<PeerNominationDto> CreateAsync(CreatePeerNominationDto createDto, CancellationToken cancellationToken = default);
     Task<PeerNominationDto> UpdateAsync(UpdatePeerNominationDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> SendInvitationAsync(SendPeerEvaluationInvitationDto invitationDto, CancellationToken cancellationToken = default);
-    
+    // send-invitation, a stub with no screen, went in performance closure D3: approval asks the peer.
+
     // Batch operations
-    Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The appraisal's nominations and counts. <paramref name="viewerEmployeeId"/> is the reader: the
+    /// appraisee in Manager mode with anonymous reviews is told the counts only (D-40).
+    /// </summary>
+    Task<PeerNominationSummaryDto> GetNominationSummaryAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     // P14: nominatedById is the caller (from the token); Manager mode refuses the appraisee.
     Task<IEnumerable<PeerNominationDto>> BatchCreateAsync(BatchCreatePeerNominationsDto batchDto, Guid nominatedById, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> ApproveNominationsAsync(ApprovePeerNominationsDto approveDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<PeerNominationDto>> RejectNominationsAsync(RejectPeerNominationsDto rejectDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The one approval path (performance closure D1, D4, D-39): approves the pending nominations among
+    /// <paramref name="nominations"/> — each peer's evaluation added, the appraisal's peer count moved,
+    /// the due date set when given — on the caller's unit of work. The caller saves, then calls
+    /// <see cref="NotifyApprovedAsync"/>. The appraisal and the nominations must be tracked.
+    /// </summary>
+    Task<IReadOnlyList<PeerNomination>> StageApprovalAsync(
+        PerformanceAppraisal appraisal, IEnumerable<PeerNomination> nominations, DateTime? dueDate, CancellationToken cancellationToken = default);
+
+    /// <summary>Tells each approved peer they have been asked for feedback, with the due date. Best-effort.</summary>
+    Task NotifyApprovedAsync(
+        Guid appraisalId, IReadOnlyCollection<PeerNomination> approved, DateTime? dueDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rejects the pending nominations among <paramref name="nominations"/> whose peer is no longer at work — inactive, or
+    /// no longer on the books — with the reason <c>No longer at work</c>, on the caller's unit of work (performance closure
+    /// E-g2, D-83: HR's advance approved them, made the leaver an evaluation and asked them for feedback). Returns the
+    /// rejected nominations and their peers' names; the caller saves, then calls <see cref="NotifyLeaversRejectedAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<(PeerNomination Nomination, string PeerName)>> StageLeaverRejectionsAsync(
+        IReadOnlyCollection<PeerNomination> nominations, Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>Tells the appraisee which of their nominations were rejected because the peer has left. Best-effort.</summary>
+    Task NotifyLeaversRejectedAsync(Guid appraisalId, IReadOnlyCollection<string> peerNames, CancellationToken cancellationToken = default);
 }
 
 #endregion Peer Nomination
@@ -413,12 +460,15 @@ public interface IAppraisalTemplateService
 
     /// <summary>Submit a Draft/Rejected template for approval, starting its workflow.</summary>
     Task<AppraisalTemplateDto> SubmitForApprovalAsync(Guid id, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
-    /// <summary>Record an approval on the current workflow step. Approves the template outright once the last step passes.</summary>
+    /// <summary>
+    /// Record an approval on the current workflow step. Approves the template outright once the last step passes. Never
+    /// by its submitter (F3, D-12).
+    /// </summary>
     Task<AppraisalTemplateDto> ApproveAsync(Guid id, Guid approvedByEmployeeId, CancellationToken cancellationToken = default);
-    /// <summary>Reject the template at the current workflow step, with an optional reason.</summary>
+    /// <summary>Reject the template at the current workflow step, with an optional reason. Never by its submitter.</summary>
     Task<AppraisalTemplateDto> RejectAsync(Guid id, Guid rejectedByEmployeeId, string? reason, CancellationToken cancellationToken = default);
-    /// <summary>Pull a still-pending template back to Draft so its author can keep editing.</summary>
-    Task<AppraisalTemplateDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Pull a still-pending template back to Draft so its author can keep editing. Its submitter only (F9).</summary>
+    Task<AppraisalTemplateDto> RecallAsync(Guid id, Guid recalledByEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Appraisal Template
@@ -543,6 +593,13 @@ public interface IAppraisalScoreService
     /// stored. Read-only — nothing is written.
     /// </summary>
     Task<AppraisalSettleDryRunReportDto> DryRunAsync(Guid? cycleId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What a settle would store for one appraisal now, at any status, beside what is stored — the
+    /// dry run's row (performance closure E-a, replacing the calculate-score route). Read-only.
+    /// Throws <see cref="ArgumentException"/> when the appraisal is not in the tenant.
+    /// </summary>
+    Task<AppraisalSettleDryRunRowDto> PreviewAsync(Guid appraisalId, CancellationToken cancellationToken = default);
 }
 
 #endregion
@@ -581,6 +638,32 @@ public interface IAppraisalLifecycleService
 
 #endregion
 
+#region Appraisal withdrawal (performance closure E-d1)
+
+/// <summary>
+/// Takes an appraisal out of its cycle without a result (D-10): from Draft, Active, or Governance
+/// before it is final (D-52), with a reason, the actor and the date.
+/// </summary>
+public interface IAppraisalWithdrawalService
+{
+    /// <summary>
+    /// HR's withdraw action. Throws <see cref="ArgumentException"/> without a reason,
+    /// <see cref="KeyNotFoundException"/> for an appraisal not in the tenant,
+    /// <see cref="UnauthorizedAccessException"/> on the officer's own appraisal (the two-actor rule),
+    /// and <see cref="InvalidOperationException"/> when it is withdrawn already, past governance, or final.
+    /// </summary>
+    Task WithdrawAsync(Guid appraisalId, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The exit's hook (D-54): withdraws the leaver's unfinished appraisals on the caller's unit of
+    /// work, <b>without saving</b>, so they go in the exit's own save. A final one is left, and logged.
+    /// Returns how many it withdrew.
+    /// </summary>
+    Task<int> StageLeaverWithdrawalsAsync(Guid tenantId, Guid employeeId, DateTime exitDate, string? detail, CancellationToken cancellationToken = default);
+}
+
+#endregion
+
 #region Salary Review Proposals (Theme 11)
 
 public interface ISalaryReviewProposalService
@@ -598,12 +681,16 @@ public interface ISalaryReviewProposalService
     // Who signs off a pay change is configuration, not code: the proposal's type, percentage and
     // amount go into the workflow entity context so a definition can route on them.
 
-    /// <summary>Sends the proposal for approval. Requires a figure to have been set.</summary>
-    Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<SalaryReviewProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    /// <summary>Pulls a pending proposal back so its figure can be reworked.</summary>
-    Task<SalaryReviewProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Sends the proposal for approval and records who sent it. Requires a figure to have been set.</summary>
+    Task<SalaryReviewProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Decided by the Managing Director — never the submitter, never the employee it is about (F3, D-12, D-104) — on
+    /// both paths.
+    /// </summary>
+    Task<SalaryReviewProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<SalaryReviewProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    /// <summary>Pulls a pending proposal back so its figure can be reworked. Only its submitter does (F9).</summary>
+    Task<SalaryReviewProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records that payroll has made the change. Not an approval — it is the receipt for one —
@@ -622,10 +709,12 @@ public interface IEmploymentActionProposalService
     // The action type is in the workflow entity context, so a definition can send a recognition
     // and a termination to different approvers.
 
-    Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> ApproveAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, CancellationToken cancellationToken = default);
-    Task<EmploymentActionProposalDto> RecallAsync(Guid id, CancellationToken cancellationToken = default);
+    // Who decides is the record's rule, as for a salary review proposal (F3, D-12, D-104): the Managing Director, never
+    // the submitter, never the employee it is about; only the submitter recalls (F9).
+    Task<EmploymentActionProposalDto> SubmitForApprovalAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> ApproveAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> RejectAsync(Guid id, string? reason, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
+    Task<EmploymentActionProposalDto> RecallAsync(Guid id, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Records that the owning module has created the real record. Refused unless the proposal
@@ -825,17 +914,16 @@ public interface IEmployeeGoalService
 {
     Task<EmployeeGoalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<EmployeeGoalDto>> GetByEmployeeIdAsync(Guid employeeId, Guid? cycleId = null, CancellationToken cancellationToken = default);
-    Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, CancellationToken cancellationToken = default);
+    /// <param name="viewerEmployeeId">The caller's employee id: the goal assessments' self and manager sides follow AppraisalVisibility.</param>
+    Task<IEnumerable<EmployeeGoalDto>> GetByAppraisalIdAsync(Guid appraisalId, Guid? viewerEmployeeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<EmployeeGoalDto>> GetPendingApprovalAsync(Guid managerId, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<PagedResult<EmployeeGoalDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? employeeId = null, Guid? cycleId = null, CancellationToken cancellationToken = default);
     Task<EmployeeGoalDto> CreateAsync(CreateEmployeeGoalDto createDto, CancellationToken cancellationToken = default);
     Task<EmployeeGoalDto> UpdateAsync(UpdateEmployeeGoalDto updateDto, CancellationToken cancellationToken = default);
+    /// <summary>A goal not yet agreed (draft, pending or rejected) goes, with its progress entries (decision D-72).</summary>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Approval workflow
-    Task<EmployeeGoalDto> SubmitForApprovalAsync(Guid goalId, Guid managerId, CancellationToken cancellationToken = default);
-    Task<EmployeeGoalDto> ApproveGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default);
-    Task<EmployeeGoalDto> RejectGoalAsync(Guid goalId, Guid managerId, string? feedback = null, CancellationToken cancellationToken = default);
+    // Submit, approve, reject and lock are IGoalWorkflowCommandService's (the bespoke goal workflow).
 
     // Progress tracking
     /// <summary>recordedById comes from the caller's token — never from the payload.</summary>
@@ -845,9 +933,9 @@ public interface IEmployeeGoalService
     Task<GoalProgressEntryDto> UpdateProgressEntryAsync(Guid goalId, UpdateGoalProgressEntryDto dto, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
     Task<bool> DeleteProgressEntryAsync(Guid goalId, Guid entryId, Guid? actorEmployeeId, bool actorIsDesk, CancellationToken cancellationToken = default);
 
-    // Lock management (goals locked at start of evaluation phase)
-    Task<bool> LockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
-    Task<bool> UnlockGoalAsync(Guid goalId, CancellationToken cancellationToken = default);
+    // Unlock (the lock is the goal workflow's). actorEmployeeId comes from the token: nobody unlocks
+    // their own goal, the HR desk included (decision D-72).
+    Task<bool> UnlockGoalAsync(Guid goalId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 
     // Summaries
     Task<EmployeeGoalSummaryDto> GetGoalSummaryAsync(Guid employeeId, Guid cycleId, CancellationToken cancellationToken = default);
@@ -1018,10 +1106,14 @@ public interface IAppraisalConversationService
     Task<IEnumerable<AppraisalConversationDto>> GetScheduledByManagerAsync(Guid managerId, CancellationToken cancellationToken = default);
     /// <summary>Conversations about a given employee, keyed on the appraisal rather than the scheduler.</summary>
     Task<IEnumerable<AppraisalConversationDto>> GetByAppraiseeAsync(Guid employeeId, CancellationToken cancellationToken = default);
-    Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, CancellationToken cancellationToken = default);
+    // Decision D-74: actorEmployeeId is the caller's employee, from the token — the scheduler on
+    // create, the conductor on complete. Who may write is the controller's rule.
+    Task<AppraisalConversationDto> CreateAsync(CreateAppraisalConversationDto createDto, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
     Task<AppraisalConversationDto> UpdateAsync(UpdateAppraisalConversationDto updateDto, CancellationToken cancellationToken = default);
+    /// <summary>An unheld conversation only; a held one is the appraisal's record (D-74).</summary>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<AppraisalConversationDto> CompleteAsync(Guid conversationId, string? postMeetingNotes, string? keyTakeaways, CancellationToken cancellationToken = default);
+    /// <summary>heldDate: when it was held — not in the future; today when null (D-74).</summary>
+    Task<AppraisalConversationDto> CompleteAsync(Guid conversationId, string? postMeetingNotes, string? keyTakeaways, DateTime? heldDate, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Appraisal Conversation
@@ -1035,14 +1127,16 @@ public interface ICalibrationSessionService
     // or facilitator); null is the desk's whole list.
     Task<IEnumerable<CalibrationSessionDto>> GetByCycleIdAsync(Guid cycleId, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
     Task<PagedResult<CalibrationSessionDto>> GetPagedAsync(int pageNumber, int pageSize, Guid? panellistEmployeeId, CancellationToken cancellationToken = default);
-    Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, CancellationToken cancellationToken = default);
+    // facilitatorId is the caller's employee, from the token (E-b); null for an unlinked account.
+    Task<CalibrationSessionDto> CreateAsync(CreateCalibrationSessionDto createDto, Guid? facilitatorId, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> UpdateAsync(UpdateCalibrationSessionDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
-    // Lifecycle
+    // Lifecycle: Pending → open → InProgress → complete → Completed → commit, or cancel from Pending
+    // or InProgress (E-b). Opening stamps the start — there is no separate start.
     Task<CalibrationSessionDto> OpenSessionAsync(Guid sessionId, Guid facilitatedById, CancellationToken cancellationToken = default);
-    Task<CalibrationSessionDto> StartSessionAsync(Guid sessionId, CancellationToken cancellationToken = default);
     Task<CalibrationSessionDto> CompleteSessionAsync(Guid sessionId, Guid completedById, string? meetingNotes, CancellationToken cancellationToken = default);
+    Task<CalibrationSessionDto> CancelSessionAsync(Guid sessionId, string reason, CancellationToken cancellationToken = default);
 
     // Participant management
     Task<CalibrationParticipantDto> AddParticipantAsync(Guid sessionId, CreateCalibrationParticipantDto dto, CancellationToken cancellationToken = default);
@@ -1061,7 +1155,8 @@ public interface ICalibrationSessionService
 
     /// <summary>
     /// Commits the session: applies each appraisal's latest adjustments and lifts the calibration
-    /// gate on <em>every</em> appraisal in the session's scope, not only the adjusted ones.
+    /// gate on <em>every</em> appraisal in the session's scope at the step, not only the adjusted
+    /// ones — once each, and only on the evaluation the panel sat over (E-b).
     /// </summary>
     Task<CalibrationApplyResultDto> ApplyAllAdjustmentsAsync(Guid sessionId, Guid appliedById, CancellationToken cancellationToken = default);
 
@@ -1146,6 +1241,13 @@ public interface IAppraisalWorkflowService
         Guid cycleId,
         Guid advancedByEmployeeId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// The transition report (performance closure B8): the cycle's in-flight appraisals whose
+    /// records run ahead of where the gates hold them, for HR to waive through the audited advance.
+    /// Read-only — nothing is moved.
+    /// </summary>
+    Task<AppraisalTransitionReportDto> GetTransitionReportAsync(Guid cycleId, CancellationToken ct = default);
 }
 
 #endregion Appraisal Workflow
@@ -1173,6 +1275,15 @@ public interface IEffectiveAppraisalConfigurationService
     /// template (no re-resolution); omit it to let the service resolve automatically.
     /// </summary>
     Task SnapshotConfigAsync(Guid performanceAppraisalId, Guid employeeId, Guid cycleId, Guid? templateId = null, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rebuilds an appraisal's criterion snapshot — the form's rows, weights, targets and bands — from its own template
+    /// (performance closure E-g2, D-86: an appraisal generated or seeded without one opened empty, and nothing could
+    /// rebuild it). Only while nobody has scored it: Draft or Active, its cycle open, no evaluation submitted and no score
+    /// saved, its template approved. The template rows it had are replaced whole; the goal rows are rebuilt. Refused to
+    /// the appraisee (<paramref name="actorEmployeeId"/>). Returns the number of template rows written.
+    /// </summary>
+    Task<int> RebuildSnapshotAsync(Guid performanceAppraisalId, Guid? actorEmployeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion Effective Appraisal Configuration

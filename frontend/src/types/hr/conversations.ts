@@ -38,8 +38,15 @@ export interface AppraisalConversation extends AuditFields {
   tenantId: string;
   appraisalId: string;
   appraisalNumber?: string | null;
+  /**
+   * The appraisee (closure D-74). They read their conversations and write none — the screens offer
+   * Save and Mark held to everyone else on it, and the server refuses the appraisee each write.
+   */
+  appraiseeEmployeeId?: string | null;
+  /** Who booked it — the server's, from the token. */
   scheduledById?: string | null;
   scheduledByName?: string | null;
+  /** Who marked it held — the server's, from the token. */
   conductedById?: string | null;
   conductedByName?: string | null;
   type: ConversationType;
@@ -52,37 +59,35 @@ export interface AppraisalConversation extends AuditFields {
   reviewEventId?: string | null;
 }
 
+/**
+ * The scheduler is the booker and the conductor whoever marks it held, both stamped by the server
+ * (closure D-74), so neither is sent.
+ */
 export interface CreateAppraisalConversation {
   appraisalId: string;
+  /** One of this appraisal's review events, or none. */
   reviewEventId?: string | null;
-  /** Left null to let the server stamp the signed-in employee, which is the normal case. */
-  scheduledById?: string | null;
-  conductedById?: string | null;
   type: ConversationType;
   scheduledDate?: string | null;
   agenda?: string | null;
 }
 
+/**
+ * The meeting's details only (closure D-74): its type, appraisal, scheduler, conductor and held
+ * state are not the edit's — the server reads the body without them.
+ */
 export interface UpdateAppraisalConversation {
   id: string;
-  appraisalId: string;
-  scheduledById?: string | null;
-  conductedById?: string | null;
-  type: ConversationType;
   scheduledDate?: string | null;
-  /**
-   * Ignored by the server on this path: held date and completion are stamped by `complete`, so
-   * an edit cannot quietly close a meeting that was never held.
-   */
-  heldDate?: string | null;
   agenda?: string | null;
   postMeetingNotes?: string | null;
   keyTakeaways?: string | null;
-  isCompleted: boolean;
   reviewEventId?: string | null;
 }
 
 export interface CompleteConversation {
   postMeetingNotes?: string | null;
   keyTakeaways?: string | null;
+  /** When it was held (closure D-74) — not in the future; today when omitted. */
+  heldDate?: string | null;
 }

@@ -1,0 +1,3935 @@
+# HR Staff Travel — final closure plan
+
+**What this is:** the single tracking document for the final, end-to-end closure of the Staff Travel
+module — requests and their approval, itineraries, the four kinds of booking, budgets, advances,
+expense claims and payment, the travel policy and its caps, compliance (passports, visas, risk
+assessments, destination alerts, insurance, health), the portal, the reminder sweep, notifications,
+and the seams with Finance, Fleet, attendance, leave and separation. It supersedes the to-do side of
+`HR-STAFF-TRAVEL-SYSTEM-GUIDE.md` § 19 (T-1…T-58); the guide stays the screen-by-screen reference.
+
+**How it was made (2026-10-01).** Three passes, each re-reading the code rather than the earlier
+documents:
+1. **First review** — every travel service, controller, entity, DTO, mapper and repository, the
+   policy guard, the budget rollup, the reminder engine and its host, the workflow adapter and the
+   no-definition fallback, the notification publisher, the currency bridge, the permission map and
+   the HR workflow seeder, plus three sweeps (backend field and enum census, frontend wiring,
+   notifications and seams). Findings A, B, C, D, E, F (§ 3a). Decisions D-1…D-6.
+2. **Second review** — an independent re-check of every High finding in source (all held, seven
+   corrections, § 3c) and a search for what the first pass missed: findings O-1…O-18 (§ 3b), the guide
+   items the first plan had dropped (§ 3d). Decisions D-7…D-10.
+3. **Fleet review** — the seam with Fleet Management, which travel already calls but does not really
+   use: findings FX-1…FX-9 (§ 3e). Decisions D-11, D-12.
+
+**Scope decision, 2026-10-01:** close all of it — the user asked for this to be the ultimate and
+final review of the module, with every discovered issue fixed. The user accepted the plan and asked
+for development to be held until they say go. **They said go on 2026-10-01, skipping the old suites'
+baseline (D-13); lane 0 was built the same day.**
+
+**START HERE:**
+1. § 1 is settled — thirteen decisions, all taken with the user on 2026-10-01. Decision numbers in
+   this document are **travel-closure-local**; they are not the closure ledger's D-01…D-40.
+2. **Lane 0** (§ 4) — **COMPLETE 2026-10-01**, committed `0b8cdf124` (`run-final-truth.mjs` 112/112
+   twice on UAT). The old slice suites are not run on UAT at all (D-13). Starting the API on UAT: auto
+   mode refuses `start-api-uat.ps1` unless this project's local settings allow it (the user added that
+   rule on 2026-10-01); before every start, check UAT for pending migrations and ask the user first if
+   one would be applied.
+3. **Migration batch 1** (§ 5) — **APPLIED to UAT 2026-10-02**, committed `d426f4ed3`
+   (`20261002000637_TravelClosureBatch1`, guarded SQL; 33/33 on a scratch copy of UAT first; verified on
+   UAT; truth suite 112/112 twice after). Lanes 1–9 build on it.
+4. **Lane 1** (§ 4) — **COMPLETE 2026-10-02**, in three slices: **1a** the request's write rules
+   (committed `e1d050da2`), **1b** the lifecycle verbs (committed `8fadfd31e`), **1c** comments, the
+   traveller's privacy and groups (committed `895996b6f`).
+5. **Lane 2** (the approval ladder and the approver's door, D-7) — **COMPLETE 2026-10-02**, in two
+   slices: **2a** the ladder, the door, the queue and the retrofit migration (committed `4e4d85b2f`; the
+   retrofit `20261002042909_TravelClosureApprovalLadder` is applied to UAT, restore point
+   `ErpSystemDB_UAT_before_travell2.bak`); **2b** the screens, the last stage read from the route, and
+   the workflow designer fix (cross-module defect #34) — built and proven (`run-final-approvals.mjs`
+   123/123 twice, lifecycle 255/255 twice, truth 117/117 twice), committed `519418f00`.
+   ⚠ Stage 1 is addressed **by name**, not by role — read lane 2's *As built* before touching the route.
+6. **Lane 3** (the money chain, B9 included) — **COMPLETE 2026-10-02**, in three slices: **3a** advances,
+   numbers and the lane's migration (committed `e2785ce7b`; `20261002132850_TravelClosureMoneyChain` applied
+   to UAT, restore point `ErpSystemDB_UAT_before_travell3.bak`); **3b** the claim chain (committed
+   `f49e5eb9c`); **3c** the budget and the payment void, with D-17's posted-path proof on a scratch copy of
+   UAT (committed `b08bd498d` — money 286/286 twice, the posting proof 70/70 twice). Decisions D-14…D-17.
+   ⚠ The posting proof found that **no HR posting can land on a database seeded with Finance's v2 books**
+   (cross-module defect #35): it passed only once the scratch copy's primary book was renamed.
+7. **Lane 4** (policy and authority) — **COMPLETE 2026-10-02**, in three slices: **4a** the policy itself
+   (committed `19f20f2f2`), **4b** bookings under the policy (committed `3a6792a30`; D-1's booking half, D-8, C4, C5),
+   **4c** authority (D-3, D-19, D-21 — policy 129/129 twice, staged). No migration — batch 1 carries every column.
+   ⚠ **The HR role's `HR.Travel.Admin` row reaches an existing database through `seed-db`'s add-only grant, not
+   at API startup** (D-22): UAT was granted it by hand on 2026-10-02; the API lets HR through meanwhile (the
+   role-fallback handler), but the screens draw from the row.
+8. **Lane 5** (bookings and itinerary) — **COMPLETE 2026-10-02.** Source-checked against `ef113ea0a` (lane 5's
+   *Source check*: Q1–Q7; D-23…D-26). **5a** bookings (the trip-status gate, dates, status verbs, the visa gate, D-24's
+   cascade, the booking doors, the demo pack) committed `4b7d12302`; **5b** itinerary and destination alerts (D-25,
+   O-15, Q3, Q5, T-19, T-45) — bookings 148/148 three times — committed `f8e9a9e31`. No migration.
+9. **Lane 6** (Fleet) — **COMPLETE 2026-10-02.** Source-checked against `f8e9a9e31` (lane 6's *Source check*: R1–R4;
+   D-27…D-29). **6a** the reservation (pickers through travel's door, the clash and compliance refusals, the D-27
+   submit, the leg following its fleet trip, Fleet's costs in the budget) — committed `3723e3e23`. **6b** fuel on claims
+   (S1–S5; D-30…D-32: a fuel expense names its vehicle trip, the paid fuel goes into Fleet's log, a void removes it) —
+   committed `c9e4cd9ee`. **6c** drivers as travellers and incidents shown (G1–G4; D-33…D-35: the leg links the
+   driver's own request, raised on the desk's click and going with the leg; Fleet's incidents read-only on the
+   Compliance tab) — committed `aba756a29`. No migration; Fleet's code unchanged. ⚠ **UAT has no Fleet data** —
+   the suite makes and removes its own (D-28). The sweep's fleet signals are lane 8's (D-29).
+10. **Lane 7** (compliance and the portal) — **COMPLETE 2026-10-03.** Source-checked after `aba756a29` (lane 7's *Source
+   check*: K1–K5; D-36…D-39; slices 7a–7d). **7a** the desk's compliance records (the documents register, masking,
+   the visa edit, the risk and delete guards, an alert's fan-out) — committed `7a22f177c`. **7b** the checks against the
+   trip (the visa flag from the register, health clearances, the ticket's insurance and Critical waits, submission's
+   warnings, stale entries) — migration `20261003002540_TravelClosureHealthClearance` **applied to UAT** (restore point
+   `ErpSystemDB_UAT_before_travell7b.bak`) — committed `81bd93074`. **7c1** the traveller's reads and E1's
+   acknowledgement (D-42; the itinerary in force, the bookings in full, what is in force over the trip, the traveller's
+   own documents) — committed `584993d0a`. **7c2** the traveller's files and messages (D-40, D-41, P4 for every caller)
+   — committed `a922f5085`. **7d** the traveller's own claims (D-38, D-43, D-44) — no migration,
+   `run-final-portal.mjs` 177/177 twice with the clamd stub — committed `8f6df4f08`.
+   ⚠ **An alert raised active now reaches every approved or under-way trip to its destination** — suites raise theirs for
+   a city only fixture trips visit, or inactive (UAT's demo Kumasi trip is approved).
+11. **Lane 8** (notifications and the sweep) — **COMPLETE 2026-10-03**, 8c committed `6de559255`. Source-checked against `8f6df4f08` (lane 8's *Source
+   check*: U1–U9; slices 8a–8c; decisions D-45…D-50 taken by the user, all as recommended). **8a** the event notices
+   (D-4, D-45, D-46, E6's in-app half, O-17's notice half; no migration) — `run-final-reminders.mjs` 110/110 twice, the
+   regression unchanged twice — committed `707207602`. **8b** the sweep's kinds (D-49, D-50, F2, O-11; no migration) —
+   the scheduled run proven with nobody signed in (`run-final-sweep-scheduled.mjs` 10/10), `run-final-reminders.mjs`
+   172/172 twice, the regression unchanged twice — committed `b5808d29b`. **8c** the transitions and Fleet's signals
+   (D-6, D-29, D-47, D-48, D-51 kept as built, **D-52** found by the regression; no migration) — the scheduled run
+   15/15, `run-final-reminders.mjs` 222/222, the regression unchanged twice with fleet 194 — committed `6de559255`. Its
+   first sweep on UAT (the user's go) completed the demo's Sebrepor trip, as measured. The harness's fixture employees, units and positions left on UAT since lane 0 were **retired on UAT** on the
+   user's go (restore point `ErpSystemDB_UAT_before_fixretire.bak`), and every teardown now retires its own (8b's *Found on
+   the way*). ⚠ Cross-module defect #36 (the notification
+   dispatcher undoes soft deletes) — the shared teardown deletes a run's notices again 35 s later.
+12. **Lane 9** (cross-module touchpoints) — ✅ **COMPLETE 2026-10-04** (the close: two regression passes clean — see
+   *Lane 9 close* under lane 9). **SOURCE-CHECKED 2026-10-03** against `6de559255` (lane 9's *Source check*:
+   V1–V10; slices 9a–9d; decisions D-53…D-58 taken by the user, all as recommended). Three of the checklist's premises do not hold:
+   attendance has no column for travel's rows (V1 — § 5's "no schema" was wrong), leave has no warning path (V5), and the
+   clearance never sees travel (V6); a recovered advance stays out in travel after the final settlement (V7). **9a**
+   attendance (D-53, D-54) — migration `TravelClosureAttendanceLink` (proven 28/28 on a scratch copy; applied to UAT after
+   restore point `ErpSystemDB_UAT_before_travell9.bak`), the scheduled run 15/15, `run-final-touchpoints.mjs` 43/43 twice,
+   reminders 222, the regression unchanged twice — committed `67cb65f83`; its first sweep put Kumasi's two days on duty.
+   **9b** the leave warning (D-55) — on the leave request page, and at the user's word as a badge on the approvals list
+   (proven end to end on a scratch copy, and in a browser) — touchpoints 55/55 twice, the regression unchanged twice —
+   committed `c2e21c5be`. **9c** separation (D-56…D-58) — the clearance's Travel block, the approval's cascade, no trip
+   after the leaving day, the recovered advance settled in travel without a posting; touchpoints 71/71 twice, the cascade
+   and the release 36/36 twice on a scratch copy, one regression pass unchanged — committed `738e3acaf`. **9d** the payroll
+   hand-off (D-10) — `HANDOFF-PAYROLL-TRAVEL-CLAIMS.md` and cross-module row #37, documents only — committed `954b6b464`.
+   **The close** — two regression passes, every suite unchanged twice, after two harness gaps of the new cadence were
+   closed (and one unexplained SQL error recorded) — committed `2201a5f7d`. **From 9c on the run cadence
+   is the user's (§ 7):** the slice's suite twice; one regression pass only if it changes travel code; two at lane close
+   (`tools/run-regression.sh <tag> [2]`).
+13. **Lane 10** (docs, demo pack, harness, hand-offs) — **SOURCE-CHECKED 2026-10-04** against `2201a5f7d` (W1–W10;
+   slices 10a–10h; decisions D-59…D-62 taken by the user, all as recommended). ⚠ `hr.head` cannot approve the demo's
+   policy — C3 refuses its author — so `hr.officer` does (W2). **10a** the record — the Fleet hand-off and #38, #15
+   naming travel, the Finance backlog's refund, write-off and dated-rate notes, the HR README and the finish plan —
+   staged 2026-10-04. **10b** the harness — the old suites retired to `retired/`, 43 uncovered checks moved into truth,
+   bookings, policy and compliance (each twice on UAT), a second fixture retirement when a background job writes
+   mid-teardown — **done 2026-10-04**. **10c** the demo pack — the policy approved by `hr.officer` before the trips are
+   submitted, the Hilton through D-8, a health clearance, three rerun bugs fixed; proven on a fresh scratch database,
+   15/15 three times, travel 28/28 tables; UAT untouched — **done 2026-10-04**. **10d** the guide's rules and model —
+   seven rules, chapter 1, chapter 13, Appendix B — **done 2026-10-04**. **10e** the trip at the desk — chapters 3, 3a
+   (new), 4, 5 (but 5.4) and 6 — **done 2026-10-04**. **10f** money and registers — 5.4, 7, 8, 8a (new), 9, 10, 10a
+   (new), 11, 12, 13a (new), and the alerts page's stale footnote — **done 2026-10-04**. **10g** the workbook and the
+   record — chapter 2 (both databases side by side), 14–18, § 19 as a pointer to § 3d, Appendices A and C — **done
+   2026-10-04**; the guide is rewritten whole. **10h** the close — the memories; two regression passes on UAT, every
+   suite unchanged (1,646 a pass, reminders 222, the scheduled run 15) — **done 2026-10-04**. **Lane 10 COMPLETE** —
+   staged as one commit, at the user's choice. **With it the travel final closure is complete:** lanes 0–10, decisions
+   D-1…D-62. What stays open is deferred by decision (§ 6) or another team's (#15, #23, #34–#38).
+
+**House rules** (from the HR programme, not repeated in each lane): the user runs builds — never
+`dotnet build`; stop `ErpSystem.Api` by command line before the user builds; migrations are scaffolded
+by the user and rewritten as guarded SQL; **stage, the user commits** — never `git commit`; `hrdev` is
+never pushed; the harness lives at `D:\Rhema\TDC ERPS\dev-harness\hr-travel\`, outside the repo, and
+runs against UAT the way the performance closure does (Staging, the JWT key, the UAT connection
+string, the API started with `dev-harness\hr-performance\tools\start-api-uat.ps1`, two HR officers,
+the clamd stub for uploads); **UAT is the demo database — no fixture may resolve to real staff**;
+every suite tears down in a `finally` and switches off the logins it minted; never `python -`;
+PowerShell bulk edits mangle UTF-8; a demo-pack scenario a lane's new rule breaks is fixed in that
+lane's slice.
+
+---
+
+## 1. Decisions (all taken with the user, 2026-10-01)
+
+| # | Question | Decision |
+|---|---|---|
+| **D-1** | Eight policy caps have an editor and no reader (C1) | **Enforce the enforceable, drop the rest.** `MaxSingleTripBudget` at request submit; `ReceiptRequiredAbove` and `ExpenseSubmissionDays` at claim submit; `AdvanceBookingDaysFlight/Hotel` at booking create; `PreferredVendorMandatory` — a booking needs a Supplier. `RequiresCheapestFare` and `MaxAnnualTravelBudget` leave the form and the DTOs (the columns stay). |
+| **D-2** | The money chain sits on one Write permission with no self-check (B2) | **Self-check plus two-person pay.** Nobody reviews, approves, disburses or pays their own claim or advance; whoever approved a claim or advance cannot be the one who pays or disburses it. Stays on `HR.Travel.Write`. |
+| **D-3** | The admin tier needs an employee link that no admin login has (T-1, T-2) | **Grant `HR.Travel.Admin` to the HR role.** The narrowing is done in code: author ≠ approver on policies (lane 4), D-2 on money, D-8 on breaches, status guards on every delete (lane 7). The reminders screen opens to HR. |
+| **D-4** | No travel notification reaches the traveller in the app (F1, F2) | **Full delivery on leave's pattern.** One topic per event and audience, in-app and email, recipients by `UserFromEmployeeIdData`, `UsersFromData` and `Role` (`LeaveReminderService.cs:379-531` is the model). |
+| **D-5** | 95 of 194 client methods have no screen | **Build the doors that make existing features true** — booking edit/cancel/status and flight segments, a travel-documents register, portal claim filing with receipt upload, portal risk-assessment acknowledgement, portal view of advances/claims/itinerary/bookings/visas, the desk's overdue-settlements queue, visa-application edit. No per-diem screen; no policy-exception screen. |
+| **D-6** | `ReturnedForRevision`, `InProgress` and `Closed` have no writer (A3, T-7) | **Give all three real writers.** The approver returns a request for revision; the nightly sweep moves Approved → InProgress on departure; Completed → Closed when every claim is paid or rejected and every advance settled (sweep, plus an HR Close verb). |
+| **D-7** | A line manager cannot open or approve a travel request (O-1) | **Two stages, like leave.** Stage 1 the traveller's line authority — their supervisor, or the head of their unit or any unit above it — enforced in the travel service, not just by the engine's role; stage 2 HR. A read door and an approvals queue for the approver. A traveller with no line authority who has a login goes to HR at stage 1. |
+| **D-8** | With HR holding Admin, the booker can authorise their own breach (O-3) | **A second person authorises.** A booking above a cap is saved awaiting authorisation and cannot be confirmed or ticketed until a different Admin holder authorises it; authoriser and time are recorded; a breach register lists every over-cap booking. The `AdvanceBookingDays` override follows the same rule. |
+| **D-9** | Nothing can change a trip after approval (O-10) | **Send it back for re-approval.** A *Request change* verb returns an Approved trip to ReturnedForRevision; it is edited and approved again; bookings, advances and claims stay linked. Not allowed once the trip is InProgress. |
+| **D-10** | "Paid by payroll offset" pays nobody (O-6) | **Hide payroll offset** from the pay dialog and refuse it in the API until payroll can receive travel claims; existing rows keep their value; a hand-off is recorded for the payroll owner. |
+| **D-11** | Which Fleet integrations (FX-1…FX-8) | **All four:** core reservation and sync; fuel on claims; drivers as travellers; incidents and trip signals (with the traveller's assigned official car as the default vehicle). Lane 6. |
+| **D-12** | Who fixes Fleet's own gaps — planned-window conflicts, driver leave, no seeded fleet-trip approval (FX-2, FX-7, FX-9) | **Hand them to the Fleet owner; travel guards its own side meanwhile.** Travel's checks refuse overlapping vehicles and unavailable drivers for travel bookings. This closure does not change Fleet's code. |
+| **D-13** | Run the sixteen slice suites on UAT as lane 0's baseline? (asked at the go, 2026-10-01) | **No — skip the baseline.** The slice suites were written for a throwaway database: they hang their actors off the first position in the tenant (real staff's), mint `HR` and `TenantAdmin` logins they never switch off, approve fixture policies in the tenant and mostly delete nothing. The lane-0 truth suite is the baseline; each lane re-proves, with its own clean-up, what the slice suites covered in its area, and retires them by name in this document. |
+| **D-14** | Lane 3 needs columns batch 1 did not add (asked at lane 3's source check, 2026-10-02) | **A small lane-3 migration** (`TravelClosureMoneyChain`, guarded SQL, proven on a scratch copy of UAT first): `StaffTravelAdvances.CancelledAt`, `CancelledById`, `CancellationReason`; `StaffTravelExpenseClaims.ReviewNotes`. Its data part, applied with slice 3a's code: `UnsettledAmount` 0 on advances not yet disbursed (moved here from batch 1, § 5), and a settlement deadline — the trip's end plus its approved policy's claim window, or 30 days — on advances with cash out and none. Rejected: reusing the rejection columns for a cancellation and keeping review reasons as trip comments. |
+| **D-15** | A claim is valued in the base currency; how much of it does an advance in another currency cover? (B11) | **Finance's rate on the day the claim is paid.** The deduction is worked in the advance's own currency; whatever a rate movement leaves on the advance is refunded or written off. Rejected: the rate on the day the advance went out, which pays the traveller a windfall or a shortfall whenever the cedi moves between disbursement and spending. |
+| **D-16** | Three refinements of lane 3's own checklist | **All three:** the payer may not be anyone who reviewed a line of the claim, as well as the claim's reviewer; advances only on Approved or InProgress trips (money after the trip is a claim); a budget only once the trip is approved, its total defaulting to the approved budget. |
+| **D-17** | How is the posted path proven — a payment journal reversed by a void and posted again? UAT has no travel posting rule, so every travel row in the posting register is Unposted (lane 3's source check) | **On a scratch copy of UAT (2026-10-02).** UAT here is the developer's local database, so no Finance owner can open its periods or add a travel account. The posted path is proven by one run of the API against a COPY_ONLY restore of UAT on which Finance's authority is prepared (`dev-harness/hr-finance/prep-uat-finance-authority.sql`), a travel expense account added and travel's rules switched on; the copy is dropped afterwards. UAT keeps no travel rule and an empty ledger, and its suites prove the Unposted path. **Done 2026-10-02**: `run-final-posting.mjs` 70/70 twice; its first run found cross-module defect #35 — on a database seeded with Finance's v2 books no HR posting lands (lane 3, *D-17*). |
+| **D-18** | C5's second half — a Critical trip needs an acknowledged risk assessment — cannot be met before lane 7: the traveller's acknowledgement sits on the desk's Write policy and the portal door is lane 7's (lane 4's source check) | **Moved to lane 7**, beside the portal's acknowledgement door. Lane 4 keeps the Prohibited refusal. |
+| **D-19** | With D-3, the officer who set a trip's budget can approve it (slice 3c refuses only the traveller) | **The officer who set or last changed the budget does not approve it** — the policy's author ≠ approver, applied to the budget. Lane 4, slice 4c. |
+| **D-20** | With D-3, any booking can be deleted, so a breach could be erased from D-8's register | **Pulled forward from lane 5 in part:** a flight or hotel booking that carries an exception (pending, authorised or refused) is not deleted — it is cancelled. The full "delete only while Pending" rule stays lane 5's. Lane 4, slice 4b. |
+| **D-21** | With D-3, A10's "a comment is changed by its author or a travel administrator" lets any HR officer reword a colleague's comment — the thing A10 closed (found building slice 4c) | **Taken in the build, 2026-10-02, and put to the user — reversible in one line:** editing a comment is its author's alone; deleting stays author-or-administrator (moderation). The comments screen has neither control, so no screen changes. Lane 4, slice 4c. |
+| **D-22** | The plan said the startup seeder converges the grant on existing databases; it does not — `SeedRolePermissionAssignmentsAsync` runs under `seed-db` / `seed-deployment-uat` and development seeding, which Staging and Production refuse at startup (asked at slice 4c's proof, 2026-10-02) | **No migration (the user, 2026-10-02).** A fresh database is granted by `seed-db` from `HrStaffGrants` (the migration would have run before the role and permission exist, inserting nothing); an existing one by its next `seed-db` run, the add-only path every HR grant has taken. **UAT was granted by hand** — the one row that step writes, `GrantedBy = 'System'`. A scaffolded migration was written and deleted unapplied: it duplicated `seed-db` with a second provenance for the same fact. |
+| **D-23** | When may a trip carry bookings? The demo pack holds Confirmed and Ticketed bookings on two Submitted trips (lane 5's source check, 2026-10-02) | **Only once the trip is Approved or under way** — the plan's wording, over holding a fare while the trip awaits approval. Create, edit, hold, confirm, ticket and segments need an Approved or InProgress trip; cancel works on any trip not Closed; a no-show or completion only once the trip has started. Lane 5, slice 5a. *Committed* keeps lane 3's rule (Q6 recorded for TDC). |
+| **D-24** | What happens to a trip's bookings when the trip is cancelled (Q2)? | **Cascade the holds, refuse the live:** cancelling a trip cancels its Pending and OnHold bookings with it, and is refused while any booking is Confirmed or Ticketed — the desk cancels those first, recording the supplier's fee. The itinerary's current version is marked Cancelled (5b). Lane 5. |
+| **D-25** | Who moves an itinerary's status (D5)? | **The server, with a Finalise step:** Draft on create; Finalise on the current version stamps `FinalizedAt` and marks it Approved; Superseded when a newer version becomes current; Cancelled with the trip. An edit no longer writes the status. PendingReview, Active and Completed stay readable with no writer. Lane 5, slice 5b. |
+| **D-26** | D-23 leaves the demo's two Submitted trips unable to hold bookings | **The demo pack approves London** (hr.head's trip — md.tdc at stage 1, `hr.officer` at HR's): its BA flight is held at Confirmed and refused a ticket until the visa is approved (T-24 live), with the Hilton and the Avis car. **Lagos stays Submitted** for the approvals walk, keeping its group, itinerary, insurance and risk assessment, without its flight and hotel. Lane 5, slice 5a. |
+| **D-27** | Fleet submits a trip through the workflow engine, and with no published `FLEET_TRIP` route the engine approves it with nobody asked (R2, FX-9) | **Travel submits a leg's fleet trip only under a published, active `FLEET_TRIP` route;** otherwise the trip stays a Draft and the leg says the vehicle is not held. FX-9 itself stays Fleet's hand-off. Lane 6, slice 6a. |
+| **D-28** | UAT holds no Fleet data at all (R1) | **Proofs use per-run suite fixtures only** — a vehicle category, vehicles, compliance items and verified licences made through the APIs as the platform admin and removed in teardown. A demo fleet is Fleet's owner's to seed (hand-off). Lane 6. |
+| **D-29** | The sweep's fleet signals (dispatch → InProgress, the completion notice, an incident notice) belong with the other notices | **They move to lane 8;** lane 6 shows a trip's fleet incidents read-only on its Compliance tab (6c). |
+| **D-30** | When must a fuel expense name a fleet trip (6b)? | **On a trip with a live company-vehicle leg, a Fuel line names one of its fleet trips — unless the trip also has a car rental,** when it may name none (fuel for the rental). Fuel on a trip with no company vehicle names nothing. Lane 6, slice 6b. |
+| **D-31** | What does a paid claim put in Fleet's fuel log (6b)? | **Only a fuel line approved above zero: the litres claimed and the amount paid** (unit cost = paid ÷ litres). A rejected line writes nothing; a voided payment removes what the payment wrote. Lane 6, slice 6b. |
+| **D-32** | A fuel line for a fleet trip on a day Fleet already logs fuel for it (S5) | **Refused unless the desk gives the reason it is claimed too;** the reason is kept as an internal note on the trip, and the dialog shows Fleet's fuel for the trip first. Lane 6, slice 6b. |
+| **D-33** | The plan ties a driver's request to the trip through a group, but only a draft joins a group and joining rewrites its dates, while a company vehicle is booked only on an approved trip (G1) | **The leg links them:** the company-vehicle leg keeps the driver's request (`DriverTravelRequestId`); the leg shows it, and the driver's request shows whom it drives for, with a link back. No group is made. Lane 6, slice 6c. |
+| **D-34** | How is a driver's request raised? | **On the desk's click, prompted:** a leg that keeps its driver away overnight says so and offers *Raise the driver's request*, which makes a Draft for the driver — the trip's dates, destination and purpose — for the desk to cost and submit through the usual two-stage approval. Lane 6, slice 6c. |
+| **D-35** | What happens to a driver's request when its leg goes or changes driver? | **It goes with the leg:** cancelling or deleting the leg, changing its driver, the trip's cancel and *Request change* cancel the driver's live request — refused, naming why, when that request cannot be cancelled (under way, advance cash out, a committed booking). Lane 6, slice 6c. |
+| **D-36** | The plan's *cleared* tick per health requirement has nowhere to live (lane 7, K1) | **A small lane-7 migration:** one clearance row per trip and health requirement — who cleared it, when, a note. The trip lists the destination's health requirements, each ticked or not; nothing is blocked. Lane 7, slice 7b. |
+| **D-37** | Where D-18 binds — nothing fires at departure until lane 8 (K3) | **Ticketing waits:** a Critical trip is approved and booked as any other, but its flight is not ticketed until the traveller has acknowledged the current risk assessment (as lane 5's visa gate); the trip page warns until then. Lane 7, slice 7b. |
+| **D-38** | How much of a claim the traveller does on the portal (T-54) | **File and submit:** the traveller starts a claim on their own approved, under-way or completed trip, adds lines with receipts (uploaded as the trip's attachments) and submits it; the desk reviews and pays as now, and can still file for them. Lane 7, slice 7d. |
+| **D-39** | Which register results set *requires a visa* when the passport country is known (K2) | **E-Visa and Embassy Visa set it; Visa Free and On Arrival clear it;** an override against the register needs a note, kept as an internal note; a **Prohibited** entry refuses submission. Lane 7, slice 7b. |
+| **D-40** | Whether a traveller removes a file they put on their own trip (lane 7, 7c) | **Their own uploads, before submission:** only a file the traveller uploaded, only while the trip is a draft or returned to them; after that the desk may be relying on it — they ask the desk. Lane 7, slice 7c2. |
+| **D-41** | What the traveller writes to the travel desk (E7) | **A reply, or a new message:** a reply to a note the desk shared with them, or a question of their own; both visible to the traveller; no edit or delete afterwards, so the desk's record stands. Lane 7, slice 7c2. |
+| **D-42** | Which itinerary the traveller sees (E7, D-25) | **The one in force only:** the version the desk finalised; while the desk is still drafting, the portal says the itinerary is being planned. Lane 7, slice 7c1. |
+| **D-43** | Whether the traveller marks an expense as a per diem (7d) — a per diem needs no receipt and its amount is checked against no rate | **Yes, as the desk can:** the same switch; the reviewer sees it marked and approves, cuts or rejects it like any line. Lane 7, slice 7d. |
+| **D-44** | What the traveller removes from their own claim (7d) | **Lines, and a draft claim:** a line while the claim is a draft or returned to them; the whole claim while it is a draft — never submitted. Lane 7, slice 7d. |
+| **D-45** | The workflow engine's own notices reach whoever pressed Submit — the traveller only on a self-service submission — and link the desk's page, which the traveller cannot open (lane 8, U1) | **Travel's own notices replace them for the traveller:** they always reach the traveller and link the portal; `StaffTravelRequest.WorkflowSubmitted`, `.WorkflowCompleted` and `.WorkflowRejected` are switched off. The engine's approval request and step assignment stay — they reach the approvers, and their link opens. Lane 8, slice 8a. |
+| **D-46** | What the desk (the HR role) hears of the lifecycle — today every submission, approval, rejection, cancellation and completion | **What it must act on:** a trip approved (book it), and a trip cancelled or sent back for a change by someone outside the desk (unwind bookings, advances and vehicles). Submitted, rejected and completed to HR retire; the engine asks HR when it is HR's stage. Lane 8, slice 8a. |
+| **D-47** | Nothing moves a trip under way to completed, so a trip nobody marks completed never closes (U4) | **The sweep completes an under-way trip the day after its end date;** the desk's verb stays for an early return. Lane 8, slice 8c. |
+| **D-48** | Once the date moves a trip under way it cannot be cancelled, though it may not have happened (U4) | **A "did not travel" cancel:** the desk may cancel an under-way trip with a reason, kept as an internal note, until its end date and only while nothing was spent on it — no claim, no advance cash out, no booking confirmed or ticketed. Lane 8, slice 8c. |
+| **D-49** | The claim window binds a draft's first submission, so a chase after it can only say it is too late (U5) | **Before, not after:** the traveller is told seven days before the window's last day, on a completed trip whose policy has a window and that has no submitted claim (a draft counts as not submitted); once it has passed with a draft or returned claim, or cash still out, the desk is told once — that trip cannot close. A trip with no claim and nothing out is not chased. Replaces "claim overdue, no claim". Lane 8, slice 8b. |
+| **D-50** | The sweep's windows | **Constants in one place, each a TDC question in § 6:** approval waiting 5 days; HR escalation 3 days before departure; visa missing 14 days before; briefing unacknowledged 7 days before; passport rungs 90, 30 and 7 days; the claim reminder 7 days before the window closes. No settings screen. Lane 8, slice 8b. |
+| **D-51** | When the sweep closes a completed trip (D-6). "When settled" alone closes a trip with no claim yet the day after it is completed — and a closed trip takes no claim, so the traveller loses the window | **Once its claim window has passed and nothing is open:** the approved policy's window, or lane 3's 30 days when it has none (the settlement deadline's own default); the settled test the Close verb's own (`StaffTravelLifecycleRules.OpenItemAsync`). The desk's Close keeps lane 1's rule alone. Lane 8, slice 8c. *Proposed with the build and **taken by the user, 2026-10-03, as built** — with the 30 days a TDC question in § 6.* (Alternatives, kept as the record: close on settled alone — a trip with no claim yet would close the night after it completes, and a closed trip takes no claim; or never close by the sweep, only by the desk's verb.) |
+| **D-52** | 8c's first build let the desk's cancel of a trip take an **under-way** driver's request with it as "did not travel" (D-48 passed down the cascade) — while the leg's cancel, delete and new driver and Request change still refused it (D-35, G3), so the answer hung on which button the desk pressed. Found by lane 6's fleet suite (§13) in 8c's regression | **Lane 6's refusal everywhere:** a driver's request under way never goes with the trip or its leg, whoever cancels. The refusal tells the desk to cancel the driver's request on its own page first — as not travelled if the driver did not go either (D-48) — or mark it completed. The driver is someone else, who may have set off (collecting the vehicle the day before); "under way" now only means the date came. Lane 8, slice 8c. *The user, 2026-10-03, as recommended.* (Alternative, kept as the record: every desk path takes it when nothing was spent on it — one click.) |
+| **D-53** | Attendance has no column for travel's rows, so a reversal could not tell them from a clerk's `OnDuty` day (V1) | **A lane-9 migration:** `StaffDailyAttendances.StaffTravelRequestId` — nullable, foreign key set-null, indexed — exactly as leave's `LeaveRequestId`; travel's posting and reversal touch only rows carrying the trip's id. Lane 9, slice 9a. |
+| **D-54** | Which days travel posts, and what wins on a clash | **The trip's working days** (Mon–Fri, not a public holiday on the tenant's calendar), posted while it is approved, under way, completed or closed; an early completion keeps the days up to it; a cancel, *did not travel* or Request change removes them. Nothing already recorded is overwritten — a punch, a note, leave's day, a clerk's status: first writer wins, as leave's posting; a removed day with a punch is kept, unlinked. The monthly summary counts `OnDuty` as present, as the dashboard does. Lane 9, slice 9a. |
+| **D-55** | Leave has no warning path (V5) | **Computed on every read of a leave request** — so its creation, an approver's suggested dates and a reschedule are all covered: *"{name} has staff travel TR-… ({status}) from … to …, over these days"*, for trips Submitted, Approved or under way that overlap (inclusive), shown on the request page to the employee, the approver and HR. Lane 9, slice 9b. |
+| **D-56** | The clearance never sees travel (V6) | **A computed, read-only Travel block**, read live like the asset register: open trips, live bookings, advances undisbursed and cash out, open claims. Advisory — it does not block completion; the money flows through the settlement. Lane 9, slice 9c. |
+| **D-57** | A separation's approval touches no trip, and a leaver can still travel (V8) | **The approval cancels the leaver's Draft, Submitted and ReturnedForRevision trips** — after its save, each through travel's own cancel, best-effort, *"Left the organisation on {day}"*; any it cannot cancel is named in the Travel block. Approved and under-way trips are listed for the desk. Travel refuses, at create and submit, a trip that starts after an approved separation's day. Lane 9, slice 9c. |
+| **D-58** | An advance the final settlement recovered stays out in travel (V7) | **The settlement's release settles it in travel** — unsettled to nothing, fully settled, *"recovered from the final settlement"* as an internal note on its trip — with no travel posting: the settlement's journal is the posting. Lane 9, slice 9c. |
+| **D-59** | The sixteen old suites cannot start on UAT and are superseded (W9) | **Retire them all** — and slice12, slice13, lane5b-visa, the probes and smokes — **moving the 35–45 checks no `run-final-*` suite makes** into those suites; a README table names the lane that ended each. Lane 10, slice 10b. |
+| **D-60** | The demo's policy is a draft, so nothing binds the demo (W2, W6) | **The demo approves its policy:** `hr.officer` approves `hr.head`'s draft before the trips are submitted, so the Hilton goes through D-8 and the Sebrepor claim needs its receipt. Lane 10, slice 10c. |
+| **D-61** | A rerun of the pack on UAT changes the demo (W8) | **Prove the updated pack on a scratch copy; UAT's demo is left as it is.** Applying it to UAT — a rerun or a rebuild — is a separate go when the next demo is prepared. Lane 10, slice 10c. |
+| **D-62** | The Fleet hand-off was never written (W5) | **One hand-off document** in the payroll hand-off's shape **and one defects row**, offering HR's availability read (leave and trips) for FX-7. Lane 10, slice 10a. |
+
+**Standing assumptions (not re-asked):** the closure ledger's D-29 holds — the policy rule register
+stays read-only and the policy-exception flow stays withheld until rule enforcement exists; Finance
+posting stays as the posting sweep left it (no rule = Unposted, enabled under HR Settings → Finance
+posting); the generic workflow inbox's desync is cross-module defect #15 and is recorded, not fixed.
+
+---
+
+## 2. Lane status
+
+| Lane | What | Schema | Suite | Status |
+|---|---|---|---|---|
+| **0** | Harness on UAT, truth and fiction | none | `run-final-truth.mjs` | ✅ complete 2026-10-01 — 112/112 twice on UAT; committed `0b8cdf124` |
+| **M1** | Migration batch 1 | the whole batch | `m1/test-cycle.sh` (session scratchpad) | ✅ applied to UAT 2026-10-02 — 33/33 on a scratch copy first, verified on UAT, truth suite 112/112 twice after; committed `d426f4ed3` |
+| **1** | Request lifecycle | batch 1 | `run-final-lifecycle.mjs` | ✅ complete 2026-10-02 — 1a `e1d050da2`, 1b `8fadfd31e`, 1c `895996b6f` |
+| **2** | The approval ladder and the approver's door | data-only retrofit `20261002042909_TravelClosureApprovalLadder` | `run-final-approvals.mjs` | ✅ complete 2026-10-02 — 2a `4e4d85b2f` (retrofit applied to UAT); 2b `519418f00` (approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice) |
+| **3** | The money chain | batch 1 + `TravelClosureMoneyChain` (D-14, applied to UAT) | `run-final-money.mjs`, `run-final-posting.mjs` (D-17, a scratch copy only) | ✅ complete 2026-10-02 — 3a `e2785ce7b`, 3b `f49e5eb9c`, 3c `b08bd498d` (money 286/286 twice, posting proof 70/70 twice on a scratch copy, lifecycle 256/256, truth 116/116, approvals 123/123 twice) |
+| **4** | Policy and authority | batch 1 (no lane migration) | `run-final-policy.mjs` | ✅ complete 2026-10-02 — 4a `19f20f2f2`, 4b `3a6792a30`, 4c staged (policy 129/129 twice, money 287, lifecycle 256, truth 117, approvals 123 twice each); D-18…D-22 |
+| **5** | Bookings and itinerary | batch 1 (no lane migration) | `run-final-bookings.mjs` | ✅ complete 2026-10-02 — 5a `4b7d12302`, 5b `f8e9a9e31` (bookings 148/148 ×3, policy 131, money 288, lifecycle 256, truth 118, approvals 123 twice each); D-23…D-26 |
+| **6** | Fleet | batch 1 (no lane migration) | `run-final-fleet.mjs` | ✅ complete 2026-10-02 — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29` (fleet 165/165 twice; bookings 148, money 288, policy 131, lifecycle 256, truth 118, approvals 123 twice each); D-27…D-35; the signals are lane 8's (D-29) |
+| **7** | Compliance and the portal | batch 1 + a lane-7 migration in 7b (D-36) | `run-final-compliance.mjs`, `run-final-portal.mjs` | ✅ complete 2026-10-03 — 7a `7a22f177c`; 7b `81bd93074` (its migration applied to UAT); 7c1 `584993d0a`; 7c2 `a922f5085`; 7d `8f6df4f08` (portal 177/177 twice; compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); D-36…D-44 |
+| **8** | Notifications and the sweep | batch 1 (no lane migration expected) | `run-final-reminders.mjs` | ✅ complete 2026-10-03 — 8a `707207602`, 8b `b5808d29b`, 8c `6de559255`; source-checked 2026-10-03 (U1–U9; slices 8a–8c); D-45…D-50 taken; 8a staged 2026-10-03 (reminders 110/110 twice; portal 177, compliance 96, bookings 148, money 288, policy 131, lifecycle 257, truth 118, approvals 123, fleet 165 twice each); committed `707207602`; 8b staged 2026-10-03 (scheduled 10/10, reminders 172/172 twice; the regression unchanged twice); committed `b5808d29b`; 8c staged 2026-10-03 (D-51 kept as built, D-52; scheduled 15/15, reminders 222/222, the regression unchanged twice, fleet 165 → 194) |
+| **9** | Cross-module touchpoints | a lane-9 column if D-53 is taken (V1) | `run-final-touchpoints.mjs` | ✅ complete 2026-10-04 — source-checked 2026-10-03 (V1–V10; slices 9a–9d; D-53…D-58 taken); 9a committed `67cb65f83` (migration `TravelClosureAttendanceLink` applied to UAT; touchpoints 43/43 twice; the regression unchanged twice); 9b committed `c2e21c5be` (touchpoints 55/55 twice; the badge proven on a scratch copy and in a browser); 9c committed `738e3acaf` (touchpoints 71/71 twice; cascade and release 36/36 twice on a scratch copy; one regression pass unchanged); 9d committed `954b6b464` (the payroll hand-off and row #37 — documents only); the close: two regression passes clean (2026-10-04) |
+| **10** | Docs, demo pack, harness, hand-offs | none | the full regression | ✅ complete 2026-10-04 — two regression passes unchanged (1,646 a pass, reminders 222, scheduled 15); staged as one commit. Source-checked 2026-10-04 (W1–W10; slices 10a–10h; D-59…D-62 taken); 10a staged 2026-10-04 (the record — documents only); 10b done 2026-10-04 (old suites retired, 43 checks moved; truth 136, bookings 153, policy 137, compliance 110, each twice); 10c done 2026-10-04 (the demo pack on a fresh scratch database: 15/15 three times, travel 28/28 tables; UAT untouched); 10d done 2026-10-04 (the guide's rules, chapter 1, chapter 13, Appendix B); 10e done 2026-10-04 (chapters 3, 3a, 4, 5 but 5.4, 6); 10f done 2026-10-04 (5.4, 7, 8, 8a, 9, 10, 10a, 11, 12, 13a; the alerts footnote); 10g done 2026-10-04 (chapter 2, 14–18, § 19, Appendices A and C — the guide rewritten whole); 10h done 2026-10-04 (memories, the two passes) |
+
+A lane is done when its suite is green **twice** on UAT, the travel regression holds its count, this
+document, the guide and the memory carry the new state, and the slice is staged for the user.
+
+---
+
+## 3. Findings (verified in source on 2026-10-01, HEAD `bad482a8d`)
+
+Severity: **H** — money, authority or data wrong · **M** — does not do what it says · **L** — tidy.
+Each finding names the lane that owns it.
+
+### 3a. First review
+
+**A. Request lifecycle** (`StaffTravelRequestService.cs`, the workflow adapter, the mapper, `/me`)
+- **A1 H** `UpdateAsync` (l.539) refuses only Approved/Completed/Cancelled/Closed, so a **Submitted**
+  request can be rewritten while the approver decides — on the desk and through `/me`; Rejected and
+  InProgress too. → lane 1 — **fixed in slice 1a, 2026-10-02**
+- **A2 H** `CancelAsync` (l.713) never cancels the engine instance (leave and movements call
+  `CancelWorkflowAsync`), so a cancelled Submitted trip leaves a live approval task; cancelling an
+  Approved trip leaves confirmed bookings counted as committed, a disbursed advance outstanding and a
+  Fleet trip live. → lanes 1, 6 — **lane 1's half fixed in slice 1b, 2026-10-02** (the approval task is
+  cancelled with the trip; an approved trip with advance cash out cannot be cancelled); the bookings and
+  the Fleet trip are lanes 5 and 6
+- **A3 M** `ReturnedForRevision`, `InProgress` and `Closed` have no writer (D-6). → lanes 1, 8 —
+  **ReturnedForRevision and Closed have writers since slice 1b, 2026-10-02**; InProgress is the sweep's
+  (lane 8)
+- **A4 M** `SubmitAsync` checks nothing but status: cost 0, return before departure (the mapper
+  clamps the duration to 0), past dates, no itinerary, the policy; `SubmittedAt` comes from the DTO's
+  default. → lane 1 — **fixed in slice 1a, 2026-10-02** (an itinerary is not required: a trip is often
+  approved before its itinerary is drawn up)
+- **A5 M** The mapper (`StaffTravelMappingExtensions.cs` l.111–172) takes `IsInternational`,
+  `ApprovedBudget` (on a plain update), `PolicyId` (read by nothing), `GroupTravelId`,
+  `ParentRequestId`, `OrganizationUnitId` and `EmployeeId` from the payload with no tenant check. The
+  policy guard's own comment says *IsInternational is derived from the two countries* — it is not;
+  declaring a domestic trip international buys the international caps. → lane 1 — **fixed in slice 1a,
+  2026-10-02**, except `GroupTravelId` on an edit, which slice 1c moves to the group endpoints
+- **A6 H** `GET /me/requests/{id}` returns every comment — `IsVisibleToTraveller` is read by nothing
+  on the server, only the client filters — plus the budget, advances, claims and policy exceptions.
+  → lane 1 — **fixed in slice 1c, 2026-10-02** (comments the desk did not share, at any depth, and policy
+  exceptions are dropped on the server; the traveller's own budget, advances and claims stay — lane 7
+  builds the portal's views of them)
+- **A7 M** The desk's *Add comment* sends `commentType: 'General'`, which is not a C# member, so it
+  **always 400s** (`hr/travel/[id]/page.tsx:137`); `isVisibleToTraveller` is hard-coded true (T-27).
+  → lane 0 — **fixed 2026-10-01** (a Comment / Internal note toggle)
+- **A8 M** The request form offers `Negotiation` and `Extreme` (T-3, both 400) and hides `Emergency`,
+  five purposes, `Critical`, `Prohibited` and `System`; its replace payload drops `approvedBudget`,
+  `policyId` and `groupTravelId`, so editing a group participant silently removes them from the
+  group; a self-service request gets no organisation unit although a comment says it does. → lanes 0, 1
+  — **lane 0's half fixed 2026-10-01** (options from the enums; the edit sends the three back; the
+  comment corrected); **lane 1's half fixed 2026-10-02** (the unit is the server's, slice 1a; the three
+  fields are off the edit, the group link last, slice 1c)
+- **A9 M** The attachment upload offers six types, five of them not C# members — 400 unless *Other*
+  (`TravelAttachmentsPanel.tsx:33`); its delete button renders for HR and 403s. → lane 0 — **fixed
+  2026-10-01**
+- **A10 L** Comment edit and delete check no author; the desk path takes `CancelledAt` from the body;
+  the request has no approver column (only `UpdatedBy`); the request-number generator is not atomic
+  (recorded). → lane 1 — **`CancelledAt` and the approver fixed in slice 1b, the comment author check in
+  slice 1c, 2026-10-02**; the request-number generator stays recorded (§ 6)
+- **A11 M** Group travel: `MaxParticipants` is not enforced, the group's status is whatever the PUT
+  says, dates and destination are not pushed to participants, an existing request cannot be linked,
+  and the add-traveller dialog hard-codes purpose, risk, `requiresVisa: false` and `GHS`. → lane 1 —
+  **fixed in slice 1c, 2026-10-02** (the currency half in lane 0)
+- **A12 M** No recall verb in the service or controller although `HrWorkflowFallbackAuthority` says
+  *use all four or none*; the generic recall button works only while a definition is published.
+  → lane 1 — **fixed in slice 1b, 2026-10-02**
+
+**B. The money chain** (`StaffTravelFinanceService.cs`, its controller and repositories)
+- **B1 H** `ReviewClaimAsync` (l.361) has **no from-status guard and no to-status validation**: Draft →
+  Approved or Paid, Paid → Approved → paid again — the advance is recovered twice and `PaidAt`
+  overwritten, while the Finance journal is deduplicated, so the ledger and travel drift apart.
+  → lane 3
+- **B2 H** No segregation of duties on money: review, pay, approve-advance and disburse are all
+  Write with no self-check; a claimant can approve and pay their own claim (D-2). → lane 3
+- **B3 H** `TravelAdvanceId` and the claim's and advance's `EmployeeId` are not validated — a claim can
+  settle another employee's advance or be filed for someone who is not the traveller;
+  `ReceiptAttachmentId` and `PerDiemRateId` are unchecked; claims and advances are accepted on Draft,
+  Rejected and Cancelled requests, and `PayClaimAsync` pays on a cancelled trip. → lane 3
+- **B4 H** Approving a claim with no reviewed lines pays `TotalClaimed` (l.809) while the GL posts
+  nothing (`HrFinancePostingCommandFactory.cs:101, 128`); `ReviewClaimLineAsync` does not cap
+  `AmountApproved + AmountRejected` at the line's amount. → lane 3
+- **B5 H** Lines sent **with** the claim on create are never valued (`CreateClaimAsync` skips
+  `ApplyBaseCurrencyAmountAsync`): rate 0, base amount 0, currency unchecked. → lane 3
+- **B6 M** Lines can be added, edited, reviewed and deleted on Submitted, Approved and Paid claims —
+  the only guard is the posting register, inert without a posting rule; `UpdateClaimAsync` allows
+  PartiallyApproved, Submitted and UnderReview and can re-point the advance and the currency. → lane 3
+- **B7 M** The *awaiting payment* read excludes PartiallyApproved, which `PayClaimAsync` accepts.
+  → lane 3
+- **B8 M** Advance: `ApprovedAmount` is uncapped; there is no reject or cancel verb; `Overdue` and
+  `WrittenOff` are set by nothing; `UnsettledAmount = RequestedAmount` on create, so a merely
+  requested advance reads as outstanding (and, with a deadline, overdue) in the endpoints; the approve
+  dialog says *or less* and nothing enforces it. → lane 3
+- **B9 M** Claim and advance numbers come from `CountByYearAsync` — live rows under the global
+  soft-delete filter (`ApplicationDbContext.cs:9931`), across tenants — against an **unfiltered**
+  unique index, so deleting a Draft claim or a Requested advance makes the next number collide (500).
+  The request-number fix was never applied here. → lane 3
+- **B10 M** The budget rollup's *Actual* counts paid claims only — a disbursed advance is cash out
+  and is counted nowhere; cancellation fees are dropped; Pending, OnHold and NoShow bookings count as
+  committed; the budget's `ApprovedById/At` have no writer; `ApprovedTotal` and the lines are
+  caller-set. → lane 3
+- **B11 M** Claim totals are in base currency, but the claim carries its own `CurrencyCode` that
+  nothing reconciles, and an advance in another currency is deducted unconverted. → lane 3
+- **B12 M** `HrCurrencyBridge.GetRateToBaseAsync` checks that a rate exists for the expense date, then
+  converts with `ConvertAsync`, which uses **today's** rate (`CurrencyService.cs:397`) — the comment
+  "valued at the rate for the expense date" is false. → lane 3
+- **B13 L** Per-diem rates have no screen and no reader on claims (`IsPerDiem`, `PerDiemRateId`,
+  `PolicyLimit` are decorations) and no overlap check. Deferred by D-5 (§ 6).
+- **B14 L** Employee ids written into `UpdatedBy` (l.379, 487, 638, 664); pay records no actor; DTO
+  fields the server ignores (`PaidAt`, `ReviewedAt`, `ApprovedById`, `SubmittedById`). → lane 3
+
+**C. Policy** (`StaffTravelPolicy`, the guard, the service, the forms)
+- **C1 M** Eight caps are read by nothing — `AdvanceBookingDaysFlight/Hotel`, `RequiresCheapestFare`,
+  `PreferredVendorMandatory`, `MaxSingleTripBudget`, `MaxAnnualTravelBudget`, `ReceiptRequiredAbove`,
+  `ExpenseSubmissionDays` — while `TravelPolicyForm.tsx:237-282` and `PolicyRulesPanel.tsx:55` present
+  them as rules (D-1). → lanes 1, 3, 4 (lane 0 made the copy true meanwhile: a banner says they are
+  not enforced, and the rules banner no longer counts the budgets among the caps)
+- **C2 M** `[Required]` on the non-nullable cabin-class enums is a no-op: an omitted class is stored as
+  0 and, once the policy is approved, **every flight exceeds the cap**. → lane 4
+- **C3 M** The hotel cap has no currency (T-9); `VersionNumber` is caller-declared and not unique
+  (T-50); no check that `EffectiveFrom ≤ EffectiveTo` or that the level band is in order; a policy's
+  author may approve it. → lane 4
+- **C4 M** Deciding a policy exception needs only Write (authorising a booking breach needs Admin)
+  and takes `Status` and `DecidedAt` from the body — the flow is withheld, align it anyway. → lane 4
+- **C5 M** `RiskLevel.Prohibited` prohibits nothing (T-46); an alert's severity blocks nothing (T-45).
+  → lanes 4, 5
+- **C6 L** The shared `SelectField` clears a value that arrives before its async options
+  (`fields.tsx:336-338`); on the policy form a cleared staff-level band silently widens the policy.
+  → lane 4
+
+**D. Bookings and itinerary** (`StaffTravelBookingService.cs`, `StaffTravelItineraryService.cs`, panels)
+- **D1 M** Bookings are accepted on any request status; their dates are not checked against the trip;
+  delete has no status guard; `Status` and `VendorId` are free on update; every booking status is
+  caller-set with no transitions. → lane 5
+- **D2 M** A company-vehicle leg creates a Fleet trip; edit, delete and cancel never touch it.
+  → lane 6
+- **D3 M** No screen can edit, cancel or change the status of a booking, add a flight segment, edit or
+  delete an itinerary, leg or activity, or link a leg to its booking (`travel-bookings.service.ts`: 26
+  of 40 methods uncalled) — *Committed* can never fall from the UI. → lane 5
+- **D4 M** The booking dialogs never offer `vendorId` (Suppliers now load), hotel `starRating`, the
+  ground leg's driver or actual cost; the vehicle is a free-text GUID box. → lanes 5, 6
+- **D5 L** The mappers copy derived fields (`BookedAt`, `CancelledAt`, `NumberOfNights`, `TotalCost`,
+  `PolicyAllowedClass`, `ClassExceptionApproved`) from the DTO before the service overwrites them; a
+  car rental's `BookedAt` is stamped on update only; the itinerary's status, `FinalizedAt` and day
+  totals are caller-set; `Superseded` is never set. → lane 5
+
+**E. Compliance and the portal** (`StaffTravelComplianceService.cs`, panels, `/me`)
+- **E1 H** No traveller can acknowledge a risk assessment: the desk route needs Write, the service
+  accepts only the traveller, `/me` has no route, and the desk button 403s (T-23/T-55, finish plan
+  9.19). → lane 7
+- **E2 M** No screen creates a travel document (`createDocument` has no caller), so the passport-based
+  visa lookup never resolves for UI data and the expiry reminders have no UI-fed rows — while the
+  panel tells users to "record their passport under travel documents first". → lane 7
+- **E3 M** A visa application is frozen at creation: the dialog collects status, number and dates
+  that the create DTO drops (`StaffTravelDTOs.cs:2638`); the update has no caller; the list uses the
+  summary DTO, so *Number* and *Fee* always read "—". → lane 7 — **the create DTO and the list
+  brought forward and fixed in lane 0** (2026-10-01); the edit dialog stays in lane 7
+- **E4 M** `RequiresVisa` gates nothing (T-24/T-42); health requirements are never checked (T-25);
+  an expiring passport blocks nothing (T-26); `GetRequirementAsync` is not tenant-scoped, so the
+  duplicate guard and the read-back can pick another tenant's row. → lanes 5, 7
+- **E5 M** Updating a risk assessment re-opens the actor hole (`AssessedById` from the payload,
+  `StaffTravelMappingExtensions.cs:1946`); editing a document keeps `IsVerified` (l.1724); an
+  acknowledgement is not reset when the risk level rises. → lane 7
+- **E6 M** The alert topic reaches the traveller **by email only**, never in the app;
+  `CreateAlertAsync` notifies nobody (T-44); *Notify* sends an `employeeId` the DTO ignores. → lanes 7, 8
+- **E7 M** The portal has no claims, no receipts, no attachments, no advances, itinerary, bookings,
+  visas or risk; `MyTravelAlertsPanel` points travellers at "your trip's compliance tab", which `/me`
+  does not have. → lane 7
+
+**F. Notifications, reminders, seams**
+- **F1 M** The five lifecycle topics have one recipient — the HR role, in-app. Nothing tells anyone
+  about advances, claims, bookings, exception decisions or briefings awaiting acknowledgement.
+  (Correction 2 in § 3c: the engine's own notices do reach a self-submitting traveller.) → lane 8
+- **F2 M** The reminder sweep has four kinds, all to the HR role in-app; a document gets one rung at
+  90 days and nothing until it expires; there is no *visa missing*, *claim overdue* or *approval
+  waiting*; a delivery that fails is still logged as sent; its reads are Admin-gated (T-52); the nav
+  says "trip approvals falling due", a kind that does not exist. → lane 8
+- **F3 L** Cross-module, recorded: the generic inbox `approvals/{id}/process` applies no travel status
+  (#15); `SendOverdueStepRemindersAsync` has no caller; Procurement's `POST /api/Suppliers` is behind
+  its staged master-data guard (correction 3). → lane 10
+- **F4 L** No travel query handles `isError`, so a 403 or 500 renders as "nothing yet"; option arrays
+  duplicate the TS unions (how the drift happened); `'GHS'` is a fallback in twelve places; stale
+  comments (no GL posting, advance recovered on approval, pay only Approved); the HR hub card promises
+  per diem; *Open in Travel* passes an `employeeId` the register ignores; a withdrawn policy shows
+  *Superseded*; the policy form pushes to its own URL after save. → lane 0 — **fixed 2026-10-01**
+- **F5 L** Five enums with no reference outside their own file (`TravelApproverType`,
+  `TravelApprovalDecision`, `TravelApprovalInstanceStatus`, `TravelAllowanceType`, `TravelVendorType`);
+  the `StaffTravelCurrencyBridge` alias is due for retirement. → lane 0 — **fixed 2026-10-01**
+
+### 3b. Found by the second review
+
+- **O-1 H — a line manager cannot approve travel.** The seeded definition names Manager, but the
+  approve route is `HR.Travel.Write`, the detail page `HR.Travel.Read`, and Manager holds neither
+  (`HrPermissions.cs:862-892`); `/me/inbox` deep-links the manager to `/hr/travel/{id}`, which answers
+  "does not exist". Leave met this exact defect and fixed it (`LeavesController.cs:120-173`
+  `CanReadRequestAsync`; `/hr/leave/approvals`; `LeaveService.IsLineAuthorityAsync` l.3571). Travel has
+  no line-authority narrowing either, and its definition is the one-step *Manager or HR, one
+  signature* shape leave abandoned on 2026-09-17 (`DatabaseSeedingService.cs:590-600`). → lane 2 (D-7)
+- **O-2 H — T-57 is still a money leak.** A claim filed without the advance link is paid in full while
+  the advance stays outstanding; the filing page offers *No advance* even when one is outstanding.
+  → lane 3
+- **O-3 H — a breach's authoriser is never recorded, and D-3 lets the booker authorise.** Flight and
+  hotel bookings carry only a flag and a reason (`StaffTravelEntities.cs:417-420, 556-559`); with HR
+  holding Admin, the clerk who books over the cap ticks their own exception. → lane 4 (D-8)
+- **O-4 H — policy supersession is date-blind.** Approving a version effective next year stands the
+  sitting one down today (`StaffTravelPolicyService.cs:214-230`), and resolution requires
+  `IsCurrentVersion` (`StaffTravelPolicyRepositories.cs:68`), so every trip before the new date
+  resolves to no policy and no cap. → lane 4
+- **O-5 M — policy scope can be chosen.** The guard resolves on `request.OrganizationUnitId`, a payload
+  field (null on `/me`), with an exact match and no ancestry (l.71) — a directorate's policy does not
+  cover its departments, and a requester can pick a unit with a laxer policy. → lanes 1, 4 — **lane 1's
+  half fixed in slice 1a, 2026-10-02** (the request carries the traveller's own unit); the ancestry is
+  lane 4's
+- **O-6 M — "Paid by payroll offset" pays nobody.** `PayrollOffset` has no reader outside the posting
+  factory, which posts nothing for it; the claim reads Paid and the employee is not paid. → lane 3 (D-10)
+- **O-7 M — passport and visa numbers are plain text** despite *encrypted at rest* and *encrypted*
+  (`StaffTravelEntities.cs:1139, 1215`; no converter anywhere in the model), and every document and
+  visa DTO returns the full number to any travel reader. → lane 7
+- **O-8 M — advances:** no verb records unused cash handed back; `SettlementDeadline` is optional with
+  no default, so the overdue sweep never sees such an advance; no limit on several advances or their
+  total against the approved budget; a typed "0" approves GHS 0. → lane 3
+- **O-9 M — *Approved budget* is the estimate copied.** The approve action sends no amount
+  (`hr/travel/[id]/page.tsx:104`), so the field records no decision (T-10); `request.ApprovedBudget` and
+  `budget.ApprovedTotal` are two unlinked "approved" figures, and neither caps bookings or claims.
+  → lanes 2, 3
+- **O-10 M — no change path after approval.** The edit page says "Raise an amendment instead"
+  (`[id]/edit/page.tsx:51`); no amendment exists. → lane 1 (D-9) — **fixed in slice 1b, 2026-10-02**
+  (Request change)
+- **O-11 M — lifecycle edges:** cancel is allowed while InProgress; Complete before the trip starts; a
+  Submitted trip whose departure passes is never escalated. → lanes 1, 8 — **lane 1's half fixed in
+  slice 1b, 2026-10-02** (no cancel or change under way; no completion before the start); the
+  escalation is lane 8's
+- **O-12 M — travel is invisible to attendance.** `StaffAttendanceStatus.OnDuty` exists and the
+  attendance dashboard counts it as present, but nothing writes it; leave posts its days through
+  `LeaveAttendancePostingService` and travel posts nothing. → lane 9
+- **O-13 M — no conflict checks.** Overlapping trips for one traveller and trips over approved leave
+  are accepted; training's `NomineeAvailabilityService` and recruitment read travel as a conflict, but
+  travel reads nothing back. → lanes 1, 9 — **lane 1's half fixed in slice 1a, 2026-10-02** (an
+  overlapping trip is refused at submission, approved leave is a warning); leave's side is lane 9's
+- **O-14 M — leavers:** separation reads only outstanding advances (`SeparationService.cs:2312`); a
+  leaver's open trips, bookings and undisbursed advances are not flagged; a request can be raised for
+  an inactive employee. → lanes 1, 9 — **lane 1's half fixed in slice 1a, 2026-10-02** (create and
+  submit refuse a traveller who has left; so does adding them to a group); separation's side is lane 9's
+- **O-15 M — duty-of-care deletes:** risk assessments (acknowledged or not), verified passports, issued
+  alerts and current itineraries delete with no status guard — reachable by every HR officer under
+  D-3. → lanes 5, 7
+- **O-16 M — international trips:** no check that insurance covers the trip dates; no check of the
+  passport's validity against the return date (T-26). → lane 7
+- **O-17 L — portal:** the traveller cannot reply to a desk comment or download their own attachment;
+  a desk comment notifies nobody. → lanes 7, 8
+- **O-18 L** — deleting a group leaves its participants linked to it; no status history for requests,
+  claims or advances beyond the workflow tab; lookups by number and the effective per-diem read take
+  the first row across tenants (single tenant today). → § 6 — **the group half fixed in slice 1c,
+  2026-10-02** (deleting a group takes its travellers off it); the rest stays in § 6
+- **O-19 H — the people who use the travel screens could pick no currency on any of them** (found
+  while building lane 0). Every travel currency dropdown — the request form, the four booking dialogs,
+  the visa fee, insurance, the budget, the advance, the claim and its lines, the group's add-traveller
+  dialog — read `GET /api/finance/currencies`, which `FinancePermissionPolicyMap` puts behind a Finance
+  permission: HR officers and travellers get a 403 and an empty list, so none of those could be entered
+  from the screens. `api/hr/currencies` (InternalOnly) exists for exactly this; area 13 met the same wall.
+  → lane 0 — **fixed 2026-10-01**; the truth suite asserts both answers
+
+### 3c. Corrections the second review made to the first
+
+1. The "dead error path" in F4 is harmless: `apiService` already puts the server's message in
+   `e.message` (`api.service.ts:329-349`).
+2. *The traveller is never told* overstated F1: the engine's own Submitted/Rejected/Completed notices go
+   to the initiating user, who is the traveller on a self-service submission (not on a desk one).
+3. A harness supplier cannot be created through `POST /api/Suppliers` — it sits behind
+   `GuardDirectMutationAsync("LegacySupplier.Create")` (`SuppliersController.cs:197`); read an existing
+   active supplier instead.
+4. The guide's T-28 (*cancel has no server guard*) is wrong — Cancelled, Completed and Closed are
+   refused. The real gaps are A2 and O-11.
+5. D-3's safety net needed D-8 and the delete guards of O-15; it was incomplete as first written.
+6. Approver notifications (lane 8) are useless until the approver can open the request (lane 2).
+7. The claim-filing page says the advance is recovered "when the claim is approved"
+   (`claims/new/page.tsx:168`); it is recovered on payment. (The copy was corrected in lane 0.)
+
+⚠ **For the leave owner, not travel scope:** `LeaveService.EnsureMayDecideAsync` (l.1000) asks only the
+engine, whose stage 1 is the Manager *role*, so any Manager-role user appears able to decide any
+leave at stage 1 — the line-authority rule exists (l.3571) but is not applied to the decision.
+Travel applies the line rule in its service (lane 2) rather than copying leave's approve path.
+
+### 3d. The guide's T-findings — where each one now lives
+
+| Status | Findings |
+|---|---|
+| **Fixed upstream — correct the prose only** | T-5 and T-37's conversion half (Finance FX fixed 2026-09-10, PR #99), T-8's supplier read (2026-09-22), T-43 (alert body), T-53 (the sweep has been hosted daily since 2026-08-17 — the guide was wrong when written), T-58 (claims and advances post since 2026-09-20), T-44's per-trip button (it exists) |
+| **Kept by decision** | T-4 and T-49 (D-29), T-6 (recovery on payment — the copy was fixed in lane 0), T-51 (informational) |
+| **Lane 0** | T-3, T-12, T-15, T-27, T-29 (with lane 1) |
+| **Lane 1** | T-7 (with lane 8), T-16, T-17, T-28 (corrected), T-30, T-31, T-32 |
+| **Lane 2** | T-10 |
+| **Lane 3** | T-21, T-22, T-35, T-36, T-37, T-38, T-39, T-57 |
+| **Lane 4** | T-1 and T-2 (D-3), T-9, T-46, T-50, T-52 |
+| **Lane 5** | T-19, T-24/T-42 (ticketing half), T-45 (a warning) |
+| **Lane 6** | T-8's vehicle half |
+| **Lane 7** | T-23/T-55, T-24/T-42 (derived half), T-25, T-26, T-40, T-44, T-54, T-56 |
+| **Deferred (§ 6)** | T-11, T-13, T-14, T-18, T-20, T-33, T-34, T-41, T-47, T-48 |
+
+### 3e. Fleet (the seam travel already calls)
+
+**What exists.** A company-vehicle ground leg calls `IFleetTripService.CreateTripAsync`
+(`StaffTravelBookingService.cs:462-497`) and keeps the trip id as a bare Guid. Fleet's own service
+interfaces (`IFleetServices.cs`) already offer everything a deeper seam needs — trip read, update,
+submit and cancel; compliance items blocking a vehicle as at a date; costs per trip; fuel transactions;
+vehicle assignments; incidents — so travel integrates without changing Fleet's code, the way it creates
+the trip today.
+
+- **FX-1** "This reserves the vehicle in Fleet" (`TravelBookingsPanel.tsx:445, 471`) is false: the
+  fleet trip is created **Draft** (`FleetTripService.cs:180`) and never submitted, so the transport
+  office has nothing to approve and nothing is held. → lane 6 (lane 0 made the text true: *a draft
+  trip in Fleet; the vehicle is not held*)
+- **FX-2** Fleet's only conflict check looks at **Dispatched** trips (`FleetTripService.cs:885-899`), so
+  two legs — or a leg and a fleet booking — can hold one vehicle or driver for the same days. → lane 6
+  (travel side), Fleet hand-off
+- **FX-3** The leg keeps only the trip id: vehicle, plate, driver and fleet status never show on the
+  travel record; the update DTO cannot change vehicle or driver; edit, delete, a type change away from
+  CompanyVehicle and a request cancel leave the fleet trip live (D2). → lane 6
+- **FX-4** The vehicle is a raw asset GUID because Fleet's reads need `MaintenanceRead`
+  (`FleetTripsController.cs:10`), which HR lacks; the screen says "a vehicle picker arrives with the
+  Fleet integration" (`TravelBookingsPanel.tsx:472`). → lane 6
+- **FX-5** Vehicle compliance (insurance, roadworthiness) is checked only at dispatch
+  (`FleetTripService.cs:484`): a vehicle whose insurance lapses before the trip can be booked. → lane 6
+- **FX-6** Fleet records fuel and cost per trip (`FleetFuelTransaction.FleetTripId`,
+  `FleetCostEntry.FleetTripId`, `IFleetCostService.GetPagedForTripAsync`), but travel's budget takes the
+  leg's hand-typed cost, and a Fuel claim line is never compared with Fleet's fuel log — the same fuel
+  can be paid twice. → lane 6
+- **FX-7** A driver is checked for a licence only — not for approved leave or another trip (Fleet's own
+  tracker, DRV-006) — and a driver who goes out of station gets no travel record (allowances,
+  attendance, duty of care). → lane 6, Fleet hand-off
+- **FX-8** `FleetIncident.FleetTripId` exists; an accident on a staff trip never reaches the travel
+  request or its approver. → lane 6
+- **FX-9 (Fleet's own)** No fleet-trip approval definition is seeded (a catalogue entry only), and
+  Fleet's submit does not use HR's no-definition guard, so a submitted fleet trip auto-approves; with
+  `RequirePredefinedFleetTripDestinationOnDispatch` on, a travel-created trip cannot be submitted at
+  all. → Fleet hand-off (lane 10); lane 6 handles the destination setting on its side
+
+---
+
+## 4. Lanes
+
+### Lane 0 — Harness on UAT, truth and fiction (no schema)
+
+**Status 2026-10-01: COMPLETE.** `run-final-truth.mjs` passed 112/112 twice on UAT (runs 631771
+and 649145) after one harness fix (below); staged for the user's commit. No migration was pending on
+UAT — its history already held every migration in the repo — so starting the API changed no schema.
+
+**The harness.** The slice suites' `setup.mjs` was not repaired: it is retired from UAT with the slice
+suites (D-13), and the closure has its own fixture.
+- [x] `final-api.mjs` (performance style — no throw on a non-2xx; `observe()` records a known-open
+  finding without counting it) and `final-setup.mjs`: the fixture's own unit and position under the live
+  root, employees created with `employeeNumber: ''`, the tenant from `/api/auth/me`, every minted login
+  tracked and switched off.
+- [x] The teardown, in a `finally`: every row the run made is soft-deleted by its request and group ids
+  (claim lines, flight segments, itinerary legs and activities included), then checked — nothing left
+  live. **Claim and advance numbers are renamed `…~E2E<stamp>` before the soft delete**: under B9 a
+  deleted claim makes every later claim on the tenant collide, so the teardown also checks that the next
+  claim and advance numbers are free. (Read-only on 2026-10-01: UAT held one live claim and one live
+  advance, and both next numbers were free.)
+- [x] `hr-travel/README.md`: the environment, `start-api-uat.ps1`, the clamd stub, the suites and their
+  counts, the teardown rule, and why the slice suites must not run on UAT.
+- [—] *A supplier from the tenant* — lane 0 books nothing through a vendor; the first suite that does
+  (lane 4, `PreferredVendorMandatory`) reads an active one through `api/hr/suppliers`.
+- [—] *`workflow-definition.mjs`* — retired with the slice suites; lane 2's suite asserts on the seeded
+  definition.
+- [—] *Run the sixteen existing suites on UAT* — **skipped by D-13.**
+- [x] **Found on the first UAT run (stamp 418116), fixed.** Every feature check passed, but the
+  teardown renamed the two claims the suite leaves on one number into each other: the unique index
+  refused, SQL Server carried on with the rest of the batch, and one deleted claim kept
+  `EXP-2026-00002`, so every new claim on UAT would have collided. The rename now takes the row's id,
+  the teardown runs as one transaction under `XACT_ABORT`, a failure reports SQL Server's own
+  message, and `teardown-run.mjs <stamp> [--apply]` recovers a run whose teardown did not finish —
+  it renamed the stranded claim, and both next numbers were checked free afterwards.
+
+**Frontend truth (A7, A8, A9, F4, F5).**
+- [x] Every travel union written from its C# enum. `travel-enums.ts` holds one label map per request
+  enum (labels from `[Description]`) and every option list is generated from a map;
+  `travel-enums.test.ts` holds the unions to the C# enums (36 compared) and the maps to their members
+  and descriptions. One `TravelRiskLevel` export.
+- [x] The composer: a Comment / Internal note toggle sets the type and the visibility. Attachment types
+  from the enum. The attachment delete button only for `HR.Travel.Admin` (`useTravelAccess`).
+- [x] The request form's payloads are built by `travel-request-payload.ts` (unit-tested): an edit sends
+  `approvedBudget`, `policyId` and `groupTravelId` back as they are; `isInternational` is derived from
+  the two countries; an empty id is sent as `null`.
+- [x] `TravelQueryError` on every travel read (26 screens, panels and forms), so a 403 or a 500 no
+  longer reads as "nothing yet"; `fmtTravelMoney` replaces ten formatters that fell back to `'GHS'` —
+  no currency is invented; error toasts read `e.message`.
+- [x] Backend: the stale FX and GL comments; `StaffTravelCurrencyBridge` retired onto
+  `HrCurrencyBridge`; the five dead enums deleted; `StaffTravelBusinessRulesAttribute` maps
+  `DbUpdateException` to 409 with a fixed sentence (the database's own text is logged, never returned).
+
+**Found while building lane 0, fixed in it.**
+- [x] **O-19** (§ 3b): all seven currency reads moved to `api/hr/currencies` through `CurrencyField` and
+  `CurrencyPicker`. The claim line no longer starts in GHS (its default was read while the claim was
+  still loading); the group's add-traveller dialog no longer defaults to GHS and requires a currency.
+- [x] **E3, brought forward from lane 7.** The visa create DTO accepts the status, the number and the
+  three dates it used to drop (an omitted status is still Not Started; a status number the enum does not
+  have → 422). The visa summary carries the approval date, the fee, its currency and the number masked
+  to its last four — O-7's rule, for visas. The client types the list reads as the summary. Lane 7 keeps
+  the edit dialog, the passport side of O-7 and the tenant-scoped requirement lookup.
+- [x] Strings that promised what the code does not do: the request form's visa and health switches
+  (they record a need; nothing checks it); FX-1's "reserves the vehicle"; "Open the booking to see
+  both" (no screen opens a booking); the alert dialog's "travellers see it on their trip" (a traveller
+  sees only what is sent to them); the policy form's eight unenforced caps (a banner says so, and the two
+  switches say *should*); the rules banner's "and the budgets"; the policy badges (*Not in force* for a
+  withdrawn or superseded version — the record cannot tell which — *Approved — in force from …* for a
+  future one, *Expired* for an ended one); the reminder horizons (one reminder, then escalation only
+  after the date passes) and their audience (the HR role, in the app only); the travel reminders and
+  travel policies nav descriptions; the HR hub's travel card (no per diem); "Raise an amendment instead"
+  (there is none); the dashboard's *High risk* tile (it counts High, Critical and Prohibited); the portal
+  alert panel's "compliance tab" (the portal has none); the claim page's "recovered when the claim is
+  approved" (on payment) and "pay refuses anything not Approved" (it takes Partially approved too).
+- [x] The policy edit form stayed open after a save: it pushed to its own page's URL (F4). It now
+  closes through an `onSaved` callback.
+- [x] The risk-assessment acknowledgement button shows only to the traveller — for everyone else it
+  could only answer 403. A traveller without desk access still has no door (E1, lane 7).
+- [x] The register honours `?employeeId=` from the employee record (with *Show every traveller*), and
+  its type filter offers all eleven types.
+
+Suite `run-final-truth.mjs` — **112 assertions with the clamd stub running; 112/112 twice on UAT,
+2026-10-01**: § 1 the currency doors;
+§ 2 every request-enum member round-trips (31), the old forms' fiction values are refused, the
+traveller's own create and edit; § 3 an edit keeps a group participant in the group; § 4 comment types;
+§ 5 a visa keeps its status, number and dates, and the list masks the number; § 6 all seven attachment
+types, the old ones refused, delete for Admin only; § 7 the money and booking payloads, and the claim
+number collision answering 409; § 8 the register's employee filter; the teardown's five checks. Four
+known-open findings are observed, not counted: A5, A6, O-5 and the link an edit that omits it drops.
+*Since migration batch 1 (2026-10-02):* § 7 asserts that a deleted claim no longer blocks the next one,
+observes the reused number (B9, lane 3) as a fifth finding, and proves the 409 on the policy version
+index instead of the claim number.
+
+Checks run 2026-10-01: `frontend/tsconfig.travel-lane0.json` type-checks clean; `travel-enums.test.ts`
+(9) and `travel-request-payload.test.ts` (6) pass; `hr-setup-nav.test.ts` passes. Four layout tests
+fail outside travel (the HR sidebar keep-open list's leave and company-schedule leaves, procurement's
+sidebar, the header and the dashboard layout) — none touches a file of this lane. The API log of the
+UAT runs holds two kinds of error besides the deliberate claim collision (one a run, answered 409):
+payroll's profile insert failing its payment-method key at every fixture employee create
+(cross-module defect #23 — the employee still saves), and one HR/Identity reconciliation failure for
+a demo user (*Sequence contains more than one element*, `HrIdentityReconciliationService`) — neither
+is travel's; the second is recorded here for the HR identity owner.
+
+### Lane 1 — Request lifecycle (A1–A6, A10–A12, D-6, D-9, O-5, O-10, O-11, O-13, O-14, T-16, T-17)
+
+- [x] **Edit** only in Draft and ReturnedForRevision, on the desk and `/me`. The update DTO loses
+  `ApprovedBudget`, `PolicyId` and `GroupTravelId` (group membership moves to the group endpoints).
+  *Slice 1a; `GroupTravelId` stays on the edit until slice 1c gives the group its link endpoint, so the
+  form still sends it back.*
+- [x] **Server-derived facts:** `IsInternational` from the two countries on create and update; the
+  organisation unit from the traveller's employee record; every FK tenant-validated (employee, unit,
+  group, parent). Create refuses an inactive or separated traveller. *Slice 1a.*
+- [x] **Submit preconditions:** cost > 0; return ≥ departure; departure ≥ today (the desk may override
+  with a reason); a currency Finance holds; `MaxSingleTripBudget` of the applicable approved policy
+  (D-1) — the 422 names the cap; a trip overlapping another Submitted/Approved/InProgress trip of the
+  same traveller is refused; an overlap with approved leave is a warning; `SubmittedAt` from the clock.
+  *Slice 1a.*
+- [x] **The request form shows the policy that will apply and its caps** (a read that resolves the
+  guard for a traveller and a date — T-16). *Slice 1a.*
+
+**Slice 1a as built (2026-10-02)** — `StaffTravelRequestService` (create, update, submit, group
+participants, the new `GetPolicyPreviewAsync`), the DTOs, the mapper, `StaffTravelPolicyGuard`
+(`ResolveForAsync`; the caps record carries the single-trip limit, the policy's currency and its
+version), `HrCurrencyBridge` (`GetBaseCurrencyCodeAsync`, `ConvertBetweenAsync`), both controllers;
+on the frontend the types, the payload builder, the service, a `TravelPolicyPreview` card on the
+request form (the desk's unit picker is gone), the late-submission dialog on the desk's request page,
+the portal's "departure has passed" note, and both edit pages' lock rule.
+- *The facts.* The unit is the employee's own, or their position's when the employee row has none (29
+  of 4,398 UAT staff; none where the two disagree). Create and submit re-derive it, so a draft written
+  before lane 1 is checked on the facts.
+- *Who has left* is a record switched off or a status of Inactive, Terminated or Retired — what
+  separation, termination and deactivation write. Probation, leave and suspension are statuses of
+  someone still employed. Adding participants to a group checks every one first, so one leaver refuses
+  the call instead of leaving half a group behind.
+- *A past departure* is the desk's to submit, with a reason kept as an internal note in the
+  submitter's name (so the caller must be employee-linked); the traveller cannot submit it from the
+  portal. *Trips may meet on a travel day* — back from one and off on the next the same day — but not
+  run over each other, and two cannot leave on the same day. Only Submitted, Approved and In-progress
+  trips count.
+- *The single-trip limit* applies only from an approved policy (UAT's only real policy is still an
+  unapproved draft, so nothing binds there yet). A policy written before batch 1 has no currency and is
+  read in the base; a trip in another currency is compared at Finance's rate and the 422 shows the
+  converted figure. The policy checked is recorded on the request (`PolicyId` finally has a writer).
+- *Submission answers* with the status, the policy and any warnings (approved leave over the days); the
+  portal's submit answered 204 before, so a warning had nowhere to go.
+- *An itinerary is not required* to submit (finding A4 listed it): trips are often approved before the
+  itinerary is drawn up.
+- *The demo pack* (`dev-harness/hr-demo-smoke/scenarios/080-travel.mjs`) broke on two new rules and is
+  fixed in this slice: the Sebrepor trip (taken twelve working days before the build) is submitted with
+  a late reason, and the Lagos request is linked to its group — and its health clearance set — while
+  still a Draft, before the submit loop (the edit after submission is now refused). The hand-made policy
+  links are gone: a request records the policy it was checked against, and the demo's policy stays an
+  unapproved draft until lane 4 (D-3) and lane 10 have hr.head approve it. Proven at the next demo
+  rebuild (lane 10); UAT's demo trips are already built and are not re-run.
+
+**Suite** `run-final-lifecycle.mjs` (slice 1a: 103 assertions) — §1 the facts, desk and portal; §2 what
+a create refuses; §3 the edit lock through Submitted, Approved and Rejected, desk and portal; §4
+submission — cost, the past departure, overlaps, the limit in GHS and in USD, the policy recorded, the
+leave warning, the clock, no approval task left by a refusal; §5 the preview, desk and portal; §6 group
+participants. Its fixture adds a TenantAdmin login (to approve the run's unit-scoped policy — HR cannot
+until lane 4), an employee deactivated through the API, and one approved leave planted for its own
+traveller and deleted after. Every request it submitted is decided before the teardown, so no
+approval task is left in a real approver's inbox, and the teardown retires the run's notifications
+(each run writes about 230, mostly the engine's *Approval Required* to the Manager, HR and TenantAdmin
+role holders; emails dead-letter on UAT, which has no mail server). **103/103 twice on UAT, 2026-10-02**
+(stamps 138908, 184961; and 308438 after a date-format fix in the suite — the server writes September
+as "Sept"). Regression: `run-final-truth.mjs` **114/114 twice** (stamps 207913, 223419) — O-5 and A5 now
+asserted, three findings still observed (the group link on an edit and A6 for slice 1c, B9 for lane 3).
+Four runs wrote 44 requests and 466 notifications to UAT and left none live, no open workflow instance,
+no fixture leave, policy or active login.
+- [x] **Cancel:** cancels the engine instance while Submitted; refused once InProgress; from Approved
+  it requires no disbursed advance with money outstanding (the 422 names it) and cancels pending and
+  confirmed bookings and undispatched fleet trips (lanes 5, 6). *Slice 1b; the bookings and the Fleet
+  trip remain lanes 5 and 6.*
+- [x] **D-6 writers.** `ReturnForRevisionAsync` (the approve gate) on leave's suggest-changes shape
+  (`LeaveService.cs:1163-1177`): `HasActiveApprovalWorkflowAsync` → `CancelWorkflowAsync` → check
+  `.Success` → set the status directly (the engine has no *returned* outcome), stamping
+  `ReturnedAt/ById/Reason`. `CloseAsync` (HR), `ClosedAt/ById`; the sweep closes too (lane 8) when every
+  claim is Paid or Rejected and every advance FullySettled, refunded or written off, or when no claim
+  was filed by `TravelEndDate + ExpenseSubmissionDays`. Nothing is booked, advanced or claimed on a
+  Closed trip. Complete only on or after `TravelStartDate`. *Slice 1b; the sweep's close is lane 8's.*
+- [x] **D-9 Request change** (traveller, desk or approver; Approved only): returns the trip to
+  ReturnedForRevision with a reason (`ChangeRequestedAt/ById`, `ChangeReason`); bookings, advances and
+  claims stay linked; resubmission re-enters the two-stage ladder. The edit page's "raise an amendment"
+  text becomes this button. *Slice 1b — the traveller and the desk; the approver gets their door in
+  lane 2.*
+- [x] **Recall** — service, `/recall` and `/me/recall`: the requester-only check in the service first
+  (the helper does not enforce it), then `HrWorkflowFallbackAuthority.RecallAsync`, then
+  `ApplyRecallOutcome` whatever the helper returns. This completes "all four or none". *Slice 1b.*
+- [x] **`ApprovedById`** (new column) is the final approver's employee id, stamped in `ApproveAsync`; an
+  instance completed through the generic inbox never passes the service, so it stays null there
+  (recorded under #15). *Slice 1b.*
+- [x] Comment edit and delete by their author (or Admin); `CancelledAt` from the clock; the `/me`
+  detail filters comments by `IsVisibleToTraveller` on the server and drops policy exceptions.
+  *`CancelledAt` in slice 1b; the rest in slice 1c.*
+
+**Slice 1b as built (2026-10-02)** — `StaffTravelRequestService` (`CancelAsync`, `MarkCompletedAsync`,
+`ApproveAsync`'s stamp, and the new `ReturnForRevisionAsync`, `RequestChangeAsync`, `RecallAsync`,
+`CloseAsync`), a new `StaffTravelRequestGuards` (a closed trip takes nothing more — used by the four
+booking creates and the budget, claim and advance creates), the read DTO's lifecycle fields and the
+repository's includes for them, four desk routes (`return`, `request-change`, `recall`, `close`) and two
+portal routes (`recall`, `request-change`); on the frontend a shared `TravelReasonDialog`, a
+`TravelLifecycleNotes` card, the desk page's Return for revision, Request change, Close and its recall
+wired into the shared workflow actions (the generic recall never told the request), the portal's Recall
+and Request change, and both edit pages' Request change button.
+- *Cancel* asks the engine whether the record has a live instance (not whether a definition is
+  published: a request submitted before one was has no instance) and cancels it first; a refusal stops
+  the cancel. A rejected request is refused too — its rejection reason lives in `CancellationReason`,
+  which a cancel would overwrite.
+- *Return for revision* runs the approve gate (the engine's assignee, or the approve tier with no
+  definition), never the traveller, before it cancels the approval. *Recall* allows the traveller or
+  whoever raised the request; with an instance the engine also insists on the login that submitted it, so
+  a trip the desk submitted is the desk's to recall — the traveller is told to ask them.
+- *Request change* keeps the approval's stamps as the record of what is being changed until the next
+  approval replaces them; return, request change and recall all clear `SubmittedAt` and the recorded
+  policy, which the next submission sets again.
+- *Close* needs a completed trip, every claim paid or rejected, and every advance settled, written off,
+  rejected or cancelled — until lane 3 gives advances reject and cancel verbs, an unpaid requested advance
+  is deleted (Admin) before closing.
+- *Not yet:* none of the new verbs notifies anyone — who hears of each is lane 8's (D-4).
+
+**Suite** `run-final-lifecycle.mjs` gains §7–§11 (193 assertions in all): §7 cancel — the approval task
+withdrawn on the desk and the portal, the clock's time, refused for a rejected request, for an approved
+trip with a paid-out advance (named, with its amount), and under way; §8 return for revision — refused
+for a draft, without a reason and for a plain employee, the task withdrawn, edited and resubmitted into
+a new approval, an officer refused on their own trip; §9 request change — the approver recorded, the
+advance kept, edited, resubmitted and approved again, from the portal too and nobody else's; §10 recall
+— the traveller's own, the desk's submission refused to the traveller, an outsider refused, the
+raiser's recall; §11 complete and close — not before the start, not while a claim or an advance is open
+(each named), closed, and then no advance, claim, budget or booking. "Under way" is set on the run's own
+trip in SQL (lane 8 writes InProgress). The suite pays out one advance, which writes an unposted row to
+HR's Finance posting register (UAT has no posting rules, so no journal); the teardown retires the run's
+register rows with its notifications. **193/193 twice on UAT, 2026-10-02** (stamps 651140, 780011).
+Regression: `run-final-truth.mjs` **114/114 twice** (stamps 849263, 860396), the same three observed.
+Four runs wrote 70 requests, 8 advances, 2 register rows and 1,474 notifications, and left none live —
+no open workflow instance, fixture leave, policy or active login. The API log's only errors were the
+known payroll defect #23, the truth suite's deliberate duplicate policy, the known demo-user identity
+reconciliation, and one failure of the platform's notification clean-up job under the suite's load
+(it deleted nothing and recovered).
+- [x] **Groups:** `MaxParticipants` enforced; a change of the group's dates or destination propagates
+  to Draft participants; `POST groups/{id}/requests/{requestId}` links an existing Draft request; the
+  group's status moves by verb (open, close, cancel), not by PUT; deleting a group detaches its
+  participants; the add-traveller dialog takes purpose, risk, visa and currency. *Slice 1c.*
+
+**Slice 1c as built (2026-10-02)** — `StaffTravelRequestService` (comment author rule; group create and
+edit checks, propagation, the open / close / cancel verbs, `LinkGroupParticipantAsync`, the delete that
+detaches, capacity on add), the mapper (`SeatsTaken`, `ToTravellerView`, no group link from either
+request DTO, no status from the group edit), the group repository reads (each traveller's destination
+country; the by-status list counts places), both controllers (comment routes with the Admin test, four
+group routes, the traveller's view on `/me`); on the frontend the group page rebuilt around the verbs,
+with a link dialog, the fuller add-traveller dialog and a "differs from the group" mark, and the payload
+builder without the group link.
+- *A place* is held by every linked trip that is not cancelled or rejected — the count used to include
+  them, so a cancelled traveller held a place for ever, and could not be added again.
+- *A new destination or new dates* go to every trip still a draft or returned for revision — the two
+  states the requester may edit (lane 1's lock). A submitted or approved trip keeps what its approver is
+  deciding or decided; the page marks it. The PUT ignores any status it is sent.
+- *Linking* takes only a draft or returned request of a traveller not already on the group, while the
+  group takes travellers (Planning or Open) and has room; the trip takes the group's destination and
+  dates (and so is international if the group goes abroad). A trip on another group must come off it
+  first.
+- *Cancelling a group* is refused while any traveller's trip is going ahead (draft, submitted,
+  approved, returned or under way) — the error names them. Each trip has its own approval and money and
+  its own cancel rules, so the group does not cancel them for the desk.
+- *The group link is off both request DTOs* (create and edit): a payload that names a group is ignored,
+  not believed and not refused. *A group's lead* must be an employee still employed, its destination a
+  country the organisation holds, its dates in order.
+- *The traveller's view* drops comments the desk did not share at every depth of replies, and the
+  policy exceptions; their own budget, advances and claims stay (lane 7 builds the portal's views of
+  them).
+- *Comments* are edited and deleted by their author or a travel administrator (`HR.Travel.Admin`,
+  evaluated against the same policy as the routes); deleting was administrators only, so an officer
+  could not take back their own comment, while any officer could rewrite a colleague's.
+- *The demo pack* links the Lagos request through the new route (`080-travel.mjs`).
+- *InProgress and Completed* group statuses still have no writer; they belong with lane 8's sweep, which
+  can derive them from the travellers' trips (recorded there).
+
+**Suite** `run-final-lifecycle.mjs` gains §12–§14 (255 assertions in all; its fixture adds a second HR
+officer): §12 a comment edited and deleted by its author and an administrator, refused to a colleague;
+§13 the traveller's read without internal notes at any depth and without the policy exception the desk
+reads (a real rule and exception planted on the run's policy); §14 groups — a leaver lead and backwards
+dates refused, the PUT's status ignored, the limit on add, link and edit, a link that aligns the trip,
+links refused twice and for a submitted request, propagation to drafts and not to a submitted trip, the
+request edit leaving the link alone, open/close/reopen, cancel refused with live trips (named) and then
+done, a cancelled trip freeing its place, a cancelled group refusing edits, delete detaching travellers
+while their trips carry on. The first run (stamp 339381) failed one 1a assertion slice 1c had made stale
+— a create naming a group is now accepted on no group, not refused — and, because the suite expected a
+refusal, it had not tracked the request, which stayed live until `teardown-run.mjs 339381 --apply`; the
+suite now asserts the new behaviour and tracks every create, refusal expected or not. Then **255/255
+twice on UAT, 2026-10-02** (stamps 517575, 600995). Regression: `run-final-truth.mjs` **117/117 twice**
+(stamps 702525, 713508) — A8's group link and A6 now asserted; only B9 still observed (lane 3). Five runs
+wrote 120 requests, 11 groups and 2,715 notifications and left none live — no rule, exception, comment,
+register row, open workflow instance, fixture leave, policy or active login.
+
+*A teardown safety net, and the lesson it taught.* Both suites' teardowns now also take in everything
+their own fixture travellers own, found by the run's stamp (`includeDiscovered`), so a create a suite did
+not record is still decided and torn down. Its first two runs (stamps 133298, 231515) passed every
+feature check and then failed the teardown: SQL Server prints GUIDs in upper case and the API in lower,
+so the merged set held both forms of one id, the teardown's id table refused the duplicate, and the
+atomic teardown rolled everything back. Both were recovered with `teardown-run.mjs <stamp> --apply` (no
+approval left open, nothing live after); ids are now lower-cased on discovery and de-duplicated without
+regard to case before any SQL. Then both suites passed twice more on the final harness (lifecycle
+335140, 435255 — 255/255; truth 416045, 519338 — 117/117), and UAT was checked to hold no live travel
+fixture row from any run. The API log's only errors
+were the known ones, and the platform's notification clean-up job failing twice more under the suite's
+load (a bulk `UPDATE` over `Notifications` after 4–6 s, then "Deleted 0") — not travel's; recorded for the
+platform owner.
+
+### Lane 2 — The approval ladder and the approver's door (D-7, O-1, O-9, T-10)
+
+- [x] **Seeder:** STAFF_TRAVEL_REQUEST leaves the one-step list and is seeded through
+  `EnsureSequentialWorkflowDefinitionSeededAsync` as leave is — ~~stage 1 Manager + TenantAdmin~~
+  **stage 1 addressed by name, falling back to HR** (see *As built*), stage 2 HR + TenantAdmin —
+  deactivating the superseded one-step row so no tenant holds two active definitions.
+  `PreventInitiatorApproval` stays false; the traveller check is the control. *(2a)*
+- [x] **Service:** before the engine, approve, reject and return refuse a stage-1 decision by anyone
+  who is not the traveller's line authority — leave's `IsLineAuthorityAsync` extracted into a shared HR
+  helper (`HrLineAuthority`), not the leave service injected — unless the traveller has no line
+  authority with a login, when HR decides stage 1 and the record says why. *(2a)*
+- [x] **Controller:** approve, reject and return move from `TravelWritePolicy` to `InternalOnly` with
+  the service's checks (leave's shape, `LeavesController.cs:847-858`); a read door — Read OR line
+  authority OR the person it waits for (`LeavesController.cs:138-154`) — on the request, its comments
+  and its attachments; `GET requests/my-approvals` asks the engine (`LeavesController.cs:759`). *(2a)*
+- [x] **Frontend:** a `/hr/travel/approvals` queue, added to `sidebar-hr-gates.test.ts`'s KEEP_OPEN list
+  with its reason; the detail page renders for an approver with no travel permission (desk-only tabs
+  hidden), so `/me/inbox`'s link opens; the approve dialog takes an approved budget, prefilled with
+  the estimate. *(slice 2b)*
+
+Suite `run-final-approvals.mjs`: the traveller's manager approves stage 1; an unrelated manager is
+refused; HR approves stage 2; a traveller with no manager goes to HR; the inbox link opens.
+
+**As built — slice 2a (2026-10-02).**
+
+- *Stage 1 is addressed BY NAME — a deviation from this plan's "Manager + TenantAdmin", taken while
+  building.* A role-based stage 1 sends the task, the *Approval Required* notification (in-app and
+  email) and the inbox row to **every** holder of the Manager role — leave's stage does exactly that
+  today — so every manager in the organisation would be asked about every trip and refused on click;
+  and it shuts out a supervisor without the Manager role (on UAT, `she.manager`, `records.officer`,
+  `auditor` and three others have reports and no Manager role), while the HR fallback D-7 asks for
+  needs HR on the stage. So the stage carries two **Dynamic** approver rules reading
+  `lineApproverUserId` and `lineApproverUserId2` — the logins of the traveller's two nearest line
+  authorities who can sign in (supervisor first, then the head of their unit and of each unit above,
+  never the traveller) — which `SimpleWorkflowService` now puts in a travel request's engine context;
+  and its **required role is HR**, which the engine falls back to when no rule resolves (no line
+  authority with a login). This is per-record assignment, not conditional routing: cross-module defect
+  #3 is about transitions and is untouched. TenantAdmin is off stage 1 (the service would refuse them
+  there anyway) and stays on stage 2 as the backstop. The rule is shared, static, over the unit of
+  work (`HrLineAuthority`, Core) so the engine's context and the service name the same people; leave's
+  own `IsLineAuthorityAsync` is unchanged — its owner may point it at the helper.
+- *The service* (`StaffTravelRequestService`, the "approval ladder" block) works out the caller's
+  standing from the engine's current step: at **Line manager approval** the engine must accept the
+  caller and the caller must be one of the traveller's line authorities; when none of the two the stage
+  was sent to can decide it, the travel desk (`HR.Travel.Write`, evaluated by the API's policy pipeline
+  and passed in — never read from a body) decides, and the request gains an **internal note** in the
+  decider's name saying why ("… at the line manager's stage by the travel desk. {who the line was}");
+  a desk officer with no employee link is refused before the engine is asked. At any other step the
+  engine decides alone. Nobody decides their own trip, on either stage. A request out for approval on
+  the retired one-step route has no line-manager stage and is decided as that route said (UAT's demo
+  TR-2026-00002 and -00003). Renaming the stage in the designer turns the service's check off; the
+  engine's routing still applies (`StaffTravelApprovalLadder` documents the contract).
+- *The approved budget (O-9, T-10)* is HR's, at the last stage: sent at the line manager's stage it is
+  refused (422), not ignored; it must be more than zero and within the policy's single-trip limit
+  (the 422 names the policy and the limit, in the policy's currency at Finance's rate); with none sent
+  the estimate is approved as before. `ApprovedById` is the final approver. The approve DTO lost its
+  vestigial `ApprovedById` and `ApprovedAt`.
+- *The door.* `GET {id}`, its comments, attachments and attachment download, approve, reject and
+  return moved to **`StaffTravelApprovalsController`** — same route, `InternalOnly` — because the desk
+  controller's class-level `HR.Travel.Read` is ANDed with any action policy. The door is Read, OR the
+  traveller's line authority (at any status — a manager reads their people's trips), OR the person the
+  request waits for now. Approvers see internal notes: they are staff deciding the trip. The traveller
+  gets no door to their own trip — the desk view carries internal notes and the portal is theirs (A6).
+  New: `GET my-approvals` (the engine, then the line rule, request by request — exactly what the verbs
+  accept) and `GET {id}/viewer-actions` (may I decide, at which stage, as whom, who it waits for, why
+  not) for the screens. The approve answer now says whether the trip is approved or gone on to the next
+  approver.
+- *Seeder and existing databases.* A new tenant gets the two-stage route from
+  `EnsureStaffTravelWorkflowSeededAsync` (also run by `SeedHrWorkflowDefinitionsAsync`); the shared
+  stage seed record gained optional Dynamic keys and a fallback role. A database seeded before lane 2 is
+  moved by the data-only migration **`20261002042909_TravelClosureApprovalLadder`**: per tenant, the
+  seeded one-step route gets version 2 (same key and name, superseding it, as the designer's own
+  new-version-and-publish leaves it), both stages keep the old step's approval settings, the one-step
+  version is retired, requests already out for approval keep their route; two active seeded routes
+  in one tenant refuse the whole migration; a tenant-authored route is left alone; Down changes
+  nothing. Proven on a COPY_ONLY restore of UAT first — **27/27** (shape, rules, transitions, settings
+  kept, Up twice with no change, the refusal with nothing changed, a tenant's own route untouched) —
+  then **applied to UAT 2026-10-02** on the user's go, after a restore point
+  (`ErpSystemDB_UAT_before_travell2.bak`), and re-verified there.
+- *The demo pack* (`080-travel.mjs`) approves stage by stage: the line manager's stage by whichever of
+  `gm.ops`, `head.dev`, `md.tdc` the route named (head.dev's Kumasi trip goes to gm.ops and md.tdc,
+  staff's Sebrepor trip to head.dev and gm.ops), then `hr.head` with the budget. Not run on UAT —
+  UAT's four demo requests are past that step; a rebuilt database exercises it.
+- *Known limits, recorded.* The engine's own delegation re-addresses a by-name approval to the
+  delegate, whom the line rule then refuses: a line manager away is covered by the second line
+  authority the stage was also sent to (the head above), not by delegation. The two line authorities
+  are fixed when the request is submitted: a supervisor changed afterwards does not receive it — the
+  traveller recalls and resubmits. The generic workflow inbox still decides through the engine alone
+  (cross-module defect #15).
+
+**Suite** `run-final-approvals.mjs` (118 assertions; fixture `buildApprovalsFixture` — its own
+directorate and unit with heads and a lone unit with none, under a root with no head, so no real person
+is anyone's line authority; a supervisor holding only the Employee role; a supervisor with no login; an
+unrelated Manager; two HR officers; a TenantAdmin for the run's policy): §1 the route's shape on UAT;
+§2 the supervisor — no Manager role, no travel permission — opens, queues and decides stage 1, is told,
+and so is the head of unit, by name; the unrelated Manager can open nothing, decide nothing, is not told
+and has no inbox row; the head above reads but is not asked; HR waits and the supervisor cannot set the
+budget; §3 HR's stage, the zero and over-limit budgets refused, the budget and the approver recorded;
+§4 no line authority → the desk decides with its note, unseen by the traveller, then a second HR
+officer; §5 a supervisor without a login is passed over and the head of unit rejects; §6 the head of
+unit returns for revision; §7 a head's own trip goes to the head above; §8 the line authority keeps
+reading. **118/118 twice on UAT, 2026-10-02** (stamps 155645, 234900). The first run (087448) failed two
+assertions that expected the approver's door to answer a traveller about their own trip — the door
+refuses them by design (A6), and the suite now asserts that; one run (180324) was cut short by a
+transient failure of the suite's own SQL read of `Notifications` while the platform's notification
+clean-up job rewrote the table, and the harness's SQL now retries a deadlock or timeout and reports
+SQL Server's own message. Both runs tore down cleanly (checked with `teardown-run.mjs`).
+Regression: `run-final-lifecycle.mjs` **255/255 twice** (stamps 266125, 342391 — its approvals now
+take both stages, the desk deciding the first, and its clean-up tries the second HR officer before the
+TenantAdmin); `run-final-truth.mjs` **117/117 twice** (411394, 422420). The API log's only errors were
+the known ones: payroll's profile FK on every employee create (defect #23), the truth suite's
+deliberate duplicate policy version, one demo user's identity reconciliation, and the notification
+clean-up job.
+
+**As built — slice 2b (2026-10-02).**
+
+- *The screens.* **Travel Approvals** (`/hr/travel/approvals`, *Human Resources → Time & Leave → Staff
+  Travel → Approvals*), open to every user and on the sidebar test's keep-open list with its reason —
+  the server lists only what waits for the caller; each row says the stage, whether it sets the
+  budget, how the caller decides (line manager and their relation, the travel desk, an approver) and
+  how long it has waited. The request page draws **Approve, Reject and Return for revision** from the
+  server's *viewer actions*, not from the engine's flag (the shared workflow actions keep submit and
+  recall; their approve and reject are off, since they offered the buttons to anyone the engine
+  listed); a banner says the stage, what follows, and whose decision it is ("Waiting for … or …").
+  **`TravelApproveDialog`** asks for the approved budget at the last stage only, prefilled with the
+  estimate (T-10). An approver without travel permission sees the overview, comments, attachments and
+  the workflow tab — not the itinerary, bookings, finance or compliance tabs, the comment composer, the
+  upload, or Edit, Cancel, Complete and Submit; **Cancel had been drawn for anyone who could open the
+  page**, and is now the desk's. The back link goes to the queue for them. `useTravelAccess` gained
+  `canRead`.
+- *The last stage is read from the route.* 2a treated every stage after the line manager's as the last,
+  so a stage an administrator adds in the middle (Finance between the line manager and HR) would have
+  been offered the budget and the figure discarded. The service now reads the route — the engine's
+  current step, its definition, the next approval step by order — and only the stage with none after
+  it takes the budget; an earlier stage's budget is refused naming the stage that follows. *Viewer
+  actions* gained `nextStageName`, and the stage-1 refusal says what follows instead of "HR decides
+  after them". With Finance added, HR — last — would still set the budget; whether TDC wants Finance
+  to own that figure is recorded as a question, not decided.
+- *The workflow designer keeps what it does not edit* — **cross-module defect #34, found and fixed in
+  this lane** (the entry records both, for the workflow owner). The designer understood only role and
+  user approvers: it showed the travel stage's approver as HR (its fallback) and, on any save, deleted
+  the two named-approver rules and wrote HR as a role — every HR officer would have been asked about
+  every trip at stage 1, silently. The approval-stage mapping moved into
+  `frontend/src/components/workflow/WorkflowDesigner.approvers.ts` (part of the designer, in its own file so
+  it is tested — `WorkflowDesigner.approvers.test.ts`): other kinds of rule are
+  kept as stored, shown read-only (*Named by the record*), saved back unchanged, counted by validation;
+  the required role stays their fallback. Role-and-user stages load and save exactly as before (the
+  test holds a verbatim copy of the old code as the reference); the travel stage exactly as UAT's API
+  returns it round-trips unchanged, twice. 8 new tests; all 47 workflow component tests pass. Not
+  walked in the browser. Assigning an approval stage to a person from the record in the designer stays
+  the workflow owner's.
+
+**Suite** `run-final-approvals.mjs` gains five checks (123 in all): the stage that follows is named, read
+from the route; the desk's refusal at stage 1 names it rather than assuming HR; the supervisor's budget
+is refused naming the stage that sets it; HR's stage has none after it; HR's queue row is marked as the
+stage that sets the budget. **123/123 twice on UAT, 2026-10-02** (stamps 157115, 210672). Regression:
+lifecycle **255/255 twice** (248517, 317816), truth **117/117 twice** (387218, 396916). Frontend: the
+scoped travel type-check and the designer files' type-check clean, lint clean, the travel and workflow
+unit tests green. ⚠ `sidebar-hr-gates.test.ts` fails on two leaves that are not travel's —
+`/hr/leave/calendar` and `/hr/company-schedule/my-schedule` — exactly as it does on the committed code
+before this slice; the new entry passes. Recorded, not changed here. The API log held only the known
+noise (no SMTP on UAT: 1,600 notification e-mails failed; payroll's profile FK; the truth suite's
+deliberate duplicate; one demo user's identity reconciliation). The screens were not walked in a
+browser.
+
+### Lane 3 — The money chain (B1–B12, B14, D-2, D-10, O-2, O-6, O-8, O-9, T-21, T-22, T-35–T-39, T-57)
+
+- [x] **Claim state machine.** Submit: Draft or Returned → Submitted; the request Approved, InProgress
+  or Completed; at least one line; every line above `ReceiptRequiredAbove` carries a receipt
+  attachment; filed within `ExpenseSubmissionDays` of `TravelEndDate` or the 422 names the date.
+  Review: only from Submitted or UnderReview, only to UnderReview, Approved, PartiallyApproved,
+  Rejected or Returned; Approved versus PartiallyApproved is computed from the lines; nothing approved →
+  "review the lines first". Pay: only Approved or PartiallyApproved with `TotalApproved > 0`;
+  `PaidById` stamped; Paid is terminal. Lines are frozen from Submitted except when Returned.
+- [x] **D-2:** reviewer and payer ≠ the claim's employee; payer ≠ the reviewer; advance approver ≠ the
+  employee; disburser ≠ the employee and ≠ the approver — a 403 with the sentence.
+- [x] **Parents (B3):** the advance must belong to the same request and employee; the claim's and
+  advance's employee is the request's traveller (server-set); a receipt is an attachment of the same
+  request; claims and advances only on Approved, InProgress or Completed requests.
+- [x] **O-2 (T-57):** pay refused while the traveller holds a disbursed advance on the same request
+  that the claim does not name, unless the payer records a waiver reason; the filing page preselects
+  the outstanding advance, and its copy says recovery happens on payment.
+- [x] **Valuation (B5, B11, B12):** inline lines valued; the claim's currency server-set to base;
+  `GetRateToBaseAsync` returns the dated row's rate (direction per PR #99's contract, asserted against
+  `GET /api/finance/exchange-rates/current/USD`); an advance in another currency converted before it
+  is deducted.
+- [x] **Advances:** `0 < ApprovedAmount ≤ RequestedAmount`; the total approved on a request ≤ its
+  approved budget; no new advance while the traveller has an Overdue one; reject and cancel verbs
+  (`TravelAdvanceStatus.Rejected = 8`, `Cancelled = 9`); `UnsettledAmount` 0 until disbursed — and the
+  data step moved here from batch 1: zero it on existing Requested and Approved advances in the same
+  slice as the disbursement code that sets it; the
+  outstanding and overdue reads filter status; `SettlementDeadline` defaults to `TravelEndDate +
+  ExpenseSubmissionDays` (or 30 days); `Overdue` set by the sweep; `WrittenOff` by an Admin verb with a
+  reason; **`RecordRefundAsync`** (amount ≤ unsettled, reference, actor ≠ traveller) settles unused
+  cash handed back and posts through the same adapter as a new posting event (the Finance owner told).
+  *(3a; the Finance owner's note is lane 10's)*
+- [x] ⚠ Flip the posting retry guard at `HrFinancePostingAdminService.cs:655` from the negative list
+  to `is not (Disbursed or PartiallySettled or FullySettled or Overdue)`, or a rejected advance could
+  be re-posted; regenerate the `TravelAdvanceStatus` TS union. *(3a — WrittenOff joins the list: its
+  money did go out)*
+- [x] **Numbers (B9):** max-based, tenant-scoped generators for claims and advances (the shape of
+  `GenerateRequestNumberAsync`), with filtered unique indexes (§ 5).
+- [x] **Budget (B10, O-9, T-22):** Actual = paid claims' `NetPayable` + disbursed advances; Committed
+  excludes NoShow and adds cancellation fees; the budget's lines sum to `ApprovedTotal`, which defaults
+  to and may not exceed the request's approved budget; the budget's currency is the request's;
+  `budgets/{id}/approve` on `TravelAdminPolicy` stamps `ApprovedById/At` (approver ≠ traveller),
+  shown on the card; the Finance tab shows committed and actual against the approved budget and flags
+  an overrun (whether an overrun refuses is a TDC question, § 6).
+- [x] **D-10:** payroll offset leaves the pay dialog and is refused by the API for new payments.
+- [x] **T-39:** an Admin *void payment* (a second person, a reason) reverses the payment and the advance
+  settlement it made, and asks the posting register to reverse `TravelClaimPaid`. No code in
+  `Services/HR/Finance` calls back into a claim after a Finance reversal, so a reversed posting row
+  stays retryable as it is.
+- [x] B7: *awaiting payment* includes PartiallyApproved. B14: user ids in `UpdatedBy`; the ignored DTO
+  fields removed.
+- [x] **Frontend:** a line review takes an amount and a typed reason; the advance approve dialog
+  prefills and caps; the overdue-settlements queue (D-5); the posting card's wording. *(3a: the advance
+  dialogs and the queue; 3b: the line review. The shared `FinancePostingCard` was left as it is — its
+  wording is not travel's and already says what it does; the panel's own note names the new refund and
+  write-off events)*
+
+Suite `run-final-money.mjs`: every H above as a two-actor assertion; pay twice → 422; review a Paid
+claim → 422; a claim naming another employee's advance → 404; a zero-line approval → 422; inline lines
+valued; a back-dated line valued at its date's rate; a deleted claim does not collide; a reversed
+`TravelClaimPaid` leaves the claim Paid and a retry re-posts the same amount.
+
+**Source check (2026-10-02, HEAD `519418f00`).** The finance service, controller, repositories, budget
+rollup, currency bridge, posting factory and register, mapper, DTOs, entities and the frontend money
+screens were re-read. Lanes 0 and 1 touched these files only lightly: every finding above still holds,
+at the cited lines (B4's l.809 is l.810). Ten more:
+
+- **N1 — `Overdue` has three readers that would drop it.** Claim recovery (`SettleLinkedAdvanceAsync`),
+  the separation clearance (`SeparationService.cs:2314`) and the sweep's own advance query
+  (`StaffTravelReminderService.cs:301`) accept only Disbursed and PartiallySettled. Given a writer, an
+  overdue advance would stop being recovered by a claim (O-2's leak again), vanish from a leaver's
+  clearance and stop being chased the day it became overdue. The clearance also computes the amount
+  owed itself and would ignore refunds. "Cash out" is defined once and read by all of them, in the
+  slice that gives `Overdue` its writer.
+- **N2 — a cancelled trip keeps its undisbursed advances.** Lane 1b's cancel refuses only cash out; a
+  Requested or Approved advance stays live on the Cancelled trip and can still be approved and
+  disbursed — disbursement checks nothing about the trip.
+- **N3 — an advance is editable after settlement.** `UpdateAdvanceAsync` refuses only Disbursed, so a
+  PartiallySettled, FullySettled, Overdue or WrittenOff advance can be re-currencied and re-dated; the
+  currency is not validated on update.
+- **N4 — the review's notes are accepted and dropped.** `ReviewStaffTravelExpenseClaimDto.Notes` is read
+  by nothing; a rejected or returned claim carries no reason anywhere (D-14 adds the column).
+- **N5 — a cancelled advance has nowhere to record who and why** (D-14).
+- **N6 — the receipt rule has no screen to satisfy it.** The add-line dialog never sends
+  `receiptAttachmentId`; once a policy with `ReceiptRequiredAbove` is approved, every desk claim with a
+  line above it would be refused at submission. 3b adds a receipt picker.
+- **N7 — the rate's direction.** UAT holds GHS→USD as `Rate 0.08`, `InverseRate 12.5` — Finance's
+  documented contract, *1 base = Rate target* — not the 12.5 the bridge's remarks quote. `ConvertAsync`
+  reaches 12.5 through its inverse path, at today's date. B12's dated rate repeats Finance's own lookup
+  (direct quote, then inverse) on the expense date rather than reading `Rate`. (`ConvertAsync` also
+  rounds the rate to the target's two places, because it converts one unit; the dated rate keeps six.)
+- **N8 — no money control is permission-gated.** `TravelFinancePanel` and the claim pages do not use
+  `useTravelAccess`; every button renders for any reader.
+- **N9 — the advance-status union escapes its enum test.** The comment inside the
+  `TravelAdvanceStatus` union defeats the test's regex, so it is not compared with C#.
+- **N10 — copy that contradicts the server:** the advance "recovered at approval"
+  (`travel-finance.service.ts:125`, `travel-finance.ts:192`) and pay "refuses anything not Approved"
+  (`travel-finance.service.ts:117`, `travel-finance.ts:244`).
+
+Also observed: the approve-advance dialog's prefill sits in the Dialog's own `onOpenChange`, which a
+controlled `open` never calls, so it probably never fires (not run); the line review is two icons with
+no amount or reason; disbursement has no confirmation; UAT's only live money rows are the Kumasi
+advance (GHS 2,500, disbursed, deadline 2026-11-03 — so D-14's data part touches no live row on UAT) and
+the Sebrepor claim (submitted). **The posting seam on UAT (D-17):** no travel rule or account mapping exists, `JournalEntries`
+is empty, only August 2026's fiscal period is open (September onward *Future*), no
+`AccountingBookPeriods` row exists, and the chart has no travel expense account — so with a rule
+switched on today Finance would refuse every travel posting, and the strict adapter would refuse the
+travel action with it.
+
+**Slices.**
+- **3a — advances, numbers and the migration.** D-14's migration; B9 for claims and advances;
+  `0 < approved ≤ requested`, the trip's approved advances within its approved budget, no new advance
+  over an overdue one, edits only while Requested (N3), approve and disburse only on Approved or
+  InProgress trips (D-16); D-2 on advances; reject, cancel (a trip's cancel cancels its undisbursed
+  advances, N2), write-off, refund with its posting event; `UnsettledAmount` from disbursement and the
+  default deadline; `Overdue` by the sweep with N1's readers; the retry guard flipped; D-15's recovery
+  arithmetic. Screens: the advance dialogs, the overdue-settlements queue, gated money controls (N8),
+  the union under its test (N9).
+- **3b — the claim chain.** The state machine, B3 parents, B4, B5/B11/B12 (N7), B6, B7, D-2 on claims
+  (D-16's line reviewers), O-2 with the waiver, D-10, B14, the review notes (N4). Screens: line review
+  with an amount and a reason, the receipt picker (N6), the filing page's advance and currency, the pay
+  dialog, the copy (N10).
+- **3c — the budget and void payment.** B10, O-9, T-22; T-39.
+
+**As built — slice 3a (2026-10-02).**
+
+- *The migration* `20261002132850_TravelClosureMoneyChain` (D-14): scaffolded by the user, rewritten as
+  guarded SQL, proven **38/38** on a COPY_ONLY copy of UAT (kit: session scratchpad `m2/` — the migration's
+  exact SQL rendered with csc, then Up, Up again with no row changed, Down to UAT's exact schema, Up again;
+  six planted advances, one per case the data part handles; a self-test that the checking helper fails a
+  wrong value). **Applied to UAT 2026-10-02** after a restore point (`ErpSystemDB_UAT_before_travell3.bak`,
+  COPY_ONLY, verified with `RESTORE VERIFYONLY`); history 110 rows; verified in SQL. On UAT the data part
+  touched no live row. ⚠ *The kits' `expect` helper had been vacuous* since migration batch 1: the value in
+  the message was read after the test, so `$?` was always 0. Fixed (`tools/migration-kit-lane2` too);
+  batch 1's and lane 2's saved results were re-checked against their expectations and all hold.
+- *One definition of cash out* — `StaffTravelAdvanceRules` (Core): Disbursed, PartiallySettled or Overdue
+  with something unsettled; the settlement status from the figures (an overdue advance partly settled
+  stays overdue); the default deadline; the cancellation. Read by claim recovery, the separation
+  clearance (which now reads the unsettled amount, so cash handed back counts), the sweep's reminder query,
+  the trip's cash-out refusals and the two repository reads (N1). Requested advances no longer read as
+  owed anywhere.
+- *Advances.* Raised only on an Approved or InProgress trip (D-16), for the trip's traveller (the create
+  DTO lost `EmployeeId`, B3), for more than nothing, with a deadline not before the trip ends, and never
+  for a traveller who holds an overdue advance (O-8). Edited only while Requested (N3). Approved above zero,
+  no more than asked, and within the trip's approved budget — its estimate on a trip approved before lane 2 —
+  with every other approved advance, each converted at Finance's rate (O-8). **D-2:** nobody approves, pays
+  out, records cash back on or writes off their own advance; the approver cannot pay it out (403 with the
+  sentence). Paying out starts the debt and sets the deadline when none was given (trip end + the approved
+  policy's claim window, else 30 days). **Reject** (Requested; reason), **cancel** (Requested or Approved;
+  reason; the trip's cancel does it for each undisbursed advance, N2), **cash handed back** (once; at most
+  what is outstanding; reference), **write off** (Admin; reason; nothing owed afterwards).
+- *Overdue* is written by the reminder sweep before it collects candidates (`AdvancesMarkedOverdue` on the
+  run's result); reads treat cash out past its deadline as overdue before the sweep runs (`IsOverdue`).
+- *D-15* — a claim recovers a foreign advance at Finance's rate on the payment date, in the advance's own
+  currency, the whole advance when the claim covers it (no rounding remainder).
+- *B9* — claim and advance numbers: the highest ever issued in the tenant and year, deleted rows included,
+  plus one (`CountByYearAsync` removed).
+- *Posting* — two events: `TRAVEL_ADVANCE_REFUNDED` (Dr staff payments clearing / Cr staff advances
+  receivable) and **`TRAVEL_ADVANCE_WRITTEN_OFF`** (Dr staff receivable write-off / Cr staff advances
+  receivable) — the write-off event is an addition to this plan: without it Finance's receivable outlives an
+  advance travel has written off. The register rebuilds both; the retry guard is a positive list. The
+  catalogue gate test has both samples (37/37 with the build's binaries).
+- *Screens.* The Finance tab's money controls render only for who may use them (N8): Approve (prefilled — the
+  prefill sat in an `onOpenChange` Radix never calls — and capped), Reject, Pay out (confirmed), Cancel, Cash
+  back and Write off (Admin); a requested advance waits for an approved trip; reasons and refunds show under the
+  status. **Staff Travel → Advances** (`/hr/travel/advances`, `HR.Travel.Read`): overdue settlements (D-5),
+  cash out, all. The advance-status union is under its enum test (N9). Scoped type-check, lint and the
+  travel unit tests clean; the sidebar test fails only on the two non-travel leaves recorded in lane 2. Not
+  walked in a browser.
+- *A second HR persona* — at the user's request, in the seeder rather than left to lane 10:
+  `TdcDemoPersonaSeeder` gains **`hr.officer`** (HR + Employee, on the Human Resource Officer post, fallback
+  HR Assistant), so every seed — `seed-hr-demo` or the Developer Test Data screen's Logins tier — has the
+  second officer the two-person rules need (D-2 here, D-8 in lane 4). `080-travel.mjs` pays the Kumasi
+  advance out as `hr.officer`; the pack's `personas.mjs` checks the login; `UAT-DEMO-DATABASE.md` lists it.
+  A database seeded before 2026-10-02 gains it when the persona seeder next runs. UAT's own Kumasi advance
+  (disbursed, deadline 2026-11-03) is untouched. **UAT gained it the same day**, on the user's go:
+  `seed-hr-demo` after a restore point (`ErpSystemDB_UAT_before_hrofficer.bak`) and a read-only dry run of
+  every orchestrator probe and of the persona resolution (UAT holds `TDC/` employees the demo seeder did not
+  create, which is why the Test Data screen refuses its Logins tier there) — 2 steps ran (both write nothing
+  on UAT), 21 skipped, 0 failed; one login created, `hr.officer` → TDC/00082 Esi Vanderpuye; the other 17
+  personas kept their employees; `personas.mjs` signs in as all ten it checks.
+
+**Suite** `run-final-money.mjs` (121 assertions; fixture `buildLifecycleFixture`): §1 numbers; §2 raising;
+§3 approving; §4 paying out, with the disbursement's register row; §5 reject, cancel and the trip's
+cancel; §6 cash back, once, posted; §7 write-off, posted, never one's own; §8 overdue before the sweep, the
+sweep's mark and reminder, no new advance, a request change paying nothing out, and a claim recovering the
+overdue advance; §9 a USD advance recovered at 12.5. **121/121 twice on UAT** (stamps 124762, 160270). The
+first run (988288) passed every feature check and failed the two next-number checks: the harness's rewritten
+check printed SQL Server's *Null value is eliminated by an aggregate* warning ahead of its answer and parsed
+the warning — fixed, the answer was 0 and 0. All three runs tore down cleanly (`teardown-run.mjs`).
+Regression: lifecycle **256/256 twice** (201951, 269738 — §7 pays out with the second officer, §8 raises its
+advance while the trip is approved), truth **118/118 twice** (333841, 342014 — the draft trip's advance is now
+a 422 naming the rule), approvals **123/123 twice** (349180, 383684). The API log held only the known noise:
+payroll's profile FK on every employee create (defect #23), the truth suite's deliberate duplicate policy
+version, and notification e-mails failing for want of SMTP.
+
+**As built — slice 3b (2026-10-02).** No migration (the review notes' column came with 3a's).
+
+- *Filing (B3, B5, B11).* A claim is the trip's traveller's and is kept in the base currency — both set by the
+  server; the create DTO lost `EmployeeId` and `CurrencyCode`, the update DTO its currency. Only on a trip that
+  is approved, under way or completed. The advance it names is this trip's and this traveller's (404
+  otherwise) and not rejected, cancelled or written off; a receipt is an attachment of the same trip (404);
+  a per-diem rate is this organisation's. Lines sent with the claim are checked and valued like any other
+  (they were stored at rate 0).
+- *Submitting (D-1's claim half).* At least one expense. Under the approved policy the trip was checked
+  against: every expense above its receipt threshold (converted to base from the policy's currency) carries a
+  receipt — **a per diem excepted**, a refinement taken while building: it is a flat allowance with no receipt
+  behind it, and the demo's Sebrepor claim has one — and a FIRST submission falls within the claim window after
+  the trip ends (a returned claim was filed in time). The 422s name the expenses, the threshold, the last day
+  and the policy.
+- *Expenses* are fixed once the claim is submitted, except on a claim returned to the claimant; changing a
+  reviewed expense sends it back to be reviewed (B6).
+- *Reviewing (B1, B4, D-2, N4).* Only a submitted claim or one under review; never one's own claim or
+  expense. A line is approved in whole or part — the server works out the rejected part, so the two always make
+  the line (`AmountRejected` left the DTO) — and any cut needs its reason. Approving the claim needs every
+  expense decided and something approved, and **records Approved or Partially approved from the lines** (it
+  was set outright: a claim with no reviewed line was approved and paid its claimed total while Finance
+  recognised zero). Rejecting or returning needs the reason, kept in `ReviewNotes` for the claimant.
+- *Paying (B1, D-2, D-10, O-2, B7).* Approved or partly approved, once; on a trip that takes claims; the
+  caller's employee link now required (`PaidById` is recorded); never the claimant, the claim's reviewer or
+  anyone who reviewed one of its expenses (D-16's refinement); never by payroll offset; not in full past advance
+  cash the traveller holds on the trip that the claim does not name unless the payer records why
+  (`AdvanceWaiverReason`). The recovery works on the approved total only. *Awaiting payment* includes partly
+  approved claims.
+- *B12 — the expense date's rate.* `HrCurrencyBridge.GetRateToBaseAsync` reads the rate in force on the date
+  asked, with `ConvertAsync`'s own lookup order (the direct quote, then the inverse), to six places — it had
+  checked the date and then converted at today's rate. **It reaches beyond travel:** HR's Finance posting
+  adapter (every foreign-currency HR posting) and staff requisition costs value at their own date too. The
+  adapter test's fake stored GHS → USD as 12.5 — the transposed seed, which only worked while the bridge read
+  `ConvertAsync` — and now stores Finance's contract, 0.08; its expectations are unchanged (USD 100 → GHS
+  1,250). The bridge's remarks record UAT's actual row.
+- *Saving.* The claim paths save by change tracking: `UpdateAsync` on a claim read with its navigations marked
+  the traveller, trip, reviewer and advance modified too (the tracked-graph trap). The claim's detail read
+  gained the trip, the reviewer and the payer — `RequestNumber` and `FinanceReviewedByName` had always come back
+  empty.
+- *Screens.* The claim page: a receipt picker (the trip's attachments; the dialog opens once they are loaded,
+  so the select cannot blank a linked receipt), changing an expense, a review dialog per expense (approve all
+  or part, or reject, with the reason), the review outcomes (approve-as-reviewed, reject and return with their
+  reason), the reviewer's notes, who paid, the waiver box when unnamed advance cash exists, no payroll offset,
+  controls for the travel desk only. The filing page: no currency to choose, the advance the traveller holds
+  preselected, refused politely for a trip that takes no claims. Copy that said the advance is recovered at
+  approval, or that pay refuses a partly approved claim, corrected (N10). Scoped type-check and lint clean. Not
+  walked in a browser.
+
+**Suite** `run-final-money.mjs` gains §10–§14 (202 assertions): §10 filing — the traveller and currency the
+server's, another traveller's advance 404, a cancelled one 422, inline lines valued (GHS 100 + USD 10 = 225);
+§11 under the run's own approved policy (receipts above GHS 200, a 10-day window) — a late first submission
+refused, an empty claim refused, one unreceipted expense named (the per diem exempt), another trip's attachment
+404, the trip's receipt linked, then nothing added, changed or removed after submission (the suite now uploads,
+so it needs the clamd stub); §12 reviewing — draft refused, one's own refused, undecided expenses refused, a
+cut over the line or without a reason refused, 200 of 300 approved with the 100 rejected computed, Partially
+approved worked out, its posting row; a claim with nothing approved refused and rejected with its kept reason;
+a returned claim's changed expense back to Pending, resubmitted; §13 paying — the partly approved claim in the
+queue, payroll offset refused, a line reviewer and the claim reviewer refused, unnamed advance cash refused then
+waived with the reason, the payer recorded, paid once, not reviewed again, both posting rows; §14 B12 — a
+second GHS → USD rate planted in Finance's table for the run (stamped, removed at once and checked gone in
+`finally`): a USD expense 30 days old valued at 12.5, today's at 16. **202/202 twice on UAT, 2026-10-02**
+(stamps 660163, 728907; every section ran — none skipped). Regression: lifecycle **256/256 twice** (768625,
+836539), truth **115/115 twice** (912862, 923384 — its claim checks moved to the money suite and a claim on its
+draft trip is now a 422), approvals **123/123 twice** (931619, 966528). The posting catalogue tests 37/37 with the
+build's binaries. The API log held only the known noise; every run tore down clean.
+
+**As built — slice 3c (2026-10-02).** No migration (the void's three columns came with migration batch 1).
+
+- *The budget (B10, O-9, T-22, D-16).* Set only once the trip is approved, under way or completed; one per
+  trip. **In the trip's currency**, set by the server — the create and update DTOs lost `CurrencyCode` (T-22), and
+  the update DTO the `TotalCommitted`/`TotalActual` it ignored (B14). Its total, when 0 is sent, is the trip's
+  approved budget (its estimate on a trip approved before lane 2), and it may not exceed it; its five parts are all
+  0 or add up to the total exactly (the dialog had called a mismatch "allowed"). A budget kept in another currency
+  before lane 3 moves to the trip's on its next edit, and cannot be approved until it does.
+- *Approval.* `POST budgets/{id}/approve` (`TravelAdminPolicy`, the caller's employee link): never the
+  traveller's own trip (403), once (422 naming the date), and re-checked against the trip's approved budget —
+  `ApprovedById`/`ApprovedAt` had no writer. **Changing an approved budget withdraws its approval**; saving it
+  unchanged keeps it.
+- *The rollup (B10).* `StaffTravelBudgetRollup` works in the budget's currency, each figure converted at
+  Finance's rate on its own date (a booking when made, a claim when paid, an advance when paid out). *Committed*
+  leaves out a no-show and keeps a cancelled or refunded flight's or hotel's cancellation fee. *Actual* =
+  claims paid (their net) + advances paid out less cash handed back (Disbursed, PartiallySettled, FullySettled,
+  Overdue and WrittenOff) — a claim against an advance pays only the balance, so nothing is counted twice. The
+  read adds both parts of *Actual*, the trip's approved budget, and an overrun flag for each figure: **flagged,
+  not refused** — whether an overrun refuses is TDC's question (§ 6), and T-20 (the parts do not bind a
+  booking) stays open with it. Variance is approved less actual.
+- *Voiding a payment (T-39).* `POST claims/{id}/void-payment` (`TravelAdminPolicy`, employee link, a reason of
+  five characters or more): only a Paid claim; never the claimant or the payer (403 with the sentence); not on a
+  closed trip; refused when the advance it recovered from has since been written off. A posted
+  `TRAVEL_CLAIM_PAID` row is reversed **through the register first** (`IHrFinancePostingAdminService.ReverseAsync`,
+  Finance's exact reversal, its own transaction); a row that never posted is marked **Skipped** with the reason.
+  Then, in one save: the claim back to Approved or Partially approved (from its lines), its payment, payer, method,
+  reference and waiver cleared, nothing deducted, the approved total payable; `PaymentVoidedAt/ById/Reason` set;
+  the advance's recovery undone (the deduction in the claim's currency, or at Finance's rate on the payment date
+  for a foreign advance, capped at what claims settled — cash handed back is never undone) and its status worked
+  out again; an internal note on the trip naming the payment, the advance, the journal reversed and the reason.
+  The approval's journal stands. Paying again posts afresh — a Reversed row as its next generation, a Skipped one
+  as a new attempt. Should the save fail after the reversal, the claim reads Paid beside a reversed row, which the
+  register's retry posts again; the void can be repeated.
+- *Screens.* The budget dialog: no currency field (the trip's is named), the total prefilled with the trip's
+  approved budget, the year from the trip, the cap and the parts' sum checked before Save, reset each time it
+  opens. The budget card: who approved it and when, the trip's approved budget, committed and actual in red when
+  over, actual split into claims and advances, an overrun note, **Approve the budget** for a travel administrator,
+  Set/Edit only on a trip that takes a budget. The claim page: **Void payment** for a travel administrator on a
+  Paid claim (a reason dialog that wants five characters — `TravelReasonDialog` gained `minLength`), and the
+  void's date, officer and reason shown. Scoped type-check and lint clean. Not walked in a browser.
+- *Demo pack.* `080-travel.mjs` sets budgets only on the trips it approves (Kumasi and Sebrepor), without a
+  currency; Lagos and London, left submitted, take none — a database seeded before 3c keeps the ones it has.
+  Neither is approved: approving a budget and voiding a payment are `HR.Travel.Admin`'s, and no demo persona
+  holds it (the guide's Rule 2, where both acts and the write-off are now listed).
+
+**Suite** `run-final-money.mjs` gains §15–§16 (286 assertions): §15 the budget — none on a draft trip; above the
+trip's approved budget refused; parts adding to 900 of 1,000 refused, naming the 900; set with no total and no parts →
+1,000 in the trip's currency though the payload said USD; a second refused; HR cannot approve (403), the travel
+administrator can, once, recorded by name; a re-split withdraws the approval, an unchanged save keeps it; the
+administrator's own trip refused; committed 370 from a 320 booking, a no-show of 200 and a 150 fare cancelled with a
+fee of 50; actual 400 from an advance paid out, 300 once 100 is handed back, and 500 (claims 200 + advances 300) once a
+claim of 500 recovering the 300 is paid; cut to 400, actual flagged as an overrun, variance −100. §16 the void — a
+four-character reason refused, HR refused, the administrator voids: the claim Approved, payment and payer cleared,
+500 payable, the void recorded by name with its reason; the advance back from Fully settled to Partially settled with
+300 owed; the payment's register row Skipped and the approval's untouched; the budget's claims paid back to 0; the
+internal note (not the traveller's) naming the advance, the 300 and the reason; no second void; paid again, the 300
+recovered again, the row Unposted again; the payer cannot void their own payment; the claimant cannot void theirs; a
+payment whose advance was later written off cannot be voided. **286/286 twice on UAT, 2026-10-02** (stamps 992779,
+077210; §15 49 checks, §16 35 — none skipped). Regression: lifecycle **256/256 twice** (124715, 193277 — §11's budget
+on a closed trip sends no currency), truth **116/116 twice** (255937, 265254 — §7's budget on its draft trip is now a 422
+naming the rule), approvals **123/123 twice** (273481, 308759). The posting catalogue tests 37/37 with the build's
+binaries. The API log held only the known noise (payroll's profile FK, defect #23; the truth suite's deliberate
+duplicate policy version; e-mail with no SMTP; one identity-reconciliation job error that predates travel).
+
+**D-17 — the posted path, on a scratch copy of UAT.** `run-final-posting.mjs` (70 assertions) against a COPY_ONLY
+restore of UAT (`ErpSystemDB_TravelPostProof`; kit in the session scratchpad `l3c/d17`), on which Finance's authority
+was prepared (`prep-uat-finance-authority.sql`), a travel expense account **6150** and a write-off account **6650**
+were added (copies of 6000's row — UAT's 6600 is a control account), every role mapped and travel's five rules
+switched on; the API started against it by `dev-harness/hr-travel/tools/start-api-scratch.ps1`, which refuses UAT,
+and the suite refuses any other SQL target and stops before switching a rule on unless the API is on the copy too.
+Every journal is read back from Finance: disbursement Dr 1120 400 / Cr 1010 400; cash back Dr 1010 100 / Cr 1120 100;
+claim approval Dr 6150 500 / Cr 2120 500; payment Dr 2120 500 / Cr 1120 300 / Cr 1010 200; **the register's reversal
+of the payment** — a reversal journal, the claim still Paid (nothing in Finance calls back into travel, T-39's note) —
+and its **retry**, the same amounts as the row's second generation in a new journal; **the void**, reversing that
+posted payment through the register (the reversal's reason naming the void, the trip's note naming the journal), the
+claim approved again with its approval's journal standing, 300 of the advance owed again; **paid again**, posted as
+the third generation for the same amounts; a write-off Dr 6650 300 / Cr 1120 300. **70/70 twice, 2026-10-02**
+(stamps 677609, 702006). The copy was dropped; UAT still has no travel rule, no mapping, its own three books and no
+6150 or 6650.
+
+⚠ **The first run failed at the first posting, and that is a finding: cross-module defect #35.** HR's posting store
+takes the book from Finance's V1 resolver, which answers `IFRS` from UAT's `SubledgerPostingMode`; a database seeded
+on Finance's book model v2 (2026-09-21) has `BASE`, `IFRS_ADJUSTMENTS` and `USD_PARALLEL` and no `IFRS`, so Finance
+refused — *"Accounting book is unavailable for this tenant"* — and the strict adapter refused the disbursement and the
+claim approval with it. **No HR posting rule can be switched on on such a database** until Finance's V2 cut-over
+gives producers a book that exists. The proof renamed the copy's primary book `BASE` to `IFRS`
+(`l3c/d17/scratch-book.sql`) to get past it; `HR-FINANCE-POSTING-DESIGN.md` § 5.1 now says its prep table is out of
+date.
+
+### Lane 4 — Policy and authority (C1–C6, D-1, D-3, D-8, O-3, O-4, O-5, T-1, T-2, T-9, T-46, T-50, T-52)
+
+- [x] **D-3 in four steps:** *(4c — the "runs every startup" below was wrong: see D-22)* add `AdministerTravel` to `HrStaffGrants` (`HrPermissions.cs:687`;
+  precedent `AdministerRecruitment`, l.693); the seeder's grant loop is add-only and runs every
+  startup, so restarting the UAT API converges existing tenants (`RoleRevocations` is not touched);
+  the suite asserts the `hr` actor passes an Admin route, and `mintTravelAdminActor` is retired;
+  update the remarks that describe the travel tier (`HrPermissions.cs` ~l.280, 584, 611;
+  `StaffTravelMeController.cs:186`). The UI's `canAdmin` drops its `HR_ADMIN_ROLES` fallback.
+- [x] **D-8:** flight and hotel bookings gain `ExceptionState` (None, Pending, Authorised, Refused),
+  `ExceptionRequestedById` and `ExceptionAuthorisedById/At`. An over-cap booking is saved Pending and
+  cannot be Confirmed or Ticketed until a **different** Admin holder authorises it; the
+  `AdvanceBookingDays` override takes the same path; a breach register under Staff Travel lists every
+  over-cap booking.
+- [x] **D-1:** *(the policy half — the two fields out, the form saying what binds — done in 4a; the booking half is
+  4b's)* `AdvanceBookingDays*` at flight and hotel create; `PreferredVendorMandatory` → a Supplier
+  is required (picker on the four booking dialogs, tenant-validated); `RequiresCheapestFare` and
+  `MaxAnnualTravelBudget` leave the DTOs and the form; the form and `PolicyRulesPanel` say exactly what
+  binds, and the rules panel keeps its read-only, non-binding banner (D-29).
+- [x] **C2, C3:** cabin classes validated as enum members; a policy `CurrencyCode` (the hotel cap
+  compared in it, a booking in another currency converted through the bridge); `VersionNumber`
+  server-assigned (max + 1 per policy name) with a filtered unique index; `EffectiveFrom ≤ EffectiveTo`;
+  the level band in rank order; author ≠ approver.
+- [x] **O-4:** approving a future-dated version sets the sitting version's `EffectiveTo` to the day
+  before and keeps both in force for their own windows; resolution picks by date.
+- [x] **O-5:** the guard resolves the unit from the traveller, not the request, and walks the unit's
+  ancestry (`UnitAncestryAsync`), most specific first.
+- [x] **C4:** deciding an exception → Admin, `DecidedAt` from the clock, decider ≠ requester (still no
+  screen). **C5:** `RiskLevel.Prohibited` refuses submit; `Critical` needs an acknowledged risk
+  assessment before departure — **moved to lane 7 (D-18)**.
+- [x] **C6:** one shared line in `SelectField.onValueChange` (`fields.tsx:336-338`): `if (next === '')
+  return;` before `form.setValue`. Safe: the only legitimate clear is `NONE_VALUE → ''`, and no HR
+  option array declares `value: ''` (750 uses in 208 files). Scoped type-check afterwards.
+- [x] **D-19:** the officer who set or last changed a budget does not approve it. **D-20:** a flight or
+  hotel booking carrying an exception is not deleted. *(D-20 done in 4b; D-19 in 4c)*
+
+Suite `run-final-policy.mjs`. (The plan said to re-run `run-slice12-policy-authoring.mjs` too; D-13 keeps the
+slice suites off UAT, so it is **retired by name** here — `run-final-policy.mjs` re-proves what it covered.)
+
+**Source check (2026-10-02, HEAD `b08bd498d`).** The permission map and its seeder, the role-fallback handler,
+the policy service, guard, repository, DTOs and mapper, the booking service and controller, the exception flow,
+the risk-assessment acknowledgement, the policy form, the access hook and the shared select were re-read. Every
+finding above holds: HR's grant list still lacks `AdministerTravel` (adding it converges at once through the
+role-fallback handler and durably through the startup seeder); the cabin classes are bare `[Required]` enums;
+the policy entity has batch 1's `CurrencyCode` and the DTOs do not; `VersionNumber` is the payload's; no date or
+band check; a policy's author may approve it; approval stands every sibling down at once, and resolution needs
+`IsCurrentVersion`; scope is an exact unit match (`HrAudienceResolver.UnitAncestryAsync` exists — the unit then
+its ancestors, nearest first, tenant explicit); the booking cap guard records a flag, a reason and no authoriser;
+`AdvanceBookingDays*` and `PreferredVendorMandatory` have no reader, and no booking dialog sends a `VendorId`
+(four booking types carry one, FK to Procurement's `Supplier`, read by HR through `api/hr/suppliers`); exceptions
+are decided on Write with the body's status and date; `TravelRiskLevel.Prohibited` prohibits nothing; the select
+still writes a blank. Batch 1 carries every column the lane needs — **no lane-4 migration**. On UAT: one policy
+(unapproved), no booking exception, one policy exception, three suppliers.
+
+Six more:
+- **P1 — a booking's cabin class has C2's defect.** `BookingClass` is a non-nullable enum too: omitted, it is
+  stored as 0 and passes any cap (0 ≤ cap). C2 covers both.
+- **P2 — the request's risk level is the requester's own.** A desk risk assessment rating the destination
+  Prohibited refuses nothing either; the trip's level is the higher of the two.
+- **P3 — the traveller cannot acknowledge a risk assessment.** The route is the traveller's own but sits on
+  `TravelWritePolicy`, and the portal door is lane 7's (D-5) — hence D-18.
+- **P4 — with D-3 every booking is deletable**, so a breach could vanish from D-8's register (D-20). Itinerary and
+  compliance deletes have no status guard either; lane 7 keeps them.
+- **P5 — with D-3 the budget's setter can approve it** (3c refuses only the traveller) — D-19.
+- **P6 — the demo pack decides its policy exception as `hr.head`, who raised it**; C4's decider ≠ requester
+  refuses that, so the pack decides as `hr.officer` (slice 4b).
+
+**Slices.**
+- **4a — the policy itself.** C2 (policy and booking classes, P1); C3 (the policy's currency on the DTOs,
+  defaulting to base, and the hotel cap compared in it; `VersionNumber` server-assigned; dates; the band in
+  rank order; author ≠ approver); O-4; O-5 (the traveller's unit and its ancestry); D-1's policy half
+  (`RequiresCheapestFare`, `MaxAnnualTravelBudget` out of the DTOs and the form; the form says what binds); C6.
+- **4b — bookings under the policy.** D-1's booking half (`AdvanceBookingDays*` at flight and hotel create;
+  `PreferredVendorMandatory` → a supplier on the four bookings, tenant-validated, with a picker); D-8 (the
+  exception state, authorise and refuse by a different Admin holder, Confirmed/Ticketed refused until authorised,
+  the breach register); D-20; C4; C5's Prohibited half (P2). The demo pack's exception decided as `hr.officer`.
+- **4c — authority.** D-3 (the grant, the remarks, the UI's `canAdmin` without its role fallback, the reminders
+  screen open to HR — T-52); D-19; every suite expectation that HR is refused an Admin route turned round.
+  Last, because D-3 leans on 4a's and 4b's two-person rules.
+
+**As built — slice 4a (2026-10-02).** No migration.
+
+- *Shape (C2, C3, P1).* A policy's two cabin classes must be real classes (`Enum.IsDefined`) — omitted, they were
+  stored as 0, below every class, so once approved every flight exceeded the cap; a flight's booked class too (P1:
+  0 passed any cap). The end is not before the start; the unit and the two staff levels are this organisation's
+  (404); the band runs from the lower rank to the higher (`Covers` reads it that way — on UAT rank 1 is
+  Management). The same checks run at approval, for drafts written before lane 4, which also refuses a draft whose
+  end has passed.
+- *Currency (C3, T-9).* The DTOs carry batch 1's `CurrencyCode`: given, it is checked against HR's list; omitted,
+  the policy keeps its own or takes the base. The hotel cap is compared in it — `StaffTravelBookingService`
+  converts the booked rate through `HrCurrencyBridge` at the booking's date and the guard's 422 gives both
+  ("USD 100.00 (GHS 1,250.00) exceeds … GHS 900.00").
+- *Versions (T-50).* The server numbers them: the highest version of the name in the tenant, deleted drafts
+  included, plus one; a renamed draft becomes the next of its new name. `VersionNumber` and `IsCurrentVersion`
+  left the DTOs.
+- *Author ≠ approver (C3).* Whoever created or last changed the draft (`CreatedBy`/`UpdatedBy`, the platform user)
+  does not approve it — 403 with the sentence.
+- *Dates (O-4).* Approval makes room by date among the versions in force for the same scope: one that started
+  earlier keeps going until the day before the new one starts (`EffectiveTo` set); one starting on or after it, and
+  overlapping, is stood down; one with no common day is left alone. Both stay current; the repository's date filter
+  picks the version for a trip's departure. Saved by tracking — `UpdateAsync` on the siblings, read with their
+  rules and approver, would have marked those modified too.
+- *Scope (O-5).* `StaffTravelPolicyGuard` takes the traveller's unit from their employee record (the request's only
+  for a traveller with none) and asks `IHrAudienceResolver.UnitAncestryAsync` for the chain; the repository matches
+  any unit in it and orders nearest first, then banded before unbanded, then the latest start. The `applicable`
+  endpoint resolves the same way.
+- ⚠ *A memory grant, caught by the second suite run.* The first build's resolution query kept the old
+  `Include(Rules)` and `Include(ApprovedBy)` (a whole `Employee` row) and sent the unit chain as a JSON list: SQL
+  Server sized its memory grant at **~600 MB and used 16 KB** (`sys.dm_exec_query_stats`, `max_ideal_grant_kb`
+  606,952), and when workspace memory was busy it queued (`RESOURCE_SEMAPHORE`, seen live with the DMVs) — four policy
+  previews took 25 s in the second run, while the first ran clean (the performance closure's E-d1 pattern: a small
+  read whose wide includes size the grant).
+  Rebuilt: the resolution reads the policies alone, untracked, and filters the unit chain in memory (a tenant has a
+  handful of policies in force on a date); the `applicable` endpoint reads the approver's name and the rule count in a
+  narrow projection of its own. The new statement's grant is **0 KB**, its worst time under 1 ms.
+- *D-1's policy half.* `RequiresCheapestFare` and `MaxAnnualTravelBudget` left the DTOs and the form (the columns
+  stay). The form says what binds once approved (per-trip limit at submission; receipts and the claim window on
+  claims) and what does not yet (booking days ahead, preferred vendors — 4b); the scope note explains ancestry and
+  dated supersession; the currency is chosen on the form; the end date is validated client-side too. The policy
+  page shows the currency and drops the two fields; the register's approve toast reports the state the policy is
+  in (in force, or from its date).
+- *C6.* `SelectField.onValueChange` ignores `''` — the only real clear is the None item. Scoped type-check and lint
+  clean; not walked in a browser.
+- *Demo pack.* `080-travel.mjs`'s policy sends no version, no current flag and neither retired field, and names
+  GHS.
+
+**Suite** `run-final-policy.mjs` (new; fixture `buildApprovalsFixture` — a directorate with a unit under it and a
+lone unit, policies scoped to them only): §1 shape — no class 422, dates backwards 422, a band from Junior Staff down
+to Management Staff 422 and in rank order accepted, a foreign unit 404, no currency → GHS, `usd` → USD, an unknown
+currency 422; §2 versions — 7 in the payload → 1, then 2, version 2 deleted → the next is 3, a renamed draft is 1 of its
+name; §3 the administrator's own draft refused (403, with the sentence), an HR draft the administrator changed refused,
+an untouched one approved, once; §4 the directorate's policy covers a traveller in the unit under it (it matched
+exactly), not one in the lone unit; the unit's own policy wins for its traveller and the directorate's staff keep
+the directorate's; §5 version 2 approved to start in 60 days leaves version 1 in force until day 59 (a trip at day 40
+under v1, at day 70 under v2); version 3 starting the same day replaces v2; an ended draft refused; §6 on an approved
+trip at day 40 under v1 (cap GHS 900): GHS 950 refused, GHS 900 accepted, USD 100 refused naming GHS 1,250 and the cap,
+USD 60 accepted; §7 a flight with no class 422, Economy accepted. On the first build 52/52 twice (194938, 237259 —
+the second run's four 25 s previews are the memory grant above); **on the rebuilt one 52/52 twice (838127, 858328;
+every section ran, no slow request)**. The truth suite's §7 now asserts two drafts of one name are versions 1 and 2
+(the 409 they hit is gone): 116 → 117. Regression on the rebuilt binary: money **286/286 twice** (865025, 891248),
+lifecycle **256/256 twice** (913425, 949815), truth **117/117 twice** (980644, 986185), approvals **123/123 twice**
+(990748, 009065) — none with a slow request; on the first build the same counts twice each. The API log held only
+the known noise (payroll's profile FK, defect #23; one identity-reconciliation job error that predates travel).
+`run-slice12-policy-authoring.mjs` is retired by name (D-13); this suite re-proves it.
+
+**As built — slice 4b (2026-10-02).** No migration (batch 1's `ExceptionState`, `ExceptionRequestedById`,
+`ExceptionAuthorisedById/At` on flights and hotels).
+
+- *Notice (D-1).* `AdvanceBookingDaysFlight/Hotel` are read: a flight booked fewer days before the trip's departure,
+  or a hotel before its check-in, than the approved policy asks is a breach — counted from the day the booking was
+  made (`CreatedAt`), so an edit does not move it. `TravelPolicyCaps` carries both and `PreferredVendorMandatory`.
+- *Suppliers (D-1).* A booking's `VendorId` is this organisation's supplier (404 otherwise) and an active one when
+  newly named; under a preferred-vendors policy every flight, hotel, car rental and ground-transport booking names one
+  (a company vehicle excepted — no supplier provides it). The four booking dialogs carry the shared `SupplierPicker`
+  (`api/hr/suppliers`).
+- *The exception (D-8).* `StaffTravelPolicyGuard` now only describes a breach (`FlightClassBreach`,
+  `HotelRateBreach`, `AdvanceBookingBreach`) — its `Require*WithinPolicy` granted the exception in the same request to
+  a caller holding `HR.Travel.Admin`, and the controller's `CallerMayApproveExceptionsAsync` is gone. A breaching flight
+  or hotel is refused unless the desk asks for an exception with the reason (the dialogs' switches now ASK); with one it
+  is saved **Pending** (`ExceptionRequestedById` = the caller's employee record), and is refused Confirmed, Ticketed or
+  Completed until **Authorised**. An authorised or refused exception stands while the facts it was decided on stand
+  (a flight's class; a hotel's rate, currency and check-in) and goes back to Pending when they change. `POST
+  flights|hotels/{id}/exception/authorise|refuse` (`TravelAdminPolicy`, employee link): never the one who asked for it,
+  the booking's last writer or the traveller (403 with the sentence); a refusal's reason (≥5) is an internal note on
+  the trip; `ExceptionAuthorisedById/At` record the decider either way. **Staff Travel → Policy breaches**
+  (`/hr/travel/breaches`, `GET bookings/exceptions?state=`) lists flights and hotels with an exception, pending
+  first, with Authorise and Refuse for an administrator; the trip's booking rows badge the state. The register and
+  the exception names are narrow projections — no whole `Employee` rows (4a's memory-grant lesson; the new reads'
+  grants are under 1 MB).
+- *D-20.* A flight or hotel booking with an exception is not deleted — 422, cancel it.
+- *C4.* Deciding a policy exception is `TravelAdminPolicy`; only Approved or Rejected; `DecidedAt` the clock's
+  (`DecidedAt` left the DTO); never by whoever raised it (its `CreatedBy`).
+- *C5 (Prohibited; P2).* A trip rated Prohibited — or whose latest risk assessment valid on the departure date says so
+  — is refused at submission and at every approval stage. The Critical half is lane 7's (D-18).
+- *Screens and copy.* The bookings panel's switches ask rather than grant, with the wording of D-8; the policy form
+  says the notice and the preferred-vendor rule bind. Scoped type-check and lint clean; the sidebar gate test fails only
+  on the two pre-existing leaves. Not walked in a browser.
+- *Demo pack.* `080-travel.mjs` decides its policy exception as `hr.officer` — raised as `hr.head` — which works once
+  HR holds Admin (4c).
+
+**Suite** `run-final-policy.mjs` gains §8–§12 (119 assertions): on the lone unit's approved policy (30/14 days'
+notice, preferred vendors) and a trip departing in 10 days — §8 a late flight refused without an exception, refused
+without a reason, refused Confirmed, saved Pending and asked for by the booking officer; a hotel breaching rate and
+notice refused naming both, saved Pending with an exception; §9 a flight and ground transport without a supplier
+refused, a foreign supplier 404, a car rental with one accepted; §10 HR (no Admin yet) cannot authorise; the
+administrator authorises (recorded by name), once; the authorised flight confirmed with its exception standing; the
+administrator's own booking not authorised by them; a refusal needing five characters, recorded Refused with the
+internal note; a refused flight not ticketed; a re-booked class asking again (Pending); a hotel's authorised exception
+back to Pending when the rate changes; the register's pending and full views; §11 the authorised flight and the pending
+hotel not deleted, a within-policy flight deleted; §12 a policy exception: another HR officer 403, "Pending" 422, the
+administrator approves at the server's time (the payload said 2000-01-01), the administrator's own raised exception
+403; a trip rated Prohibited not submitted, one assessed Prohibited not submitted, one assessed Prohibited after
+submission not approved. **119/119 twice on UAT** (555393, 597136; every section ran — §8 13, §9 6, §10 25, §11 4,
+§12 15). Regression: money **286/286 twice** (610815, 650142), lifecycle **256/256 twice** (716068, 779855), truth
+**117/117 twice** (815614, 820901), approvals **123/123 twice** (825756, 843253). Two submissions took 12–15 s (one in
+money's second run, one in lifecycle's first); no SQL statement of the hour took over 0.75 s, the new risk-assessment
+read under 10 ms with no grant, and the machine had 2.3 GB of 24 GB free — the low-memory stall the harness memory
+records, not this slice. The API log held only the known noise.
+
+**As built — slice 4c (2026-10-02).** No migration (D-22).
+
+- *D-3.* `AdministerTravel` is in `HrStaffGrants`. The permission's description now lists what Admin decides — and that
+  each act is refused to the person it concerns; `HrPermissions`' remarks say where the narrowing moved (the services,
+  per act: C3, D-2, T-39, D-8, D-19, C4; the delete status guards are lane 7's). The remarks on the policy approve
+  route, the reminders controller and `CallerIsTravelAdminAsync` say HR holds it; the flight and hotel DTOs' exception
+  flags say they ask. The UI's `canAdmin` (`useTravelAccess`, the policy page) reads `HR.Travel.Admin` alone — the
+  `HR_ADMIN_ROLES` fallback is gone (SuperAdmin and TenantAdmin hold the permission as rows); the compliance panel's
+  note and the policy register's footnote say a second officer signs. `StaffTravelMeController` no longer describes the
+  Admin tier (lane 1 rewrote it), so the checklist's line 186 had nothing left to change. The harness's
+  `mintTravelAdminActor` is marked retired — only the old slice suites import it (D-13).
+- *The grant on existing databases (D-22).* The API passes HR at once (the role-fallback handler reads the map); the
+  screens draw from `/auth/me`, which reads `RolePermissions`. The add-only seeder writes that row under `seed-db` and
+  development seeding only — not at a Staging or Production start, as this checklist had assumed. **UAT's HR role was
+  granted the row by hand** (`GrantedBy = 'System'`, as the seeder writes it; one row, guarded, dry-run twice first);
+  any other existing database takes it on its next `seed-db`.
+- *D-19.* `ApproveBudgetAsync` refuses whoever set or last changed the budget (`CreatedBy`/`UpdatedBy`, the platform
+  user) — 403 naming the trip.
+- *D-21.* `UpdateCommentAsync` is the author's alone (`AuthorId` against the token's employee); deleting keeps
+  `RequireCommentAuthorOrAdmin`.
+- *Demo pack.* `080-travel.mjs` approves the Kumasi budget as `hr.officer` (`hr.head` set it; `head.dev` travels) and
+  leaves Sebrepor's awaiting approval for the guide's walk; the policy stays a draft (approving it binds every trip
+  submitted after it — lane 10's call).
+- *Guide.* Rules 1 and 2 (Rule 2 now a table of each Admin act and who it is refused to), the permission ladder, § 2.4
+  Option B (sign in as `hr.officer`; the SQL shortcut marked retired), the Bookings and Attachments notes, chapters 13
+  and 14, the undo table, T-1/T-2, Appendix B, and a lane-4 paragraph in § 19. The full rewrite of the six rules stays
+  lane 10's.
+
+**Suites.** `run-final-policy.mjs` 119 → **129**: §10 and §12 refuse the HR officer for the act — booked and asked, or
+raised — "not for the role", and the second HR officer decides (the hotel's exception, the policy exception); §13 an HR
+officer's draft refused to its author and approved by another HR officer, the reminders screen open to HR and refused to
+a traveller, and `/auth/me` listing `HR.Travel.Admin` for HR and not for a traveller. `run-final-money.mjs` 286 → **287**:
+§7's write-off by the second HR officer, §15 the budget's setter refused with the sentence and re-approval by the other
+officer, §16 the payer's 403 relabelled. `run-final-lifecycle.mjs` §12: an administrator no longer edits another's
+comment (D-21) and the second HR officer deletes one (moderation); `run-final-truth.mjs`: HR deletes an attachment.
+**On UAT, before the grant: policy 127/127 twice (635625, 652993), money 287/287 twice (675031, 699387), lifecycle
+256/256 twice (721954, 764961), truth 117/117 twice (797080, 802170), approvals 123/123 twice (807262, 824020)**; after
+it, with the two `/auth/me` checks, **policy 129/129 twice (946585, 962390)** — every section ran in each. No request over
+2 s (the slowest a 1.6 s login). The API log held the known noise (defect #23, one identity-reconciliation error) and two
+environmental items: 180 queued emails failing at once (UAT has no `EmailSettings` row) and the 90-day notification
+clean-up hitting its 5 s command timeout twice during a lifecycle run.
+
+### Lane 5 — Bookings and itinerary (D1, D3–D5, E4, O-15, T-19, T-24/T-42, T-45)
+
+- [x] Bookings only on Approved or InProgress requests; booking dates inside the trip (± 1 day); status
+  by verb — confirm, ticket, cancel (with fee), complete — not by PUT; status verbs never re-run the
+  cap check (cancelling an authorised over-cap booking must work); delete only while Pending; the
+  mappers stop copying derived fields; a car rental's `BookedAt` on create. *(5a; `BookedAt` is stamped on
+  confirmation — a booking is created Pending)*
+- [x] A flight cannot be Ticketed while the request requires a visa and no visa application is
+  Approved or NotRequired. *(5a)*
+- [x] An active Critical or Emergency alert for the destination shows on the approval and booking
+  screens (a warning; a block is a TDC question). *(5b)*
+- [x] Itinerary: delete only a non-current version; `Superseded` set when a version is replaced. *(5b)*
+- [x] **Doors (D-5):** edit, cancel and status on every booking row; flight segments; itinerary, leg and
+  activity edit and delete; the leg ↔ booking link; the vendor picker, star rating, actual cost. *(The booking
+  half — rows, segments, star rating, actual cost — 5a; the vendor picker was 4b's; the itinerary half 5b's.)*
+
+Suite `run-final-bookings.mjs` (and re-run `run-slice8*.mjs`). *(D-13 keeps the slice suites off UAT: `run-slice8*.mjs`
+are retired by name here — `run-final-bookings.mjs` re-proves what they covered.)*
+
+**Source check (2026-10-02, HEAD `ef113ea0a`).** The booking and itinerary services, controllers, DTOs and mappers, the
+budget rollup, the request's cancel, the visa and alert models, the two panels and the client were re-read. Every
+finding holds: a booking needs only a trip that is not Closed (`StaffTravelRequestGuards.RequireOpen`) — a Draft,
+Submitted, Rejected or Cancelled trip takes one; no booking date is compared with the trip's; an edit writes any status
+and re-runs the policy check, so cancelling a breaching booking needs the exception asked again; delete has only lane 4's
+exception guard. The mappers copy nights, totals, caps, `BookedAt`, `CancelledAt`; a car rental's `BookedAt` is stamped on
+update only; the itinerary's status, `FinalizedAt` and day totals are the payload's and `Superseded` has no writer; the
+current itinerary deletes. 20 of the 42 booking and itinerary client methods have no caller (every booking edit, delete
+and status change; add-segment; itinerary and leg edit and delete). T-24 is live on UAT: London's flight is Ticketed on a
+trip needing a visa whose only application is NotStarted. Nothing reads an alert's severity (T-45).
+
+Seven more:
+- **Q1 — the demo pack books two Submitted trips** (081: Lagos's flight and hotel, London's flight, hotel and car) — D-23
+  breaks it; D-26.
+- **Q2 — a cancelled trip's bookings stay live**, and the budget's *Committed* keeps counting them (the request's cancel
+  defers it to lanes 5 and 6) — D-24.
+- **Q3 — a leg's booking links are the payload's:** a flight, hotel or ground booking of another trip can be linked (5b).
+- **Q4 — flight segments** are added, changed and deleted on a cancelled booking or a closed trip, their dates unchecked.
+- **Q5 — the itinerary** is created on a trip in any status, Closed included, and an edit can clear the current flag on
+  the current version, leaving the trip with none (5b).
+- **Q6 — *Committed* counts Pending and OnHold bookings** as spend. Kept as lane 3 built it; a TDC question (lane 10).
+- **Q7 — ground transport and car rentals have no cancellation fee** (no column): a fee is recorded on flights and hotels
+  only; no migration.
+
+**Slices.**
+- **5a — bookings.** D-23's gate on every booking write; booking and segment dates inside the trip, a day either side;
+  status by verb — hold, confirm, ticket (flights), cancel (a reason, kept as an internal note, and a fee on flights and
+  hotels), no-show, complete — an edit no longer writes the status or any derived field (`Status`, `BookedAt`,
+  `CancelledAt`, `CancellationFee`, nights, totals and caps leave the write DTOs), a verb never re-runs the cap check, and
+  Refunded keeps no writer; confirm and ticket need the exception None or Authorised; ticketing needs an Approved or
+  NotRequired visa application when the trip requires a visa (T-24's ticketing half); delete only a Pending booking with
+  no exception; D-24's cascade; segments on a live booking only. The booking doors (edit, the verbs, delete,
+  add-segment, star rating, actual cost) and D-26's demo pack.
+- **5b — itinerary and alerts.** Created on an open trip; only a non-current version deleted; D-25; day totals from the
+  trip's dates; the current flag not cleared by an edit; the leg's booking links the same trip's, with a date mismatch
+  flagged (T-19); the itinerary, leg and activity doors and the leg ↔ booking picker; D-24's itinerary half; a
+  `destination-alerts` read on the approver's door so a Critical or Emergency alert shows on the request and bookings
+  screens (T-45).
+
+**As built — slice 5a (2026-10-02).** No migration.
+
+- *The rules in one place.* `StaffTravelBookingRules` (Core) holds what every booking kind shares: the trip gate, the
+  date window, the verb table, "live", delete and D-24's two queries; `TravelBookingVerb` (Hold, Confirm, Ticket,
+  Cancel, NoShow, Complete) is a new, unstored enum.
+- *The trip gate (D-23).* Create, edit, hold, confirm, ticket and every segment write need the trip Approved or
+  InProgress ("…is submitted, so a flight booking cannot be made or changed — bookings are made once the trip is
+  approved…"); cancel needs a trip not Closed; no-show and complete a trip Approved, InProgress or Completed whose
+  departure has come.
+- *Dates.* A hotel stay, a car rental, ground transport (when its times are given) and a flight segment fall between
+  the day before departure and the day after return — on create, and on an edit when the dates move (a trip's dates
+  changed by D-9 do not block unrelated edits).
+- *Status by verb (D1).* `POST bookings/{flights|hotels|ground-transport|car-rentals}/{id}/{hold|confirm|no-show|complete}`,
+  `…/{id}/cancel` (reason ≥5, an internal note on the trip; a fee on a flight or hotel no more than its cost, ground and
+  car none — Q7) and `bookings/flights/{id}/ticket` (the number). Pending → OnHold; Pending/OnHold → Confirmed
+  (`BookedAt` stamped — a car rental's too, D5); Confirmed → Ticketed; any live booking → Cancelled (`CancelledAt`
+  stamped on flights and hotels); Confirmed/Ticketed → NoShow or Completed. Refunded keeps no writer. A verb never
+  re-runs the policy's cap check; confirm and ticket need the exception None or Authorised (a refused one stands until
+  the booking changes). Cancel needs an employee-linked login (the note's author).
+- *Edits (D5).* A create is Pending whatever it says; `Status`, `BookedAt`, `CancelledAt`, `CancellationFee`,
+  `PolicyAllowedClass`, `PolicyMaxRatePerNight`, nights and totals left the write DTOs and the mappers (JSON naming them
+  is ignored); an edit is refused on a booking no longer live, and an edit that pushes a confirmed booking into an
+  unauthorised breach is refused (cancel and rebook). The ticket number stays editable, as a correction.
+- *T-24's ticketing half.* A trip with `RequiresVisa` is ticketed once a visa application on it is Approved or
+  NotRequired.
+- *Delete.* Only a Pending booking (a booking with an exception never — D-20), on a trip not Closed.
+- *D-24.* `CancelAsync` refuses, before the approval is withdrawn, while any booking is Confirmed or Ticketed, naming
+  each; after it, the trip's Pending and OnHold bookings are cancelled with it. (The itinerary's half is 5b's; a company
+  vehicle's Fleet trip lane 6's.)
+- *Screens.* The bookings panel: Add only on an approved trip (a note says why otherwise); no status picker; each row's
+  menu offers Edit, Put on hold, Confirm, Ticket…, Mark completed, Record a no-show, Cancel booking… (reason, and the fee
+  on a flight or hotel) and Delete (pending, administrators); edit reloads the full record; a flight's **Segments**
+  dialog lists, adds and removes segments (no screen had any); a hotel's star rating; ground transport's actual cost.
+  The client gained `moveBooking`, `cancelBooking`, `ticketFlight`; the write types lost the server's fields. Scoped
+  type-check and lint clean; not walked in a browser.
+- *Demo pack (D-26).* `080` approves London (md.tdc at the line stage, `hr.officer` at HR's — hr.head travels);
+  `081` books only on approved trips, creates Pending and drives each booking to its status by verb: London's BA flight
+  confirmed and its ticket refused while the visa is NotStarted (T-24), the Hilton and the Avis car confirmed, Kumasi's
+  bus confirmed and its taxi completed once the trip starts, Sebrepor's hire completed; Lagos keeps its itinerary and no
+  longer gets a flight or hotel. UAT's existing Lagos and London bookings stay as they were — history, not rebuilt.
+
+**Suite** `run-final-bookings.mjs` (new, 90 assertions; fixture `buildApprovalsFixture`'s lone-unit traveller, no policy
+in force): §1 a draft and a submitted trip take no flight, hotel or car (naming the approval); an approved one does,
+Pending though the payload said Ticketed and sent a booking date; §2 a hotel two days early refused, the day before and
+after accepted (5 nights), a car returned three days late refused, ground transport after the trip refused, a segment a
+month early refused, one on the day added; §3 hold, once; confirm (the date stamped), once; a ticket needs its number;
+ticketed; a hotel is no flight to ticket (404); complete and no-show refused before departure; a pending hotel not
+completed; hotel and car confirmed, the car's `BookedAt` stamped; §4 an edit renames the airline and leaves the
+status, `CancelledAt` and the fee the payload named; a stay moved past the trip refused; §5 a short reason 400, a fee
+above the cost 422, cancelled with 120 (kept, dated, an internal note with the fee), not edited or cancelled again;
+ground transport refuses a fee and cancels without one; §6 a confirmed car not deleted, a pending ground booking deleted;
+§7 a trip needing a visa: confirmed, no ticket with no application, none while it is only Submitted, ticketed once one is
+Approved; §8 a trip that departed two days ago (submitted late from the desk): a flight confirmed and completed, a hotel
+confirmed and a no-show, which is no longer cancelled; §9 a trip with a confirmed flight refused cancellation naming
+it, stays Approved; the flight cancelled, then the trip — its pending hotel and held car cancelled with it; §10 no segment
+added to or removed from a cancelled flight. **90/90 three times** (872134, 901953, 914581; every section ran). The other
+suites move to the verbs: policy §8 a payload saying Confirmed saved Pending and its confirm refused while the exception
+is pending, §10 the authorised flight confirmed by verb and the refused one's confirm refused ("the refusal stands") —
+**131/131 twice** (927755, 939128); money §15 the committed bookings by verb (one no-show set in SQL — its trip departs in
+50 days) — **288/288 twice** (948550, 983967); truth §7 the flight dialog's payload on a draft is now D-23's 422 —
+**118/118 twice** (149341, 165621); lifecycle (a closed trip's booking refused under D-23) **256/256 twice** (008640,
+085224); approvals **123/123 twice** (180444, 252011). No request over 2 s (the slowest booking call 96 ms). The API log
+held only the known noise (defect #23, an identity reconciliation, the notification clean-up's 5 s timeout, and the
+email queue failing at once — UAT has no `EmailSettings` row).
+
+**As built — slice 5b (2026-10-02).** No migration.
+
+- *The rules in one place.* `StaffTravelItineraryRules` (Core): the plannable trip states, the editable versions, the
+  trip's days, D-24's itinerary half. `StaffTravelItineraryService` was rewritten on it.
+- *When (Q5).* An itinerary, its legs and activities are written while the trip is Draft, Submitted, returned for
+  revision, Approved or under way — planning starts with the request — and not on a rejected, cancelled, completed or
+  closed one (a Closed trip took one before).
+- *Status (D-25).* A new version is a Draft; `POST itineraries/{id}/finalise` (Write) marks the version in force, with at
+  least one leg, Approved and stamps `FinalizedAt`; set-current (and a new version asked to be current) marks the
+  version it replaces Superseded and not current; the trip's cancel marks the current one Cancelled. A finalised,
+  superseded or cancelled version — and its legs and activities — is not changed: a change is a new version. A
+  superseded or cancelled version is not put back in force. PendingReview, Active and Completed keep no writer.
+- *Server-owned (D5).* The create DTO lost `VersionNumber` and the day totals (it keeps `IsCurrentVersion`, as an ask —
+  a trip's first version is current whatever it says); the update DTO keeps only the title and summary. The days are
+  the trip's: every day from departure to return, its Saturdays and Sundays, the rest working days (public holidays not
+  subtracted), refreshed on each edit and on finalising.
+- *Delete (O-15).* The version in force is refused; another is deleted.
+- *Legs (Q3, T-19).* A leg's date falls inside the trip, a day either side; a linked flight, hotel or ground booking is
+  the same trip's (404 otherwise). Every leg read carries `LinkedBooking`, `LinkedBookingDates` and
+  `LinkedBookingDateMismatch` — the leg's date not a segment day of its flight, outside its hotel stay, or not its
+  pick-up's day — flagged, not refused (the plan or the booking may be the one that moved). Read as narrow projections.
+  Activities fall inside the trip too.
+- *Destination alerts (T-45).* `GET requests/{id}/destination-alerts` on the approver's door (Read, the line
+  authority, or whoever the request waits for): the active alerts for the destination country — its city or the whole
+  country — in force at any point of the trip, most severe first. `TravelDestinationAlerts` draws a Critical or
+  Emergency one as a warning, lesser ones as a quiet line, on the request page of a Submitted, Approved or
+  InProgress trip — above the tabs, so the approver and the Bookings tab both see it (one banner, not a second inside the
+  panel). A warning only; whether it blocks is TDC's question (§ 7's list, lane 10).
+- *Screens.* The itinerary panel: per version Edit (a draft), Finalise (the draft in force, once it has a leg), Make
+  current, Delete (not in force, administrators), New version (with "make it current now"); the days read-only, "from
+  the trip's dates"; a finalised version says it is the record; per leg Edit and Remove and a **Linked booking** picker
+  (the trip's flights, hotels and ground bookings), the link and its dates shown, a mismatch flagged; per activity Edit
+  and Remove. Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: `081`'s Lagos itinerary (Lagos is Submitted — plannable) sends a version and day totals the
+  server now ignores; it stays a Draft for the guide to finalise.
+
+**Suite** `run-final-bookings.mjs` 90 → **148**: §9 the trip's cancel marks its itinerary Cancelled and a cancelled trip
+takes no new one; §11 a first version is 1, current and a Draft though the payload said 7, not current and Approved,
+its days 4 with the weekend counted from the trip's dates (not the payload's 99); a second is 2, beside it; the one in
+force not deleted; an edit leaves the status (payload Completed) and the current flag; set-current supersedes version 1,
+which is then not put back, edited or given a leg, but deleted; §12 a leg after the trip refused, another trip's flight
+404, a stay linked to the trip's hotel named with no flag, a leg the day after its flight's segment flagged and the flag
+cleared when moved; §13 a version not in force not finalised; the one in force finalised (Approved, stamped); then no
+leg, edit or leg removal; a new version supersedes it; a draft trip planned too, its legless plan not finalised; §14 an
+activity after the trip refused, one on the day added, moved and removed; §15 alerts raised for the run — Critical for
+Kumasi, Warning country-wide, one for Tamale, one ending before the trip: the trip sees Kumasi's and the country's, the
+Critical first; the traveller is refused (403); the run's alerts deleted at the end. **148/148 three times** (579523,
+629716, 661095; every section ran; no test alert left). Regression: policy **131/131 twice** (676658, 688290), money
+**288/288 twice** (698899, 729479), lifecycle **256/256 twice** (777449, 814081), truth **118/118 twice** (851164,
+856092), approvals **123/123 twice** (861253, 881417). No request over 2 s (the slowest travel call 130 ms). The API log
+held only the known noise.
+
+### Lane 6 — Fleet (D-11, D-12, D2, D4, FX-1…FX-9)
+
+- [x] **Pickers through travel's own controller** (HR needs no Maintenance permission): active fleet
+  vehicles with plate, current assignment, the compliance items blocking them on the trip dates
+  (`IFleetComplianceService.GetDispatchBlockingItemsAsync(vehicle, date)`) and their planned overlaps
+  (Draft, Submitted, Approved or Dispatched fleet trips in the window); drivers with a valid licence,
+  flagged when on approved leave or another trip. The traveller's active Primary fleet assignment
+  preselects its vehicle and driver.
+- [x] **A real reservation** (D-27: submitted only when Fleet publishes a route): on an Approved request the leg's fleet trip is submitted to Fleet's
+  approval (`SubmitForApprovalAsync`); travel refuses a vehicle or driver with an overlapping planned
+  trip (a read-only check on Fleet's trips) and a vehicle whose critical compliance item expires before
+  the return; when Fleet requires a predefined destination, the leg offers Fleet's destination
+  templates.
+- [x] **Kept in step:** the leg's status is read from the fleet trip (Submitted → Pending, Approved →
+  Confirmed, Dispatched → in use, Completed → Completed, Rejected or Cancelled → Cancelled, with
+  Fleet's reason shown); leg edits go through `UpdateTripAsync` while Fleet allows it, otherwise cancel
+  and rebook; leg delete, a type change, a request cancel and *Request change* cancel undispatched fleet
+  trips. **No copies of Fleet's facts** — vehicle, driver and status are read from the fleet trip.
+- [x] **Shown on the leg:** vehicle, plate, driver, fleet status, dispatch and return times, distance
+  from the start and end mileage. Fleet's costs for the trip feed the budget rollup for that leg.
+- [x] **Fuel on claims** (6b; D-30 required unless a car is hired, D-31 the paid amount, D-32 a reason): claim lines gain `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId`;
+  a Fuel line on a request with a company-vehicle leg names one of its fleet trips; on **payment**
+  travel records it through `IFleetFuelService.CreateAsync` (vehicle, trip, quantity, cost, merchant,
+  receipt) and keeps the id; a voided payment deletes it; a Fuel line on a date Fleet already holds fuel
+  for that trip asks for a reason; the rollup counts a claim-created fuel cost once, as the paid claim.
+- [x] **Drivers as travellers** (6c — **linked by the leg, not a group: D-33**; raised on the desk's click, D-34; going
+  with the leg, D-35): when a leg keeps the driver away overnight (drop-off on a later date,
+  or a destination outside the origin city), the desk is asked to raise the driver's own request — a
+  Draft linked to the trip through its group record (created if none exists, the traveller as lead),
+  same dates and destination, purpose "driver — company vehicle for TR-…" — which goes through the same
+  two-stage approval, so allowances, attendance and duty-of-care alerts cover the driver. The leg keeps
+  `DriverTravelRequestId`; cancelling the leg or the trip cancels the driver's request.
+- [~] **Incidents and signals** (6c built the read half — the Compliance tab's incidents card; the sweep's signals and
+  notices moved to **lane 8**, D-29): the sweep reads fleet incidents carrying a fleet trip of an open
+  travel request (read-only), shows them on the request's Compliance tab and tells the travel desk and
+  the traveller's line authority once per incident; Fleet's dispatch of the outbound leg moves an
+  Approved trip to InProgress ahead of the date rule; Fleet's completion of the return leg tells the
+  desk to mark the trip completed.
+
+Suite `run-final-fleet.mjs` — a fixture vehicle with a verified-licence driver (created and retired by
+the suite if Fleet allows; real vehicles are read, never written): the fleet trip reaches Fleet's queue
+as Submitted; a second leg on the same vehicle and days is refused; a vehicle insured only until before
+the return is refused; a request cancel cancels the fleet trip; Fleet's rejection shows on the leg; a
+paid fuel line lands in Fleet's fuel log once and the budget counts it once; the driver's request is
+raised, approved and cancelled with the leg; a fleet incident reaches the desk once.
+
+**Source check (2026-10-02, HEAD `f8e9a9e31`).** Fleet's service interfaces (`IFleetServices.cs`), the trip service
+(create, update, submit, cancel, the dispatched-only conflict check, the licence check, the location scope), the fleet
+DTOs and entities (trip, assignment, compliance, fuel, cost entry, incident), the workflow integration's submit, travel's
+ground-transport path, the claim line and the rollup were re-read. Every FX finding holds. The claim line's
+`FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId` are already in the model and on UAT (batch 1) — **no lane-6
+migration**. Fleet's location scope binds only staff of a Maintenance unit, so the HR desk is not refused a vehicle.
+
+Four more:
+- **R1 — UAT holds no Fleet data at all:** no vehicle category of type Vehicle, no vehicle, assignment, compliance item,
+  destination, fuel, incident or Maintenance settings row, and no verified driver's licence. The company-vehicle path
+  cannot run on UAT; every proof needs its own fixtures (D-28).
+- **R2 — FX-9 is live on UAT:** Fleet submits through the workflow engine and no `FLEET_TRIP` definition exists, so a
+  submitted fleet trip is approved with nobody asked (D-27).
+- **R3 — the 5a verbs fight Fleet:** a company-vehicle leg has its own hold, confirm and complete since slice 5a,
+  independent of the fleet trip — its cancel must go to Fleet and its other verbs be refused.
+- **R4 — Fleet's fuel feeds its own cost entries** (`FleetCostEntry.FleetFuelTransactionId`): with Fleet's costs in the
+  rollup, a fuel cost a travel claim created would be counted twice — the claim's and Fleet's.
+
+**Decisions:** **D-27** — travel submits a leg's fleet trip only when Fleet has a published, active `FLEET_TRIP`
+approval route; otherwise the trip stays Draft and the leg says the vehicle is not held (travel's side of the
+no-definition guard; FX-9 stays Fleet's hand-off). **D-28** — proofs use per-run suite fixtures only (a vehicle
+category, vehicles, compliance items and a verified licence, created through the APIs as the platform admin and
+removed in teardown); UAT keeps no Fleet data, and a demo fleet is Fleet's owner's to seed (hand-off). **D-29** — the
+sweep's fleet signals and notices (dispatch → InProgress, the completion notice, an incident notice once per
+incident) move to **lane 8**; lane 6 shows a trip's fleet incidents read-only on its Compliance tab.
+
+**Slices.**
+- **6a — the reservation.** Pickers through travel's controller (vehicles with plate, assignment, blocking compliance
+  at the return and planned overlaps; drivers with a valid licence, flagged on approved leave or another trip; the
+  traveller's assignment preselected; Fleet's destinations when its settings require one); the overlap and
+  compliance refusals; the D-27 submit; the leg's status read from the fleet trip, its verbs routed (cancel to Fleet,
+  the rest refused — R3), edit through `UpdateTripAsync` while Fleet allows, delete, a type change, the trip's cancel
+  and *Request change* cancelling undispatched fleet trips; vehicle, plate, driver, fleet status, times and distance on
+  the leg; Fleet's costs for the trip in the rollup.
+- **6b — fuel on claims** (FX-6, R4).
+- **6c — drivers as travellers** (FX-7) **and incidents shown** on the Compliance tab (FX-8's read half).
+
+**As built — slice 6a (2026-10-02).** No migration; Fleet's code unchanged (D-12).
+
+- *One seam.* `IStaffTravelFleetService` / `StaffTravelFleetService` (Core) is travel's only door to Fleet: the pickers,
+  the reservation, its changes and cancels, and the leg's Fleet facts. The booking service no longer calls
+  `IFleetTripService` itself.
+- *Pickers (FX-4).* `GET bookings/fleet/options?requestId=&from=&to=&excludeFleetTripId=` on the bookings controller
+  (HR holds no Maintenance permission). Over the trip's days, or the leg's pick-up to drop-off: active vehicles of a
+  Vehicle category, each with plate, current assignment, the critical compliance items blocking it at the window's end
+  (Fleet's own query, its due-soon days included) and its planned overlaps (a Draft, Submitted, Approved or Dispatched
+  fleet trip), and `Available` when it has neither. Drivers: verified, unexpired driver's licences (Fleet's rule — an
+  identification type named with "driver"), flagged when on approved leave or driving another trip. The traveller's
+  Primary assignment preselects its vehicle and, as driver, another licensed driver assigned to it or else the
+  traveller. Fleet's destinations are offered when its settings ask one. `ApprovalRoutePublished` tells the screen
+  about D-27.
+- *Reservation (FX-1, FX-2, FX-5, D-27).* A company-vehicle leg needs a vehicle and pick-up and drop-off times. Before
+  Fleet is asked: the drop-off after the pick-up; a destination if Fleet requires one; no vehicle or driver on a planned
+  fleet trip over the same hours (strict — one trip may end as the next starts); no critical compliance item blocking the
+  vehicle at the drop-off. A leg naming no driver is checked for the vehicle's latest active assignment — the driver
+  Fleet gives it. Then `CreateTripAsync` (purpose "Staff travel TR-…"), and `SubmitForApprovalAsync` only when Fleet
+  publishes an active `FLEET_TRIP` route; otherwise the trip stays a Draft and the leg says the vehicle is not held yet.
+  A failed submit is logged and leaves the draft. Fleet's `ArgumentException` and location-scope refusal are passed on
+  as 422s.
+- *The leg follows Fleet (R3).* Every ground read is described from its fleet trip by one narrow projection: vehicle,
+  plate, driver, Fleet's status and rejection reason, out and back times, distance from the mileages, and a note. The
+  leg's status is Fleet's — Approved or Dispatched → Confirmed, Completed → Completed, Rejected or Cancelled → Cancelled,
+  otherwise Pending; a leg travel cancelled stays Cancelled. Its hold, confirm, no-show and complete are refused ("follows
+  its fleet trip"); cancel (a reason, a linked login) cancels the fleet trip first — not a dispatched one, "the vehicle
+  is out" — and keeps the reason as an internal note, as any booking.
+- *Edit, type change, delete.* An edit goes through `UpdateTripAsync` while Fleet allows it: a Draft or Rejected trip
+  (times, vehicle, driver re-checked; resubmitted under D-27) or an Approved one (only its driver — Fleet refuses the
+  rest). A leg does not change to or from a company vehicle (cancel and rebook). A draft or rejected leg is deleted and
+  its fleet trip cancelled; a live one is cancelled instead.
+- *The trip (D2, D-24).* The trip's cancel refuses while a company vehicle is Approved or Dispatched in Fleet ("the
+  company vehicle {name} ({status} in Fleet)"), like a confirmed booking; otherwise it, and *Request change*, cancel every
+  undispatched fleet trip and mark the legs Cancelled. The hold cascade skips fleet legs.
+- *Money (FX-6).* A company vehicle's leg costs what Fleet books against its trip — the budget's committed sums the
+  trip's `FleetCostEntries` (not a typed estimate), leaving out a fuel cost a travel claim put into Fleet's log (R4; used
+  from 6b).
+- *Screens.* The ground dialog: for a company vehicle, a vehicle picker (availability, plate, why not), a driver picker
+  (flags), Fleet's destination when required, the D-27 note, the traveller's car and driver preselected; no cost fields;
+  the type locked once a fleet leg exists. The row shows vehicle, plate, driver, out/back, distance, Fleet's note and
+  status, and "Fleet's costs"; its actions follow Fleet's status (Edit on Draft, Rejected or Approved; Cancel until
+  dispatched; Delete on Draft or Rejected, administrators). Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: `081` books no company vehicle (its Kumasi leg is a bus), and UAT has no fleet (R1, D-28).
+
+**Suite** `run-final-fleet.mjs` (new, **75**), on `buildApprovalsFixture`'s lone-unit traveller. §0 the run's own fleet
+(D-28): a Vehicle category, three vehicles (the Corolla insured only until day 41), verified driving licences for the
+traveller and a second fixture employee, the traveller's Primary assignment to the Hilux — through Fleet's and HR's
+APIs as the platform admin. §1 the HR desk reads the options: the three vehicles with plates, the Corolla flagged by
+its insurance, the traveller's Hilux and the traveller preselected, both licensed drivers offered and an unlicensed one
+not, no approval route. §2 no pick-up refused; the Hilux reserved — a Draft fleet trip with the leg's times, driver and
+purpose, the leg Pending and saying the vehicle is not held, Fleet's vehicle, plate and driver on it. §3 the same
+vehicle, or the same driver in another, over overlapping hours refused, each named; the Corolla refused for days 42–43;
+the same driver back to back accepted. §4 confirm refused ("follows its fleet trip"); a draft's times and driver moved
+in Fleet; a type change refused; an Approved fleet trip (planted in SQL — UAT has no route) reads Confirmed, refuses a
+vehicle change with Fleet's own rule, takes a driver change, holds the trip's cancel back naming the vehicle; a
+Dispatched one is not cancelled. §5 the approved leg cancelled — Fleet's trip Cancelled, the reason an internal note;
+the draft leg deleted and its fleet trip cancelled. §6 the traveller busy in one car, so their assigned car with no
+driver named is refused over the same hours and reserved from noon with them as driver; Request change cancels both
+fleet trips and the legs; a trip's cancel takes its draft vehicle. §7 a toll of 75 booked in Fleet against the leg's
+trip raises the budget's committed by exactly 75. Every fixture and every trip and cost on the run's vehicles
+soft-deleted in `finally`, then counted. **75/75 twice** (683185, 698861; every section ran; UAT holds no live Fleet
+row after). The first run (73/75) sent a cost `Source` Fleet does not accept — the suite's fixture, fixed.
+Regression: bookings **148/148 twice** (724011, 747838), money **288/288 twice** (770538, 811074), policy **131/131
+twice** (841338, 853035), lifecycle **256/256 twice** (863936, 904154), truth **118/118 twice** (943023, 948577),
+approvals **123/123 twice** (953639, 973646). No request over 404 ms (the fleet calls under 100 ms). The API log held
+only the known noise (defect #23, the identity reconciliation, the email queue — UAT has no `EmailSettings` row) and the
+suites' own expected refusals.
+
+**Slice 6b source check (2026-10-02, HEAD `3723e3e23`).** Fleet's fuel service, the claim line (entity, DTOs, mapper),
+the claim's create, line, payment and void paths, HR's posting runner and the claim screen were re-read. The line already
+carries `FleetTripId`, `FuelQuantity` and `FleetFuelTransactionId` (batch 1) — **no migration**. Five facts:
+- **S1 — Fleet's fuel record.** `IFleetFuelService.CreateAsync` needs the vehicle, a fleet trip of that vehicle and litres
+  above zero; it keeps the unit cost to 4 places and works the total out as litres × unit cost, and writes a matching
+  `Fuel` cost entry (source `FuelTransaction`) in Finance's base currency — the claim's own currency since lane 3. It
+  checks no trip status. `DeleteAsync` removes the transaction and its cost entry together. Paying the approved amount
+  through a unit cost can leave Fleet's total a pesewa off on a large fill; the budget does not read it (R4).
+- **S2 — atomicity.** The payment runs inside HR's posting runner, a transaction that allows saves — Fleet's fuel
+  record lands with the payment or not at all. The void has no transaction around its last save, so its Fleet half is
+  wrapped in one (`ExecuteInTransactionAsync`, after the journal's reversal, which keeps its own).
+- **S3 — one filer, two doors.** Only the desk files claims; the new-claim page sends no lines, but the API takes inline
+  lines on create — the same rules on both, and on a line's add and change.
+- **S4 — no date rule on a line today.** A fuel line naming a fleet trip falls within that trip's planned days, a day
+  either side, as bookings do.
+- **S5 — Fleet's own fuel.** A driver can log the same fill in Fleet. Paid, the claim would log it a second time, so
+  Fleet's fuel log and costs would hold one fill twice (and the budget's committed keeps Fleet's own copy, which no
+  claim made).
+
+**Decisions (the user, 2026-10-02):** D-30 (a Fuel line names a fleet trip on a trip with a live company vehicle,
+unless a car rental is on it too), D-31 (the paid amount and the claimed litres, only for a line approved above zero),
+D-32 (a same-day fill Fleet already logs is refused without a reason, kept as an internal note) — § 1.
+
+**As built — slice 6b (2026-10-02).** No migration; Fleet's code unchanged.
+
+- *The seam grows.* `IStaffTravelFleetService` gains `GetFuelOptionsAsync`, `CheckFuelLineAsync`, `RecordClaimFuelAsync`
+  and `RemoveClaimFuelAsync` (over `IFleetFuelService`); the finance service reaches Fleet only through it.
+- *The line (D-30, S4).* Create and update line DTOs carry `FleetTripId`, `FuelQuantity` and a write-only
+  `FuelDuplicateReason`; the read DTO the first two and `FleetFuelTransactionId`. Only a fuel expense names a vehicle trip
+  and litres. On a trip with a live company-vehicle leg and no live car rental, a fuel expense must name one of the
+  trip's fleet trips (D-30); a named trip is the request's own (404 otherwise) and not cancelled or rejected in Fleet;
+  litres from 0.01; the fill inside the vehicle's trip, a day either side (S4). The same check runs on a claim's inline
+  lines at create, an added line and a changed one.
+- *A fill Fleet already logs (D-32).* A fuel line on a day Fleet logs fuel for that trip is refused without a reason of
+  five characters; with one it is saved and the reason is kept as an internal note on the trip, authored by the caller
+  (`CurrentUser.EmployeeId` from the controller — a reason needs a linked login). An edit asks again only when the fill
+  moves — another trip, day or category.
+- *Payment (D-31, S2).* Inside the payment's posting transaction, each fuel line approved above zero and not yet logged
+  is written to Fleet through `IFleetFuelService.CreateAsync`: the vehicle trip, the expense day at noon UTC, the litres,
+  the amount paid as a unit cost (in Finance's base currency — converted if the claim's ever differs), the merchant as
+  vendor, the claim number as reference. Fleet writes its own `Fuel` cost entry; the line keeps the record's id. A
+  rejected line and fuel naming no vehicle trip write nothing. The budget leaves those cost entries out (R4, built in 6a).
+- *Void (D-31, S2).* The records the payment wrote are removed through `IFleetFuelService.DeleteAsync` (with their cost
+  entries) and the lines cleared, in one transaction with the void's save (`ExecuteInTransactionAsync`, after the
+  journal's reversal); the void's internal note says so. Paid again, the fuel is logged afresh.
+- *Read.* `GET finance/claims/{claimId}/fleet-fuel` (Read): the trip's fleet trips — vehicle, plate, planned days,
+  Fleet's status, live — each with Fleet's fuel on it (litres, cost, vendor, and the travel claim that logged it, if one
+  did), plus `FuelNamesTrip` and `HasCarRental`.
+- *Screen.* The claim's expense dialog: for a fuel expense on a trip with a company vehicle, a **Company vehicle trip**
+  picker (required when D-30 binds; "Not the company vehicle" otherwise), **Litres**, and — when Fleet already logs fuel
+  for that trip on that day and the fill moved — Fleet's fills listed with a **Why it is claimed too** field. The
+  expense row shows the vehicle, the litres and "in Fleet's fuel log" once paid; the pay dialog says approved fuel goes
+  to Fleet's log, the void dialog that it is removed. Scoped type-check and lint clean; not walked in a browser.
+- *Demo pack.* No change: its claims carry no company-vehicle trip.
+
+**Suite** `run-final-fleet.mjs` 75 → **124**: §8 a trip in 80 days takes the Hilux; its claim offers the Hilux's trip with
+fuel bound to name it; fuel naming none refused (D-30), a meal naming one refused, no litres refused, another trip's
+vehicle 404, a fill three days after the return refused (S4); 40 L for GHS 600 on day 80 taken, nothing in Fleet yet;
+the driver logs 35 L in Fleet on day 81, so a claimed day-81 fill is refused naming it and taken with a reason, kept as
+an internal note (D-32), and its description then changed with no reason; a car hired, fuel for it names none. §9 the
+claim submitted, the 40 L approved at 500 of 600, the day-81 fill rejected, the hired car's fuel approved, paid by
+another officer: Fleet holds 40 L at GHS 500 on the Hilux's trip on day 80 from the merchant, with its Fuel cost entry;
+the rejected and the hired car's lines wrote nothing (D-31); the claim's fuel options list the claim's fill and the
+driver's own; the budget's committed unchanged by the paid fuel while its actual rose by 600 (R4 — §7 shows a Fleet cost
+on the trip does move committed). §10 the void removes Fleet's record and its cost entry, the options drop it, the note
+says so; paid again, a fresh record. §11 with the first trip's Land Cruiser cancelled, its claim offers only dead trips,
+fuel naming it is refused and fuel naming none is taken. The teardown now also soft-deletes the fuel records on the
+run's vehicles and counts fuel and costs. **124/124 twice** (553588, 590116; every section ran; UAT holds no live Fleet
+row after). Regression: bookings **148/148 twice** (603503, 620027), money **288/288 twice** (634186, 662308), policy
+**131/131 twice** (688589, 700745), lifecycle **256/256 twice** (715573, 756790), truth **118/118 twice** (802904,
+808211), approvals **123/123 twice** (813497, 834332). The slowest travel call 168 ms (only the cold start's first login
+took longer, 1.6 s); the API log held only the known noise and the suites' expected refusals.
+
+**Slice 6c source check (2026-10-02, HEAD after 6b).** The ground leg, the group model and its service (lane 1c), the
+request's create and cancel, Fleet's incident entity and the Compliance tab were re-read. The leg already carries
+`DriverTravelRequestId` — an FK to the request with no navigation (batch 1) — **no migration**. Four facts:
+- **G1 — the group route collides with lanes 1c and 5.** The plan links the driver's request "through its group record
+  (created if none exists, the traveller as lead)". A request joins a group only as a draft or returned for revision, and
+  joining rewrites its destination and dates to the group's (lane 1c, T-30, T-32); a company-vehicle leg exists only on an
+  approved trip (D-23). So the traveller's trip can never join, and a group around it would need its own exception — and
+  would then carry lane 1c's propagation, seat limit and group cancel onto an approved trip.
+- **G2 — no purpose fits a driver.** `StaffTravelPurpose` has no driving value; the driver's request takes the trip's own
+  purpose, its description "Driver — company vehicle {vehicle} for TR-…".
+- **G3 — order of a cascading cancel.** Fleet's cancel saves at once, so a trip's cancel that also cancels a driver's
+  request must check that request can go (not under way, no advance cash out, no committed booking) before any fleet trip
+  is touched.
+- **G4 — incidents.** `FleetIncident` carries the vehicle, an optional fleet trip and driver, when, type (Accident or
+  Incident), title, description, location, severity (Low…Critical), status (Open, InProgress, Closed) and the repair and
+  insurance figures. A trip's incidents are those on its legs' fleet trips; read-only here (D-29).
+
+**Decisions (the user, 2026-10-02):** D-33 (the leg links the driver's request — no group), D-34 (raised on the desk's
+click, prompted), D-35 (it goes with the leg) — § 1.
+
+**As built — slice 6c (2026-10-02).** No migration; Fleet's code unchanged.
+
+- *The prompt (D-34).* Every company-vehicle leg read carries `DriverTravelRequestId`, its number and status, and
+  `DriverAwayOvernight` — a driver other than the traveller, on a live leg, with a drop-off on a later day than the
+  pick-up or a trip whose destination city is not its origin city (filled beside Fleet's facts in `DescribeAsync`). The
+  row says so and offers **Raise the driver's request** while the trip takes bookings.
+- *Raising (D-33).* `POST bookings/ground-transport/{id}/driver-request` (Write): a company-vehicle leg, not cancelled,
+  with a driver who is not the traveller and no live driver's request already. It goes through the request service's own
+  create — every create rule — as a **Draft** for the driver, initiated by the desk, with the trip's type, purpose,
+  priority, origin, destination, dates, currency, visa and health flags and risk level; its description "Driver —
+  company vehicle {vehicle} ({plate}) for TR-…"; no estimate (the desk costs it — submission refuses a zero estimate as
+  for any trip). The leg keeps its id. The driver's request reads `DriverForRequestId`/`Number` from the leg that keeps
+  it, and its page says whose vehicle it drives, with a link.
+- *It goes with the leg (D-35, G3).* The leg's cancel and delete, a change of driver (which also clears the link), the
+  trip's cancel and *Request change* cancel the driver's live request through the request service's own cancel — the
+  approval withdrawn, its holds and itinerary with it. Whatever would refuse that cancel (under way, advance cash out, a
+  committed booking) refuses the leg's or the trip's, naming the driver's request, and is checked **before** Fleet's
+  cancel saves. The cancel guard is now one helper (`RequireCancellableAsync`) shared by the trip and its drivers. The
+  leg's update and delete take the caller's employee id (the cancel's `CancelledById`); *Request change* uses the
+  caller's.
+- *Incidents (D-29).* `GET compliance/requests/{id}/fleet-incidents` (Read): the incidents Fleet records on the trip's
+  legs' fleet trips, newest first — type, title, description, where, severity, status, vehicle and plate, driver. The
+  Compliance tab shows them in a read-only card when there are any. Telling anyone of one stays lane 8's.
+- *Demo pack.* No change (no company vehicle on UAT).
+
+**Suite** `run-final-fleet.mjs` 124 → **165**: §12 a trip in 90 days takes the Hilux for three days with the second
+fixture employee driving — the leg says it keeps the driver away overnight; a leg the traveller drives does not, and its
+raise is refused; the desk raises the driver's request — a Draft for the driver with the trip's dates, destination and
+purpose, described as the Hilux's driver for the trip, naming the trip it drives for; a second raise refused. §13 the
+traveller takes the wheel — the request cancelled and the link cleared; driving again, a new request; that request
+under way (planted) refuses the leg's cancel, naming it, with Fleet's trip still a draft (G3); back to a draft, the leg's
+cancel takes it and the fleet trip; a deleted leg takes its request; *Request change* takes another's; a third trip's
+cancel is refused while its driver's request is under way (Fleet's trip untouched), then takes it and the fleet trip.
+§14 an accident Fleet records on the Hilux's trip shows on the trip's incidents, read through travel's door, with
+severity, vehicle, driver and place; another trip shows none. The teardown also soft-deletes incidents on the run's
+vehicles. **165/165 twice** (599122, 704630; every section ran; no live Fleet row or fixture trip left). Regression:
+bookings **148/148 twice** (750614, 766890), money **288/288 twice** (782153, 812051), policy **131/131 twice** (839192,
+852405), lifecycle **256/256 twice** (864522, 909885), truth **118/118 twice** (954953, 961284), approvals **123/123
+twice** (969542, 015375). Approvals run 966528 failed in its fixture before any travel call: its six-digit stamp repeated
+lane 3b's, whose unit code `E2ETVD966528` still exists — the stamp wraps every 1,000 s; a rerun is the remedy. Two
+requests took ten seconds — run 599122's leg delete (its driver's request cancelled within the same second, then the
+saves of the cancel's notices spread over the gap) and run 969542's self-service submit, a path this slice did not touch
+(four to five seconds per approval notice sent). Both are the platform sending notices inside the request while UAT
+has no `EmailSettings` row; neither recurred on the other run. The API log otherwise held only the known noise.
+
+**Lane 6 complete:** 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c staged. D-29's signals and notices are lane 8's.
+
+### Lane 7 — Compliance and the portal (E1–E7, D-5, O-7, O-15, O-16, O-17, T-23–T-26, T-40, T-44, T-54–T-56)
+
+- [x] **E1:** `/me/risk-assessments/{id}/acknowledge` and a portal screen; the desk button becomes a
+  read-only state. *(7c1)*
+- [x] **E2:** a travel-documents register (`/hr/travel/documents`: list, create, edit, verify, delete,
+  an expiring filter) and `/me/travel/documents` for the traveller's own passport; `IsVerified` reset
+  on edit; one primary document per type per employee. *(7a; the traveller's page 7c1)*
+- [x] **E3:** the visa-application create DTO takes status, number, dates and fee; the edit dialog
+  wired; the list typed from the summary DTO, with a detail read for the drawer; `GetRequirementAsync`
+  tenant-scoped. *(lane 0, 7a)*
+- [x] **E4:** `RequiresVisa` derived from the visa-requirement register when the traveller's passport
+  country is known (an override needs a note); health requirements shown on the request with a
+  *cleared* tick each (no block); a requirement not verified for twelve months shows as stale (T-40). *(7b)*
+- [x] **E5:** a risk update ignores `AssessedById`; an acknowledgement is reset when the risk level
+  rises. *(7a)*
+- [ ] **E6:** `CreateAlertAsync` fans out one notification per Approved or InProgress request to the
+  country within the alert's window (the button's path), and the traveller gets it in the app. *(The fan-out 7a; the
+  traveller's bell is lane 8's — a per-audience topic.)*
+- [x] **O-7:** passport and visa numbers masked (last four) in every list and summary read and on the
+  request's screens; the full number only on the document's own detail; the false *encrypted* comments
+  corrected; column encryption recorded as a platform item (§ 6). *(7a)*
+- [x] **O-15:** delete refused for an acknowledged risk assessment, a verified document, an alert that
+  has notifications (deactivate it instead). *(7a)*
+- [x] **O-16:** an international trip with no insurance spanning its dates gets a warning at submit and
+  refused ticketing; a primary passport expiring within six months of the return gets a warning (both
+  windows to be confirmed by TDC). *(7b)*
+- [x] **Portal (D-5, E7, O-17):** `/me/claims` — create, lines, receipt upload through the controlled
+  gate, submit, status; the traveller's advances, itinerary, bookings, visas and risk assessment;
+  `/me` attachment upload and download; a reply to a desk comment. Upload precedent
+  `MyProfileController.cs:138-173` (entitlement first — the traveller's own request or 404 through
+  `GetOwnActiveRequestAsync` — then `HrAttachmentUpload.ExecuteAsync` with
+  `ControlledFileUploadCategories.HrStaffTravelAttachments`); `StaffTravelMeController` gains
+  `IHrControlledDocumentService` and a logger. `MyTravelAlertsPanel` stops pointing at a tab `/me`
+  does not have. *(7c1 — the reads and the alerts panel; 7c2 — files and messages; 7d — `/me/claims`.)*
+
+Suites `run-final-compliance.mjs` and `run-final-portal.mjs` — every portal check runs as a plain
+employee (HR passes its own guards); the upload category requires a clean scan, so both need the
+clamd stub.
+
+**Source check (2026-10-02, HEAD after 6c).** The compliance service and controller, the document, requirement,
+risk, alert, insurance and health entities, the `/me` controller and pages, `MyTravelAlertsPanel`, the
+upload precedent (`MyProfileController` → `HrAttachmentUpload.ExecuteAsync`, category
+`HrStaffTravelAttachments` already registered) and migration batch 1 were re-read. Every E and O finding above holds:
+documents are edited with `IsVerified` kept and deleted with no guard, any number of primaries per type; the
+document DTO returns the full number to every reader and the entity still says "encrypted at rest"; the requirement
+lookup is not tenant-scoped; the portal serves requests, the policy preview and alert acknowledgements only — its
+trip page is cards, no tabs. Five more:
+- **K1 — no store for two of E4's items.** Batch 1 carries nothing for lane 7. A *cleared* tick per health
+  requirement per trip has nowhere to live; nor has the note on a visa-flag override (an internal note can hold that
+  one, as other reasons do).
+- **K2 — what "needs a visa" is.** `VisaRequirementType` is Visa Free, Visa On Arrival, E-Visa, Embassy Visa or
+  **Prohibited**. E-Visa and Embassy Visa mean an application before travel; on arrival does not; Prohibited means the
+  passport is refused entry — nothing reads that today.
+- **K3 — D-18 has no moment.** "A Critical trip needs an acknowledged risk assessment before departure": nothing
+  happens at departure until lane 8's sweep; the moments that exist are submission, the approval stages and ticketing
+  (where lane 5 put the visa gate).
+- **K4 — what exists for O-16 and O-15.** Insurance policies carry cover dates; documents carry an expiry and a primary
+  flag; alerts carry `IsActive` (deactivation needs no schema); risk assessments carry the acknowledgement.
+- **K5 — the portal is the lane's bulk.** Claims, lines with receipts, attachments up and down, comment replies, the
+  traveller's own documents and the read views of itinerary, bookings, visas, advances and risk — each a door through
+  `GetOwnActiveRequestAsync`, each run as a plain employee.
+
+**Proposed slices.**
+- **7a — the desk's compliance records.** E2 (the documents register; `IsVerified` reset on edit; one primary per
+  type per employee — a new primary stands the old one down; a verified document not deleted), E3's rest (the visa
+  edit dialog; the tenant-scoped requirement lookup), E5, O-7 (masking everywhere but a document's own detail; the
+  false comments corrected; encryption to § 6), O-15 (the delete guards; an alert with notifications deactivated, not
+  deleted), E6 (a new alert reaches the travellers of approved and under-way trips to the country in its window, in
+  the app).
+- **7b — the checks against the trip.** E4 (the visa flag derived from the register when the passport country is
+  known, an override with a note; a Prohibited entry refused; health requirements on the request; T-40's stale
+  flag), O-16 (insurance across an international trip's dates; a primary passport expiring within six months of the
+  return), D-18.
+- **7c — the portal's views and acts.** E1 (`/me` acknowledgement and its screen), the traveller's itinerary,
+  bookings, visas, advances and risk, attachments up and down through the controlled gate, a reply to a desk comment,
+  the traveller's own passport, `MyTravelAlertsPanel`.
+- **7d — the portal's claims** (T-54): a claim, its lines and receipts, submitted by the traveller; the desk reviews
+  and pays as now.
+
+**Decisions (the user, 2026-10-02):** D-36 (a small migration for health clearance ticks, 7b), D-37 (a Critical trip's
+ticket waits for the acknowledgement, 7b), D-38 (the traveller files and submits their own claim, 7d), D-39 (E-Visa and
+Embassy set the visa flag, Prohibited refuses submission, 7b) — § 1.
+
+**As built — slice 7a (2026-10-03).** No migration.
+
+- *Documents (E2, O-7, O-15).* A document's dates in order and a number given; an edit takes the verification off (who
+  and when cleared); one primary per type per employee — a new primary stands the others of its type down, by change
+  tracking; a verified document is not deleted. Every list read (`documents`, `documents/employee/{id}`,
+  `documents/expiring`) masks the number to its last four with lane 0's helper (now shared) and says so
+  (`NumberMasked`); `documents/{id}` is in full. The entity's "encrypted at rest" and the visa's "encrypted" comments say
+  what is true; column encryption stays § 6's platform item.
+- *Register screen.* `/hr/travel/documents` (sidebar *Staff Travel → Travel Documents*, `HR.Travel.Read`): every
+  traveller's documents or one traveller's, or those expiring within 90 days; type, masked number, issuing country,
+  expiry (flagged expired or within six months), primary, who verified; record, change (reads the document in full
+  first, and says a change takes the verification off), verify, remove (administrators, unverified only). The
+  Compliance panel's "no passport on file" now links there.
+- *Visas (E3, E4's lookup).* The Compliance panel's visa list gains a change button; the record dialog serves both,
+  reading the application in full first. The update takes the create's checks (a present currency Finance holds, a
+  status the enum has). The visa-requirement lookup is scoped to the tenant at the repository.
+- *Risk (E5, O-15).* An update no longer takes the assessor from the payload (the create always took the caller); a
+  higher risk level clears the acknowledgement; an acknowledged assessment is not deleted.
+- *Alerts (E6, O-15).* Raising an **active** alert sends it at once, through the desk's own Send path, to the traveller
+  of every approved or under-way trip to the country — to the alert's city when it names one — whose dates meet the
+  alert's window: each recorded on the trip, published to the HR role in the app and to the traveller by email, and
+  shown on the traveller's portal. An alert raised inactive, or switched on later by an edit, sends nothing. An alert
+  that has reached a trip is not deleted — untick *Active* (the update already carried `IsActive`; a deactivate verb
+  written first was removed as a duplicate). The alert dialog says both. ⚠ The traveller's in-app notice (the bell)
+  needs a topic per audience — the event's link is the desk's page, which the traveller cannot open — so it is
+  lane 8's (its traveller topic *alert issued*).
+- *Harness.* The bookings suite's §15 alerts are now raised inactive and switched on by an edit: raised active, they would
+  reach UAT's demo trip to Kumasi (TR-2026-00001, approved, 19–20 Oct), and once sent could not be deleted.
+- *Demo pack.* No change. `081` raises its Lagos, London and Kumasi alerts active, after `080` approved London and
+  Kumasi — so on a database the pack builds from now on, the alerts reach those travellers at once wherever the trip's
+  dates meet the alert's (the feature as designed; nothing sends them by hand). Today's UAT already holds the three
+  alerts, which the pack skips, so nothing is sent there.
+
+**Suite** `run-final-compliance.mjs` (new, **51**), on `buildApprovalsFixture`. §1 a fixture employee's passport: dates
+out of order refused; the employee's list and the register show `••…1234`, flagged masked, the document's own read in
+full; verified, then un-verified by an edit; a second primary passport stands the first down, a national ID leaves it;
+a verified one not deleted, an unverified one deleted; the traveller refused the register. §2 a visa application
+recorded Not started and changed to Approved with its number, dates and fee — in full on its own read, masked on the
+trip's list; status 99 and an unknown currency refused. §3 the desk's assessment names the desk officer though the
+payload named another; with an acknowledgement planted, an update at the same level keeps the assessor and the
+acknowledgement and the delete is refused; raised to High, the acknowledgement clears and the delete goes through. §4
+four trips to the run's own city — approved in 20 days, approved in 200, submitted in 24, approved to another city in
+26 — and an active alert for days 15 to 30 reaches only the first, stamped sent, seen on the traveller's portal; an
+inactive one reaches nobody; the sent one is not deleted, unticking Active takes it out of the trip's alerts in force,
+and the unsent one is deleted. **51/51 twice** (905156, 935386; every section ran). Regression, twice each, unchanged:
+bookings **148** (952000, 981592), money **288** (000861, 058251), policy **131** (090334, 104004), lifecycle **256**
+(115064, 161350), truth **118** (202306, 207216), approvals **123** (212305, 232520), fleet **165** (252901, 277246). No
+slow request (the slowest travel call 149 ms; the cold start's first login 1.5 s). **No alert notification was written
+on any trip but the fixture's** (checked in SQL after the compliance and the bookings runs), and no run left a document,
+alert, trip or fleet row live. The API log held only the known noise.
+
+**As built — slice 7b (2026-10-03).** Migration `20261003002540_TravelClosureHealthClearance`.
+
+- *Migration (D-36, D-39).* Scaffolded by the user, rewritten as guarded SQL: `StaffTravelHealthClearances` (the trip,
+  the health requirement, who cleared it — an Employee — when, a note; four foreign keys, none cascading; unique on
+  tenant, trip and requirement among live rows) and `StaffTravelRequests.VisaOverrideReason` (nvarchar(1000), null).
+  **Why the column (a refinement of D-39):** kept only as an internal note, an override would be undone by the next
+  edit and by submission, which read the register again; on the trip it stands until the requester drops it. No data
+  step. Down refuses while a clearance is live. Proven on a scratch copy of UAT (session scratchpad `m3/`, 26/26): the
+  copy has UAT's schema; Up adds exactly the scaffold's 27 lines; Up again changes nothing; a second live clearance of a
+  pair is refused while a deleted twin sits beside the live one; Down refuses, changing nothing, while a clearance is
+  live, and once none is restores UAT's schema exactly; Up after Down gives the same schema.
+- *The rules in one place.* `StaffTravelComplianceRules` (Core): the register's verdict for a traveller's primary passport
+  (E-Visa and Embassy need a visa, Free and On arrival do not, Prohibited refuses entry — D-39); whether a trip needs a
+  visa now (its flag, or — no override — the register, for a passport recorded after the trip was raised); insurance
+  across every day of a trip; a Critical trip's acknowledgement (its own level, or the latest assessment valid at
+  departure — D-37); and submission's warnings.
+- *The visa flag (E4, D-39).* Create, edit and each group participant take the register's answer whenever the traveller's
+  primary passport is on file and the register has the pair; a different answer stands only with a reason of five
+  characters or more, kept on the trip and — when new — as an internal note. Submission reads the register again and
+  refuses a passport the register records as refused entry. The request form's switch says the register sets it and
+  offers *If this differs from the visa register, why*; the payload sends the reason back, or the next save takes the
+  register's answer again.
+- *Health (D-36, T-25).* `GET compliance/requests/{id}/health-requirements` (Read): the destination's active
+  requirements in force over the trip, mandatory first, each cleared or not; `POST …/{requirementId}/clear` (Write, the
+  caller's employee) and `DELETE …/clear` (an untick, a soft delete). Not twice; only a requirement that applies (404
+  otherwise); not on a cancelled, rejected or closed trip; nothing blocked by an unticked one. The Compliance tab's
+  *Health requirements* card lists them with *Clear* (a note) and *Untick*.
+- *Ticketing (O-16, D-37).* The ticket verb waits, in order: the visa (lane 5, now with the register's live answer — the
+  demo's London flight is still refused naming its visa); for an international trip, insurance whose cover spans every
+  day of it; for a Critical trip, a risk assessment the traveller has acknowledged. The Compliance tab warns on the
+  insurance and risk cards until each is met.
+- *Submission's warnings (O-16).* An international trip with no cover spanning it, and a primary passport expiring less
+  than six months after the return (both windows TDC's to confirm), come back in the submit result's warnings.
+- *Stale entries (T-40).* The requirement DTO says `IsStale` — never verified, or not in 365 days — and the register page
+  and the Compliance tab flag it.
+
+**Applied to UAT 2026-10-03, on the user's go.** Restore point `ErpSystemDB_UAT_before_travell7b.bak` (COPY_ONLY,
+verified), taken just before; the API's startup applied it — history 111 rows, newest
+`20261003002540_TravelClosureHealthClearance` — verified in SQL: UAT's fingerprint equals the scratch copy's after Up,
+and every new object has the model's shape.
+
+**Suite** `run-final-compliance.mjs` 51 → **96**. The run picks three destinations no register entry covers for the
+fixture's passport country and makes its own entries (embassy visa, refused entry, visa free). §5 with no passport the
+requester's "no visa" stands; with the traveller's primary passport on file, "no visa" to the embassy-visa country is
+saved needing one and "visa" to the visa-free country needing none; a different answer stands with a reason and an
+internal note, a four-character reason is refused, an edit dropping the reason takes the register's answer again; the
+refused-entry trip is not submitted. §6 a mandatory vaccination listed uncleared, cleared with a note against the desk
+officer, not twice, another country's requirement 404, the traveller 403, unticked and cleared again. §7 an
+international trip warned at submission of no cover and of a passport expiring in 100 days; its confirmed flight
+refused a ticket uninsured and with cover that misses a day, ticketed once cover spans the trip; a Critical domestic
+trip's flight refused with no assessment and with an unacknowledged one, ticketed once the acknowledgement is planted.
+§8 a never-verified entry stale, one verified 400 days ago stale, one verified this week fresh. **96/96 twice**
+(325897, 370849). Regression, twice each: bookings **148** (400379, 429258), money **288** (465468, 507213), policy
+**131** (545087, 558128), truth **118** (656300, 662144), approvals **123** (667049, 690076), fleet **165** (709486,
+734300), and lifecycle **257** (789468, 845376) — its first two runs (569215, 613017) failed one check, *submitted
+"with no warnings"*: its trip crosses a border with no cover, so O-16 now warns, as designed. The check now asserts no
+leave warning (what it meant) and the insurance warning (+1). No slow request (the slowest travel call 161 ms); no
+alert notice on a non-fixture trip; no run left a register entry, health requirement, clearance, document, alert, trip or
+override live. The API log held only the known noise.
+
+**Source check for 7c (2026-10-03, HEAD `81bd93074`).** The `/me` controller and pages, `MyTravelAlertsPanel`, the
+desk's comment and attachment routes, the approver door's attachment read, the profile-evidence upload precedent, the
+request repository's full read and the DTOs it embeds were re-read. E1 and E7 hold. Five more:
+- **P1 — the traveller's read already carries the trip.** `GET /me/requests/{id}` is the repository's full read:
+  attachments, itinerary versions, every booking, advances, claims, visa applications, risk assessments and insurance
+  all arrive, soft-deleted rows filtered by the model. The portal page renders none of it.
+- **P2 — but as summaries.** The embedded itinerary rows carry no legs and the flights no segments — no flight time
+  reaches the traveller. The detail needs `/me` reads of its own.
+- **P3 — a booking says who authorised its exception, and why.** A6 (lane 1) took the policy-exception decisions off the
+  traveller's read; the flight and hotel details carry the same decision (`ClassExceptionReason`,
+  `RateExceptionReason`, the requester and authoriser). The traveller's booking read drops them.
+- **P4 — a reply's parent is not checked.** `AddCommentAsync` checks the request but not that `ParentCommentId` is a
+  comment on it, so a reply can hang off another trip's comment.
+- **P5 — every attachment type is the traveller's business.** Invitation letter, brochure, receipt, visa document,
+  insurance certificate, medical certificate, other: nothing the desk keeps from the traveller. The traveller sees all
+  of a trip's attachments; the desk's own reasoning lives in internal notes.
+
+**Slices (the user, 2026-10-03).** 7c split in two:
+- **7c1 — the traveller's reads and the acknowledgement.** E1 (`/me` acknowledgement; the desk's button a read-only
+  state), the itinerary in force (D-42), the bookings with flight segments (P3), visas, insurance, the risk assessment,
+  7b's health requirements, the destination alerts in force over the trip, the traveller's own documents at
+  `/me/travel/documents` (add, edit — an edit un-verifies — and delete while unverified: 7a's rules), the trip page in
+  tabs. Suite `run-final-portal.mjs`, as a plain employee: the acknowledgement lifts D-37's ticket wait.
+- **7c2 — files and messages.** Attachments up and down through the controlled gate (not on a cancelled, rejected or
+  closed trip), D-40's removal, D-41's reply and new message (P4 for every caller), `MyTravelAlertsPanel` pointing at
+  the trip's tab. The suite grows, with the clamd stub.
+
+**Decisions (the user, 2026-10-03):** D-40 (a traveller removes their own upload before submission, 7c2), D-41 (a reply
+or a new message, never edited, 7c2), D-42 (the itinerary in force only, 7c1) — § 1.
+
+**As built — slice 7c1 (2026-10-03).** No migration. Every new `/me` route takes no employee id and resolves the trip
+through `GetOwnActiveRequestAsync` first — someone else's is a 404, never a 403.
+- *The acknowledgement (E1, D-37).* `POST /me/risk-assessments/{id}/acknowledge`: the token's employee, refused (404) for
+  anyone but the traveller and for an id that does not exist; a second click keeps the first time. The desk's route stays
+  (the service accepts only the traveller, so it serves only an officer's own trip); the desk's button became a state —
+  *not yet acknowledged*, and where the traveller does it. A Critical trip's ticket now waits on something a traveller can
+  do.
+- *The itinerary (D-42).* `GET /me/requests/{id}/itinerary` answers `{ inForce, beingPlanned }`: the current version when
+  it is Approved, Active or Completed, with its legs, activities and linked bookings; otherwise none, and whether a Draft
+  or PendingReview version is being worked on. ⚠ A new version the desk makes current supersedes the finalised one at once
+  (D-25), so from then until it is finalised the traveller reads *being planned* — D-42 taken literally.
+- *Bookings (P2, P3).* `GET /me/requests/{id}/bookings` (`IStaffTravelBookingService.GetTravellerBookingsAsync`): every
+  flight with its segments in flying order, hotel, ground leg (Fleet's description included) and car rental. New
+  `ToTravellerView` mappers clear the exception's decision — reason, requester, authoriser, time — on flights and hotels
+  (its state stays: it says why a booking waits), and a driver's own request on a ground leg; the request's own traveller
+  view clears the latter too.
+- *In force over the trip.* `GET /me/requests/{id}/destination-alerts` (the approver's read; the summary DTO gained `Body`
+  and `EffectiveTo`, filled by this read only) and `GET /me/requests/{id}/health-requirements` (7b's, read-only).
+- *The traveller's documents (E2).* `GET/POST /me/travel-documents`, `GET/PUT/DELETE /me/travel-documents/{id}`: the
+  owner is the token's whatever the payload names; the list masked, a document's own read in full to its owner; the
+  desk's rules unchanged (an edit un-verifies, one primary per type, a verified one kept — 422).
+- *Screens.* `/me/travel/[id]` in four tabs — *The trip* (as before), *Before you go* (the risk assessment and its
+  button, the destination's alerts, health requirements, visas, insurance — each warning while D-37 or O-16 holds the
+  ticket), *Itinerary & bookings*, *Money* (advances, what is still held and by when, claims). `/me/travel/documents`,
+  linked from *My travel*. `MyTravelAlertsPanel` points at *Before you go* (brought forward from 7c2 — the tab exists
+  now). The request's TypeScript type gained the five lists the read already carried.
+- *The guide.* Chapter 15 (five screens, the four tabs, the acknowledgement, the documents page, the routes), chapter 5.5's
+  walk and route row, gap rows T-23, T-44, T-54, T-55, T-56 — and a fix: the gap-row script of 7b had left a doubled pipe
+  (an extra empty cell) on T-25, T-26, T-40 and T-42; the six rows filled since read as two columns again.
+
+**Suite** `run-final-portal.mjs` (new; `buildApprovalsFixture`, its lone traveller travC on a plain Employee login, travB
+as someone else). §1 a Critical trip's confirmed flight refused a ticket before the acknowledgement; travB and a desk
+officer on `/me` 404, the desk officer on the desk's route 403; the traveller reads the assessment with what to do, and
+acknowledges it — recorded, a second click keeping the time — and the flight is ticketed. §2 no itinerary; a draft with a
+leg and an activity reads *being planned*, not shown; finalised, in force with both; a new version made current, *being
+planned* again. §3 a flight with two segments recorded out of order, a hotel, a taxi and a car rental; the exception's
+decision and a driver's own request planted in SQL; the traveller reads the segments in order, seats included, and none
+of the decision nor the driver's request, while the desk's reads (the control) carry them. §4 the run's alert (raised
+inactive, switched on — no notice sent) read with its text and end; a health requirement on a country with none of its
+own, read uncleared then cleared. §5 the traveller's documents: theirs whatever the payload names; masked list, full own
+read; travB 404 on read, change and removal; verified, kept (422); a correction un-verifies; a new primary stands the old
+down; the unverified one removed. §6 the trip read carries the visa (masked), the insurance and the rest, no policy
+exceptions; no sign-in 401. **84/84 twice** (557740, 587346). Regression, twice each, all unchanged: compliance **96**
+(597686, 780412), bookings **148** (616674, 798779), money **288** (633576, 814964), policy **131** (665690, 847155),
+lifecycle **257** (678011, 859337), truth **118** (726616, 907630), approvals **123** (731939, 913223), fleet **165**
+(755093, 934389). No alert notice on a non-fixture trip; nothing of any run left live; every fixture login off; the demo
+Kumasi trip still Approved. The API log held only the known noise — the missing email settings and payroll's profile
+defect (#23), one per fixture employee.
+
+**As built — slice 7c2 (2026-10-03).** No migration. The traveller's acts sit in `StaffTravelRequestService` — each
+resolves the request as the traveller's again, so no rule depends on the controller remembering to.
+- *Files (E7, T-56).* `POST /me/requests/{id}/attachments` (multipart; type and description): the trip resolved as the
+  caller's, then `RequireTravellerMayAttachAsync` — not a cancelled, rejected or closed trip (422) — both **before**
+  anything is stored; then `HrAttachmentUpload.ExecuteAsync`, category `HrStaffTravelAttachments`, the uploader the
+  token's employee. It answers **201** with the row, as the desk's door does. `GET /me/attachments/{id}/download`: the
+  attachment's trip must be the caller's (404 otherwise), served by `HrDocumentDownload`. The trip's files themselves
+  arrive on the request's read (P1) — no list route.
+- *Removal (D-40).* `DELETE /me/attachments/{id}` → `DeleteTravellerAttachmentAsync`: someone else's trip 404; a file the
+  desk added 422 (*"The travel desk added this file…"*); a trip no longer a draft or returned 422 (*"…sent for approval,
+  so the travel desk may be relying on this file"*). Returned to the traveller, it is theirs to remove again.
+- *Messages (D-41, P4).* `POST /me/requests/{id}/comments` with `CreateMyStaffTravelCommentDto` (body ≤ 2000, an optional
+  parent) → `AddTravellerCommentAsync`: a reply is a **Response**, a new message a **Query**, both visible to the traveller
+  and theirs; a reply only to a comment on the same trip that the traveller can see (404 otherwise — an internal note is
+  "not found" to them); a blank body 422. No edit or delete on the portal. **P4 for every caller:** `AddCommentAsync`
+  refuses a parent that is not a comment on the same trip (404) — the desk's door included.
+- *Screens.* Two more tabs on `/me/travel/[id]`: **Messages** (threads built from `parentCommentId` — the read carries
+  every comment flat — the desk's shared notes moved here from *The trip*; a reply box per thread, answering its latest
+  message; a box for a new question) and **Files** (every file with who added it — *You* for the traveller's own; upload
+  with type and description, not on a closed trip; download; remove on the traveller's own while the trip is theirs).
+  The tab labels count what is there. The desk reads the traveller's messages on its Comments tab as *Query* and
+  *Response* under the traveller's name, and their files on its Attachments tab. ⚠ The desk is **not told** a traveller
+  wrote or attached — notifications are lane 8's (its topic list now names both).
+- *The guide.* Chapter 15's Messages and Files tabs, four routes, T-56 (documents fixed; receipts with 7d); chapter 5.6
+  says where the traveller's messages land — and that T-27 (the desk composer's internal-note switch) was fixed in lane
+  0, which 5.6 and its gap row still called open.
+
+**Suite** `run-final-portal.mjs` 84 → **129**, now **with the clamd stub**. §7 a draft for the traveller: their visa
+document attached (201), theirs and on their read; travB attaching 404 with nothing stored; the traveller downloads it
+byte for byte, travB 404, the desk's door 200 (the control); the desk's invitation letter downloaded by the traveller
+but not removed (422, *the travel desk added this file*); travB removing the traveller's file 404; the traveller removes
+it on the draft; a second file, the trip submitted, 422 (*sent for approval*); returned, removed; a withdrawn trip takes
+no file (422, nothing stored); no file 400. §8 the desk's shared note, internal note, and a note on another trip; the
+traveller's question (a Query, trimmed, theirs) and reply (a Response under the note); a reply to the internal note and
+to the other trip's note 404; blank and 2,001 characters refused; travB 404; the traveller's read has the three, not the
+internal note; the desk reads the question under the traveller's name; the desk's reply to the other trip's note 404
+(P4); its reply in the thread reaches the traveller; the desk's edit route 403 to the traveller. The first run (701550)
+failed three checks that expected 200 from the upload gate — it answers **201 Created**, on the desk's door too; the
+checks were corrected. **129/129 twice** (761419, 776311). Regression, twice each, all unchanged: compliance **96**
+(790263, 979735), bookings **148** (809085, 998503), money **288** (825534, 015027), policy **131** (859299, 046648),
+lifecycle **257** (871958, 058937), truth **118** (925556, 110200), approvals **123** (930587, 115601), fleet **165**
+(953817, 138406). No slow request; no alert notice on a non-fixture trip; nothing of any run left live — comments and
+attachments included; every fixture login off; the demo Kumasi trip still Approved. The API log held only the known noise.
+
+**Source check for 7d (2026-10-03, HEAD `7e2d6f1bd`).** The finance controller's claim routes, `StaffTravelFinanceService`'s
+claim and line rules, the claim and line DTOs and the desk's two claim pages were re-read. D-38 needs no new rule — the
+claimant is always the trip's traveller, so lane 3's rules hold as they are: a claim only on an approved, under-way or
+completed trip; its advance this trip's and this traveller's; expenses fixed once submitted and the claimant's again when
+returned; at submission the policy's claim window and its receipt threshold (a per diem excepted); never reviewed or paid
+by the claimant (D-2). Four more:
+- **Q1 — a receipt is the trip's attachment.** A line names it by `ReceiptAttachmentId`, checked to be on the claim's trip;
+  7c2's upload is the traveller's way in.
+- **Q2 — a line's `PolicyLimit` is the payload's.** The desk's form only ever sends back what the line had; the traveller's
+  line takes none on create and keeps the line's on edit.
+- **Q3 — fuel on a company-vehicle trip names its fleet trip** (D-30) from `claims/{id}/fleet-fuel`, a desk read: the portal
+  needs its own. A traveller's reason for a fill Fleet already logs (D-32) is kept, as for the desk, as an internal note.
+- **Q4 — a per diem needs no receipt and no rate bounds it** — D-43.
+
+**Decisions (the user, 2026-10-03):** D-43 (the traveller marks a per diem as the desk can), D-44 (the traveller removes a
+line while the claim is a draft or returned, and a claim while it is a draft) — § 1.
+
+**As built — slice 7d (2026-10-03).** No migration. The traveller's claim methods sit in `StaffTravelFinanceService`
+(`GetTravellerClaimAsync`, `CreateTravellerClaimAsync`, `UpdateTravellerClaimAsync`, `DeleteTravellerClaimAsync`,
+`SubmitTravellerClaimAsync`, `AddTravellerClaimLineAsync`, `UpdateTravellerClaimLineAsync`, `DeleteTravellerClaimLineAsync`,
+`GetTravellerClaimFleetFuelAsync`). Each establishes the claim, line or trip is the caller's — "not found" otherwise — and
+calls the desk's own method, so **no lane 3 rule was copied or changed**.
+- *Routes.* `GET/PUT/DELETE /me/claims/{id}`, `POST /me/claims` (201), `POST /me/claims/{id}/submit`,
+  `POST /me/claims/{id}/lines`, `PUT/DELETE /me/claim-lines/{lineId}`, `GET /me/claims/{id}/fleet-fuel`. No review or pay
+  route: the finance controller's class-level Read refuses the traveller (403) and the service refuses the claimant
+  anyway (D-2).
+- *Q2.* A traveller's new line takes no policy limit; a changed one keeps the line's — whatever the payload says.
+- *Q3.* The fleet-fuel read through `/me`; a D-32 reason the traveller gives is kept, as the desk's is, as an internal note
+  authored by them.
+- *D-43, D-44* are the desk's own rules carried over: the per-diem switch; a line removed while the claim is a draft or
+  returned; a claim deleted while it is a draft (`DeleteClaimAsync` refuses anything else — a returned claim included).
+- *Screens.* The trip's *Money* tab: **File a claim** on a trip that is approved, under way or completed — the type and
+  the advance it settles (one still out with the traveller is offered first), then on to the claim. **`/me/travel/claims/[id]`**:
+  the claim's totals, advance deducted, payable, the desk's notes (a returned claim's in a banner) and the payment; the
+  expenses with their receipt and the desk's decision — the amount approved and why the rest was not; *Add an expense*
+  (category, date, description, merchant, amount and currency, the receipt from the trip's files or **uploaded there and
+  then** through `/me`, the per-diem switch, the fuel fields when the trip has company-vehicle trips); change and remove
+  while editable; **Send to the travel desk**; **Delete the claim** on a draft. ⚠ The desk is not told a claim was
+  submitted — lane 8's "claim submitted" topic.
+- *The guide.* Chapter 15 — six screens; the Money tab's *File a claim*; the claim page; the two route rows; T-54 fixed —
+  and chapter 9b says where a traveller's claim lands.
+
+**Suite** `run-final-portal.mjs` 129 → **177**. §9 a claim refused on a draft trip (422) and on someone else's (404);
+filed on the traveller's approved trip (201) — theirs, a draft, numbered; read by them, 404 to travB, as is its
+fleet-fuel read; a meal added with a policy limit of 99,999 — valued 120 by the server, no limit kept; a receipt uploaded
+through `/me` (201) linked to a taxi, another trip's file refused (404); a per diem kept as one (D-43); travB adds, changes
+and removes nothing (404); the desk sets the meal's limit at 150, the traveller's correction keeps it (Q2); the per diem
+removed on the draft; submitted — then no line added or removed (422) and the claim not deleted (422); the finance review
+route 403 to the traveller (D-2); the second officer returns it with a note the traveller reads; the meal removed on the
+returned claim, which is not deleted (422), and resubmitted; the second officer approves 60 of the taxi's 80 and the
+claim, the first officer pays (D-2); the traveller reads it paid — 60 payable, the reference, why 20 was cut; a second,
+empty claim not submitted (422), travB's delete 404, the traveller's 204, then gone. **177/177 twice** (231036, 247192;
+first in 191288). Regression, twice each, all unchanged: compliance **96** (264937, 479341), bookings **148** (285467,
+502316), money **288** (303694, 521738), policy **131** (343424, 559741), lifecycle **257** (357290, 573334), truth **118**
+(413815, 642882), approvals **123** (421904, 648339), fleet **165** (449117, 673846). No slow request; no alert notice on a
+non-fixture trip; nothing of any run left live — claims, lines, comments and attachments included; every fixture login
+off; the demo Kumasi trip still Approved. The API log held the known noise, and one pattern not seen before: the
+platform's notification clean-up timer (`UnifiedNotificationService.CleanupExpiredNotificationsAsync`, every ~30 s) failed
+3 of its 19 runs, each a 2–4 s bulk update of `Notifications` while the suites were writing notices — caught, logged,
+tried again the next time; no travel code runs in it.
+
+**Lane 7 — COMPLETE 2026-10-03** (7a `7a22f177c`, 7b `81bd93074`, 7c1 `584993d0a`, 7c2 `a922f5085`, 7d `8f6df4f08`): every E and O
+finding of the lane closed but E6's in-app half, which is lane 8's (a per-audience topic), as are the desk's notices of a
+traveller's message, file and claim.
+
+### Lane 8 — Notifications and the sweep (D-4, D-6, F1, F2, E6, O-11, O-17)
+
+- [x] **Topics per event and audience** (leave's shape). Traveller: submitted (acknowledgement),
+  approved, rejected, returned, change requested, cancelled by the desk, advance approved, advance
+  disbursed, claim returned, claim approved, claim paid, alert issued, briefing to acknowledge, desk
+  comment, document expiring, visa expiring, trip departing. Approver (`UsersFromData` from the
+  engine's pending approvers): request waiting — the link opens through lane 2's door. HR and the
+  travel desk: claim submitted, advance requested, settlement overdue, traveller comment, approval
+  waiting with nobody else to ask, fleet incident (lane 6). Traveller and approver topics send email.
+  *Since lane 7 (7c2) the traveller writes (a Query or a Response, D-41) and attaches files from the portal — the
+  "traveller comment" topic covers the first; a "traveller attached a file" topic joins it. Nothing tells the desk yet.*
+  *8a built every event-driven topic here (and the traveller's advance and claim rejected, D-46's desk set); "request
+  waiting" at submission is the engine's own approval request. The sweep's — document, visa, departing, approval waiting,
+  settlement overdue — are 8b's; the fleet incident is 8c's.*
+- [x] **Legacy topics** deactivated as `LeaveReminderService.cs:468-499` does — a `LegacyTopicKeys`
+  array; `IsActive = false` and a replacement description on `IsSystem` rows nothing publishes to any
+  more: `StaffTravelReminder.DueSoon.Internal`, `StaffTravelReminder.Overdue.Internal`, and the five
+  `StaffTravelRequest.{Activity}.Internal` keys unless the HR-desk audience keeps them. *8a switched off the five
+  lifecycle keys (D-46), the engine's three initiator topics (D-45) and `StaffTravelAlert.Issued.Internal`; the two
+  `StaffTravelReminder.*.Internal` keys are 8b's.*
+- [x] **Sweep kinds added:** visa missing (an approved trip within 14 days that requires a visa and has
+  none approved); claim overdue (`ExpenseSubmissionDays` passed, no claim); approval waiting (a
+  Submitted trip waiting more than N days, escalating to HR when departure is three days away or
+  past); briefing unacknowledged;
+  passport rungs at 90, 30 and 7 days. **D-6 transitions:** Approved → InProgress on departure (or on
+  Fleet's dispatch, lane 6); Completed → Closed when settled (lane 1's rule); advance → Overdue. *Added
+  by lane 1, slice 1c:* a group's **InProgress** and **Completed** are still written by nothing — the
+  sweep derives them from its travellers' trips (in progress once any is under way; completed once every
+  place is completed or closed). *8b built every sweep kind here — "claim overdue" as D-49's two halves — and advance →
+  Overdue stands from lane 3; the D-6 transitions and the groups are 8c's.* *8c built them — and Completed → Closed waits
+  for the claim window too (D-51).*
+- [x] A dispatch row records `PublishedAt` only when the bus call returned without throwing — the bus
+  swallows handler errors, so delivery is proved by counting the notification rows written per
+  audience, never by reading the log.
+- [x] The reminders page reads for HR (D-3); the nav description says what the sweep chases.
+- [x] **From lane 6 (D-29):** the sweep's fleet signals — Fleet's dispatch of a trip's outbound leg moves an Approved
+  trip to InProgress ahead of the date rule; Fleet's completion of the return leg tells the desk to mark the trip
+  completed; a fleet incident on an open trip's fleet trip tells the travel desk and the traveller's line authority
+  once per incident (the incidents are already read by `IStaffTravelFleetService.GetIncidentsAsync`, slice 6c). A
+  driver's own request (D-33) is a trip like any other here. *8c built all three — Fleet's completion of every company
+  vehicle of a trip still under way tells the desk.*
+
+Suite `run-final-reminders.mjs` (the SMTP-sink pattern; assert the rows written per audience) and
+re-run `run-slice5a.mjs`.
+
+**Source check (2026-10-03, HEAD `8f6df4f08`).** The reminder service, its host and controller, the request service's
+topics and verbs, the alert send, the finance, booking, compliance and Fleet services, the `/me` controller, the event
+bus, the topic handler and publisher, the workflow engine's own notices and the link it gives a trip, leave's reminder
+service (the model D-4 names), the reminders screen and its nav entry were re-read, and UAT's travel topics, the
+notices they wrote, the dispatch log and the live trips counted. F1, F2, E6's in-app half and O-17's notice half hold.
+Lane 4 already opened the reminders screen to HR (D-3, T-52) and lane 0 already corrected its nav description; what
+is left there is the page's list of kinds and its footnote. Nine more:
+- **U1 — who hears what today.** The five lifecycle topics (`StaffTravelRequestService.cs:444`) reach the HR role in the
+  app, for every trip — Submitted, Approved, Rejected, Cancelled, Completed. Return for revision, Request change,
+  Recall and Close publish nothing (lane 1 left them here, l.1770–1775). The workflow engine sends its own notices
+  (`WorkflowNotificationService`): **WorkflowApprovalRequest** to each approver the current stage asks — stage 1 by name,
+  stage 2 every HR and TenantAdmin holder — in the app and by email: that is already the plan's "request waiting"
+  notice at submission. **WorkflowSubmitted** (app and email), **WorkflowCompleted** and **WorkflowRejected** (app) go to
+  the *initiating user* — the traveller on a self-service submission, the desk officer on a desk one, when the traveller
+  hears nothing. Every engine notice links `/hr/travel/{id}` (`WorkflowEntityDisplayService.cs:393`): the approver's
+  door opens it (lane 2); the traveller's does not (A6). The alert topic reaches the HR role in the app and the
+  traveller by email only (E6). The finance, booking, risk, comment and attachment paths publish nothing, so nobody is
+  told of an advance, a claim, a briefing to acknowledge, a desk comment, or a traveller's message, file or claim. UAT
+  has two active HR role holders: every HR-audience topic writes two in-app notices per event.
+- **U2 — publishing never fails.** `AppEventBus` catches every handler's exception (l.29–40), as do the topic handler and
+  the publisher. The publisher queues its `Notifications` rows — one per in-app user, one per email address, status
+  Pending — and saves them **on the caller's unit of work** (`NotificationTopicPublisher.cs:663–673`). So batch 1's
+  `PublishedAt` can record only that the sweep reached the publish call, and the alert's `NotificationSentAt` the same;
+  delivery is proved by counting the rows per topic key (`AdditionalData.TopicKey`) and recipient. And a publish made
+  before the caller's own save would commit the caller's pending changes with it: every travel publish stays after the
+  commit, as today.
+- **U3 — the sweep cannot use the verbs.** `CloseAsync`, `MarkCompletedAsync` and the Fleet seam's reads
+  (`StaffTravelFleetService.cs:75`) take the tenant and the actor from the signed-in user; the nightly host has none —
+  the leave sweep's first scheduled run died of exactly this (2026-09-26). The transitions need tenant-explicit code: the
+  settled test `CloseAsync` applies made one shared predicate (as lane 3 made `CashOut`), and a tenant-explicit Fleet read
+  for dispatch, completion and incidents. `StaffTravelComplianceRules` and `HrLineAuthority` are tenant-explicit already.
+- **U4 — once the date moves a trip, "under way" stops meaning the traveller left.** Lane 1 refused cancel and Request
+  change under way (O-11) because a trip under way has happened. When the sweep moves Approved → InProgress on the
+  departure date, a trip that did not happen — the traveller fell ill that morning — can no longer be cancelled, only
+  completed, and lane 9 would post its days as on duty. And nothing moves InProgress → Completed: D-6 gives the sweep
+  Approved → InProgress and Completed → Closed, so a trip nobody marks completed stays under way and never closes (Fleet's
+  return-leg completion prompts the desk only for company-vehicle trips).
+- **U5 — the claim window is a cliff.** `ExpenseSubmissionDays` binds a draft claim's first submission, the desk's as well
+  as the traveller's (`StaffTravelFinanceService.cs:534`): after the last day nobody can submit it, and a trip holding the
+  draft never closes (`CloseAsync` counts a draft as open). A chase after the deadline can only say it is too late; the
+  useful notice comes before it. And a trip with no claim is usually one with nothing to claim — the desk booked and paid.
+- **U6 — the approval chase's recipients are leave's.** A request waits on the engine's current step: stage 1's named
+  approvers (lane 2's Dynamic rules resolve to user ids on the approval rows), stage 2's role holders.
+  `LeaveReminderService.ApproversAskedAsync` (l.1021) resolves exactly that — the current step, its lowest open group,
+  named users and active role holders — but is private to leave.
+- **U7 — passport rungs and the keys already sent.** Every day before expiry is tier 0 (`TierFor`, l.272), so a document
+  gets one notice at 90 days and the next once it has expired (F2). Rungs at 90, 30 and 7 days need the rung in the dedupe
+  key; UAT's one live dispatch (a passport of TDC/00006 expiring 8 Dec, sent to HR) is sent once more under the new key —
+  this time to its owner.
+- **U8 — the scheduled run lands in the regression, and on the demo.** The host runs 11 minutes after every API start, then
+  daily (`StaffTravelReminderBackgroundService.cs:40`), with no switch. Once the sweep moves statuses, a fixture trip that
+  is approved and has already started — the lifecycle suite's completions, the money suite's no-show — can move between
+  two steps of a suite. On UAT the first run reaches the demo's four trips: Sebrepor (TR-2026-00004, approved, 17 Sep, with
+  a claim) goes under way at once; the two submitted trips (TR-2026-00002, -00003) are waiting on their approvers; Kumasi
+  (TR-2026-00001, 19–20 Oct) is departing from 5 Oct and under way on 19 Oct.
+- **U9 — the suite note above is stale, and the teardowns.** `run-slice5a.mjs` is one of the old suites D-13 keeps off UAT;
+  `run-final-reminders.mjs` replaces it. Every suite's teardown soft-deletes `Notifications` by the trip's id: lane 8's
+  notices carry the trip's id as their entity wherever they concern a trip, so the teardowns keep catching them;
+  documents, which belong to the employee, carry the document's.
+
+**Proposed slices** (no migration expected — batch 1 carries `PublishedAt`, the group statuses exist):
+- **8a — the event notices (D-4).** One shared `StaffTravelNotices`: the topics `StaffTravel.{Event}.{Audience}` seeded once
+  per tenant with leave's three recipient rules (the traveller by employee id, the approvers by user ids, the HR role
+  with a *why* when the person has no login), each link the audience's own page (`/me/travel/{id}`, the approver's and
+  the desk's `/hr/travel/{id}`, a claim's own page). Traveller: approved, rejected, returned, change requested and
+  cancelled by someone else; advance approved, disbursed, rejected; claim returned, approved, paid; the alert in the app
+  (E6's rest); a briefing to acknowledge; a desk note shared with them. Desk: approved (ready to book), cancelled or sent
+  back for a change by someone else, advance requested, claim submitted, a traveller's message, file or claim. Traveller
+  and approver topics also by email. Retired topics switched off as leave's `LegacyTopicKeys` does (D-45, D-46).
+- **8b — the sweep's kinds.** Tenant-explicit candidates, each with its deliveries per audience (leave's shape): passport and
+  document rungs at 90, 30 and 7 days and after expiry (the owner; HR when they have no login); visa expiring (the
+  traveller); visa missing (an approved trip within 14 days that needs a visa and has none approved — traveller and
+  desk); departing (the traveller); approval waiting (the step's approvers; HR when nobody can be asked; HR too once
+  departure is three days away or past — O-11); briefing unacknowledged; the claim window (D-49); settlement overdue (the
+  traveller and the desk). `PublishedAt` stamped after the publish call, and a key claimed but not published retried by
+  the next run. `StaffTravelReminder.DueSoon/Overdue.Internal` switched off. The approvers read through a shared helper
+  on leave's model — leave's own copy untouched, as lane 2 did with `HrLineAuthority`. The reminders page lists the
+  kinds and who each reaches.
+- **8c — the transitions and Fleet's signals (D-6, D-29).** Approved → InProgress on the departure date or when Fleet
+  dispatches an outbound leg; InProgress → Completed (D-47); Completed → Closed when settled, on the predicate the Close
+  verb shares; D-48's cancel; a group under way once any of its trips is, completed once every place is completed or
+  closed; Fleet's completion of a return leg told to the desk; each Fleet incident on an open trip told once to the desk
+  and the traveller's nearest line authority. Each transition publishes 8a's notice. Fleet's seam gains tenant-explicit
+  reads; Fleet's code unchanged.
+
+**Suite** `run-final-reminders.mjs` — the SMTP sink, a fixture per kind, and each notice counted by topic and recipient
+in `Notifications`, never read from the log. **Run first after every API start**, waiting out the scheduled run with its
+own fixtures: that is the only way to prove the sweep with nobody signed in (run-now always has a user), and the rest of
+the regression then runs with no scheduled sweep for a day (U8). Before the first scheduled run on UAT, the preview
+(`asOf` today) lists what it would reach, for the user's go.
+
+**Decisions (the user, 2026-10-03 — all six as recommended; the alternatives are kept below as the record):** D-45…D-50,
+now in § 1.
+
+**As built — slice 8a, the event notices (2026-10-03).** No migration.
+- *One table of who hears what.* `StaffTravelNotices` (Core, scoped): 25 topics `StaffTravel.{Event}.{Traveller|Desk}`
+  seeded per tenant on first use — 16 for the traveller (in the app and by email: `UserFromEmployeeIdData` on the
+  traveller's employee id, plus `EmailFromData` on an address the service supplies only when they have no login), 9 for
+  the desk (in the app: `UsersFromData` — the HR role's active holders, resolved in the service so that whoever did it is
+  left out; the publisher can neither exclude nor dedupe). A traveller with neither a login nor an address on file → the
+  desk is told to tell them (`TravellerNotReachable`, to every holder, the actor included). Nobody is told of their own
+  act. The words carry the number, route and dates — never the purpose, a reason or a note's text; each link opens the
+  reader's page and tab. A notice that cannot be sent is logged, never thrown — every caller has committed — and every
+  caller publishes after its own save (U2). Tenant-explicit, so 8b's sweep uses it unchanged. Every notice's entity is
+  the trip (U9), whatever it is about.
+- *The lifecycle (D-45, D-46).* The traveller: submitted for them (not their own submission), approved (after the last
+  stage, or outright), rejected, returned, sent back for a change and cancelled by someone else. The desk: approved (all
+  but the approver), and cancelled or sent back for a change by someone outside it. Completed, recalled and closed tell
+  nobody. The request service's five HR-role topics are gone; `StaffTravelRequest.{Submitted,Approved,Rejected,Cancelled,
+  Completed}.Internal`, the engine's `StaffTravelRequest.Workflow{Submitted,Completed,Rejected}.Internal` and
+  `StaffTravelAlert.Issued.Internal` are switched off whenever the topics are ensured. ⚠ **The engine's topic seeders
+  (`seed-db`, and the Notification Topics screen's "seed workflow topics") switch its three back on** — they reactivate any
+  inactive `Workflow*` topic and restore its recipient — **and the engine sends its submitter notice during the
+  submission, before travel's notice switches it off**, so the first submission after a deploy or such a seed still sends
+  one. Not fixed here: the alternatives were to ensure the topics before the engine call (inside the submission's unit
+  of work) or to change the platform's seeders.
+- *Money.* An advance requested → the desk but the requester; approved, paid out (with the date to account for it by)
+  and rejected → the traveller, on the trip's Money tab. A claim submitted → the desk but the submitter (the whole desk
+  when the traveller submits on the portal), on the desk's claim page; returned, approved (`{{Outcome}}`: approved or
+  partly approved), rejected and paid (net of the advance — *"the advance you held covered all of it"* when it did) → the
+  claimant, on the portal's claim page. Review and payment publish after the posting runner returns.
+- *Compliance (E6's in-app half).* The alert send goes through `StaffTravelNotices` — the traveller in the app and by
+  email on *Before you go*, the desk but the sender; `NotificationSentAt` still stamped after the send. A risk assessment
+  recorded, or its level raised, on a trip still to happen or under way asks the traveller to acknowledge it.
+- *Messages and files (O-17's notice half).* A note the traveller can see, by anyone but them → the traveller (who wrote
+  it, not what); the traveller's question or reply → the whole desk, on the Comments tab; a file the traveller adds →
+  the whole desk, with its type and name, on the Attachments tab. The desk's own internal notes and files tell nobody.
+- *Screens.* The portal's trip page and the desk's open the tab named in `?tab=` (new `useTabParam`, the employee
+  profile's pattern: the URL drives the tab, a click replaces it; both pages under a Suspense boundary). An approver
+  shown fewer tabs falls back to Overview.
+- *Email.* Topic emails carry the notice's title as subject and its text as body — no link (the publisher builds no URL);
+  the words say where to go.
+- *Guide.* Chapter 15 (what tells the traveller), chapter 16 (the bell and email), T-44 closed in chapter 11 and § 19.
+- *Found on the way.* **Cross-module defect #36**: the notification dispatcher writes back whole rows, so a soft delete
+  made while its batch runs is undone — 45 notices of two deleted policy-suite trips were live again on UAT, stamped
+  *Sent* 0.1 s after the teardown deleted them. The shared teardown now deletes a run's notices again one dispatcher
+  cycle (35 s) later, until a pass finds none. And lane 7's compliance runs had left 50 alert notices live (the old alert
+  topic's entity was the alert, which no teardown swept) — removed by hand on UAT (count-checked); the compliance and
+  portal suites now sweep notices by alert id too.
+
+**Suite** `run-final-reminders.mjs` (new, **110**), on `buildApprovalsFixture`: every notice counted in `Notifications`
+by topic key and recipient. §1 the lifecycle (a warm-up note first — see the ⚠ above): a desk submission tells travC in
+the app and by email at their login's address, no engine submitter notice and no old HR one; the approval tells travC
+(their words, the portal link) and the desk but the approver, no engine "approval completed"; 25 topics with their
+rules, the eight retired ones off, the engine's approver notices on; travC's own submission tells them nothing; a
+rejection (no engine initiator notice) and a return (no reason in the text) tell travC; travC's cancel and change
+request tell the whole desk ("The traveller cancelled …") and not them; the desk's tell travC and not the desk. §2 an
+advance requested (the desk but the requester), approved (the amount; the Money tab), paid out (the date to account for
+it by), rejected; a portal claim submitted (the whole desk; the desk's claim page), returned (the portal's claim page),
+partly approved, paid with the advance covering it, and a second rejected. §3 a risk briefing (*as Medium*), nothing on an
+update at the same level, again at High; an active alert to travC in the app and by email (the *Before you go* link) and
+the desk but the sender, nothing on the old alert topic. §4 a shared note (by whom, not what), an internal note (nobody),
+travC's question and reply (the Comments link), travC's file (type and name), the desk's file (nobody). §5 the no-login
+employee emailed at their address and in nobody's app; with the address cleared, the whole desk told *"Tell …"*, no
+email. §6 a local SMTP sink and a temporary `EmailSettings` row: the shared note's email arrives at travC's address with
+its subject and *Messages tab*, its row *Sent*; the row removed. **110/110 twice** (493816, 612261). The first run
+(211847) failed four checks, all the harness's: sqlcmd's 256-character display width cut notice bodies (the suite now
+reads with `-y 0`), the fixture's `userIds.hr2` is empty (that login is `hrb`), and an email row reads *Sent* only when the
+dispatcher saves its batch (now polled); a second run (405447) stopped on an sqlcmd error the suite did not report — its
+query now retries a deadlock or timeout and reports what SQL Server said. Regression, twice each, all unchanged: portal
+**177** (708904, 236064), compliance **96** (763599, 288420), bookings **148** (819378, 343631), money **288** (871158,
+396508), policy **131** (943511, 467020), lifecycle **257** (992314, 516322), truth **118** (076553, 599300), approvals
+**123** (116937, 639877), fleet **165** (175153, 697809). No slow request; the teardowns' second pass found nothing to
+re-delete; no notice live on a deleted trip, none on the old alert topic, no alert notice on a trip not the fixture's;
+no fixture trip and no mail settings left; the demo's four trips as they were. The scheduled sweep ran during the
+regression (07:51, *Scheduled*, completed, nothing queued) — this API's start was 07:39 and the three reminders runs took
+nine minutes, not eleven: 8b's suite must wait for that run, not assume it. The API log held only the known noise
+(payroll's profile defect #23, one per fixture employee).
+
+**As built — slice 8b, the sweep's kinds (2026-10-03).** No migration (batch 1 carries `PublishedAt`).
+- *Who is told (D-4, F2).* `StaffTravelReminderService` sends every reminder through `StaffTravelNotices` (13 more topics,
+  38 in all; a third audience, `Approver` — `UsersFromData` on the ids the sweep resolves, in the app and by email). Each
+  candidate carries whom it reaches (the preview's new **Sent to**) and how it is sent. The old pair
+  `StaffTravelReminder.DueSoon/Overdue.Internal` are switched off, and every run ensures the topics — which also puts the
+  engine's three initiator topics back off daily after a workflow-topic seed (D-45's ⚠).
+- *The kinds and windows (D-49, D-50 — constants, each a TDC question in § 6):* documents of active employees at 90, 30
+  and 7 days and then tiers 1–3 (U7 — the rung is in the key; an item first seen inside a rung gets that rung only; the
+  owner, by `TellDocumentOwnerAsync` — the document's own id is the notice's entity — or the desk, `DocumentExpiring.Desk`,
+  when they have neither login nor address); visas on trips not cancelled, rejected, completed or closed, same rungs (the
+  traveller); advances overdue (the traveller and the desk, tiers as before); departing, approved trips only, 14 days (the
+  traveller); **visa missing**, 14 days, by the ticket's own rule (Approved or Not required in hand; `NeedsVisaAsync`) (the
+  traveller and the desk); **approval waiting** after 5 days, tiers by days waited — the current step's approvers by the
+  new shared `HrPendingApprovers` (leave's resolution, leave's own copy untouched), the traveller's own logins left out;
+  the desk with a *why* when nobody can be asked; **approval escalated** once 3 days or less before departure or after it
+  (O-11, the desk); **briefing unacknowledged**, 7 days, the latest assessment valid at departure (D-37's reading), once
+  per assessment (the traveller); **claim window closing** 7 days before the last day on a completed trip whose approved
+  policy has a window and no claim submitted (the traveller); **claim window passed** once, with a draft or returned claim
+  or cash out (the desk, naming each). A trip with nothing open is not chased.
+- *The record.* `PublishedAt` written after each candidate's send (one save each); a key claimed but never published is
+  sent by the next run under its old row (`Retried` on the run result); "already sent" means published. The run's
+  `CompletedAt` is written after the sends, so a run that died part-way shows it. Tenant-explicit throughout — the
+  admin reads alone take the tenant from the caller.
+- *Screens.* The reminders page lists the ten kinds with their windows and audiences, says who is told and how, shows
+  **Sent to** on the preview and **Sent** (or *Not yet — next sweep*) on the log; the toast counts retried ones. The nav
+  description names the new kinds.
+- *Guide.* Chapter 14 (the table of kinds, the cards, T-52 and T-53 corrected, F2 closed).
+- *Harness.* The shared teardown also removes the sweep's dispatch rows keyed by a run's trips and their visas. **New
+  suite `run-final-sweep-scheduled.mjs`** — run first after an API start: it plants a departing trip and waits (up to 16
+  minutes) for the host's scheduled run, nobody signed in, then reads its run row, the candidate's dispatch row under that
+  run, and the traveller's notices.
+- *UAT's first sweep under 8b (measured read-only, 2026-10-03; the user's go asked with the build):* one notice today —
+  the passport of TDC/00006 (Kwasi Danquah), 66 days, to its owner (U7: sent to HR at 90 days before; the new key sends
+  it once more, to him). From 4 Oct 13:30 UTC the two Submitted demo trips (TR-2026-00002, -00003, submitted 29 Sep) wait
+  5 days: each is on the old one-stage route asking the Manager, HR and TenantAdmin roles — 10 active people (9 Manager
+  holders, among them other modules' demo logins, and 2 HR; no active TenantAdmin). From 5 Oct the demo's Kumasi trip
+  (19 Oct) is departing. Emails dead-letter (no mail server).
+- *Found on the way — the harness has been leaving its fixtures on UAT since lane 0.* Every suite tears down its trips and
+  switches its minted **logins** off, but never retires the fixture **employees, units and positions** it creates. On
+  2026-10-03 UAT held **2,398 active `E2ETv…` employees** (36% of its 6,616 active), **592 active `E2E Travel …` units** under
+  the Board of Directors and **2,113 `E2E…` positions**; creating an employee fires the hire hooks, so each also left a
+  probation period (2,488 on the probation queue), a payroll profile, a contract detail, a position history and — with
+  the logins — 21,423 identity-reconciliation items. Leave's scheduled September chase at 07:57 queued 2,043 reminders,
+  2,042 of them to fixtures, and its HR summaries to the demo's HR officers count them. Not lane 8's — put to the user as
+  a separate piece of work: the teardown retiring each run's people, units and positions, and a one-time clean-up of
+  UAT proven on a scratch copy first.
+  **Done the same day, on the user's word, before 8c.** One SQL in the harness (`final-setup.mjs` `retireFixturesSql`)
+  soft-deletes the fixture's employees, units and positions (and makes them inactive) with what hangs off them — probation
+  periods, payroll profiles, contract details, position and unit histories, identity-reconciliation states, leave's
+  dispatch rows, notices to fixture logins and emails to fixture addresses — marked `DeletedBy = 'travel-harness-retire'`,
+  found by the fixture's names alone (no real row pointed at any). **Identity-reconciliation items are kept**: an
+  append-only audit trail, guarded by a trigger that refuses any update (found on the scratch copy, where the first run
+  rolled back whole); once the employee is deleted the reconciliation no longer takes it as a candidate, so no new item
+  is added about it. Proven on a COPY_ONLY scratch of UAT (`tools/retire-fixtures.mjs` — every table lost exactly the
+  fixture's rows, a second run changed nothing; the API on the copy answered 18 screens — register, head counts, units,
+  positions, probations, payroll profiles, identity reconciliation, travel — with no fixture and no error), then **applied
+  to UAT** after a verified restore point (`ErpSystemDB_UAT_before_fixretire.bak`): employees 7,030 → 4,380, units 1,082 →
+  451, positions 2,308 → 1,677, probation periods 6,904 → 4,254, nothing else changed. **Every teardown now retires its
+  run's fixture** (`teardownRun` → `retireRunFixtures`, by stamp): truth 118/118 (its 3 employees) and approvals 123/123
+  (12 employees, 3 units, 3 positions) retired theirs, and no travel fixture is live on UAT. The screens answered the
+  same 18 checks on UAT. ⚠ **What remains is not travel's:** the other HR harnesses' fixtures — about 4,220 employees
+  (`E2EInt…`, `E2ELc…`, `E2ECl…`) and 135,000 dead emails to `@e2e.local` — so UAT still lists 4,380 employees, of which
+  about 160 are real (some 131 seeded TDC staff and 29 other modules' demo staff since the 29 Sep rebuild); fixtures are
+  given `TDC/` numbers, so a count of `TDC/` employees is not a count of staff. Offered to the user.
+
+**Suites.** **`run-final-sweep-scheduled.mjs`** (new, **10**) — run first after the API's start: an approved trip departing
+in 6 days, then the host's own run at 10:53 UTC (Trigger *Scheduled*, nobody signed in) completed, claimed it under that
+run, published it, and the traveller was told in the app and by email. **10/10** (146887). That first sweep under 8b sent
+the demo exactly what was measured: the passport notice to TDC/00006's login (`head.dev`), in the app (its email failed —
+no mail server). **`run-final-reminders.mjs` 110 → 172**: §7–§13 as its header lists. The first run (864397) and the
+second (146506) passed every 8b check and failed §6 only — its guard refused, correctly, while someone else's email was
+queued (the demo passport's, then leave's own scheduled September chase at 10:59 queuing to the demo's HR officers); the
+guard now lets harness addresses (`@e2e.local`) through and waits up to six minutes for anyone else's to dead-letter.
+**172/172 twice** (293428, 820310). Regression, twice each, all unchanged: portal **177** (380670, 180814), compliance **96**
+(458922, 264327), bookings **148** (542683, 357506), money **288** (613496, 442081), policy **131** (730042, 586861),
+lifecycle **257** (792223, 656736), truth **118** (938876, 850749), approvals **123** (984547, 900042), fleet **165**
+(069409, 997184). No slow request; the teardowns' second pass found nothing to re-delete; no notice or dispatch row live
+on a deleted trip, no fixture document, policy or trip left, no mail settings; the only live dispatch rows and non-trip
+notices are the demo passport's; the demo's four trips as they were. The API log held the known noise — payroll's
+profile defect #23 and, louder now that travellers and approvers are emailed, *"Email service returned failure"* for
+want of a mail server.
+
+**As built — slice 8c, the transitions and Fleet's signals (2026-10-03).** No migration (the group statuses, `ClosedAt`
+and `ClosedById` exist since batch 1).
+- *The moves (D-6, D-47, D-51; U3, U4).* Each run of the sweep first plans its moves, then makes them and logs each in
+  the same save — so no move is made without its row — then finds the reminders, which read the trips as they now stand.
+  Approved → **InProgress** on the departure date, or before it once Fleet has dispatched (or completed) one of the
+  trip's fleet trips; InProgress → **Completed** the day after the end date (D-47), `CompletedAt` stamped; an approved
+  trip already past its end takes both steps in one run. Completed → **Closed** once the claim window has passed **and**
+  nothing is open (**D-51**, proposed with this build, taken by the user as built — § 1): the window is `StaffTravelLifecycleRules.ClaimWindowLastDayAsync`
+  — the approved policy's `ExpenseSubmissionDays`, else lane 3's 30 days — and the settled test is the one the desk's
+  Close now shares, `StaffTravelLifecycleRules.OpenItemAsync` (lane 1's rule, moved out of `CloseAsync` unchanged);
+  `ClosedById` stays null — no employee closed it. A **group** is under way once any place (a traveller's trip not
+  cancelled or rejected) is under way, completed or closed, and completed once every place is completed or closed; it only
+  moves forward. Every write is stamped `UpdatedBy = 'staff-travel-sweep'`; all of it is tenant-explicit (U3).
+- *The record.* Five new kinds in the dispatch log — `TripStarted`, `TripCompleted`, `TripClosed` (keyed by the trip),
+  `GroupStarted`, `GroupCompleted` (by the group) — published as soon as made; the run result counts trips started,
+  completed and closed and groups moved (no column: the run row keeps *Queued* as before). The preview lists the moves a
+  run would make, read-only (nothing tracked), each with whom it tells.
+- *Who is told (8a's rule: completed and closed tell nobody — D-46 — kept for the desk's verbs).* Only the sweep's
+  **completion** tells anyone: the traveller (`StaffTravel.TripCompleted.Traveller`, in the app and by email), with the last
+  day to file a claim, linking the trip's Money tab — and only while that day is still ahead. A completion whose notice did
+  not go out (a run stopped between) is sent by the next run from its logged row. A start tells nobody (the traveller was
+  told it is departing); a close tells nobody.
+- *Fleet's signals (D-29; lane 6's seam, Fleet's code unchanged).* `IStaffTravelFleetService.GetSweepSignalsAsync` —
+  tenant-explicit, the sweep has nobody signed in — reads each open trip's fleet trips (status, dispatched, back) and the
+  incidents on them since the backlog floor. **Dispatch** starts the trip (above). **Every vehicle back** while the trip is
+  still under way tells the desk once (`FleetReturned.Desk`, in the app: mark it completed if the traveller is back too —
+  the sweep does so the day after it ends). **An incident** on a trip not yet closed tells the desk once
+  (`FleetIncident.Desk`, in the app, with Fleet's title, linking the Compliance tab) and the traveller's **nearest line
+  authority with a login** (`HrLineAuthority`, the new `FleetIncident.Manager` topic — a fourth audience, `UsersFromData`
+  on `ManagerUserIds`, in the app and by email; **without Fleet's free text**, as 8a's rule keeps free text out of email;
+  linking the approver's door, which a line authority opens since lane 2). 42 topics in all.
+- *Did not travel (D-48, U4).* The desk's cancel of an **under-way** trip, through the desk's door only
+  (`callerIsTravelDesk`; the portal's cancel answers *"ask the travel desk"*): until its end date, and only while nothing
+  was spent on it (`StaffTravelLifecycleRules.SpentOnAsync` — a claim filed, advance cash out, a booking committed by its
+  supplier or a fleet trip approved or dispatched, a booking used or a no-show, a fleet trip completed). The reason is kept
+  as *"Did not travel: …"*, an internal note records it, and the traveller is told as for any cancel. A driver's own
+  request goes with it unless it too is under way — then the cancel is refused until the desk has decided the driver's
+  request on its own page (**D-52**, below). The desk's trip page shows **Did not travel** on an under-way trip before its
+  end date.
+- *Found on the way.* The departure, visa-missing and briefing finders read only *Approved* trips: once the sweep moves a
+  trip under way on its departure day — or earlier on Fleet's dispatch — they would have dropped it. They read under-way
+  trips not yet departed too.
+- *Found by the regression — D-52.* The first build passed D-48's desk right down the driver cascade, so the desk's cancel
+  of a trip took an under-way driver's request with it, while every other path that cancels a driver's request (the leg's
+  cancel, delete and new driver, Request change) still refused — lane 6's fleet suite §13 failed 5 checks, the same on both
+  passes (601628, 179667). Put to the user, who chose lane 6's refusal everywhere (§ 1, D-52):
+  `RequireDriverCancellableAsync` refuses an under-way driver's request outright, naming the way out, and no cascade
+  carries the desk flag. The fleet suite's §13 gains the desk's path — refused, the driver's request cancelled on its own
+  as not travelled, then the trip.
+- *Screens.* The reminders page: the twelve kinds (Fleet returned, Fleet incident), a *What the sweep moves* card, the
+  preview counting moves apart from reminders, *Line Manager* among the audiences, the toast counting the moves. The desk's
+  trip page: *Did not travel*. Frontend type-check (scoped) and lint clean.
+- *Guide.* § 1.3 (the statuses' writers), chapter 5's header and dialog, § 2.1 (the sweep completes Sebrepor), chapter 14
+  (the kinds, the moves, the cards), T-7 closed.
+- *Harness.* `run-final-reminders.mjs` gains §14 (the moves, the preview, D-51, §12's settled trip closed), §15 (did not
+  travel) and §16 (a group); its topic count is 42. `run-final-fleet.mjs` gains §15 (dispatch, an incident to the desk and
+  the line manager, the vehicle back, *did not travel* refused while the vehicle is out and once it is back, nothing twice).
+  `run-final-sweep-scheduled.mjs` gains a second candidate — an approved trip that ended yesterday — so the moves are
+  proven with nobody signed in. The shared teardown also removes a run's group dispatch rows. `tools/run-all-8c.sh` keeps
+  the fleet suite last in each pass: it runs the sweep itself, and no other suite may see a sweep move its trips (U8).
+- *UAT's first sweep under 8c (measured read-only, 2026-10-03):* UAT holds two approved trips and no trip under way or
+  completed. **Sebrepor (TR-2026-00004, TDC/00017, 17 Sep, a submitted claim, no policy) is moved under way and completed
+  in that run**, and its traveller told *"claims by 17 Oct 2026"* (in the app; the email dead-letters); it does not close —
+  its claim is open and so is its window. Kumasi (TR-2026-00001, 19–20 Oct, its advance paid out) is untouched until 19 Oct.
+  The *Lagos Free Zone study tour* group stays Planning — its one place is still submitted. No Fleet data on UAT.
+
+**Suites (8c).** Run on UAT on the user's go, after D-51 was kept as built. **`run-final-sweep-scheduled.mjs` 10 → 15:** the
+host's own run at 19:05 UTC, nobody signed in, moved the second candidate under way and completed it, logged both under
+that run and told its traveller the last day to claim (1 Nov — 30 days, no policy) — **15/15** (699547), and again after
+D-52 (798951, the run at 20:14). **That first 8c sweep did on the demo exactly what was measured:** Sebrepor (TR-2026-00004)
+under way and completed by `staff-travel-sweep`, its traveller told in the app (the email dead-lettered — no mail
+server); nothing else moved. **`run-final-reminders.mjs` 172 → 222:** 222/222 twice on the first build (949747, 588576)
+and **222/222 on the final code** (226369; D-52 touches no path it walks). Two runs (437397, 500025) failed §6's guard
+alone: leave's HR digest to the demo's two HR officers, queued about 17 minutes after every API start, had not
+dead-lettered within the six minutes §6 waited — it now waits up to ten. **The regression, twice, on the final code:**
+portal **177** (010548, 604457), compliance **96** (066879, 661416), bookings **148** (125572, 721555), money **288**
+(181993, 778872), policy **131** (269633, 861794), lifecycle **257** (324826, 912178), truth **118** (419804, 012710), approvals
+**123** (463563, 057279) — all unchanged — and fleet **165 → 194** (529766, 120040: §15 and §13's D-52 path). On the first
+build the regression was unchanged twice except fleet, **181/186 twice** (601628, 179667) — §13's G3 check, which gave
+D-52. After every run: the demo's four trips as stated (Kumasi Approved, the two Submitted, Sebrepor Completed), the
+only live new dispatch rows Sebrepor's two moves, no fixture employee, active fixture login, vehicle, policy, mail
+setting or notice on a deleted trip left. *Seen in the API log, not travel's:* payroll's profile defect #23 on every fixture
+employee; *"Email service returned failure"* (no mail server); and **`HR/Identity reconciliation failed … Sequence
+contains more than one element`** (`HrIdentityReconciliationService.ResolveEligibleUserForEmployeeAsync`, a
+`SingleOrDefault` over a user–employee join) — 95 times during 8c's runs, against 2 in 8b's regression that morning,
+each on a suite's freshly minted fixture logins while its fixture was built; it was already logged on earlier days
+(87 on 30 Sep, 28 on 2 Oct). No assertion depends on it; no affected employee has more than one login afterwards. Put to
+the user as a separate item.
+- **D-45 — the engine's notices to the initiator.** Travel's own traveller topics carry the traveller's news, linking the
+  portal; `StaffTravelRequest.WorkflowSubmitted`, `.WorkflowCompleted` and `.WorkflowRejected` are switched off — left on,
+  a self-submitting traveller hears twice, through a link that does not open, and a desk-submitted trip's traveller still
+  hears nothing. The engine's approval request and step assignment stay: they reach the approvers and their link works.
+  *Recommended.* (Alternative: keep the engine's three and add only what they do not cover.)
+- **D-46 — what the desk hears of the lifecycle.** What it must act on: approved (book it), and cancelled or sent back for a
+  change by someone else (unwind the bookings, advances, vehicles). Submitted, rejected and completed to HR retire — the
+  engine asks HR when it is HR's stage, and the rest are acts the desk does or sees in its queues. *Recommended.*
+- **D-47 — completing a trip.** The sweep completes an under-way trip the day after its end date; the desk's verb stays for
+  an early return. The claim window and every claim already count from the end date, and without it no trip closes by
+  itself. *Recommended.* (Alternative: the sweep only asks the desk to mark it completed.)
+- **D-48 — a trip that did not happen (U4).** The desk may cancel an under-way trip as *did not travel*, with a reason kept as
+  an internal note, until its end date and only while nothing was spent on it — no claim, no advance cash out, no booking
+  confirmed or ticketed (D-24 already refuses those). *Recommended.* (Alternative: lane 1's rule stands — it is
+  completed, with a note.)
+- **D-49 — the claim window (U5).** Instead of "claim overdue, no claim": the traveller is told seven days before the
+  window's last day, on a completed trip whose policy has a window and that has no submitted claim (a draft counts as
+  not submitted); once the window has passed with a draft or returned claim, or cash still out, the desk is told once —
+  that trip cannot close. A trip with no claim and nothing out is not chased. *Recommended.*
+- **D-50 — the windows.** Constants in one place, each named in § 6's TDC questions: approval waiting 5 days (leave's
+  default), HR escalation at 3 days before departure, visa missing 14 days, briefing 7 days before departure, the passport
+  rungs 90/30/7, the claim reminder 7 days before the window closes. A per-tenant settings screen stays out of scope.
+  *Recommended.*
+
+### Lane 9 — Cross-module touchpoints (O-12, O-13, O-14, D-10)
+
+- [x] **Attendance** *(slice 9a, `67cb65f83` — as `StaffTravelAttendancePosting`, with a link column, D-53)*: a `TravelAttendancePostingService` on the model of
+  `LeaveAttendancePostingService` — an approved trip posts its working days as `OnDuty` (the enum value
+  that has never had a writer); *Request change* and cancel reverse or re-post; an existing punch is
+  never overwritten.
+- [x] **Leave** *(slice 9b, `c2e21c5be` — computed on every read, since leave has no warning path, V5/D-55)*: a leave
+  submission warns when the employee has an approved trip on those days, through leave's existing warning path.
+- [x] **Separation** *(slice 9c, `738e3acaf` — and ReturnedForRevision trips too, D-57; the recovered advance settled, D-58)*:
+  the clearance lists a leaver's open trips, bookings and undisbursed advances (it lists outstanding advances already);
+  the separation's approval cancels Draft and Submitted trips.
+- [x] **Payroll** *(slice 9d)*: the D-10 hand-off; the payroll-offset row in the cross-module defects document.
+
+Suite `run-final-touchpoints.mjs`: attendance rows written and reversed; the leave warning; the
+separation lists.
+
+**Source check (2026-10-03, HEAD `6de559255`).** Attendance's posting and summary, leave's create, submit and date-moving
+paths, separation's clearance, approval, completion and settlement, the payroll offset, and UAT's attendance rows and
+separations were re-read and counted. Three of the checklist's premises do not hold (V1, V5, V6), and the settlement has
+a money gap the plan did not name (V7). Ten:
+- **V1 — attendance cannot tell travel's rows apart.** Leave owns its `StaffDailyAttendance` rows by `LeaveRequestId` and
+  `OnLeave` (`LeaveAttendancePostingService.cs:195-200`) and reverses only those — hard-deleting them, since the unique
+  index (TenantId, EmployeeId, AttendanceDate) is not filtered on `IsDeleted` (l.243-248). The row carries
+  `LeaveRequestId`, `RemoteWorkRequestId` and `PublicHolidayId` — nothing for travel (`StaffAttendanceEntities.cs:133-152`).
+  § 5's *"attendance posting needs no schema"* is wrong: without a column travel would know its rows only by `OnDuty` and the
+  wording of `StatusReason`, and a clerk can set `OnDuty` by hand (the records and daily-entry screens offer it) — a
+  reversal could delete their row.
+- **V2 — `OnDuty` counts as nothing in the monthly summary.** `RecalculateAsync` counts Present, Absent and OnLeave
+  (`AttendanceCoreServices.cs:1364-1366, 1385-1387`); the dashboard counts `OnDuty` as present
+  (`AttendanceDashboardService.cs:153, 161, 282, 289, 352`). Posted travel days would vanish from the monthly figures. The
+  payroll export reads only the summary's row count (`AttendanceOperationsServices.cs:983-996`); alerts fire on Absent
+  only. No code writes `OnDuty` today.
+- **V3 — leave's model, to reuse.** `LeaveAttendancePostingService` is tenant-explicit and never saves; `LeaveService` calls
+  it after each commit, best-effort, through one dispatcher (`ReconcileAttendanceAsync`: post while the leave counts as
+  taken, else reverse — `LeaveService.cs:3697-3717`) and a nightly 14-day `ReconcileRecentAttendanceAsync` (l.3719-3779) on
+  leave's sweep host. A day with a punch, a note, another status or another source is skipped, never overwritten; only an
+  empty absence is taken over (posting l.99-119); a released row with a punch is kept and unlinked (l.227-235). Working
+  days: `IHrWorkingDayCalculator.GetHolidayDatesAsync` (the tenant's calendar; optional holidays are working days) and
+  Sat/Sun — leave's `LeaveChargeableDays.Between` needs a leave type. Travel's own `StaffTravelItineraryRules.Days()` skips
+  weekends but not public holidays (l.61-77).
+- **V4 — attendance has no guard.** A punch on a posted day fills the times and keeps the status and the link
+  (`AttendanceCoreServices.cs:754-767`); a clerk's edit changes the status freely (`AttendanceMappingExtensions.cs:245-267`).
+  So, as leave's, travel's release keeps a punched row (unlinked) and its posting never overwrites one.
+- **V5 — leave has no warning path.** Every check at leave's create and submit refuses or passes silently
+  (`LeaveService.cs:277-445, 649-807`); `LeaveRequestDto` carries no warnings (`LeaveDTOs.cs:871-1033`); submit answers a
+  fixed message (`LeavesController.cs:817`); the frontend's submit is `Promise<void>` and the desk page's workflow hook
+  drops any result (`useWorkflowRecord.ts:104`). Dates also move through suggest-changes, respond-to-suggestion and
+  reschedule (`LeaveService.cs:1120, 1194, 1270`), which bypass submit. Leave reads no other module. Training and
+  recruitment read travel as a conflict — Submitted, Approved, InProgress, inclusive days
+  (`NomineeAvailabilityService.cs:93-98`, `PanelistCommitmentSources.cs:165-182`); travel reads leave at its submission —
+  Approved, InProgress (`StaffTravelRequestService.cs:395-416`).
+- **V6 — separation sees travel only at the settlement.** Clearance lines come once, at the start, from the template
+  catalogue (seven defaults, no travel kind — `SeparationService.cs:3251-3269, 3507-3580`), plus one computed source: HR
+  assets, through a read-only, tenant-explicit bridge (`AssetCustodyClearanceBridge.cs:126-160`), refreshable
+  (l.3817-3883). Travel appears only when the settlement is prepared, after clearance: each cash-out advance becomes a
+  `TravelAdvanceRecovery` deduction (l.2312-2342; another currency → *cannot compute*, which holds finalisation). Open trips,
+  live bookings, undisbursed advances and open claims are never shown. The checklist's *"it lists outstanding advances
+  already"* is true of the settlement, not the clearance.
+- **V7 — a recovered advance stays out in travel.** The settlement deducts the unsettled advance from the final pay and its
+  release posts it (`HrFinancePostingCommandFactory.cs:534` → staff advances receivable), but nothing writes back: the
+  advance stays cash out, the sweep marks it overdue and chases the leaver and the desk (lanes 3, 8b), its trip never
+  closes (`OpenItemAsync`), and a claim paid later would recover it a second time. Settling it in travel must not post
+  again — lane 3's refund verb posts `TRAVEL_ADVANCE_REFUNDED`, a second credit to the same receivable.
+- **V8 — approval touches nothing else, and a leaver can still travel.** `ApproveAsync` (l.750-827) changes only the
+  separation (its adapter sets Approved, l.810-811; the generic inbox never calls that adapter). The cascade pattern is
+  `AppraisalWithdrawalService.StageLeaverWithdrawalsAsync` (tenant explicit, tracked, the caller saves; called at
+  completion through `EmployeeService.ApplySeparationOutcomeAsync`). Travel's `CancelAsync` reads the tenant from the
+  signed-in user, needs a non-null `CancelledById`, saves on its own (Fleet's cancel at once) and notifies — so a cascade
+  calls it per trip after the separation's save, best-effort. Travel treats someone as a leaver only once their status is
+  Inactive, Terminated or Retired (`StaffTravelRequestService.cs:172-213`), set at completion: between approval and
+  completion a trip can be raised that starts after they have gone. The separation's day is `EffectiveDate` (always set by
+  submission) or `LastWorkingDay`, read `EffectiveDate ?? LastWorkingDay` (l.2402).
+- **V9 — payroll.** D-10's refusal holds (`StaffTravelFinanceService.cs:719-722`; the pay dialog hides the option since lane
+  3). The hand-off it promised the payroll owner is not written — no row in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`, no
+  travel hand-off in `docs/HR/integration/handoffs/` (`HANDOFF-PAYROLL-LEAVE.md` is the shape).
+- **V10 — UAT.** 54 attendance rows in all (10 Aug – 19 Oct), none `OnDuty`, none on any trip's days. The first reconcile
+  would post three days: Sebrepor (TR-2026-00004, TDC/00017) 17 Sep; Kumasi (TR-2026-00001, TDC/00006) 19 and 20 Oct. No
+  live separation is of anyone with a trip or an advance (the demo's TDC/00028 awaiting approval, TDC/00052 and TDC/00096
+  have none).
+
+**Proposed slices:**
+- **9a — attendance (V1–V4; D-53, D-54).** A lane-9 migration (D-53) — `StaffDailyAttendances.StaffTravelRequestId`,
+  nullable, foreign key set-null, indexed — scaffolded by the user, rewritten as guarded SQL, proven on a scratch copy of
+  UAT. `TravelAttendancePostingService` on leave's model; one dispatcher run after each status change commits (approval,
+  cancel and *did not travel*, Request change, an early completion), and the nightly travel sweep reconciling recent trips
+  (8c's host). The monthly summary counts `OnDuty` as present (V2). The trip's page says how many days are on the
+  traveller's attendance.
+- **9b — leave (V5; D-55).** A travel conflict on the leave request, computed when it is read.
+- **9c — separation (V6–V8; D-56, D-57, D-58).** A computed Travel block on the clearance; the approval's cascade to the
+  leaver's trips; travel refusing a trip after an approved separation's day; the settlement's release settling the
+  advances it recovered.
+- **9d — payroll (V9).** The D-10 hand-off and its cross-module row — documents only.
+
+**Decisions (the user, 2026-10-03 — all six as recommended; the alternatives are kept below as the record):** D-53…D-58,
+now in § 1.
+- **D-53 — how attendance knows travel's rows (V1).** *Recommended:* a lane-9 migration adding `StaffTravelRequestId` to
+  `StaffDailyAttendances` (nullable, set-null, indexed), exactly as leave's `LeaveRequestId`; a reversal touches only rows
+  carrying the trip's id. (Alternative: no schema — travel's rows are `OnDuty` with the trip's number in the reason; a
+  clerk's own `OnDuty` row could be removed or taken over.)
+- **D-54 — which days, and who wins.** *Recommended:* the trip's working days (Mon–Fri, not a public holiday on the
+  tenant's calendar), posted while the trip is approved, under way, completed or closed; an early completion keeps the
+  days up to it; a cancel, *did not travel* or Request change removes them. Never overwrite a punch, a note, leave's day or
+  a clerk's status — first writer wins, as leave's posting does; a removed day with a punch is kept, unlinked. The monthly
+  summary counts `OnDuty` as present, as the dashboard does. (Alternative: post weekends and holidays too — a traveller is
+  away — though attendance keeps no rows on non-working days.)
+- **D-55 — the leave warning (V5).** *Recommended:* computed on every read of a leave request, so it covers its creation,
+  an approver's suggested dates and a reschedule alike: *"{name} has staff travel TR-… ({status}) from … to …, over these
+  days"*, for trips Submitted, Approved or under way that overlap (inclusive, as training and recruitment read travel) —
+  shown on the leave request page to the employee, the approver and HR, before anyone decides. (Alternative: warnings
+  returned by create, submit and the three date-moving verbs — four frontend doors, one of which drops its result.)
+- **D-56 — travel on the clearance (V6).** *Recommended:* a computed, read-only **Travel** block, read live like the asset
+  register: the leaver's open trips (by status and dates), live bookings, advances — undisbursed (withdrawn with their
+  trip) and cash out (recovered in the settlement) — and open claims; advisory, not a line that blocks completion, since
+  the money already flows through the settlement. (Alternative: a mandatory clearance line the desk must clear.)
+- **D-57 — the separation's approval (V8).** *Recommended:* it cancels the leaver's Draft, Submitted and
+  ReturnedForRevision trips — after the separation's save, each through travel's own cancel, best-effort, with *"Left the
+  organisation on {day}"*; any it cannot cancel is named in the Travel block. Approved and under-way trips are listed for
+  the desk, not cancelled (bookings and money hang off them). And travel refuses a trip — at create and submit — that
+  starts after an approved separation's day. (Alternative: cancel only at the separation's completion.)
+- **D-58 — the advance the settlement recovered (V7).** *Recommended:* when the settlement is approved for release, each
+  advance it recovered is settled in travel — unsettled to nothing, fully settled, *"recovered from the final settlement"*
+  as an internal note on its trip — with **no** travel posting (the settlement's journal is the posting). (Alternative:
+  list it only, and the desk records it by hand — but lane 3's refund verb would post a second time.)
+
+**As built — slice 9a, attendance (2026-10-03).**
+- *The migration (D-53).* `20261003212653_TravelClosureAttendanceLink`, scaffolded by the user and rewritten as guarded SQL:
+  `StaffDailyAttendances.StaffTravelRequestId` — nullable, indexed, a foreign key to the trip that sets itself null.
+  No data step (nothing ever wrote `OnDuty`). Down refuses while any day carries a trip's link — run as dynamic SQL, since
+  a batch naming the column does not compile where the column is gone (found by the proof's second Down) — then drops the
+  key, the index and the column. **Proven on a COPY_ONLY scratch copy of UAT, 28/28**: Up, Up again unchanged, Down
+  refused with a linked day (all kept), Down once unlinked (keys, indexes and the 54 rows exactly as before), Down again a
+  no-op, Up after Down the same shape; the SQL rendered from the migration itself (csc + the API's EF DLLs); the scratch
+  dropped. The model has the column with a navigation-free `HasOne<StaffTravelRequest>()` set-null key.
+- *The posting (D-54).* `StaffTravelAttendancePosting` (Core, scoped) on leave's model, rule for rule: a trip holds its
+  working days — Monday to Friday, not a public holiday on the tenant's calendar (`IHrWorkingDayCalculator`) — while
+  approved, under way, completed or closed, up to an early completion; the days carrying its id are exactly those. A day
+  with a punch, a note, leave's or another trip's link or any other status is skipped; an empty absence is taken over; a
+  given-up day is hard-deleted, or — punched since — kept, unlinked, with *"Staff travel TR-… no longer covers this day,
+  but attendance was recorded for it"*. Rows say *"On duty — staff travel TR-… to {city}"*, by `Travel`. Tenant-explicit;
+  best-effort after each caller's commit (logged, never thrown).
+- *When.* After the final approval, a cancel (*did not travel* and the driver cascade included), Request change and an
+  early completion; the sweep's own moves change no day. **Every sweep reconciles** (`ReconcileRecentAsync`, after its
+  moves): each trip that holds days and has not ended, or ended in the last 14 days (leave's window — older attendance is
+  not rewritten), and each trip — deleted ones too, read with `GetQueryableIncludingDeleted` since the repository's
+  `GetQueryable` hides them with its own filter — whose days it should no longer hold. The run result counts the days
+  added and removed (`AttendanceDaysAdded`, `…Removed`).
+- *The monthly summary (V2).* `RecalculateAsync` counts `OnDuty` as present, as the dashboard does.
+- *Screens.* The desk's trip page: **On attendance** — the days on duty (`AttendanceDaysRecorded`, the single read only). The
+  reminders page: an *Attendance* line under *What the sweep moves*; the toast counts the days. Frontend type-check (scoped)
+  and lint clean.
+- *Guide.* Chapter 5.1 (the trip's days on attendance), chapter 14 (the sweep's reconcile).
+- *Harness.* New suite **`run-final-touchpoints.mjs`** §1–§6 (approval with a taken-over and a punched day, the monthly
+  summary, Request change and re-approval, an early return, a cancel keeping a punched day, the sweep's repair both ways);
+  it sweeps, so `tools/run-all-9a.sh` runs it last with fleet. The shared teardown deletes a run's posted days and counts
+  them in its "nothing left".
+- *UAT's first reconcile (corrects V10):* 14 days back, so **only Kumasi's two days** — TR-2026-00001, TDC/00006, Monday 19 and
+  Tuesday 20 October — go on duty; Sebrepor's 17 September is older than the window and stays as it is.
+
+**Suites (9a).** On the user's go: a verified restore point (`ErpSystemDB_UAT_before_travell9.bak`, COPY_ONLY, checksum), the
+migration set-diff (112 against 111 — this one pending), the API's start applied it (history row, column, set-null key and
+index verified in SQL; the 54 attendance rows untouched). **The host's first sweep (22:04 UTC) put exactly Kumasi's two days
+on TDC/00006's attendance as on duty** — nothing else on the demo moved. `run-final-sweep-scheduled.mjs` **15/15** (419955;
+its back-dated candidate shows the reconcile both ways: one day posted at approval, two added and one given up once its
+dates moved). `run-final-reminders.mjs` **222/222** (123228). **New `run-final-touchpoints.mjs` 43:** 42/43 twice on the
+first pass (478610, 124997), failing only *"…saying which trip"* — the reason is stored right (U+2014, read in SQL) but
+sqlcmd prints the em dash as a hyphen in the console's code page; the check now compares in SQL — **43/43 twice** (216604,
+275851). **The regression, twice, all unchanged:** portal **177** (875543, 536718), compliance **96** (940714, 593222),
+bookings **148** (003605, 653279), money **288** (060609, 710205), policy **131** (143000, 789310), lifecycle **257** (195671,
+841905), truth **118** (292894, 940381), approvals **123** (336147, 983630), fleet **194** (400867, 048444). After every run: the
+demo's four trips as they were, 56 attendance rows of which the two on duty are Kumasi's, no fixture attendance row, summary,
+employee, login or mail setting left.
+
+**As built — slice 9b, the leave warning (2026-10-03).** No migration.
+- *The warning (D-55, V5).* `LeaveService.GetLeaveRequestByIdAsync` — leave's single read, beside its attendance count — fills
+  `LeaveRequestDto.TravelConflicts`: one sentence per trip of the employee **awaiting approval, approved or under way** whose
+  days overlap the leave's, either end inclusive (training's and recruitment's reading of travel): *"{name} has staff
+  travel TR-… (approved) from 19 Oct 2026 to 20 Oct 2026, over these days."* (dates in the invariant culture — the server's
+  own writes *Sept*). None for leave cancelled or rejected. Computed on every read, so the request's creation, an approver's
+  suggested dates and a reschedule all show it, with no change to any of leave's write paths; nothing refuses the leave.
+- *Screens.* A shared `LeaveTravelConflicts` banner — *"Staff travel over these days"*, in the shape of the leave plan's
+  reliever clashes — on the HR desk's leave request page (where approvers decide one by one) and on the employee's own.
+  Frontend type-check (leave-scoped) and lint clean. **And on the approvals list** — put to the user as a known limit, and
+  added at their word: the list approves in bulk without opening each request, so its rows carry the same warning as a
+  badge (*"Staff travel over these days"*, or *"N trips over these days"*, each trip's sentence in its tooltip).
+  `GetMyPendingApprovalsAsync` fills the field for the page in one query, as it already marks the rows matching an approved
+  plan; the single read uses the same `MarkTravelConflictsAsync`.
+- *Guide.* Chapter 16 — attendance and leave join the places travel shows up outside its menu.
+- *Harness.* `run-final-touchpoints.mjs` §7: a leave request planted over a trip (13 columns — a fixture employee has no
+  leave entitlement to pass leave's own gates) and read through leave's real endpoint — to HR and to the employee; the
+  wording; awaiting approval, then approved; a day after the trip names nothing; a draft on its first day names it; cancelled
+  leave names nothing; a cancelled trip leaves nothing; HR's approvals list carries the field on every row. On UAT the list's
+  badge cannot be exercised end to end — a planted request has no workflow instance, so no approver's list holds it, and a
+  real one would be routed by UAT's live leave route to the demo's approvers. Clean-up deletes the planted rows.
+- *The badge, proven end to end on a scratch copy of UAT (the user's ask, 2026-10-04).* `tools/prove-leave-badge-scratch.mjs`
+  (refuses unless `DEMO_DB` names a scratch copy) against the API started on `ErpSystemDB_TravelL9bScratch` (a COPY_ONLY
+  restore): a real Compassionate leave request raised and submitted through leave's own API for a fixture traveller with a
+  trip awaiting approval over those days; leave's live workflow routed it — to **every Manager-role holder** of the fixture
+  (chief, director, unit head, the unrelated manager), not to the traveller's own supervisor, who holds only the Employee
+  role: on UAT that would have been the demo's managers — and every list holding it carried the trip's sentence on its row,
+  **9/9**. Then **in a browser**: the frontend (`next dev`) against the scratch API, Edge driven by `playwright-core` (in the
+  scratchpad — no browser download), signed in as the chief, `/hr/leave/approvals` showed the request's row with the amber
+  **"Staff travel over these days"** badge and the trip's sentence as its tooltip; the copy's other pending leave (the demo's)
+  carried none — **all checks passed**, screenshot kept in the session scratchpad. The servers stopped and the copy dropped
+  afterwards.
+
+**Suites (9b).** No migration. `run-final-touchpoints.mjs` **43 → 55** (§7): **55/55 twice** on the warning's build (951520,
+019355), and again **twice** on the badge's build (195309, 860692). The badge **9/9** on a scratch copy and seen in a browser
+(above). The scheduled run **15/15** (072107), `run-final-reminders.mjs` **222/222** (774286), and the regression twice, all
+unchanged — portal **177** (563921, 260088), compliance **96** (622332, 317704), bookings **148** (684748, 379928), money **288**
+(765888, 437904), policy **131** (848961, 518191), lifecycle **257** (900898, 570280), truth **118** (003447, 673580), approvals
+**123** (046893, 717327), fleet **194** (113009, 782652) — the last run at the old cadence: 9b changed no travel code, and the
+user then set the cadence above (§ 7) from 9c on. After the runs: the demo's four trips as they were, attendance at 56 (the
+two on duty Kumasi's), no planted leave, fixture row, login or mail setting left.
+
+**As built — slice 9c, separation (2026-10-04).** No migration. Travel's side lives in one class,
+`StaffTravelSeparationBridge` (Core, scoped, tenant-explicit) — travel decides what counts as open and how an advance
+settles; separation owns the form, the approval and the settlement, as `AssetCustodyClearanceBridge` keeps HR Assets'
+answer in HR Assets.
+- *The Travel block (D-56, V6).* `GetClearanceAsync` fills `SeparationClearanceDto.Travel`, read live: every trip of the
+  leaver not cancelled, rejected or closed, with its live bookings (`StaffTravelBookingRules.IsLive`, all four kinds);
+  every advance not fully settled, written off, rejected or cancelled; every claim not paid or rejected. Each trip says what
+  happens to it — a draft, submission or trip sent back *"Cancelled when the separation is approved"*, or, once it is,
+  *"Not cancelled by the separation's approval — cancel it on its page"*; approved and under way *"Goes ahead unless the
+  travel desk cancels it — bookings and money may hang off it"*; completed *"…the trip closes once they have"*. An advance
+  not paid out is *"withdrawn with its trip"*; cash out is *"deducted from the final settlement, and settled in travel when
+  the settlement is released"*. Advisory: no clearance line, nothing in `BlockedReason` or `CanComplete`. The clearance
+  page shows it as a **Staff travel** card under the items (`SeparationTravelPanel`), each trip and claim opening on the
+  desk's own page. Frontend type-check (scoped) and lint clean.
+- *The approval's cascade (D-57, V8).* After the separation's save, once its status is **Approved** — in `ApproveAsync`
+  (the last stage, not an intermediate one) and in `SubmitAsync` (a published route that approves at submission) —
+  `CancelLeaverTripsAsync` cancels the leaver's Draft, Submitted and ReturnedForRevision trips one by one through
+  `IStaffTravelRequestService.CancelAsync` (which withdraws the approval in progress, holds and undisbursed advances,
+  gives up attendance and tells the traveller and the desk), reason *"Left the organisation on {d MMM yyyy} — separation
+  SEP-…"*, by the approver as an employee. Best-effort: a refusal is logged and the trip stays, named in the Travel block;
+  a login with no employee record cancels nothing and logs why. ⚠ The generic inbox (`/workflow/inbox` → `mobile/actions`)
+  completes a step through the engine alone and applies no status adapter — a separation approved there stays
+  PendingApproval, so its trips are not cancelled either. That is **cross-module defect #15** (open since 2026-08-26), true of
+  every adapter-based area alike, and not travel's to fix.
+- *No trip after the leaving day (D-57).* `StaffTravelRequestService.RequireNotGoneByAsync`, at create and submit:
+  *"{name} leaves the organisation on {dd MMM yyyy} under an approved separation, so a trip starting on {dd MMM yyyy}
+  is not raised"* (or *submitted*). The day is the separation's effective date, else its last working day, for any
+  separation from Approved to Completed; a trip on the day itself is allowed. Once the separation completes the employee
+  record refuses anything anyway (lane 1).
+- *The recovered advance (D-58, V7).* `ApproveSettlementReviewAsync` — Internal Audit's release — calls
+  `ApplyFinalSettlementRecoveryAsync` inside the settlement's posting callback, before its save: each
+  `TravelAdvanceRecovery` line naming an advance (`SourceTravelAdvanceId`) settles that advance in travel by what it
+  deducted, up to what is still out; the status follows (`StaffTravelAdvanceRules.SettlementStatus`), and the trip carries
+  an internal note — *"Advance TA-…: GHS n recovered from the final settlement of separation SEP-…, released on {day}.
+  Settled in travel without a travel posting — the settlement's journal is the posting."* No travel posting: lane 3's
+  refund would credit the staff advances receivable a second time. It commits or rolls back with Finance's journal. ⚠
+  **Idempotent by construction:** the posting adapter runs the callback inside EF's execution strategy, which may run it
+  again after a transient failure, and a rollback leaves tracked values changed — so the amounts are read as the database
+  holds them (no tracking) and set absolutely, never incremented in place.
+- *Guide.* Chapter 16 — separation joins the places travel shows up outside its menu.
+- *Harness.* `run-final-touchpoints.mjs` §8 on UAT: a separation for the fixture traveller raised as a draft through
+  separation's API and marked approved in SQL (submitted, it would reach UAT's Managing Director); its clearance's Travel
+  block — an approved trip going ahead, a draft named as not cancelled, an advance not paid out, nothing closed, nothing
+  holding the clearance; the draft refused at submit and a trip after the day refused at create, one before it raised.
+  Clean-up soft-deletes the separation. The cascade and the release, which need the MD and Internal Audit, are proven end
+  to end on a scratch copy by `tools/prove-separation-travel-scratch.mjs` (refuses unless `DEMO_DB` names a scratch copy).
+
+**Suites (9c).** No migration (set-diff 112 = 112 before the API's start). The scheduled run **15/15** (328839).
+`run-final-touchpoints.mjs` **55 → 71** (§8): **71/71 twice** (042915, 127588). **The cascade and the release, end to end on a
+scratch copy** (`ErpSystemDB_TravelL9cScratch`, a COPY_ONLY restore of UAT, the API started on it):
+`prove-separation-travel-scratch.mjs` **36/36 twice** (246573, 297579) — trips A and B approved (A with an advance of 400
+approved and paid out by the two officers), D a draft, S submitted, R sent back; a separation raised, submitted and approved
+by a minted Managing Director: D, S and R cancelled with *"Left the organisation on 3 Nov 2026 — separation SEP-…"*, S's
+approval withdrawn, A and B left; a trip after the day refused, one before it raised; the clearance's Travel block listing
+A, B and the new draft (named as not cancelled by the approval) and the advance as cash out, holding nothing; clearance
+completed, the settlement deducting 400, finalised, released by a minted Internal Auditor — the advance **fully settled,
+400 settled, nothing out**, the internal note on A, **no `TRAVEL_ADVANCE_REFUNDED` record**, the settlement's own
+`SEPARATION_SETTLEMENT_RELEASED` record, and the Travel block no longer listing the advance. The API's log: *"3 of the
+leaver's 3 trip(s) not yet approved cancelled"* both times, no warning. The servers stopped, the copy dropped, its backup
+deleted. **The regression — one pass, the cadence's first use** (`tools/run-regression.sh 9c`, 15 minutes, all unchanged):
+portal **177** (201138), compliance **96** (235873), bookings **148** (263254), money **288** (287992), policy **131** (336658),
+lifecycle **257** (354538), truth **118** (431559), approvals **123** (439996), fleet **194** (472812), touchpoints **71**
+(526168); reminders after it **222/222** (595358). The re-delete pass found nothing to re-delete after the pass or after
+reminders — not by construction: the pass deleted 138 trips carrying 2,675 notices, none live afterwards. After the runs: the
+demo's four trips as they were (Kumasi approved with its two days on duty, two awaiting approval, Sebrepor completed),
+attendance at 56, no separation or trip of the day's runs left live.
+
+**As built — slice 9d, payroll (2026-10-04).** Documents only; no code, no run. V9 held: D-10's refusal is in
+`StaffTravelFinanceService.PayClaimAsync`, the pay dialog offers bank transfer, cash, cheque and corporate card, and UAT has
+no claim paid by payroll offset (its paid claims are bank transfers, all of them deleted harness rows).
+- *The hand-off* — `docs/HR/integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`, in `HANDOFF-PAYROLL-LEAVE.md`'s shape,
+  self-contained for the payroll owner: what payroll offset did (O-6) and what D-10 did; that HR's posting already leaves
+  the staff claims payable for payroll's journal, so what is missing is the amount reaching a payslip; that payroll has
+  no intake for a one-off amount per employee (bonus, back-pay and arrears are their own policies,
+  `PayrollEmployeeComponent` is a standing setting, `PayrollImportBatch` reconciles staff numbers); what travel would send
+  per claim (number, employee, `NetPayable`, currency, what it was for, when) and need back (the pay period that paid it,
+  a way to withdraw an item not yet paid — travel voids payments); and the asks — first, whether claims should be paid
+  through payroll at all (if not, D-10 stays and nothing is built), then the intake, then currency and tax as payroll's to
+  rule. It is the note `HANDOFF-FINANCE-HR-POSTING-ROUTES.md` § 3 said would be raised with the payroll owner.
+- *The cross-module row* — **#37** in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`, in that file's shape.
+- *Found while writing it — medical's twin, not travel's:* a medical claim can still be paid by **Salary deduction**
+  (`PaymentMethod.SalaryDeduction`), offered on the medical claim page's pay dialog; its posting is skipped as *"settled
+  through payroll"* and nothing reaches payroll — O-6 again, unrefused. UAT has no such claim. Named in the hand-off and
+  #37; whether to switch it off the way D-10 did is the user's call, for the medical area.
+- *Guide.* Chapter 9's pay step named *mobile money* and *payroll* among the methods; it now names the four the dialog
+  offers and why payroll offset is not one.
+- *The lane's checklist* — the four touchpoints ticked with their slices.
+- *Corrected:* 9c's as-built note had the generic inbox's stranded approvals as a finding; it is cross-module defect
+  **#15**, recorded since 2026-08-26.
+
+**Lane 9 close (2026-10-04) — two regression passes, at the user's cadence (§ 7).** No migration (112 = 112); the API
+started on UAT at 13:50 UTC; the scheduled run **15/15** (882446) first.
+- *The first two passes* (`tools/run-regression.sh 9close 2`): pass 2 unchanged in every suite; pass 1 failed two:
+  - **lifecycle 256/257** (804617) — *"no live row is left … expected 0, got 2"*. **A harness gap of the new cadence.**
+    Leave's reminder sweep, which runs once about 17 minutes after an API start, reminded the run's fixture chief (a
+    Manager — UAT's pending leave asks every one) at 14:08:18, mid-teardown: once in the app, twice by email. The
+    dispatcher wrote them back after the fixture's retirement (#36); the per-suite 35-s wait used to absorb that, and
+    the once-per-pass re-delete covered only notices on deleted trips. The same sweep posted the run's planted
+    approved leave onto its traveller's attendance (five days, 1–5 Feb 2027); the run deleted the leave, the days
+    stayed — UAT's attendance read 61, not 56. **Fixed in the harness:** under `TRAVEL_REDELETE=defer` the teardown
+    leaves notices to fixture logins and addresses to `tools/redelete-pass.mjs`, which now covers them; the fixture's
+    retirement hard-deletes its employees' daily attendance (leave's and travel's own model) and soft-deletes their
+    monthly summaries, counting any left. Both run against the leftovers: 3 notices re-deleted, the 5 days removed,
+    attendance back to 56; the whole travel fixture rehearsed at zero live rows in every table.
+  - **fleet 188/194** (991615) — §15's sweep answered **500**: *"Incorrect syntax near ')'"* (SQL error 102) on the
+    sweep's claim-window read (`StaffTravelReminderService.ClaimWindowsAsync`, lane 8b), request `0HNP23Q7VS0I8:0000000B`,
+    14:11:00 UTC; the five checks reading that sweep failed with it. **Unexplained, and recorded as such:** the statement
+    EF logged is complete and valid, fixed and parameterised; it has run in every sweep since 8b (every scheduled,
+    reminders, fleet and touchpoints run — dozens of suite runs) without error, and did not recur in the three passes
+    after it. No
+    travel code runs a query concurrently (no unawaited task, raw ADO or parallel work in the sweep, its notices or the
+    attendance posting). The connection runs with MARS, under which interleaved use of one connection can garble a
+    command — a guess, not a finding. Watch for it; if it recurs, capture the server's view (an Extended Events
+    `error_reported` session on error 102 shows the text SQL Server actually received).
+- *The close's two passes*, rerun on the fixed harness (`tools/run-regression.sh 9close2 2`, 14:41–15:04 UTC), **every
+  suite unchanged twice**: portal **177** (893138, 328229), compliance **96** (918196, 353373), bookings **148** (948906,
+  383833), money **288** (974040, 410250), policy **131** (031441, 467047), lifecycle **257** (050609, 487493), truth **118**
+  (129116, 562983), approvals **123** (137986, 571801), fleet **194** (173003, 607866), touchpoints **71** (217608, 654449);
+  reminders after them **222/222** (729236). Pass 1's re-delete removed 10 notices the dispatcher had written back onto
+  touchpoints' deleted trips (approval requests and a *Ready to book*, created 14:47:02–03) — the mechanism working; pass 2
+  and reminders' found none. Leave's sweep had already run for this API start, so the rerun did not meet it again: the
+  fixes are proven on the leftovers above, not by a second collision.
+- *After the runs:* the demo's four trips as they were (Kumasi approved, its two days on duty; two awaiting approval;
+  Sebrepor completed), attendance at 56, no trip, notice or attendance row of the day's fixtures live. The API stopped.
+
+### Lane 10 — Docs, demo pack, harness, hand-offs
+
+- [ ] `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`: rewrite the six rules above chapter 1 (T-1 and T-2 fall with
+  D-3, T-3 is fixed, T-5 is stale, T-6 stays) and every chapter a lane changed; § 19 points here.
+- [x] `docs/HR/README.md`, `HR-FINISH-PLAN.md` (lane 10's travel sweep, lane 9's travel-policy door,
+  row 9.19, D-29), `HR-FINANCE-INTEGRATION-BACKLOG.md` (the FX note, the refund event). *(10a)*
+- [x] `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`: #15 lists travel among the unprotected entities; the
+  Fleet hand-offs (planned-window conflicts, driver leave and trip availability at dispatch — offer HR's
+  availability read — a seeded fleet-trip approval definition with the no-definition guard, an
+  incidents-by-trip read); the payroll-offset row. *(10a; the payroll row is #37, 9d)*
+- [x] *(10c — proven on a fresh scratch database; UAT untouched, D-61)* The demo pack (`dev-harness\hr-demo-smoke\scenarios\080-travel.mjs`, `081-travel-logistics.mjs`):
+  ~~`hr.head` approves the policy (D-3)~~ **`hr.officer` approves `hr.head`'s draft before the trips are submitted
+  (D-3, C3, D-60 — W2)**, the London trip's over-cap hotel is authorised by a second
+  officer (D-8), a claim is filed with a receipt; the verify-tables gate covers the new rows.
+- [x] The travel harness README with its regression count; each of the sixteen old suites re-pointed
+  or retired where a rule changed, naming the lane that changed it. *(10b — all retired, D-59; 43 checks moved)*
+- [ ] Memory: the two travel memories updated; the closure memory records each lane's state.
+
+**Source check (2026-10-04, HEAD `2201a5f7d`).** Every checklist item re-read against the documents, the harness, the
+demo pack and the code; nothing run. Ten:
+- **W1 — the guide is staler than the checklist says.** Beyond the six rules, 18 of its chapters, sections and
+  appendices need a rewrite and 13 more need small fixes; § 19 logs lanes 0–5 only, still calls 5b and 4c *staged*, and about 30 fixed
+  T-rows read as open (T-3, T-5, T-8–T-10, T-12, T-15–T-17, T-21, T-22, T-27–T-32, T-35–T-40, T-46, T-50, T-52–T-54,
+  T-56–T-58). Rule 3 and Rule 5 fall; Rules 1, 2 and 6 need D-1, D-2/D-16, D-7, D-8, D-15, O-2 and the delete guards.
+  The menu has ten items, not six; the portal six screens, not four; 32 tables, not 31. Two workbook writes now fail:
+  **LW3** (a budget on a draft trip — D-16) and **LW10** as `hr.head` (the reviewer cannot pay — D-2). The parts lanes
+  already edited in place (chapter 5.1, 9's pay methods, 14's reference, 15's reference, 16's newer rows and the boxes)
+  are current.
+- **W2 — ⚠ "`hr.head` approves the policy" cannot happen.** Lane 4's C3 (`StaffTravelPolicyService.cs:303-310`) refuses
+  approval by the officer who drafted or last changed a policy, and the demo's policy is drafted by `hr.head` — on UAT
+  and in `080-travel.mjs:127`. The approver is **`hr.officer`**; the checklist's wording predates C3.
+- **W3 — programme docs.** `docs/HR/README.md`'s travel row still says *lanes 6–10 to go*; the finish plan still holds
+  travel "until the user says go" (l.75-84), still promises lane 8's sweep work (l.1482-1485), and carries the
+  travel-policy door (l.1681) and row 9.19 (l.1710, done in 7c1 `584993d0a`) as open; the Finance backlog has neither
+  `TRAVEL_ADVANCE_REFUNDED` nor `TRAVEL_ADVANCE_WRITTEN_OFF` (catalogue l.62-64), nor B12's dated rate — which reaches
+  HR's posting adapter and staff requisitions too — nor 9c's recovery that posts nothing.
+- **W4 — #15 names no HR entity.** Its line *"no HR entity is protected"* (defects l.39) is where travel belongs: a trip
+  approved from the generic inbox stays Submitted, skips lane 2's line rule and stamps no `ApprovedById`, and posts no
+  attendance or notice; a separation approved there cancels no trip (9c).
+- **W5 — the Fleet hand-off was never written.** D-12 and D-27 sent FX-2 (Fleet's clash check sees Dispatched trips
+  only), FX-7 (a driver checked for a licence only, not for leave or another trip), FX-9 (no seeded fleet-trip
+  approval; Fleet's submit lacks the no-definition guard, so a submitted trip auto-approves) and an incidents-by-trip
+  read to the Fleet owner; no row or hand-off exists. Defects l.285 also tells readers to re-run `run-slice6.mjs`.
+- **W6 — the demo pack has not run since lanes 1–5 patched it** (last UAT run 29 Sep). Against the closed rules: the
+  draft policy binds nothing, so 081's over-cap Hilton is simply confirmed and D-8 is never shown; once the policy is
+  approved the Hilton is created *Pending* and its confirm refused until `hr.officer` — the only persona with travel
+  Admin who is neither booker nor traveller — authorises it; the claim's receipt rule binds only if the policy is
+  approved **before** the trips are submitted (a request records its policy at submission), so the approval must sit
+  before 080's submit loop; the upload needs the scanner stub (the wrapper starts one). Three bugs a rerun would hit:
+  081 creates the four travel documents again on every run (it matches the number against a list that lane 7a masks
+  to the last four), standing the verified originals down; Sebrepor's car hire is skipped once the sweep has completed
+  the trip; London's hotel is refused when day+75 falls on a Saturday (checkout past the return day + 1).
+- **W7 — the verify-tables gate** lacks `StaffTravelHealthClearances` (lane 7b's table — the pack clears no health
+  requirement, so it would be empty), and only counts rows: the new facts need `runbook-counts.json` entries (an
+  approved policy, an authorised exception, a receipted claim line, trip days on attendance).
+- **W8 — a rerun on UAT changes the demo:** London (on the retired one-step route) approved by `hr.officer` with a
+  budget — notices, on-duty days for `hr.head`, one fewer trip waiting in the walk — the Kumasi budget approved, the
+  four documents duplicated. The plan's rule (l.707) is that UAT's demo trips are not re-run.
+- **W9 — the sixteen old suites cannot run.** `setup.mjs:27` supplies a staff number, which the staff-number rule now
+  refuses (`StaffNumberService.cs:133-137`), so each dies at its first fixture; their actors hang off the tenant's first
+  real unit (lane 2 then asks its real head); no teardown in a `finally`, logins never switched off, and the fixture is
+  named so no teardown here can find it. Every one is superseded by a `run-final-*` suite except about 35–45 checks
+  (the dashboard, list-read names, `initiatedById`, segment and car-rental derivations, the visa register's uniqueness,
+  the rule-code revive, an alert's body). Plan § 7's *"sixteen as lane 0 re-pointed them"* is stale — none was.
+  `run-lane5b-visa.mjs` is the most dangerous: it gives a demo traveller a primary passport and sets Ghana→UK Prohibited.
+- **W10 — the harness README**: eleven suite rows stop at lane 9a; the regression is **1,825** assertions a pass (ten
+  suites 1,603 + reminders 222), **1,840** with the scheduled run, **1,910** with the posting proof.
+
+**Slices (proposed).**
+- **10a — the record** (documents only): W3, W4, W5 — the HR README, the finish plan, the Finance backlog, #15, a Fleet
+  hand-off and its defects row, defects l.285; this lane's checklist corrected (W2).
+- **10b — the harness** (W9, W10): the old suites retired with a table naming the lane that ended each; the uncovered
+  checks moved into `run-final-*` suites (each touched suite twice on UAT); the README's rows and count.
+- **10c — the demo pack** (W2, W6, W7): 080/081 on the closed rules — the policy approved by `hr.officer` before the
+  submit loop, the Hilton through D-8, the Sebrepor claim with a receipt, a health requirement cleared, the three bugs
+  fixed; verify-tables and the runbook counts; **proven on a scratch copy** (D-61). The pack is outside git: backed up
+  before it is edited.
+- **10d–10g — the guide** (W1), in four parts: the rules and the model (top matter, Rules, ch 1, 13, App. B); the trip
+  at the desk (ch 3–6 and an Approvals chapter); money and registers (5.4, ch 7–12 and the Advances, Policy Breaches and
+  Travel Documents screens); the workbook and the record (ch 2, 14–18, § 19 → a pointer to § 3d, App. A and C) — last,
+  after 10c, whose demo it describes.
+- **10h — the close**: the memories; two regression passes (§ 7).
+
+**Decisions (the user, 2026-10-04 — all four as recommended; the alternatives are kept below as the record):** D-59…D-62,
+now in § 1.
+- **D-59 — the old suites.** *Recommended:* retire all sixteen (and slice12, slice13, lane5b-visa, the probes and
+  smokes), moving the 35–45 checks no `run-final-*` suite makes into those suites. (Alternatives: retire without moving
+  — loses the dashboard and register checks; or re-point all in place — 3–5 days, mostly duplicating lanes 1–8.)
+- **D-60 — the demo's policy.** *Recommended:* the demo approves its policy — `hr.officer` approving `hr.head`'s draft,
+  before the trips are submitted — so the caps bind the demo: the Hilton shows D-8, the Sebrepor claim needs its
+  receipt, London's cost meets the single-trip limit. (Alternative: keep it a draft; then neither D-8 nor the receipt
+  rule can be shown.)
+- **D-61 — UAT's demo.** *Recommended:* prove the updated pack on a scratch copy and leave UAT's demo as it is; applying
+  it to UAT (a rerun, or a rebuild) is a separate go when the next demo is prepared. (Alternative: rerun on UAT now,
+  after a restore point — London approved, the policy binding every later trip on UAT, the Hilton rebooked through
+  D-8.)
+- **D-62 — the Fleet hand-off.** *Recommended:* one document in the payroll hand-off's shape plus one defects row,
+  offering HR's availability read (leave and trips) for FX-7. (Alternative: four defects rows, no hand-off.)
+
+**As built — slice 10a, the record (2026-10-04).** Documents only.
+- *The Fleet hand-off (D-62, W5)* — `docs/HR/integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md`, self-contained for the
+  Fleet owner. It says what travel does with Fleet through its one seam, and sets out four things, each re-read in
+  Fleet's code on 2026-10-04:
+  - **§ 1:** the clash check (`EnsureNoDispatchedConflictAsync`, l.885-901, on create, update and dispatch) sees
+    dispatched trips only and compares no dates. Planned trips for the same hours are all accepted, and a vehicle that
+    is out refuses next month's trip too.
+  - **§ 2:** a driver is checked for a licence only. HR offers its availability read: who is on leave or travelling.
+  - **§ 3:** no `FLEET_TRIP` route is seeded, and submit (l.346) has no guard, so the engine approves with nobody asked.
+  - **§ 4:** a Fleet-owned read of a trip's incidents. Travel reads `FleetIncidents` directly because Fleet's reads
+    need `MaintenanceRead`.
+  - Cross-module defect **#38** points at it.
+- *#15 (W4)* — staff travel and separation named under *What it blocks*. A trip approved from the generic inbox stays
+  Submitted and skips the checks travel's approve makes before the engine: the line authority, and never the traveller.
+  By the route's design, an HR officer who is travelling could approve their own trip at the HR stage from the inbox
+  (read from the code, not tried). It also gets no `ApprovedById`, no attendance days and no notices. A separation
+  approved there cancels no trip. The re-verification table's row notes it.
+- *Defects l.285* — the step "re-run `run-slice6.mjs`" now says that suite is retired (D-59) and names the suites that
+  check the rate today.
+- *The Finance backlog (W3)* — rows 12.6 (`TRAVEL_ADVANCE_REFUNDED`), 12.7 (`TRAVEL_ADVANCE_WRITTEN_OFF`, on the existing
+  write-off role) and 12.8 (9c's recovery, which posts nothing by design); B12's dated rate and its reach beyond
+  travel; 12.1's payroll offset (2026-10-04, earlier).
+- *The HR README* — the plan's row now carries lanes 6–9 and lane 10 under way; the guide's row warns it is being
+  rewritten and that LW3 and LW10 as `hr.head` fail meanwhile.
+- *The finish plan* — the travel paragraph (lanes 0–9 complete; D-29 unchanged), the sweep note (done 2026-10-03), the
+  policy door (built 2026-10-02) and row 9.19 (closed in 7c1); the hand-offs lane gains #38 beside #37.
+- *This lane's checklist* — the demo item corrected to `hr.officer` (W2, C3); the two record items ticked.
+
+**As built — slice 10b, the harness (2026-10-04).** No code; the harness lives outside the repository.
+- *Retired (D-59).* The sixteen August suites, slice12, slice13 and lane5b-visa, the three smokes, the seven probes,
+  `audit-content.mjs` and the old helpers (`setup.mjs`, `api.mjs`, `teardown-run.mjs`, `workflow-definition.mjs`,
+  `fixtures.json`) — 35 files — moved to `dev-harness/hr-travel/retired/`. Its README has a table naming, for each,
+  what it covered, the lane or decision that ended it and what covers it now. Nothing current imported them; only
+  `clamd-stub.mjs` stays beside the `run-final-*` suites.
+- *Moved, not lost — 43 checks no `run-final-*` suite made:*
+  - **truth §9:** the initiator is the caller, never the payload (old slice 7);
+  - **truth §10:** every list read names its traveller and destination — all, paged, by status, by employee, by date
+    range and the traveller's own (old slice 0);
+  - **truth §11:** the dashboard — cost by currency, the upcoming count apart from its list, six labelled months, every
+    spotlight row named, the run's trip among the newest five (old slice 11). A draft counts, so nothing is submitted;
+    the old "the total is the naive sum" assertion was dropped, since both figures sum the same rows by construction;
+  - **bookings §16:** a segment's duration from its times, a hotel's nights × rate, a car's days × rate, an untouched
+    optional time sent as null (old slices 8 and 8-ui);
+  - **policy §12b:** one live rule per code, and a removed code reused by reviving its row (old slice 12);
+  - **compliance §4b:** the destination's current alerts carry the revised body and source (old slice 13);
+  - **compliance §9:** the visa register on the suite's own pair, a fourth free destination and a second passport
+    country — names on create, edit and list; the pair fixed; a duplicate refused, naming both countries; another
+    passport accepted; a retired pair re-entered; the lookup returning the live row (old lane5b-visa).
+- *The shared teardown.* After the fixture's retirement, if anything but notices is left, it retires a second time.
+  The first 10b policy run failed only that count: HR's identity reconciliation, holding a fixture employee as a
+  candidate, wrote a state row 0.36 s after the retirement deleted it. That job stops taking a deleted employee. The
+  straggler was removed.
+- *The harness README.* The two generations became one; the regression count; the retirement; seven passages that
+  said "until lane 3/4/8" or "the fixture stays" brought up to date; every suite row's latest result.
+- *Defects l.285* (10a) and *§ 7* — no longer send anyone to the old suites.
+
+**Suites (10b).** No migration (112 = 112); the API started on UAT at 16:06 UTC; the scheduled run **15/15** (989399).
+Each touched suite twice: truth **118 → 136**, **136/136 twice** (694261, 959592); bookings **148 → 153**, **153/153
+twice** (739982, 003353); compliance **96 → 110**, **110/110 twice** (859096, 119242); policy **131 → 137**, 136/137 then
+137/137 (803013, 063863; 803013's one failure was the teardown straggler above), then **137/137 twice** on the fixed
+teardown (247958, 302848). No regression pass: no travel code changed (§ 7). The regression is now **1,868** a pass
+(ten suites 1,646 + reminders 222), **1,883** with the scheduled run, **1,953** with the posting proof. After the runs:
+the demo's four trips as they were, attendance 56, no trip, register entry, alert or fixture row live; the API stopped.
+
+**As built — slice 10c, the demo pack (2026-10-04).** The pack sits outside any repository, so the four files it changes
+were backed up first to `dev-harness/hr-demo-smoke/_backups/2026-10-04-before-travel-10c/`.
+- *`080-travel.mjs` — the policy binds (D-60).*
+  - The policy, its rules and its approval moved **before the submit loop**: a request records the policy it was
+    checked against at submission, so approved later the policy would have bound the bookings but never the claims.
+  - `hr.head` drafts it; `hr.officer` approves it (C3).
+  - Under it: London's 62,000 sits under the 75,000 single-trip limit; the Sebrepor claim's fuel line (180) needs its
+    receipt (above GHS 100; the per-diem line is exempt); Sebrepor's claim falls inside the 14-day window
+    (`nextWeekday(-12)` is at most 12 days back).
+- *`081-travel-logistics.mjs`.*
+  - **D-8 end to end:** London's Hilton at 3,200 (above 2,400) is booked by `hr.head` with the exception asked, so it
+    is saved Pending. `hr.officer` (neither the booker nor the traveller) authorises it, then it is confirmed. The
+    steps are driven by the exception's state, so a rerun resumes where the last run stopped; the old fall-back to
+    the ceiling went.
+  - **Lagos's yellow-fever requirement ticked** through `requests/{id}/health-requirements/{id}/clear`, so lane 7b's
+    `StaffTravelHealthClearances` holds a row; the online declaration stays unticked.
+  - **Three bugs fixed:**
+    - travel documents are matched on the holder and the last four characters, since lane 7 masks the number on
+      list reads (a rerun had filed all four again and stood the verified passports down);
+    - a hotel's checkout stays inside the trip (a start moved off a weekend had pushed it past the return day + 1);
+    - Sebrepor's car hire is booked first, and `ground` finds an existing booking whatever the trip's status — the
+      sweep completes a past trip on its first run, after which it takes no new booking.
+  - A stale comment about risk acknowledgement corrected (E1).
+- *The gates.* `demo-coverage-manifest.csv` gains `StaffTravelHealthClearances` (required); 081's own table list too.
+  **`runbook-counts.json` is unchanged** — a deviation from W7: it holds one query per number the books state, and
+  Book 2 §3 states none of the new facts (its policy line — "class of travel by grade … exceptions are requested and
+  approved" — stays true). The facts are checked by `dev-harness/hr-travel/tools/check-demo-travel-scratch.mjs`
+  instead (read-only; scratch copies only). Book 2 §3 can gain the D-8 walk when the books are next revised.
+- *The proof (D-61) — on a fresh scratch database, UAT untouched.*
+  - `New-UatDatabase.ps1 -Database ErpSystemDB_TravelL10cScratch -SkipScenarios -SkipConfirm` built it in 4
+    minutes: the migration chain and the seeders, no failed seeder, the two-stage travel route active, the personas
+    present including `hr.officer`.
+  - The API was started on the copy and 080 then 081 run three times:
+    - **run 1:** 4 requests, 3 approved, the advance disbursed, 3 claim lines; in 081, 1 health clearance and 1
+      exception authorised. The only refusals were the designed ones (London's flight is not ticketed without an
+      approved visa, T-24; Kumasi's taxi is not completed before the trip);
+    - **run 2:** nothing new;
+    - **run 3:** after the host's sweep at 16:55 had moved Sebrepor under way and completed it — nothing new, its car
+      hire found.
+  - `check-demo-travel-scratch.mjs` **15/15 after each run**:
+    - four requests;
+    - the policy approved by `hr.officer`, and every trip checked against it at submission;
+    - Kumasi and London approved, Lagos awaiting approval;
+    - the Hilton confirmed with its exception authorised by `hr.officer`, not its requester;
+    - the Sebrepor claim submitted with three lines, the fuel line receipted;
+    - four documents, the two verified passports still primary;
+    - Lagos's clearance;
+    - Sebrepor's car hire completed;
+    - three trips on attendance.
+  - `verify-tables.mjs`: **travel 28 of 28** required tables hold data (the other areas' scenarios were not run). The
+    API stopped, the copy dropped.
+- *Not done, by D-61:* the pack is not run on UAT. Applying it there — a rerun (London approved and its Hilton rebooked
+  through D-8, the policy binding every later trip) or a rebuild — is a separate go when the next demo is prepared.
+
+**As built — slice 10d, the guide: rules and model (2026-10-04).** `HR-STAFF-TRAVEL-SYSTEM-GUIDE.md`; every fact
+re-read in the code before it was written (the request page's **eight** tabs — the eighth, Workflow, drawn by its
+own component; eight kinds of compliance record; a Critical trip's acknowledgement holding the **ticket**, not the
+approval).
+- *Status and scope.* The status names the rewritten parts and says the plan is right where a not-yet-rewritten
+  chapter disagrees. Ten menu items and the four new screens (Approvals, Advances, Policy Breaches, Travel
+  Documents — chapters 3a, 8a, 13a, 10a, written in 10e–10f, so no chapter is renumbered); 26 pages, 32 tables;
+  the six portal screens.
+- *The rules — seven now.*
+  - **1 —** whether the policy is in force: UAT's is a draft (D-61), a rebuilt demo's in force (D-60); the state
+    labels, the five moments it binds, and the claims following the policy recorded at submission.
+  - **2 —** authority by the act: who each Admin act is refused to, what is never deleted, and the Write-tier
+    rules (D-7, D-2).
+  - **3 (new) —** two-stage approval, and UAT's Lagos and London on the old one-step route.
+  - **4 —** the rule register kept apart from D-8's booking breaches.
+  - **5 (new) —** money takes two people; payroll offset gone; the old currency rule reduced to a footnote (Finance
+    fixed its conversion; the dashboard and claims queue still do not add currencies).
+  - **6 —** recovery on payment, with the waiver, D-15 and Void payment.
+  - **7 (new) —** the nightly sweep moves trips and keeps attendance.
+  - The first edition's Rules 3 (dropdowns) and 5 (inverted rates) fell.
+- *Conventions.* The Write row names D-7, D-2 and D-16.
+- *Chapter 1.*
+  - **The diagram:** the policy box as D-1 left it, dated and scoped; submission records the policy; approval puts
+    days on attendance; health clearances; the four extra advance states; the hotel breach Pending (D-8).
+  - **The tables:** 32, with health clearances, the breach columns and the attendance link.
+  - **Enums:** the lists built from them; nine advance states; Prohibited and Critical.
+  - **§1.4:** the rollup as lanes 3 and 6 built it.
+  - **§1.5:** rewritten — every setting binds, two dropped, the scope and versions, T-9 fixed, the
+    claims-follow-submission footnote.
+  - **§1.6:** adds the generic inbox (#15).
+- *Chapter 13.* Rewritten.
+  - The state labels, Draft a policy, Approve refused to its author and Withdraw.
+  - The approved-policy card; Scope; all eleven settings in Card 2.
+  - A walk that forks on the State column: on UAT the Draft sentence and LIVE WRITE 13, with its tenant-wide
+    warning; on a rebuilt demo, who signed it and the Hilton on Policy Breaches.
+  - Behind the page; gaps T-1 (by D-61), T-4, T-49, T-51; T-2, T-9 and T-50 fixed.
+- *Appendix B.* The portal's surface as lane 7 grew it; the decision door (`StaffTravelApprovalsController`, the
+  service deciding who); Read, Write and Admin as they are; the closing note no longer calls the unlinked admin Rule
+  1's cause.
+
+**As built — slice 10e, the guide: the trip at the desk (2026-10-04).** Chapters 3, 3a (new), 4, 5 (all but 5.4) and 6,
+from the pages' code and UAT's own rows (read-only). The walks fork where UAT — not re-run, D-61 — differs from a rebuilt
+demo: UAT's London flight is **Ticketed** (booked before the visa rule), its Hilton carries no exception state, and Lagos
+and London are on the one-step route.
+- *Ch 3:* all eleven types on the filter (T-12); the `?employeeId=` banner; Pending approval forked; open Lagos on UAT,
+  London on a rebuilt demo.
+- *Ch 3a (new) — Approvals:* the approver's own queue; its columns; who each trip waits for on UAT and on a rebuilt
+  demo; never the generic inbox (#15).
+- *Ch 4:* every list from the enums (Rule 3's 400s gone); HR's currency door (O-19); no unit picker (lane 1); the visa
+  switch and its override reason (D-39); the **Policy and limits** card (T-16); what the server refuses at create (a
+  leaver, a trip after an approved separation's day) and at submission (a past departure without a reason, an
+  overlapping trip, the single-trip limit) and what it only **warns** of (approved leave, insurance, a passport expiring).
+- *Ch 5 header and 5.1:* each control as the page draws it — Submit after departure, Approve/Reject/Return from viewer
+  actions, Request change, Mark completed disabled before the start, Close trip, Cancel's refusals and cascade, Did not
+  travel; the stage banner, the alert banner, the driver's line; eight tabs; On attendance and Travel policy on the
+  Overview.
+- *5.2 Itinerary:* the server's statuses and Finalise; six leg types; Linked booking and the date flag; LW2 before
+  Finalise.
+- *5.3 Bookings:* the verbs on the ⋯ menu; every dialog's fields (Supplier, the exception request); the policy's bite
+  and D-8; the company vehicle; the ticket's three waits; a walk that shows D-8 on a rebuilt demo, and on UAT — after §
+  2.4's Option B — live on Kumasi (from 5 October the refusal also names the hotel notice).
+- *5.5 Compliance:* the six cards as they are (no documents card — they moved to their register, ch 10a); the
+  traveller-only acknowledgement; health requirements ticked.
+- *5.6–5.8 and ch 6:* the comment rules (D-21); the seven attachment types and the traveller's files; LW6 forked by
+  Rule 3; the full route table; T-28 corrected; the edit page's locked states and Request change.
+
+**As built — slice 10f, the guide: money and registers (2026-10-04).** Chapters 5.4, 7, 8, 8a (new), 9 and 9b, 10, 10a
+(new), 11, 12 and 13a (new), from the pages' code and UAT's own rows (read-only); the walks fork where UAT differs from
+a rebuilt demo. One code change: the alerts page's footnote.
+- *5.4 Finance:* the budget only on an approved trip (D-16), in its currency, its derived figures and **Approve the
+  budget** (D-19); the advance actions by status; the Finance column; LW3 as `hr.officer` approving Kumasi's (UAT) or
+  Sebrepor's (rebuilt) budget. T-20 open; T-21, T-22 fixed.
+- *Ch 7 groups:* the status verbs (Open / Close / Reopen / Cancel — In progress and Completed from the sweep); places
+  taken; *Add a traveller* and *Link an existing request*; Remove and Delete leave the trips standing. T-30–T-32 fixed.
+- *Ch 8 claims queue:* *Awaiting payment* includes Partially approved (B7); portal claims land here. T-33, T-34 open.
+- *Ch 8a (new) — Advances:* Overdue settlements (the server's read, before the sweep marks it), Cash out, All; the
+  chase-list footnote; Kumasi's GHS 2,500 out until 3 Nov.
+- *Ch 9 and 9b claims:* the four dialogs as they are — the expense review (whole or part, the reason the claimant
+  sees), the claim review's four outcomes, the pay dialog with the waiver (O-2), *Void payment*; the claim types are
+  Post Travel · Advance Settlement · Partial Claim · Amendment (the first edition invented three) and there is no currency
+  field (B11); LW 8–10 with `hr.head` refused at pay and `hr.officer` paying; the Kumasi recovery beat; the undo is the
+  void. T-35–T-39 and T-57 fixed.
+- *Ch 10 and 10a:* the register now sets the trip's visa flag (D-39) — a table by requirement type; stale entries
+  (T-40); the documents register (7a): masking, one primary per type, a change unverifies, a verified one is not
+  deleted; UAT's four documents. T-41 open.
+- *Ch 11 alerts:* an active alert fans out at once (7a), inactive goes to nobody and activating later sends nothing;
+  remove refused once sent; the demo caution for Ghana/Kumasi. T-44, T-46 fixed; T-45 a warning.
+- *Ch 12 dashboard:* the four tiles as drawn; UAT's figures on 4 Oct. T-47, T-48 open.
+- *Ch 13a (new) — Policy Breaches:* the D-8 register and its two views; London's Hilton on a rebuilt demo, empty on UAT.
+- *The alerts page footnote* (`frontend/src/app/hr/travel/alerts/page.tsx`) still said *"Raising an alert here sends
+  nothing by itself"* — untrue since 7a. It now says what the create does. Text only.
+- *Seen while writing, not fixed:* **verifying a travel document is not refused on one's own** — the two-person rule
+  does not reach it. Recorded in ch 10a's gaps as TDC's call.
+- *Pronouns:* the walks' lines no longer give the demo personas a gender (5.4 and the new chapters).
+
+**As built — slice 10g, the guide: the workbook and the record (2026-10-04).** The rest of the guide, so it is rewritten
+whole; its status line says so. Documents only.
+- *Ch 2 — the prep:* both databases side by side — the four trips (UAT: Lagos and London Submitted on the one-step
+  route, Sebrepor Completed; rebuilt: London approved, all four under the policy), and every table where they differ
+  (budgets 4 unapproved vs 2; flights and hotels 2+2 vs 1+1; health clearances; reminder runs). § 2.2 warns that
+  re-running 080 on UAT would approve the policy (D-60) — the change D-61 left undone — and that `DEMO_DB` defaults to
+  UAT. § 2.4's SQL shortcut is gone (it skipped the author rule the chapter demonstrates). § 2.5 is new — *who does the
+  second half* (`hr.officer`'s acts); three windows; ten tabs.
+- *Ch 14:* the walk as `hr.head` (Admin since lane 4); *Recent sweeps* forked; the preview's as-of date on the
+  short-dated passport's 30-day rung; gaps closed out (T-52, T-53, F2, T-7).
+- *Ch 15:* window C; Sebrepor completed; the claim on the Money tab; six screens; gaps closed out (T-54–T-56).
+- *Ch 16:* eleven places — Finance's dated rate through HR's door, Procurement's suppliers (T-8), the policy from the
+  traveller's unit and its ancestry (O-5), Workflow and #15, **Payroll (nothing, #37)**, and the General Ledger as it
+  is (posting since 2026-09-20 and lane 3; *Unposted* on UAT; #35).
+- *Ch 17 — reset:* every live write's undo as it now is — the budget's approval withdrawn by an edit, LW 7 back to In
+  progress (not Approved), LW 8–9's SQL with the real column names, **LW 10 undone by Void payment** (no SQL), the
+  Kumasi beat's claim; a rebuild flips every fork to the rebuilt side.
+- *Ch 18 — short path:* London for the bookings; the policy's State forked; Rule 6 said rather than the pay dialog
+  opened; the "do not" list without the retired 400s and 403.
+- *§ 19:* 237 lines of the first walk's findings become a pointer to § 3d — where each T-finding stands, the ten still
+  open by chapter, the lane-10 observation — and *What is genuinely strong here*, corrected for D-8, C3, two-person
+  money and the sweep.
+- *Appendices:* A — 26 routes with the persona for each second half, the generic inbox marked *not for travel*; C — the
+  plan first, the harness's 1,868 a pass, the two hand-offs, defects #15 and #34–#38 (#1 and #2 resolved).
+- *Rule 1, ch 13 and ch 2:* UAT's Lagos and London carry the draft policy from a hand link made before lane 1 — so the
+  "submitted under no policy" sentences now name Kumasi and Sebrepor only (`ApprovedPolicyAsync` would hold Lagos's and
+  London's claims to it once approved).
+- *`docs/HR/README.md`:* the guide's row describes the rewritten guide.
+
+**As built — slice 10h, the close (2026-10-04).** The travel memories brought up to date; then the lane-close proof on
+UAT — migrations 112 = 112 before the API started, so it applied nothing. The scheduled sweep **15/15** first; then
+`tools/run-regression.sh 10close 2` — both passes identical, every suite unchanged: truth **136**, lifecycle **257**,
+approvals **123**, money **288**, policy **137**, bookings **153**, fleet **194**, compliance **110**, portal **177**,
+touchpoints **71** (1,646 a pass); reminders **222** after them — **1,883** with the scheduled run. Each re-delete pass:
+0 live notices left, against 1,484 fixture notices in its scope that the teardowns had already deleted (so the zero is
+not vacuous); UAT holds exactly its four demo trips. The API log held only the known noise — the payroll profile's
+foreign key refused 666 times (cross-module #23; HR's fallback catches it) and dead-lettered notification emails; the
+one-off SQL error 102 of lane 9's close did not recur. Lane 10 changed no travel code (the alerts footnote is text),
+so these passes are the closure's final proof rather than a check on the lane.
+
+---
+
+## 5. Migration batch 1
+
+**House rules** (the performance closure's § 6): every statement guarded (`IF COL_LENGTH(...) IS NULL`,
+`IF NOT EXISTS (SELECT 1 FROM sys.indexes …)`); data operations as raw SQL; a new non-nullable column
+carries its default in the `ADD`; UAT is built from empty and then seeded, so a backfill may touch no
+rows there and must also be safe on a populated database; the model snapshot is regenerated, never
+hand-merged; the data part is dry-run on the target first and applied on the user's go.
+
+**Columns** (all nullable unless stated):
+- `StaffTravelRequests`: `ApprovedById`, `ReturnedAt`, `ReturnedById`, `ReturnReason`, `ClosedAt`,
+  `ClosedById`, `ChangeRequestedAt`, `ChangeRequestedById`, `ChangeReason`.
+- `StaffTravelExpenseClaims`: `PaidById`, `AdvanceWaiverReason`, `PaymentVoidedAt`, `PaymentVoidedById`,
+  `PaymentVoidReason`.
+- `StaffTravelExpenseClaimLines`: `FleetTripId`, `FuelQuantity` (decimal(10,2)), `FleetFuelTransactionId`.
+- `StaffTravelAdvances`: `RejectedAt`, `RejectedById`, `RejectionReason`, `WrittenOffAt`,
+  `WrittenOffById`, `WriteOffReason`, `RefundedAmount` (decimal(14,2), **default 0 in the `ADD`**),
+  `RefundedAt`, `RefundedById`, `RefundReference`.
+- `StaffTravelFlightBookings` and `StaffTravelHotelBookings`: `ExceptionState` (int, **default 0 =
+  None in the `ADD`**), `ExceptionRequestedById`, `ExceptionAuthorisedById`, `ExceptionAuthorisedAt`.
+- `StaffTravelGroundTransports`: `DriverTravelRequestId`.
+- `StaffTravelPolicies`: `CurrencyCode` char(3) — nullable, because the base currency is per tenant
+  and no literal default fits; backfilled per tenant from the tenant's base currency, and the guard
+  falls back to base when it is null.
+- `StaffTravelReminderDispatchLogs`: `PublishedAt`.
+- Enum members, int-stored, no schema: `TravelAdvanceStatus.Rejected = 8`, `Cancelled = 9`; a new
+  `TravelBookingExceptionState`.
+
+**Indexes:** the claim-number and advance-number indexes **already exist unfiltered**
+(`ApplicationDbContext.HR.cs:14765`, `:14778`), so this is a replacement — a guarded `DROP INDEX`, then
+`CREATE UNIQUE INDEX … WHERE [IsDeleted] = 0`, the model shape of `:967` / `:2781`
+(`.HasFilter("[IsDeleted] = 0")`). A new filtered unique index on `StaffTravelPolicies (TenantId,
+PolicyName, VersionNumber)`.
+
+**Data** (raw SQL; counted read-only first, applied on the user's go): `IsInternational` recomputed
+from the two countries for live requests; a claim's `CurrencyCode` set to the tenant's base where it
+differs; a policy's `CurrencyCode` set to the tenant's base; a reminder dispatch's new `PublishedAt` set
+to the time it was written (the sweep treated those rows as sent — lane 8 must not send them again).
+
+⚠ **Moved to lane 3: zeroing `UnsettledAmount` on Requested and Approved advances** (2026-10-02, while
+writing the migration). Today's disbursement does not recompute the amount — only approval sets it — so
+an Approved advance zeroed by this batch would be disbursed with nothing outstanding, and the claim that
+should recover it would recover nothing. It ships in lane 3 with the code that sets the amount at
+disbursement.
+
+**As built (2026-10-02):** `20261002000637_TravelClosureBatch1` — the scaffold rewritten as guarded SQL
+(74 batches up, 76 down). EF's scaffold also drops `IX_StaffTravelPolicies_TenantId`, because the new
+policy index starts with the tenant and covers its foreign key. Down refuses while an advance records a
+refund, a booking carries an exception state or a claim records a voided payment, and it refuses to
+restore the unfiltered number indexes while a deleted row shares a number. Proven on a scratch copy of
+UAT (`m1/test-cycle.sh`, 33/33): Up, Up again (no rows changed, same schema), Down (UAT's schema exactly),
+Up again; the two corrections on planted rows; a duplicate live policy version refused and rolled back,
+a deleted duplicate not; the three Down refusals rolled back. Against UAT it adds 38 columns, 17
+indexes, 14 foreign keys and 3 defaults, and removes the three indexes it replaces. On UAT the data part
+fills one policy's currency (GHS) and one dispatch's published time; the corrections touch nothing.
+
+**Applied to UAT 2026-10-02, on the user's go.** Restore point: `ErpSystemDB_UAT_before_travelb1.bak`
+(COPY_ONLY, verified), taken just before. The API's startup applied it — history 108 rows, newest
+`20261002000637_TravelClosureBatch1` — and it was verified in SQL, not from the log: every post-Up check
+held, and UAT's schema fingerprint equals the scratch copy's after Up. The truth suite then passed
+112/112 twice. Its claim section had to change, because the batch did what it was meant to: a deleted
+claim no longer blocks the next one, so the old 409 became a 201. The suite now asserts that, records the
+reused number as an observation for lane 3, and shows the 409 mapping on the new policy version index —
+two drafts claiming one version, which lane 4 ends by assigning the number on the server.
+
+Attendance posting needs no schema — it writes the same `StaffDailyAttendance` rows leave's posting
+does, with a reason. *(Wrong, found at lane 9's source check — V1: leave owns its rows by a `LeaveRequestId` column and
+attendance has none for travel; D-53 proposes a lane-9 column.)* Vehicle and driver are never copied onto travel rows — they are read from the
+fleet trip.
+
+---
+
+## 6. Out of scope — recorded, not built in this closure
+
+| Item | Why it waits |
+|---|---|
+| Register and claims-queue paging, search and filters; the two exports (T-11, T-13, T-14, T-33, T-34) | Recommended as the **first follow-up**; no rule depends on them |
+| Ground-transport and car-rental caps (T-18) | Needs new policy fields and TDC's numbers |
+| Per-category budget enforcement (T-20) | Product decision; the total is enforced (lane 3) |
+| Reverse visa view (T-41); dashboard date range and actual spend (T-47, T-48) | Reporting, not control |
+| Per-diem screen and per-diem claim lines (B13) | D-5 |
+| Policy-exception screen and rule enforcement | D-29 |
+| A status-history timeline for requests, claims and advances; cross-tenant first-row lookups by number (O-18) | Single tenant today; the workflow tab covers approval history |
+| Generic inbox desync (#15); Procurement's supplier create (#1) | Other teams' modules |
+| Budget consumption against Finance (backlog 12.4, 12.5) | Needs the budget-commitment conversation with Finance |
+| Paying claims through payroll (O-6) | Payroll is another developer's module — D-10 hides the option until it can receive them |
+| Column encryption of passport and visa numbers (O-7) | No encryption mechanism exists in the model; masking ships in lane 7 |
+| Concurrency tokens on travel entities | A platform item |
+| **TDC questions:** reminder windows (D-50: documents and visas 90/30/7 days, departing 14, visa missing 14, approval waiting 5, escalation 3 before departure, briefing 7, claim window warning 7, backlog 90); the claim window of a trip with no approved policy, which the sweep waits out before closing it (D-51: 30 days); the insurance and passport windows of O-16; whether an approved-budget overrun refuses or only warns (O-9); whether a pending or on-hold booking counts as committed spend (lane 5, Q6); whether a Critical or Emergency alert blocks booking (T-45); if a Finance stage is added to the travel route, whether Finance — not the last approver (HR) — should set the approved budget (lane 2) | Recorded in `HR-OPEN-QUESTIONS-FOR-TDC.md` by lane 10 |
+
+---
+
+## 7. Verification
+
+- Each lane's suite green **twice** on UAT, then the full travel regression — the `run-final-*` suites (the sixteen old
+  suites were never re-pointed; they are retired, D-59, their uncovered checks moved into these), its count recorded in
+  the harness README.
+  **From slice 9c on (the user, 2026-10-04 — a post-slice run had reached 75 minutes):** a slice that changes no travel
+  code runs its own suite twice and no regression; a slice that changes travel code runs its own suite twice and **one**
+  full regression pass; **two passes only when a lane closes**. In the harness, the teardown's re-delete of resurrected
+  notices (#36) runs once per pass, and the reminders suite runs after the regression, so it never waits for leave's HR
+  digest. The full regression stays the net for cross-lane breakage in travel code — it caught 8c's D-52.
+- **Actors:** an HR officer; a second HR officer (D-2, D-8); a plain employee (every portal check); the
+  traveller's own line manager **and** an unrelated manager (D-7 — one must succeed, one must be
+  refused); `admin` only to mint fixtures.
+- **Second-review proofs:** a future-dated policy approval leaves today's trips capped (O-4); a
+  self-service request cannot choose a laxer unit's policy (O-5); a claim with an unlinked outstanding
+  advance is refused at pay (O-2); a refunded advance settles and drops off the overdue sweep (O-8);
+  payroll offset is refused (D-10); an approved trip writes `OnDuty` days and a cancel removes them
+  (O-12); every list read masks the passport number (O-7).
+- **Manual walk** on the demo database after the demo-pack change: the guide's 25-minute short path,
+  plus the new end-to-end path — an employee raises a trip in the portal → their manager approves →
+  HR approves → the desk books (a company vehicle reaches Fleet's queue) → the employee files a claim
+  with a receipt → one HR officer reviews and a second pays → the advance is recovered → the sweep
+  closes the trip.
+- **Frontend:** a scoped `tsconfig` type-check of the travel files (the full type-check crashes) and a
+  UI-payload probe for every form a lane changes.
+
+---
+
+## 8. Status at HEAD `bad482a8d` (before any code of this plan)
+
+No lane has started. The travel harness's last green runs predate UAT (August 2026, the dev
+database); lane 0's truth suite is the first UAT run (D-13 skipped the old suites' baseline). The demo database holds the four demo trips of
+`080-travel.mjs` and `081-travel-logistics.mjs`, with the 2026 policy unapproved.
+
+---
+
+## 9. Log
+
+- **2026-10-01** — First review (findings A–F) and decisions D-1…D-6. Second review: every High
+  finding re-read and held, seven corrections, findings O-1…O-18, decisions D-7…D-10. Fleet review:
+  findings FX-1…FX-9, decisions D-11 and D-12. Plan accepted by the user; development held until the
+  user says go. This document written and staged the same day.
+- **2026-10-01, later** — The user said go, skipping the baseline (D-13). Lane 0 built and staged: the
+  frontend truth (A7, A8, A9, F4, F5); O-19 found and fixed; E3's create and list brought forward from
+  lane 7; the strings that promised more than the code does; the backend tidy-ups and the 409; the new
+  fixture, truth suite and harness README. Scoped type-check and unit tests clean. The suite has not
+  run: it waits for the user's build and the go to start the API on UAT.
+- **2026-10-02** — Migration batch 1 written: the model changes, the user's scaffold, the guarded-SQL
+  rewrite, and 33/33 on a scratch copy of UAT. The `UnsettledAmount` data step moved to lane 3 (§ 5).
+- **2026-10-02, later** — **Migration batch 1 applied to UAT** on the user's go, after a verified COPY_ONLY
+  backup; verified in SQL; the truth suite's claim section updated for the filtered index and the 409 moved
+  to the policy version index; 112/112 twice. Staged. Next: lane 1.
+- **2026-10-01, night** — **Lane 0 complete.** The build succeeded; no migration was pending on UAT;
+  the user allowed `start-api-uat.ps1` under auto mode. The first run passed every feature check but
+  its teardown failed (the claim-rename collision in lane 0's checklist) — fixed, and the stranded
+  claim renamed with `teardown-run.mjs`. Then 112/112 twice. Restaged for the user. Next: migration
+  batch 1 (§ 5).
+- **2026-10-02** — The user committed lane 0 (`0b8cdf124`) and migration batch 1 (`d426f4ed3`).
+- **2026-10-02, later** — **Lane 1, slice 1a built and proven** (the request's write rules: the edit
+  lock, the server's facts, what create and submission refuse, the policy preview). The build
+  succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 103/103 twice (and once more after
+  a harness date fix), the truth suite 114/114 twice. Staged. Next: slice 1b.
+- **2026-10-02, later** — The user committed slice 1a (`e1d050da2`). **Slice 1b built and proven** (the
+  lifecycle verbs): the build succeeded; no migration pending on UAT; `run-final-lifecycle.mjs` 193/193
+  twice, the truth suite 114/114 twice. Staged. Next: slice 1c.
+- **2026-10-02, later** — The user committed slice 1b (`8fadfd31e`). **Slice 1c built and proven — LANE 1
+  COMPLETE** (comments by their author, the traveller's view, groups by verb with a binding limit, links
+  and propagation): the build succeeded; no migration pending on UAT; one stale 1a assertion and the
+  untracked request it left were fixed; `run-final-lifecycle.mjs` 255/255 twice, the truth suite 117/117
+  twice. Staged. Next: lane 2.
+- **2026-10-02, later** — The user committed slice 1c (`895996b6f`). **Lane 2, slice 2a built**: the
+  two-stage ladder with stage 1 addressed by name (a deviation from the plan's role-based stage 1,
+  recorded in lane 2's *As built*), the line rule in the service with the desk's fallback note, the
+  approved budget at HR's stage, the approver's door, queue and viewer actions on a new controller, the
+  seeder and the data-only retrofit. One build error (the create's `CreatedAtAction` named the moved
+  read) fixed; the user scaffolded `20261002042909_TravelClosureApprovalLadder` (empty, model
+  unchanged), the SQL proven 27/27 on a scratch copy of UAT went in byte for byte, the build succeeded,
+  and on the user's go the API was started on UAT after a restore point — the retrofit applied and
+  re-verified. `run-final-approvals.mjs` 118/118 twice, lifecycle 255/255 twice, truth 117/117 twice.
+  Staged. Next: slice 2b, the screens.
+- **2026-10-02, later** — The user committed slice 2a (`4e4d85b2f`). Checking how the travel route would
+  survive an administrator's edit found **cross-module defect #34** — the workflow designer deletes an
+  approval stage's named-approver rules on save; recorded for the workflow developer, raised with them,
+  and the user chose to fix the designer's side in this lane. **Slice 2b built — LANE 2 COMPLETE**: the
+  approvals queue and the approver's view, travel's own decision buttons and the budget dialog, the last
+  stage read from the route, and the designer fix with its round-trip tests. The build succeeded; no
+  migration pending on UAT; approvals 123/123 twice, lifecycle 255/255 twice, truth 117/117 twice.
+  Staged. Next: lane 3.
+- **2026-10-02, later** — The user committed slice 2b (`519418f00`). **Lane 3 source-checked**: every
+  finding holds; ten more found (N1–N10); split into 3a, 3b, 3c; the user took the recommendations as
+  D-14, D-15 and D-16, and asked whether travel posting can be switched on in UAT (D-17, open). Slice 3a
+  began with D-14's model change (three cancellation columns on the advance, the claim's review notes),
+  handed to the user to scaffold.
+- **2026-10-02, later** — The user scaffolded `TravelClosureMoneyChain`; rewritten as guarded SQL, proven
+  38/38 on a scratch copy of UAT (the proof found the kits' vacuous `expect` helper — fixed; earlier
+  migrations re-checked and hold). D-17 settled: UAT is the developer's local database, so the posted path is
+  proven on a scratch copy. **Slice 3a built**: the build succeeded, the posting catalogue tests 37/37, a
+  restore point taken, the API started on UAT applied the migration (verified in SQL);
+  `run-final-money.mjs` 121/121 twice, lifecycle 256/256 twice, truth 118/118 twice, approvals 123/123
+  twice. Staged. Next: slice 3b, the claim chain.
+- **2026-10-02, later** — At the user's request the persona seeder gained `hr.officer` (a second HR desk
+  officer) and `seed-hr-demo` ran on UAT after a dry run and a restore point; the user committed slice 3a
+  (`e2785ce7b`). **Slice 3b built** — the claim chain: the build succeeded, the posting catalogue tests 37/37,
+  no migration; `run-final-money.mjs` 202/202 twice, lifecycle 256/256 twice, truth 115/115 twice, approvals
+  123/123 twice. Staged. Next: slice 3c, the budget and void payment, with D-17's posting proof on a scratch
+  copy of UAT.
+- **2026-10-02, later** — The user committed slice 3b (`f49e5eb9c`). **Slice 3c built — LANE 3 COMPLETE**: the
+  trip budget (in the trip's currency, within its approved budget, approved by a travel administrator, *Actual*
+  counting advances, an overrun flagged) and the payment void (T-39). The build succeeded, the posting catalogue
+  tests 37/37, no migration; `run-final-money.mjs` 286/286 twice, lifecycle 256/256 twice, truth 116/116 twice,
+  approvals 123/123 twice. **D-17 done**: `run-final-posting.mjs` 70/70 twice on a scratch copy of UAT, every
+  journal read back from Finance, the copy dropped — after its first run found **cross-module defect #35** (no HR
+  posting can land on a database seeded with Finance's v2 books). The demo pack's budgets follow the new rules.
+  Staged. Next: lane 4, policy and authority.
+- **2026-10-02, later** — The user committed slice 3c (`b08bd498d`). **Lane 4 source-checked**: every finding holds;
+  six more (P1–P6); split into 4a, 4b, 4c; the user took the recommendations as D-18 (C5's Critical half to lane 7),
+  D-19 (the budget's setter does not approve it) and D-20 (a booking with an exception is not deleted).
+  **Slice 4a built** — the policy itself (shape, currency, server versions, author ≠ approver, dated supersession,
+  unit ancestry, the two retired fields, C6). The build succeeded; no migration. The second policy run caught the
+  resolution query's ~600 MB memory grant (four 25 s previews); fixed, rebuilt — grant 0 KB. On the rebuilt binary
+  `run-final-policy.mjs` 52/52 twice, money 286/286, lifecycle 256/256, truth 117/117, approvals 123/123, each twice,
+  no slow request. Staged. Next: slice 4b, bookings under the policy.
+- **2026-10-02, later** — The user committed slice 4a (`19f20f2f2`). **Slice 4b built** — bookings under the policy: the notice and
+  preferred-vendor rules read (D-1), a breaching booking saved awaiting a different administrator's authorisation and
+  the Policy breaches register (D-8), no delete of a booking with an exception (D-20), policy exceptions decided by an
+  administrator who did not raise them (C4), Prohibited refused (C5). The build succeeded; no migration.
+  `run-final-policy.mjs` 119/119 twice, money 286/286, lifecycle 256/256, truth 117/117, approvals 123/123, each twice.
+  Staged. Next: slice 4c, authority (D-3, D-19).
+- **2026-10-02, later** — The user committed slice 4b (`3a6792a30`). **Slice 4c built — LANE 4 COMPLETE**: HR holds
+  `HR.Travel.Admin` (D-3), each Admin act refused to whoever did the thing it checks; the budget's setter does not
+  approve it (D-19); a comment is edited by its author alone (D-21, taken in the build and put to the user); the UI's
+  admin check reads the permission alone. The build succeeded. The proof found the grant does not reach an existing
+  database at startup — the add-only seeder runs under `seed-db` only; a migration was scaffolded, then dropped on the
+  user's word (D-22), and UAT's HR role was granted its row by hand. Policy 127/127 twice, money 287/287, lifecycle
+  256/256, truth 117/117, approvals 123/123, each twice; after the grant, policy 129/129 twice with `/auth/me` checks.
+  Staged. Next: lane 5, bookings and itinerary.
+- **2026-10-02, later** — The user committed slice 4c (`ef113ea0a`). **Lane 5 source-checked**: every finding holds; seven
+  more (Q1–Q7); split into 5a and 5b; the user took D-23 (bookings only on an approved trip — the plan's wording),
+  D-24 (a trip's cancel refused while a booking is confirmed or ticketed; the holds cascade), D-25 (the itinerary's
+  status the server's, with a Finalise step) and D-26 (the demo pack approves London; Lagos keeps no booking). **Slice 5a
+  built** — the trip gate, the dates, status by verb, the visa's ticketing gate, D-24, the booking doors (row verbs,
+  segments, star rating, actual cost) and the demo pack. The build succeeded; no migration. `run-final-bookings.mjs`
+  90/90 three times; policy 131/131, money 288/288, lifecycle 256/256, truth 118/118, approvals 123/123, each twice.
+  Staged. Next: slice 5b, itinerary and alerts.
+- **2026-10-02, later** — The user committed slice 5a (`4b7d12302`). **Slice 5b built — LANE 5 COMPLETE**: the
+  itinerary planned while the trip is open, its status the server's with a Finalise step (D-25), Superseded written,
+  cancelled with the trip (D-24), its days the trip's, the version in force not deleted (O-15), a leg's booking the
+  trip's own (Q3) and its date checked against the booking's (T-19), the itinerary, leg and activity doors and the
+  booking-link picker; destination alerts in force over the trip shown as a warning on the request page (T-45). The
+  build succeeded; no migration. `run-final-bookings.mjs` 148/148 three times; policy 131/131, money 288/288,
+  lifecycle 256/256, truth 118/118, approvals 123/123, each twice. Staged. Next: lane 6, Fleet.
+- **2026-10-02 to 2026-10-03** — *(this log was not kept for lanes 6 and 7; each lane's* Source check *and* As built *in
+  § 4 is the record.)* **Lane 6 complete** — 6a `3723e3e23`, 6b `c9e4cd9ee`, 6c `aba756a29`; D-27…D-35. **Lane 7 complete** —
+  7a `7a22f177c`, 7b `81bd93074` (migration `20261003002540_TravelClosureHealthClearance` applied to UAT), 7c1 `584993d0a`,
+  7c2 `a922f5085`, 7d `8f6df4f08`; D-36…D-44.
+- **2026-10-03** — **Lane 8 source-checked** against `8f6df4f08`: F1, F2, E6's in-app half and O-17's notice half hold; nine
+  more (U1–U9), among them that the workflow engine's own notices already reach approvers but reach the traveller only on
+  a self-service submission and through a link they cannot open (U1), that publishing never fails (U2), that the sweep
+  cannot call the lifecycle verbs with nobody signed in (U3), and that moving a trip under way by date leaves a trip that
+  did not happen with no way out (U4). Split into 8a, 8b, 8c; decisions D-45…D-50 proposed. Nothing built.
+- **2026-10-03, later** — The user committed the source check (`59ea1bc6a`) and took D-45…D-50, all as recommended.
+  **Slice 8a built** — the event notices: one table of who hears what (`StaffTravelNotices`, 25 topics), the lifecycle,
+  money, compliance, messages and files wired to it, the retired topics switched off, `?tab=` links on both trip pages.
+  The build succeeded; no migration. `run-final-reminders.mjs` 110/110 twice (after four harness fixes on its first
+  run); the regression unchanged twice. Found on the way: cross-module defect #36 (the notification dispatcher undoes soft
+  deletes), 95 leaked harness notices removed from UAT by hand, the shared teardown hardened. Staged. Next: slice 8b.
+- **2026-10-03, later** — The user committed slice 8a (`707207602`). **Slice 8b built** — the sweep's kinds: every reminder
+  to the people who act on it, documents and visas at 90/30/7 days, visa missing, approval waiting and escalated, briefing
+  unacknowledged, the claim window both sides (D-49), the windows as constants (D-50), `PublishedAt` and the retry, the
+  reminders page. The build succeeded; no migration. Its first sweep on UAT was measured first (one passport notice to
+  its owner today; the two waiting demo trips from 4 Oct; Kumasi from 5 Oct) and run on the user's go. The scheduled run
+  proven with nobody signed in (10/10); `run-final-reminders.mjs` 172/172 twice; the regression unchanged twice. Found:
+  the harness's fixture employees, units and positions have stayed on UAT since lane 0 (2,398 / 592 / 2,113) — put to
+  the user. Staged. Next: slice 8c.
+- **2026-10-03, later** — The user committed slice 8b (`b5808d29b`) and chose to clear the fixtures before 8c. The
+  retirement written, proven on a scratch copy of UAT (where the identity-reconciliation items' append-only trigger was
+  found and those items kept), applied to UAT after a verified restore point — 2,650 fixture employees, 631 units, 631
+  positions and what hung off them retired, nothing else changed — and built into every teardown (truth 118/118 and
+  approvals 123/123 retired their own). The other harnesses' fixtures (about 4,220 employees) remain, offered to the user.
+- **2026-10-03, later** — **Slice 8c built** — the sweep's moves: approved → under way on the date or Fleet's dispatch,
+  completed the day after the end (D-47) with the traveller told the last day to claim, closed once the claim window has
+  passed and nothing is open (**D-51**, proposed with the build), the groups; Fleet's vehicle back and incidents (D-29), the
+  incident to the traveller's line manager too; the desk's *did not travel* cancel (D-48). No migration. UAT's first sweep
+  measured read-only: it completes the demo's Sebrepor trip. The build succeeded; the user kept D-51 as built (the
+  30-day fallback a TDC question) and gave the go for that sweep.
+- **2026-10-03, later** — 8c run on UAT: the scheduled run (15/15) moved only Sebrepor, to Completed, its traveller told in
+  the app; reminders 222/222 twice (one earlier run refused §6 while leave's HR digest was queued); the regression unchanged
+  twice but for lane 6's fleet §13 (181/186 ×2) — 8c had let the desk's trip cancel take an under-way driver's request.
+  The user chose lane 6's refusal everywhere (**D-52**); fixed, and after the user's build: the scheduled run 15/15,
+  reminders 222/222 (§6 now waits ten minutes for leave's HR digest), the regression unchanged twice with fleet 194/194.
+  The API log's identity-reconciliation errors (not travel's) put to the user. Staged. Next: lane 9.
+- **2026-10-03, later** — The user committed slice 8c (`6de559255`): **lane 8 complete.** **Lane 9 source-checked** against
+  `6de559255`: attendance's posting and summary, leave's date paths, separation's clearance, approval and settlement, the
+  payroll offset, UAT's attendance and separations. Three premises fell (V1 no attendance column for travel — § 5's "no
+  schema" was wrong; V5 leave has no warning path; V6 the clearance never sees travel) and a money gap surfaced (V7 a
+  recovered advance stays out in travel). Split into 9a–9d; decisions D-53…D-58 proposed — **taken by the user the same
+  day, all six as recommended**. Slice 9a begun: the D-53 column in the model, for the user to scaffold.
+- **2026-10-03, later** — **Slice 9a built** — the trip's working days on the traveller's attendance (D-53, D-54): the user's
+  scaffold rewritten as guarded SQL and proven 28/28 on a scratch copy (its second Down caught a batch that could not
+  compile without the column — fixed), the posting service on leave's model, its hooks and the sweep's reconcile, the
+  monthly summary counting on duty as present. The build succeeded; on the user's go a restore point, the migration
+  applied to UAT, and the first sweep put Kumasi's two days on duty. Touchpoints 43/43 twice; the regression unchanged
+  twice. Staged. Next: 9b.
+- **2026-10-04** — The user committed 9a (`67cb65f83`). **Slice 9b built** — the leave warning (D-55): computed on every read
+  of a leave request and shown on its page; at the user's word also a badge on the approvals list, which approves in bulk
+  without opening a request — proven end to end on a scratch copy of UAT (a real leave request, routed by leave's live
+  route to every Manager-role holder) and in a browser (Edge, the badge and its tooltip on the row). Touchpoints 55/55
+  twice; the regression unchanged twice. The user set the run cadence from 9c on (§ 7). Staged. Next: 9c.
+- **2026-10-04, later** — The user committed 9b (`c2e21c5be`). **Slice 9c built** — separation (D-56, D-57, D-58): the
+  clearance's Travel block, the approval cancelling the leaver's trips not yet approved, travel refusing a trip after the
+  leaving day, Internal Audit's release settling the advance the settlement recovered — with no travel posting, and
+  idempotent under the posting's retry. Touchpoints 71/71 twice on UAT (a planted approved separation); the cascade and
+  the release 36/36 twice end to end on a scratch copy. The first pass at the new cadence: one regression pass, unchanged,
+  in 15 minutes (a post-slice run at the old cadence had reached about 75). Met on the way: the generic inbox approves through
+  the engine alone and moves no record — cross-module defect #15, already recorded (as built, 9c). Staged. Next: 9d.
+- **2026-10-04, later** — The user committed 9c (`738e3acaf`). **Slice 9d written** — documents only: the payroll hand-off
+  (`HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`) that D-10 promised and V9 found unwritten, and cross-module row #37. Found while
+  writing it: medical still offers *Salary deduction*, the same gap D-10 closed for travel — named in both, the user's
+  call. 9c's note on stranded inbox approvals corrected to defect #15. Lane 9's checklist ticked. Staged. Next: the lane's
+  close — two regression passes.
+- **2026-10-04, later** — The user committed 9d (`954b6b464`) and deferred medical's *Salary deduction* ("log it for later":
+  the finish plan's hand-offs lane, the TDC open questions, the Finance integration backlog). **LANE 9 COMPLETE.** The
+  close's first two passes met two gaps the new cadence opened in the harness — leave's once-per-start sweep reminding a
+  fixture chief and posting a planted leave mid-teardown, with no per-suite wait left to absorb the dispatcher (#36) —
+  both closed in the harness, and one unexplained SQL syntax error in the sweep, recorded with its evidence. Rerun: two
+  passes, every suite unchanged twice. Staged (with the four logging edits). Next: lane 10.
+- **2026-10-04, later** — The user committed the close (`2201a5f7d`). **Lane 10 source-checked** — three read-only
+  surveys (the guide, the old suites, the demo pack) checked by hand where they mattered: W1–W10, slices 10a–10h;
+  D-59…D-62 proposed and **taken by the user, all as recommended**. The checklist's *"`hr.head` approves the policy"*
+  cannot happen (C3); `hr.officer` does. **Slice 10a written** — documents only: the Fleet hand-off and #38 (each line
+  re-read in Fleet's code; two of the first draft's claims corrected against it), #15 naming travel and separation, the
+  Finance backlog's rows 12.6–12.8 and the dated-rate note, the HR README and the finish plan. Staged. Next: 10b.
+- **2026-10-04, later** — **Slice 10b built** — the harness. The 35 old files retired to `retired/` (a table naming
+  what ended each); 43 checks no current suite made moved into truth §9–§11, bookings §16, policy §12b and compliance
+  §4b and §9, each suite twice on UAT. The first policy run met a third background-job race at teardown (HR's identity
+  reconciliation, 0.36 s after the retirement), now settled by a second retirement. The regression is 1,868 a pass.
+  Next: 10c.
+- **2026-10-04, later** — The user chose to commit lane 10 once, at its end. **Slice 10c built** — the demo pack (backed
+  up first; it is in no repository). 080 approves the policy as `hr.officer` before the trips are submitted; 081 takes
+  London's Hilton through D-8, ticks a health requirement, and no longer refiles documents, overruns a trip or loses
+  Sebrepor's car hire to the sweep. Proven on a fresh scratch database built by `New-UatDatabase.ps1`: 15/15 after each
+  of three runs (the third after the sweep had completed Sebrepor), travel 28/28 tables; dropped after. UAT untouched
+  (D-61). Next: the guide (10d–10g).
+- **2026-10-04, later** — **Slice 10d written** — the guide's rules and model: seven rules (two new, two fallen),
+  the conventions, chapter 1, chapter 13 and Appendix B, each fact re-read in the code. Next: 10e.
+- **2026-10-04, later** — **Slice 10e written** — the guide's trip at the desk: chapters 3, 3a (Approvals, new), 4, 5
+  and 6, from the pages' code and UAT's own rows; the walks fork where UAT (not re-run, D-61) differs from a rebuilt
+  demo. Next: 10f.
+- **2026-10-04, later** — **Slice 10f written** — money and registers: 5.4, 7, 8, 8a, 9, 10, 10a, 11, 12 and 13a. The
+  first edition's claim types were invented and its claim chapter's five gaps are all closed; the alerts page's
+  footnote contradicted 7a and is corrected (text only). One observation for TDC: a document's verifier may be its
+  owner. Next: 10g.
+- **2026-10-04, later** — **Slice 10g written** — chapter 2 with both databases side by side, 14–18, § 19 as a pointer
+  to § 3d, Appendices A and C; the guide is rewritten whole. Found on the way: re-running 080 on UAT would approve the
+  policy (now said in § 2.2), and UAT's Lagos and London carry the draft policy by a pre-lane-1 hand link. Next: 10h.
+- **2026-10-04, later** — **Slice 10h, the close.** Memories brought up to date; the scheduled sweep 15/15, then two
+  regression passes on UAT, every suite unchanged (1,646 a pass), reminders 222; re-delete 0 left of 1,484 fixture
+  notices in scope; the API log only the known noise. **Lane 10 complete; the travel final closure complete.** Staged
+  as one commit for the user.

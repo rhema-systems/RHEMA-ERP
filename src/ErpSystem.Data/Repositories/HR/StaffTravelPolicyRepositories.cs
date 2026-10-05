@@ -60,16 +60,31 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
     /// filter is inert — see <c>ApplicationDbContext</c>). <c>StaffTravelPolicyGuard</c> filters
     /// the result before any cap is applied.</para>
     /// </remarks>
-    public async Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, Guid? organizationUnitId, DateOnly onDate)
+    /// <param name="unitChain">
+    /// The traveller's unit followed by every unit above it, nearest first (<c>IHrAudienceResolver.UnitAncestryAsync</c>).
+    /// ⚠ It was one unit matched exactly (lane 4, O-5): a directorate's policy did not cover its departments, and a
+    /// policy applied only to the unit the request named. Empty for a traveller with no unit — org-wide policies only.
+    /// </param>
+    /// <remarks>
+    /// ⚠ <b>The policies alone — no rules, no approver — and the unit filter applied here, not in SQL</b> (lane 4,
+    /// measured 2026-10-02). With <c>Include(Rules)</c>, <c>Include(ApprovedBy)</c> (a whole <c>Employee</c> row) and the
+    /// unit chain sent as a JSON list, SQL Server sized the query's memory grant at ~600 MB and used 16 KB; under load it
+    /// queued for it (<c>RESOURCE_SEMAPHORE</c>) and a policy preview took 25 s. The guard reads only the policy's own
+    /// columns, and a tenant holds a handful of policies in force on a date, so filtering the unit chain in memory
+    /// costs nothing. The <c>applicable</c> endpoint, which shows the approver and a rule count, reads those narrowly
+    /// itself. Untracked: nothing here is written back.
+    /// </remarks>
+    public async Task<IEnumerable<StaffTravelPolicy>> GetApplicablePoliciesAsync(Guid? staffLevelId, IReadOnlyList<Guid> unitChain, DateOnly onDate)
     {
-        var candidates = await _dbSet
-            .Include(p => p.Rules)
-            .Include(p => p.ApprovedBy)
-            .Where(p => p.IsCurrentVersion && !p.IsDeleted
-                     && p.EffectiveFrom <= onDate
-                     && (p.EffectiveTo == null || p.EffectiveTo >= onDate)
-                     && (p.AppliesToOrganizationUnitId == null || p.AppliesToOrganizationUnitId == organizationUnitId))
-            .ToListAsync();
+        var chain = (unitChain ?? Array.Empty<Guid>()).ToList();
+        var candidates = (await _dbSet
+                .AsNoTracking()
+                .Where(p => p.IsCurrentVersion && !p.IsDeleted
+                         && p.EffectiveFrom <= onDate
+                         && (p.EffectiveTo == null || p.EffectiveTo >= onDate))
+                .ToListAsync())
+            .Where(p => p.AppliesToOrganizationUnitId is not Guid unit || chain.Contains(unit))
+            .ToList();
 
         if (candidates.Count == 0) return candidates;
 
@@ -104,10 +119,13 @@ public class StaffTravelPolicyRepository : GenericRepository<StaffTravelPolicy>,
             return true;
         }
 
-        // Most-specific first (policies scoped to a unit / level band rank above org-wide defaults).
+        // Most-specific first: the nearest unit up the chain, then org-wide; within one unit a banded policy above an
+        // unbanded one; then the latest start.
+        int Distance(StaffTravelPolicy p)
+            => p.AppliesToOrganizationUnitId is Guid unit ? chain.IndexOf(unit) : int.MaxValue;
         return candidates
             .Where(Covers)
-            .OrderByDescending(p => p.AppliesToOrganizationUnitId != null ? 1 : 0)
+            .OrderBy(Distance)
             .ThenByDescending(p => p.AppliesToLevelFromId != null || p.AppliesToLevelToId != null ? 1 : 0)
             .ThenByDescending(p => p.EffectiveFrom)
             .ToList();

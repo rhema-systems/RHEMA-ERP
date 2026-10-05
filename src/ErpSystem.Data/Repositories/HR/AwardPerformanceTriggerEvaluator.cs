@@ -48,8 +48,10 @@ public class AwardPerformanceTriggerEvaluator : IAwardPerformanceTriggerEvaluato
         HashSet<Guid>? byScore = null;
         if (awardType.MinPerformanceScore is { } minScore)
         {
+            // A withdrawn appraisal's score is no result (performance closure E-d1).
             var scored = await _context.Set<PerformanceAppraisal>()
-                .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.OverallScore != null)
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.OverallScore != null
+                            && a.Status != AppraisalStatus.Withdrawn)
                 .Select(a => new { a.EmployeeId, a.OverallScore, a.CreatedAt })
                 .ToListAsync();
 

@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -17,6 +18,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
     private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
     private readonly IGenericRepository<Employee> _employeeRepository;
     private readonly IGenericRepository<AppraisalTemplate> _templateRepository;
+    private readonly IGenericRepository<PerformanceAppraisal> _appraisalRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<AppraisalCycleTemplateService> _logger;
@@ -26,6 +28,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         IGenericRepository<AppraisalCycle> cycleRepository,
         IGenericRepository<Employee> employeeRepository,
         IGenericRepository<AppraisalTemplate> templateRepository,
+        IGenericRepository<PerformanceAppraisal> appraisalRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<AppraisalCycleTemplateService> logger)
@@ -34,6 +37,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         _cycleRepository = cycleRepository;
         _employeeRepository = employeeRepository;
         _templateRepository = templateRepository;
+        _appraisalRepository = appraisalRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -85,7 +89,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         if (entity == null)
             throw new ArgumentException($"Appraisal cycle template assignment with ID '{id}' not found.");
 
-        return entity.ToDto();
+        return (await WithUseAsync(new List<AppraisalCycleTemplateDto> { entity.ToDto() }, cancellationToken))[0];
     }
 
     public async Task<IEnumerable<AppraisalCycleTemplateDto>> GetByCycleIdAsync(Guid cycleId, CancellationToken cancellationToken = default)
@@ -95,6 +99,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
         var entities = await _cycleTemplateRepository.GetQueryable()
             .Where(ct => ct.TenantId == tenantId && ct.AppraisalCycleId == cycleId && ct.IsActive)
+            .Include(ct => ct.AppraisalCycle)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -104,7 +109,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
             .OrderByDescending(ct => ct.Priority)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithUseAsync(entities.ToDtoList(), cancellationToken);
     }
 
     public async Task<IEnumerable<AppraisalCycleTemplateDto>> GetByTemplateIdAsync(Guid templateId, CancellationToken cancellationToken = default)
@@ -122,7 +127,65 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
             .OrderByDescending(ct => ct.AppraisalCycle.Year)
             .ToListAsync(cancellationToken);
 
-        return entities.ToDtoList();
+        return await WithUseAsync(entities.ToDtoList(), cancellationToken);
+    }
+
+    /// <summary>Sets <c>TemplateInUseInCycle</c> on each link read: whether its cycle's appraisals are scored on its template.</summary>
+    private async Task<List<AppraisalCycleTemplateDto>> WithUseAsync(List<AppraisalCycleTemplateDto> links, CancellationToken cancellationToken)
+    {
+        if (links.Count == 0)
+            return links;
+
+        var tenantId = GetTenantId();
+        var cycleIds = links.Select(l => l.AppraisalCycleId).Distinct().ToList();
+        var used = await _appraisalRepository.GetQueryable()
+            .Where(a => a.TenantId == tenantId && cycleIds.Contains(a.AppraisalCycleId) && a.AppraisalTemplateId != null)
+            .Select(a => new { a.AppraisalCycleId, TemplateId = a.AppraisalTemplateId!.Value })
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        foreach (var link in links)
+            link.TemplateInUseInCycle = used.Any(u => u.AppraisalCycleId == link.AppraisalCycleId && u.TemplateId == link.AppraisalTemplateId);
+        return links;
+    }
+
+    /// <summary>
+    /// Refuses a change to a link (performance closure E-e, D-68): a Closed cycle's links are the year's record, and a
+    /// link whose template its cycle's appraisals are scored on stays as it is — removing or switching it off released
+    /// the template's lock while those appraisals still read it.
+    /// </summary>
+    private async Task EnsureLinkChangeableAsync(AppraisalCycleTemplate link, string action, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var cycle = await _cycleRepository.GetQueryable()
+            .Where(c => c.Id == link.AppraisalCycleId && c.TenantId == tenantId)
+            .Select(c => new { c.Status, c.CycleName })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (cycle?.Status == AppraisalCycleStatus.Closed)
+            throw new AppraisalConfigurationLockedException($"{action}: its cycle, {cycle.CycleName}, is closed.");
+
+        var scored = await _appraisalRepository.GetQueryable()
+            .CountAsync(a => a.TenantId == tenantId && a.AppraisalCycleId == link.AppraisalCycleId
+                          && a.AppraisalTemplateId == link.AppraisalTemplateId, cancellationToken);
+        if (scored > 0)
+            throw new AppraisalConfigurationLockedException(
+                $"{action}: {scored} appraisal{(scored == 1 ? " in its cycle is" : "s in its cycle are")} scored on this " +
+                "template, so it stays on the cycle as it is. Add another template for people not yet generated.");
+    }
+
+    /// <summary>
+    /// Refuses a new link to a Closed cycle, or a template the cycle already has (E-e, D-68): a duplicate at the same
+    /// priority made a "conflict" that named one template twice.
+    /// </summary>
+    private async Task EnsureLinkCanBeAddedAsync(AppraisalCycle cycle, Guid templateId, CancellationToken cancellationToken)
+    {
+        if (cycle.Status == AppraisalCycleStatus.Closed)
+            throw new AppraisalConfigurationLockedException(
+                $"A template cannot be added: the cycle, {cycle.CycleName}, is closed.");
+
+        var tenantId = GetTenantId();
+        if (await _cycleTemplateRepository.GetQueryable().AnyAsync(l => l.TenantId == tenantId
+                && l.AppraisalCycleId == cycle.Id && l.AppraisalTemplateId == templateId, cancellationToken))
+            throw new InvalidOperationException("This template is already on the cycle; change its priority there instead.");
     }
 
     /// <summary>Throws if the template is not Approved — only approved templates may be assigned to a cycle.</summary>
@@ -140,8 +203,10 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
 
     public async Task<AppraisalCycleTemplateDto> CreateAsync(CreateAppraisalCycleTemplateDto createDto, CancellationToken cancellationToken = default)
     {
-        await GetOwnedCycleAsync(createDto.AppraisalCycleId);
+        var cycle = await GetOwnedCycleAsync(createDto.AppraisalCycleId);
         await AssertTemplateApprovedAsync(createDto.AppraisalTemplateId, cancellationToken);
+        // An Open cycle takes a new template — for people added to its scope and not yet generated (D-68).
+        await EnsureLinkCanBeAddedAsync(cycle, createDto.AppraisalTemplateId, cancellationToken);
 
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
@@ -158,6 +223,15 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
     {
         var entity = await GetOwnedAsync(updateDto.Id);
 
+        // The link is pinned to its cycle and template (performance closure E-e, D-68): re-pointing it checked
+        // neither the tenant nor the approval, and freed the old template's lock. Another template is another link.
+        if ((updateDto.AppraisalCycleId != Guid.Empty && updateDto.AppraisalCycleId != entity.AppraisalCycleId)
+            || (updateDto.AppraisalTemplateId != Guid.Empty && updateDto.AppraisalTemplateId != entity.AppraisalTemplateId))
+            throw new InvalidOperationException(
+                "A template link stays on its cycle and template; add a new link for another template, or remove this one.");
+        if (updateDto.Priority != entity.Priority || updateDto.IsActive != entity.IsActive)
+            await EnsureLinkChangeableAsync(entity, "This template link cannot change", cancellationToken);
+
         updateDto.UpdateEntity(entity);
 
         await _cycleTemplateRepository.UpdateAsync(entity);
@@ -172,6 +246,8 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
     {
         var entity = await GetOwnedAsync(id);
 
+        await EnsureLinkChangeableAsync(entity, "This template cannot be removed from the cycle", cancellationToken);
+
         await _cycleTemplateRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -184,13 +260,16 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         IEnumerable<CreateAppraisalCycleTemplateDto> assignments,
         CancellationToken cancellationToken = default)
     {
-        await GetOwnedCycleAsync(cycleId);
+        var cycle = await GetOwnedCycleAsync(cycleId);
         var tenantId = GetTenantId();
         var created = new List<AppraisalCycleTemplate>();
 
         foreach (var dto in assignments)
         {
             await AssertTemplateApprovedAsync(dto.AppraisalTemplateId, cancellationToken);
+            await EnsureLinkCanBeAddedAsync(cycle, dto.AppraisalTemplateId, cancellationToken);
+            if (created.Any(c => c.AppraisalTemplateId == dto.AppraisalTemplateId))
+                throw new InvalidOperationException("The same template is listed twice; a cycle takes each template once.");
             var entity = dto.ToEntity();
             entity.AppraisalCycleId = cycleId;
             entity.TenantId = tenantId;
@@ -205,6 +284,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
         var ids = created.Select(e => e.Id).ToList();
         var result = await _cycleTemplateRepository.GetQueryable()
             .Where(ct => ct.TenantId == tenantId && ids.Contains(ct.Id))
+            .Include(ct => ct.AppraisalCycle)
             .Include(ct => ct.AppraisalTemplate)
                 .ThenInclude(t => t.OrganizationLevel)
             .Include(ct => ct.AppraisalTemplate)
@@ -213,7 +293,7 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
                 .ThenInclude(t => t.Position)
             .ToListAsync(cancellationToken);
 
-        return result.ToDtoList();
+        return await WithUseAsync(result.ToDtoList(), cancellationToken);
     }
 
     /// <summary>
@@ -255,8 +335,10 @@ public class AppraisalCycleTemplateService : IAppraisalCycleTemplateService
                 ct.AppraisalTemplate.OrganizationUnitId == employee.OrganizationUnitId &&
                 ct.AppraisalTemplate.OrganizationUnitId != null &&
                 ct.AppraisalTemplate.PositionId == null)
+            // A level template covers that level's employees — it matched every employee (performance closure E-e).
             ?? assignments.FirstOrDefault(ct =>
                 ct.AppraisalTemplate.OrganizationLevelId != null &&
+                ct.AppraisalTemplate.OrganizationLevelId == employee.OrganizationLevelId &&
                 ct.AppraisalTemplate.OrganizationUnitId == null &&
                 ct.AppraisalTemplate.PositionId == null)
             ?? assignments.FirstOrDefault(ct =>

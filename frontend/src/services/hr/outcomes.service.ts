@@ -2,6 +2,7 @@ import { apiService } from '../api.service';
 import type {
   AppraisalOutcomeRecommendation,
   CreateAppraisalOutcomeRecommendation,
+  AppraisalTransitionReport,
   DeadlineEnforcementResult,
   EmploymentActionProposal,
   EmploymentActionProposalStatus,
@@ -80,9 +81,8 @@ class AppraisalOutcomeRecommendationService {
  * it has been.
  *
  * Approval runs on the generic workflow engine: reuse `WorkflowApprovalActions` /
- * `WorkflowRecordTab` on the detail screen rather than driving approve/reject from here, and
- * remember that nothing can be submitted until a `SalaryReviewProposal` workflow definition has
- * been published.
+ * `WorkflowRecordTab` on the detail screen rather than driving approve/reject from here. The
+ * Managing Director decides it — never its submitter (F3, D-104).
  */
 class SalaryReviewProposalService {
   private readonly baseUrl = '/SalaryReviewProposals';
@@ -195,6 +195,14 @@ class DeadlineEnforcementService {
    */
   advance(appraisalId: string, data: ManualAdvanceRequest): Promise<ManualAdvanceResult> {
     return apiService.post<ManualAdvanceResult>(`${this.baseUrl}/advance/${appraisalId}`, data);
+  }
+
+  /**
+   * The cycle's in-flight appraisals whose records run ahead of the gates (closure B8) — HR's list
+   * to waive through `advance`. Read-only.
+   */
+  transitionReport(cycleId: string): Promise<AppraisalTransitionReport> {
+    return apiService.get<AppraisalTransitionReport>(`${this.baseUrl}/transition-report/${cycleId}`);
   }
 }
 

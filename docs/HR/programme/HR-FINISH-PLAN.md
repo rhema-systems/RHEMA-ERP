@@ -49,7 +49,43 @@ the settings audit, S-1…S-17 (none done yet), the three audits of 2026-09-28 a
 of the plan. It owns this plan's lane 9 rows #9.3, #9.4 and #9.26 and lane 5b's score-adjustment
 question (its D-11); its F1 waits on lane 9's admin-door decision (its D-18). Performance has **no**
 reminder sweep today — it is not one of lane 10's eleven — and its lane H builds one.
-**Nothing built yet.**
+**Built so far (2026-09-29):** migration batch 1 and lanes A, P, B1 (with B3–B5) and L (slices L-a,
+L-b, L-c), all merged upstream in round 4 (PR #278); then the rest of lane B on hrdev — B2 in two
+slices (B-v visibility, B-w write paths with B6 and B8), so **lane B is complete** (every appraisal
+setting now does what it says; the KPI tolerance moved to batch 2). **Lane C**, the appeal machine,
+is complete in two slices (2026-09-30): C-a made the remand work, the decisions honest and HR's
+two-actor rule; C-b opened the page to every scored criterion (KPIs and goals), made every appeal read
+name and score its rows on their own terms, kept each item's score at the filing, and let HR open a
+decided appeal. **Lane D**, peer nomination and evaluation integrity, is complete (2026-09-30): a
+nomination is what it says it is and changes only its date and instructions; a rejected one leaves
+room for another; approval — the manager's, a Manager-mode nomination's, HR's advance past the step —
+always creates the peer's form and tells them; the peer sees the nomination's due date and
+instructions; and in Manager mode with anonymous reviews the appraisee sees counts, not names.
+**Lane E**, the lifecycle guards, was source-checked the same day and found about three times its
+estimate — twelve days, built in seven slices. Slice E-a is built: a date correction no longer blanks
+the manager's recommendations; a raw status change can no longer complete an appraisal nobody signed
+off; a return to the manager is made before the sign-off and takes the calibration with it; HR does not
+act on their own appraisal. Slice E-b is built: a calibration session commits each appraisal once, and
+only the evaluation its panel saw, so committing it again no longer undoes an upheld appeal or a return;
+the grid says whom a commit would take; a session can be cancelled, and cancelling or deleting one frees
+its appraisals; the panel's decisions stay on what they restated; and the grid shows the settled score.
+**Next: slice E-c**, cycle rules and D-14. The closure plan's START HERE block and § 2 carry the live
+state.
+
+▶ **Staff travel final closure (added 2026-10-01) has its own plan:**
+`docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md` — eleven lanes (0 → migration batch 1 →
+1 → 10), twelve decisions taken with the user the same day, one migration batch. Three passes over the
+code: the first review (findings A–F), an independent second review (every High finding held; seven
+corrections; O-1…O-18 — among them that a line manager cannot approve travel, a claim filed without
+its advance pays in full, and policy supersession is date-blind) and a Fleet review (FX-1…FX-9: the
+company-vehicle "reservation" is a draft nobody approves). It owns this plan's **D-29** row (unchanged:
+the rule register stays read-only), **lane 10's travel sweep** (its lane 8), **lane 9's travel-policy
+door** (its D-3: HR is granted `HR.Travel.Admin`, narrowed in code) and **row 9.19** (its lane 7). The
+user accepted it the same day. **State 2026-10-04: the closure is COMPLETE — lanes 0–10** — the sweep (its lane 8), the
+policy door (its lane 4, slice 4c) and row 9.19 (its lane 7, slice 7c1) are built; D-29 stands unchanged. Lane 10
+rewrote the system guide whole, rebuilt the demo pack's travel scenarios, retired the old harness and wrote the Fleet
+hand-off; its close ran two regression passes unchanged. What stays open is deferred by decision (the plan's § 6) or
+another team's (cross-module #15, #23, #34–#38).
 
 ▶ **Lane 11 (added 2026-09-25): probation is not absence.** About 1,800 long-serving staff on the
 demo database are on probation, because the employee import has no confirmation date. Two code sites
@@ -71,7 +107,9 @@ which waits on the Finance owner's answer in `../HANDOFF-FINANCE-HR-RECRUITMENT-
 ▶ **Lane 9 — demo dataset — BUILT 2026-09-04.** Every one of the 551 required HR/SHE tables holds data in
 `ErpSystemDB_UAT`, the six runbooks are checked against the database on every rebuild, and the
 rebuild is one command. **One decision is owed** (admin tier vs employee link — § Lane 9 and the
-cross-module doc § 25) and 27 HR-owned defects are tabled in § Lane 9. Start there.
+cross-module doc § 25) — **probation's door settled 2026-10-01** (the performance closure's D-99: an extension, like a
+confirmation, is decided by the probation's confirming authority through the workflow; HR never decides it), the other
+four doors still owed — and 27 HR-owned defects are tabled in § Lane 9. Start there.
 
 ▶ **Lane 4 is DONE (2026-09-01): 54 + 32 + 33 assertions, each twice** (see § Lane 4 for the
 row-by-row verification). Lane 6's buildable rows are closed — two of its
@@ -1101,8 +1139,11 @@ Each was a deliberate deferral with a trigger, not an oversight.
       and any base amount, and the claim total followed. The same half-fix shape as
       `EmployeeNumberExistsAsync`: fixed where it was noticed, not on every path that writes the
       field. Both derived fields are now gone from the write DTOs and derived on both paths.
-- [ ] **D-02 — self-service invitation response is act-as-anyone** — **VERIFIED NOT LIVE
-      2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
+- [ ] **D-02 — self-service invitation response is act-as-anyone** — **the trigger has fired
+      (2026-10-01): the company-schedule final closure plan's lane 7 ships a `/me/calendar`, and its
+      D-8 builds the invitee's own reply door with the self check** — see
+      `docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md`. Closed there.
+      **VERIFIED NOT LIVE 2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
       (`/hr/company-schedule/events/[id]`), and no `/me` events or invitations surface exists
       (`me-portal.service` has none). Correct for its one consumer; the self-or-permission check is
       still owed the day a `/me` calendar ships.
@@ -1112,7 +1153,9 @@ Each was a deliberate deferral with a trigger, not an oversight.
       things belong in it — the approval guard on rule writes, a filtered unique index on
       `(TenantId, PolicyId, RuleCode)` instead of the revive-on-re-add, and mapping
       `RuleType × ExpenseCategory` onto real booking and claim fields, which is a product decision.
-      Until then the five endpoints stay withheld and are **not** gaps.
+      Until then the five endpoints stay withheld and are **not** gaps. **Kept by the travel final
+      closure (2026-10-01) as a standing assumption** — that closure enforces the policy's own caps
+      (its D-1) and leaves the rule register read-only.
 
 ### Blocked outside HR — track, do not schedule
 
@@ -1335,6 +1378,20 @@ declared finished without pretending these are closed.
       bare `[Authorize]` behind the external-user allowlist, with procurement exposed *today*;
       **#9** Projects' maintenance follow-through throws for every tenant; **#10** maintenance
       numbers collide within one second behind unique indexes.
+- [ ] **Fleet double-books vehicles and drivers, and approves submitted trips with nobody asked** — cross-module defect
+      **#38** (2026-10-04), full report [`HANDOFF-FLEET-STAFF-TRAVEL.md`](../integration/handoffs/HANDOFF-FLEET-STAFF-TRAVEL.md):
+      Fleet's clash check sees dispatched trips only, a driver is checked for a licence only, no `FLEET_TRIP` route is
+      seeded and submit has no guard; HR offers a read of who is on leave or travelling, and asks for a Fleet-owned read
+      of a trip's incidents. Travel protects its own legs meanwhile.
+- [ ] **Payroll cannot receive a staff claim** — cross-module defect **#37** (2026-10-04; the file holds 37 entries now),
+      full report [`HANDOFF-PAYROLL-TRAVEL-CLAIMS.md`](../integration/handoffs/HANDOFF-PAYROLL-TRAVEL-CLAIMS.md). A claim
+      "paid through payroll" was marked Paid with nobody paying the employee. Travel's *Payroll offset* is refused
+      (travel closure D-10). **HR's own follow-up, deliberately deferred by the user 2026-10-04:** medical's *Salary
+      deduction* is still offered on the medical claim page and pays nobody; it stays until payroll's owner and TDC
+      answer ([open question](HR-OPEN-QUESTIONS-FOR-TDC.md), *"Should staff expense claims ever be paid through the
+      payroll?"*). If the answer is no, or slow, switch it off the way D-10 did — the claim page's pay dialog only (the same
+      option list also feeds an insurer's preferred method and premium records, which may mean something else), the API
+      refusing it, old rows kept; the medical harness twice.
 - [x] **The EF migration chain cannot build the database from scratch** — no migration ever CREATEs
       `Employees`, so a fresh environment cannot be deployed with `dotnet ef database update`.
       `rebuild-db` works around it. A squashed baseline generated from the current model is separate
@@ -1430,6 +1487,14 @@ is wrong; the letter is the likelier. Decide with TDC which unit the flat figure
 > See `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-5-LEAVE-PLAN.md` § 8, lane I. ⚠ A sweep's first
 > SCHEDULED run is the real test: leave's died for want of a signed-in user while every manual run
 > passed. The other ten sweeps are as described below.
+
+> **2026-10-01: staff travel's sweep is owned by the travel final closure, lane 8**
+> (`docs/HR/areas/travel/HR-STAFF-TRAVEL-FINAL-CLOSURE-PLAN.md`). Correction to the paragraph below: the
+> travel sweep does tell somebody — the HR role, in the app — through its own notification topics; it
+> tells no traveller, approver or finance desk. Lane 8 moves it onto leave's pattern. **✅ Done 2026-10-03** (its
+> slices 8a–8c): each reminder goes to whoever acts — the owner, the traveller, the stage's named approvers, the desk —
+> in the app and by email, logged once and published; the sweep also moves trips under way, completed and closed by
+> date, reads Fleet's signals, and (lane 9a) keeps trip days on attendance. Its first scheduled run was measured.
 
 **Found building round 4, lane K-a, and verified before it was written down:** eleven HR reminder
 sweeps — asset, certification expiry, discipline, identification expiry, leave, probation,
@@ -1623,7 +1688,13 @@ every HR/SHE entity a user can create has at least one seeded row; 48 system-gen
 
 **Decision owed (blocks five doors):** the admin-tier + employee-link contradiction — see
 `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` § 25 item 1. Either link a TenantAdmin login to an
-employee or grant the `HR` role the `HR.*.Admin` tier. Until then the demo seeds
+employee or grant the `HR` role the `HR.*.Admin` tier. **Probation's door is settled (2026-10-01, the performance
+closure's D-99):** extension goes the way confirmation does — a request decided by the probation's confirming authority
+through the workflow — and HR is not granted the probation tier; it is built in that closure's lane F (F1). **Travel's
+door is settled (2026-10-01, the travel final closure's D-3):** the HR role is granted `HR.Travel.Admin`, narrowed in
+code — a second officer authorises a booking above the policy cap (its D-8), a policy's author cannot approve it, and
+every delete is status-guarded; **✅ built 2026-10-02** in that closure's lane 4 (slices 4a–4c). Training budgets and plans, talent reviews and the
+vacancy reconcile are still owed. Until then the demo seeds
 `TrainingBudgetTransactions`, `StaffMovementApprovalLevels` and `ProbationExtensions` directly.
 
 **HR-owned defects found by the build (each reproduced twice; payloads in the agents' reports):**
@@ -1648,7 +1719,7 @@ employee or grant the `HR` role the `HR.*.Admin` tier. Until then the demo seeds
 | 9.16 | SHE / medical FK guards | `SheHazardCorrectiveActions.CorrectiveActionTemplateId`, several `UploadedById`/`ConductedById`/`EmployeeId` columns, `MedicalInsuranceClaims.MedicalExpenseClaimId`, `MedicalInsurancePolicyDependents (PolicyId, DependentId)` unvalidated → 500 not 404/409 | medium |
 | 9.17 | `POST /onboarding-plans/tasks/{id}/complete` | gated `HR.Orientation.Write`; a new starter cannot tick their own task (Book 1 §6 step 5 implies they can) | medium |
 | 9.18 | `DELETE /safety/incidents/witnesses/{id}` | needs `HR.She.Admin` while the POST needs Write | low |
-| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers | medium |
+| 9.19 | `POST /staff-travel/compliance/risk-assessments/{id}/acknowledge` | gated `HR.Travel.Write` but the service demands the traveller; no self-service door — dead path for ordinary travellers. **Owned by the travel final closure, lane 7 (E1)** — **✅ closed 2026-10-03** (slice 7c1, `584993d0a`): `POST /staff-travel/me/risk-assessments/{id}/acknowledge` and a portal screen; on the desk the button became a read-only state | medium |
 | 9.20 | asset requisitions | an approved requisition cannot be edited, withdrawn or rejected (all 409) | low |
 | 9.21 | `StaffDemotion.GradeLevelDecrease` / `StaffPromotion.GradeLevelIncrease` | silently recomputed from optional grade ids → 0 | low |
 | 9.22 | disciplinary termination | raises an `EmployeeSeparation` in Draft with no effective date | low |

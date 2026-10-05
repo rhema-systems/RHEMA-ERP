@@ -52,6 +52,20 @@ public sealed class HrFinancePostingCatalogueTests
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TravelClaimApproved), HrFinancePostingCommandFactory.TravelClaimApproved(travel));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TravelClaimPaid), HrFinancePostingCommandFactory.TravelClaimPaid(travel));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TravelAdvanceDisbursed), HrFinancePostingCommandFactory.TravelAdvanceDisbursed(advance));
+        var refunded = new StaffTravelAdvance
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, AdvanceNumber = "ADV-2", EmployeeId = Guid.NewGuid(), CurrencyCode = "GHS",
+            RequestedAmount = 400m, ApprovedAmount = 400m, SettledAmount = 400m, RefundedAmount = 150m, RefundReference = "RCPT-1",
+            RefundedAt = DateTime.UtcNow, Status = TravelAdvanceStatus.FullySettled
+        };
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TravelAdvanceRefunded), HrFinancePostingCommandFactory.TravelAdvanceRefunded(refunded));
+        var writtenOff = new StaffTravelAdvance
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, AdvanceNumber = "ADV-3", EmployeeId = Guid.NewGuid(), CurrencyCode = "GHS",
+            RequestedAmount = 400m, ApprovedAmount = 400m, SettledAmount = 100m, WrittenOffAt = DateTime.UtcNow,
+            Status = TravelAdvanceStatus.WrittenOff
+        };
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TravelAdvanceWrittenOff), HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(writtenOff));
 
         // slice 2 — employee payables
         var encashment = new LeaveEncashment
@@ -600,6 +614,10 @@ public sealed class HrFinancePostingCatalogueTests
             .SkipReason.Should().NotBeNullOrWhiteSpace();
         HrFinancePostingCommandFactory.TravelAdvanceDisbursed(new StaffTravelAdvance { AdvanceNumber = "ADV-0", CurrencyCode = "GHS", ApprovedAmount = null })
             .SkipReason.Should().NotBeNullOrWhiteSpace();
+        HrFinancePostingCommandFactory.TravelAdvanceRefunded(new StaffTravelAdvance { AdvanceNumber = "ADV-0", CurrencyCode = "GHS", RefundedAmount = 0m })
+            .SkipReason.Should().NotBeNullOrWhiteSpace();
+        HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(new StaffTravelAdvance { AdvanceNumber = "ADV-0", CurrencyCode = "GHS", ApprovedAmount = 100m, SettledAmount = 100m })
+            .SkipReason.Should().NotBeNullOrWhiteSpace();
         HrFinancePostingCommandFactory.MedicalClaimPaid(new MedicalExpenseClaim { ClaimNumber = "MC-S", AmountApproved = 100m, PaymentMethod = PaymentMethod.SalaryDeduction })
             .SkipReason.Should().Contain("payroll");
     }
@@ -608,6 +626,10 @@ public sealed class HrFinancePostingCatalogueTests
     public void TravelAdvanceCommands_CarryTheAdvanceCurrency_AndClaimCommandsDoNot()
     {
         HrFinancePostingCommandFactory.TravelAdvanceDisbursed(new StaffTravelAdvance { AdvanceNumber = "ADV-U", CurrencyCode = "USD", ApprovedAmount = 10m })
+            .TransactionCurrencyCode.Should().Be("USD");
+        HrFinancePostingCommandFactory.TravelAdvanceRefunded(new StaffTravelAdvance { AdvanceNumber = "ADV-U", CurrencyCode = "USD", RefundedAmount = 4m })
+            .TransactionCurrencyCode.Should().Be("USD");
+        HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(new StaffTravelAdvance { AdvanceNumber = "ADV-U", CurrencyCode = "USD", ApprovedAmount = 10m, SettledAmount = 4m })
             .TransactionCurrencyCode.Should().Be("USD");
         // Claim totals are functional sums already (each line was valued through Finance's rate).
         HrFinancePostingCommandFactory.TravelClaimApproved(new StaffTravelExpenseClaim { ClaimNumber = "EXP-U", CurrencyCode = "USD", TotalApproved = 10m })
@@ -635,8 +657,13 @@ public sealed class HrFinancePostingCatalogueTests
         Between(travel, "public async Task<bool> PayClaimAsync(", "// ---- Expense claim lines")
             .Should().Contain("_financePosting.RunAsync").And.Contain("await SettleLinkedAdvanceAsync(entity, ct);")
             .And.Contain("HrFinancePostingCommandFactory.TravelClaimPaid(entity)");
-        Between(travel, "public async Task<bool> DisburseAdvanceAsync(", "// ---- Per-diem rates")
+        Between(travel, "public async Task<bool> DisburseAdvanceAsync(", "public async Task<bool> RecordAdvanceRefundAsync(")
             .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.TravelAdvanceDisbursed(entity)");
+        // Lane 3: the two other ways the receivable is cleared post too.
+        Between(travel, "public async Task<bool> RecordAdvanceRefundAsync(", "public async Task<bool> WriteOffAdvanceAsync(")
+            .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.TravelAdvanceRefunded(entity)");
+        Between(travel, "public async Task<bool> WriteOffAdvanceAsync(", "// ---- Per-diem rates")
+            .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.TravelAdvanceWrittenOff(entity)");
         foreach (var method in new[] { "UpdateClaimAsync(", "AddClaimLineAsync(", "UpdateClaimLineAsync(", "ReviewClaimLineAsync(", "DeleteClaimLineAsync(" })
             Between(travel, method, "\n    public ").Should().Contain("GuardClaimNotPostedAsync", method);
         Between(travel, "UpdateAdvanceAsync(", "\n    public ").Should().Contain("GuardAdvanceNotPostedAsync");

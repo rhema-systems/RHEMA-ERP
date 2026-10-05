@@ -8,7 +8,9 @@ namespace ErpSystem.Core.DTOs.HR;
 // ----------------------------------------------------------------------------
 // Each selected employee becomes a Draft StaffTravelRequest linked to the group.
 // Destination + travel dates are taken from the group; the fields below form the
-// shared template applied to every created request.
+// shared template applied to every created request. Each participant's
+// organisation unit is their own and whether the trip is international comes
+// from the two countries — the server's, as on a single request (lane 1).
 // ============================================================================
 
 public class AddGroupTravelParticipantsDto
@@ -30,8 +32,6 @@ public class AddGroupTravelParticipantsDto
     [MaxLength(1000)]
     public string? PurposeDescription { get; set; }
 
-    public Guid? OrganizationUnitId { get; set; }
-
     public StaffTravelPriority Priority { get; set; } = StaffTravelPriority.Routine;
 
     [Required]
@@ -46,7 +46,6 @@ public class AddGroupTravelParticipantsDto
     [Required, MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public bool IsInternational { get; set; }
     public bool RequiresVisa { get; set; }
     public bool RequiresHealthClearance { get; set; }
 

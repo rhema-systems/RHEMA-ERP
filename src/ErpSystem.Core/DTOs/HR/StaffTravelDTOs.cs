@@ -68,7 +68,10 @@ public class StaffTravelRequestDto : BaseDto
     public Guid? PolicyId { get; set; }
     public string? PolicyName { get; set; }
     public bool IsInternational { get; set; }
+    /// <summary>Lane 7 (D-39): from the visa register when the traveller's passport is on file, unless overridden.</summary>
     public bool RequiresVisa { get; set; }
+    /// <summary>Why <see cref="RequiresVisa"/> stands against the register; null when the register (or nothing) set it.</summary>
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
     public TravelRiskLevel RiskLevel { get; set; }
     public string RiskLevelName => RiskLevel.ToString();
@@ -80,6 +83,19 @@ public class StaffTravelRequestDto : BaseDto
     public string? ParentRequestNumber { get; set; }
     public string? AmendmentReason { get; set; }
 
+    /// <summary>
+    /// Lane 6 (D-33): when this is a driver's own request, the trip whose company vehicle they drive — read from the leg
+    /// that keeps it, not stored here.
+    /// </summary>
+    public Guid? DriverForRequestId { get; set; }
+    public string? DriverForRequestNumber { get; set; }
+
+    /// <summary>
+    /// Lane 9 (D-54): how many of the trip's working days are on the traveller's attendance as on duty — read on the single
+    /// read only; null on lists.
+    /// </summary>
+    public int? AttendanceDaysRecorded { get; set; }
+
     // Cancellation
     public string? CancellationReason { get; set; }
     public Guid? CancelledById { get; set; }
@@ -90,6 +106,23 @@ public class StaffTravelRequestDto : BaseDto
     public DateTime? SubmittedAt { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+
+    // Who decided, and what happened after (travel final closure, lane 1). The approval stamps stay
+    // when a change is requested: they record the approval being changed until the next one replaces
+    // them.
+    public Guid? ApprovedById { get; set; }
+    public string? ApprovedByName { get; set; }
+    public DateTime? ReturnedAt { get; set; }
+    public Guid? ReturnedById { get; set; }
+    public string? ReturnedByName { get; set; }
+    public string? ReturnReason { get; set; }
+    public DateTime? ChangeRequestedAt { get; set; }
+    public Guid? ChangeRequestedById { get; set; }
+    public string? ChangeRequestedByName { get; set; }
+    public string? ChangeReason { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public Guid? ClosedById { get; set; }
+    public string? ClosedByName { get; set; }
 
     // Child collections
     public StaffTravelBudgetDto? Budget { get; set; }
@@ -135,6 +168,15 @@ public class StaffTravelRequestSummaryDto
     public DateTime? SubmittedAt { get; set; }
 }
 
+/// <remarks>
+/// <para><b>Three facts are the server's, not the payload's</b> (travel final closure, lane 1 —
+/// findings A5, O-5). The organisation unit is the traveller's own, read from their employee record;
+/// whether the trip is international is decided by its two countries; and the policy is the one the
+/// trip is checked against when it is submitted. All three used to be accepted as sent: a domestic
+/// trip declared international bought the international caps, and a requester could name a unit
+/// with a laxer policy. They are no longer on this DTO, so a client that still sends them is
+/// ignored rather than believed.</para>
+/// </remarks>
 public class CreateStaffTravelRequestDto : CreateDtoBase
 {
     [Required]
@@ -158,8 +200,6 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
 
     [MaxLength(1000)]
     public string? PurposeDescription { get; set; }
-
-    public Guid? OrganizationUnitId { get; set; }
 
     public StaffTravelPriority Priority { get; set; } = StaffTravelPriority.Routine;
 
@@ -190,20 +230,38 @@ public class CreateStaffTravelRequestDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public Guid? PolicyId { get; set; }
-    public bool IsInternational { get; set; }
     public bool RequiresVisa { get; set; }
+    /// <summary>
+    /// Lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the traveller's passport. Without
+    /// it the server sets the flag from the register whenever the passport is on file.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     public TravelRiskLevel RiskLevel { get; set; } = TravelRiskLevel.Low;
 
-    public Guid? GroupTravelId { get; set; }
+    // ⚠ No GroupTravelId (lane 1, slice 1c). Group membership belongs to the group's own endpoints —
+    // add participants, link an existing request, remove — which check the group's capacity and status
+    // and align the trip to the group's destination and dates. A payload that names a group is ignored.
+
+    /// <summary>Must be an earlier request of the same traveller; checked on the server.</summary>
     public Guid? ParentRequestId { get; set; }
 
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 }
 
+/// <remarks>
+/// <para><b>An edit is allowed only while the request is a Draft or has been returned for
+/// revision</b> (lane 1, finding A1). It used to be refused only once Approved, so a Submitted
+/// request could be rewritten while the approver was deciding it.</para>
+///
+/// <para>Not on this DTO, deliberately: the organisation unit, whether the trip is international and
+/// the policy (the server's — see <see cref="CreateStaffTravelRequestDto"/>), and the approved
+/// budget, which is the approver's decision and is set only by approval. A plain edit could write
+/// it.</para>
+/// </remarks>
 public class UpdateStaffTravelRequestDto : UpdateDtoBase
 {
     [Required]
@@ -214,8 +272,6 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
 
     [MaxLength(1000)]
     public string? PurposeDescription { get; set; }
-
-    public Guid? OrganizationUnitId { get; set; }
 
     [Required]
     public StaffTravelPriority Priority { get; set; }
@@ -243,47 +299,118 @@ public class UpdateStaffTravelRequestDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal EstimatedTotalCost { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal? ApprovedBudget { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public Guid? PolicyId { get; set; }
-    public bool IsInternational { get; set; }
     public bool RequiresVisa { get; set; }
+    /// <summary>
+    /// Lane 7 (D-39): why <see cref="RequiresVisa"/> differs from the visa register for the traveller's passport. Without
+    /// it the server sets the flag from the register whenever the passport is on file.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? VisaOverrideReason { get; set; }
     public bool RequiresHealthClearance { get; set; }
 
     [Required]
     public TravelRiskLevel RiskLevel { get; set; }
 
-    public Guid? GroupTravelId { get; set; }
+    // ⚠ No GroupTravelId since slice 1c: an edit cannot move a trip into, out of or between groups —
+    // the group's endpoints do that. It was written as sent, so an edit that left it out took the
+    // traveller out of their group (finding A8).
 
     [MaxLength(1000)]
     public string? AmendmentReason { get; set; }
 }
 
+/// <summary>What the service needs to submit a request. Built by the controllers, never bound.</summary>
+/// <remarks>
+/// The time of submission is the server's clock, not a field: this DTO used to carry a
+/// <c>SubmittedAt</c> defaulted at binding, and a <c>SubmittedById</c> the service never read.
+/// </remarks>
 public class SubmitStaffTravelRequestDto
 {
     [Required]
     public Guid RequestId { get; set; }
 
-    [Required]
-    public Guid SubmittedById { get; set; }
+    /// <summary>
+    /// The travel desk's reason for submitting a trip whose departure date has already passed — the
+    /// trip was taken at short notice and the paperwork followed. Recorded on the request as an
+    /// internal note in the submitter's name. The self-service route never sets it: a traveller
+    /// cannot submit a past trip.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? LateSubmissionReason { get; set; }
 
-    public DateTime SubmittedAt { get; set; } = DateTime.UtcNow;
+    /// <summary>The submitting employee, from the token — the author of the late-submission note.</summary>
+    public Guid? SubmittedByEmployeeId { get; set; }
 }
 
+/// <summary>The desk's submit body: optional, and only for a trip whose departure has passed.</summary>
+public class SubmitStaffTravelRequestBodyDto
+{
+    [MaxLength(1000)]
+    public string? LateSubmissionReason { get; set; }
+}
+
+/// <summary>What a submission did: where the request now is, and anything the submitter should know.</summary>
+public class StaffTravelSubmitResultDto
+{
+    public string Message { get; set; } = string.Empty;
+    public StaffTravelRequestStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+
+    /// <summary>The policy the trip was checked against, or null when no approved policy covers it.</summary>
+    public Guid? PolicyId { get; set; }
+    public string? PolicyName { get; set; }
+
+    /// <summary>
+    /// Things that did not stop the submission but that the approver and the traveller should know —
+    /// approved leave over the same days, for instance. A conflict that must stop it is a 422 instead.
+    /// </summary>
+    public List<string> Warnings { get; set; } = new();
+}
+
+/// <summary>
+/// The travel policy a trip would be checked against, before it is raised — so the form can show
+/// the limits instead of the traveller discovering them at submission (finding T-16).
+/// </summary>
+public class StaffTravelPolicyPreviewDto
+{
+    public Guid EmployeeId { get; set; }
+
+    /// <summary>The traveller's own unit — the one the request will carry.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
+    /// <summary>Decided by the two countries, as the server will decide it.</summary>
+    public bool IsInternational { get; set; }
+
+    public bool HasPolicy { get; set; }
+    public Guid? PolicyId { get; set; }
+    public string? PolicyName { get; set; }
+    public int? VersionNumber { get; set; }
+
+    /// <summary>The currency the policy's money limits are expressed in.</summary>
+    public string? CurrencyCode { get; set; }
+
+    /// <summary>The most one trip may be estimated at; null when the policy sets no such limit.</summary>
+    public decimal? MaxSingleTripBudget { get; set; }
+
+    public FlightCabinClass? MaxFlightClass { get; set; }
+    public decimal? MaxHotelRatePerNight { get; set; }
+}
+
+/// <remarks>
+/// Lane 2 dropped <c>ApprovedById</c> and <c>ApprovedAt</c>: the approver is the token's and the time the
+/// server's clock, and neither field had been read since approval moved onto the workflow engine. The
+/// approved budget is HR's to set, at the last stage — sent at the line manager's stage it is refused,
+/// not ignored — and it must be more than zero and within the policy's single-trip limit.
+/// </remarks>
 public class ApproveStaffTravelRequestDto
 {
     [Required]
     public Guid RequestId { get; set; }
-
-    [Required]
-    public Guid ApprovedById { get; set; }
-
-    public DateTime ApprovedAt { get; set; } = DateTime.UtcNow;
 
     [Range(0, double.MaxValue)]
     public decimal? ApprovedBudget { get; set; }
@@ -292,6 +419,67 @@ public class ApproveStaffTravelRequestDto
     public string? Notes { get; set; }
 }
 
+/// <summary>
+/// What the caller may decide on a travel request, and as whom (lane 2, decision D-7) — the screen's
+/// answer for whether to offer Approve, Reject and Return, and whether the approve dialog asks for the
+/// budget.
+/// </summary>
+public class StaffTravelViewerActionsDto
+{
+    public Guid RequestId { get; set; }
+
+    /// <summary>True when the caller may approve, reject or return the request now.</summary>
+    public bool CanDecide { get; set; }
+
+    /// <summary>The stage the request is on, as its approval route names it; null when it is not out for approval.</summary>
+    public string? StageName { get; set; }
+
+    /// <summary>True at the line-manager stage.</summary>
+    public bool IsLineStage { get; set; }
+
+    /// <summary>
+    /// True when the next approval completes the request — the last approval stage of its route, read from
+    /// the route itself (HR's on the seeded one). The approved budget is asked for then, and only then.
+    /// </summary>
+    public bool IsFinalStage { get; set; }
+
+    /// <summary>The stage the request goes to after this one; null at the last.</summary>
+    public string? NextStageName { get; set; }
+
+    /// <summary><c>LineAuthority</c>, <c>TravelDesk</c> or <c>Approver</c>; null when the caller cannot decide.</summary>
+    public string? DecidesAs { get; set; }
+
+    /// <summary>How the caller stands to the traveller as a line authority: "supervisor", "head of …".</summary>
+    public string? Relation { get; set; }
+
+    /// <summary>At the line-manager stage: the line authorities it waits for, named.</summary>
+    public List<string> WaitingFor { get; set; } = new();
+
+    /// <summary>Why the caller cannot decide, when the request is out for approval and they cannot.</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>One row of an approver's travel queue: the request, and the caller's part in it.</summary>
+public class StaffTravelApprovalQueueItemDto
+{
+    public StaffTravelRequestSummaryDto Request { get; set; } = new();
+    public string? OriginCity { get; set; }
+    public string? StageName { get; set; }
+    public bool IsLineStage { get; set; }
+    public bool IsFinalStage { get; set; }
+
+    /// <summary><c>LineAuthority</c>, <c>TravelDesk</c> or <c>Approver</c>.</summary>
+    public string DecidesAs { get; set; } = string.Empty;
+    public string? Relation { get; set; }
+
+    /// <summary>Whole days since the request was submitted.</summary>
+    public int DaysWaiting { get; set; }
+}
+
+/// <remarks>
+/// <c>CancelledById</c> is set by the controller from the token; the time is the server's clock — this
+/// DTO carried a <c>CancelledAt</c> the desk path wrote as sent (finding A10, lane 1).
+/// </remarks>
 public class CancelStaffTravelRequestDto
 {
     [Required]
@@ -300,11 +488,33 @@ public class CancelStaffTravelRequestDto
     [Required]
     public Guid CancelledById { get; set; }
 
-    public DateTime CancelledAt { get; set; } = DateTime.UtcNow;
-
     [Required]
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
+}
+
+/// <summary>An approver sending a submitted request back to its requester (D-6, lane 1).</summary>
+public class ReturnStaffTravelRequestDto
+{
+    /// <summary>What needs to change — it goes back to the traveller.</summary>
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Asking for a change to an approved trip, which sends it back for re-approval (D-9, lane 1).</summary>
+public class RequestStaffTravelChangeDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Withdrawing a request from approval, back to Draft (lane 1). The reason is optional.</summary>
+public class RecallStaffTravelRequestDto
+{
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 }
 
 /// <summary>
@@ -389,6 +599,15 @@ public class CreateStaffGroupTravelDto : CreateDtoBase
     public int? MaxParticipants { get; set; }
 }
 
+/// <remarks>
+/// <para><b>No status</b> (lane 1, slice 1c — finding A11): a group opens, closes and is cancelled by
+/// its own verbs, which check what each move means. The PUT wrote whatever status it was sent, and a
+/// client that left it out sent the enum default and moved the trip back to Planning.</para>
+///
+/// <para><b>A new destination or new dates reach the travellers whose trips can still change</b> —
+/// drafts and requests returned for revision (finding T-32). A submitted or approved trip keeps its own;
+/// the group's page marks it as differing from the group.</para>
+/// </remarks>
 public class UpdateStaffGroupTravelDto : UpdateDtoBase
 {
     [Required]
@@ -413,9 +632,6 @@ public class UpdateStaffGroupTravelDto : UpdateDtoBase
 
     [Required]
     public DateOnly TravelEndDate { get; set; }
-
-    [Required]
-    public GroupTravelStatus Status { get; set; }
 
     [Range(1, 10000)]
     public int? MaxParticipants { get; set; }
@@ -454,6 +670,20 @@ public class CreateStaffTravelRequestCommentDto : CreateDtoBase
     public string Body { get; set; } = string.Empty;
 
     public bool IsVisibleToTraveller { get; set; } = true;
+
+    public Guid? ParentCommentId { get; set; }
+}
+
+/// <summary>
+/// The traveller's message to the travel desk on the portal (lane 7, slice 7c2, D-41): a reply to a note the desk shared
+/// (<see cref="ParentCommentId"/>) or a question of their own. No type, visibility or author: the server sets them — a
+/// Response or a Query, visible to the traveller, theirs.
+/// </summary>
+public class CreateMyStaffTravelCommentDto
+{
+    [Required]
+    [MaxLength(2000)]
+    public string Body { get; set; } = string.Empty;
 
     public Guid? ParentCommentId { get; set; }
 }
@@ -570,57 +800,49 @@ public class StaffTravelItinerarySummaryDto
     public DateTime? FinalizedAt { get; set; }
 }
 
+/// <summary>
+/// The itinerary a traveller reads on the portal (lane 7, slice 7c1, D-42): the version in force — the one the desk
+/// finalised — or none, saying whether the desk is still drafting one.
+/// </summary>
+public class StaffTravelTravellerItineraryDto
+{
+    public StaffTravelItineraryDto? InForce { get; set; }
+    public bool BeingPlanned { get; set; }
+}
+
+/// <summary>
+/// A new itinerary version (lane 5, slice 5b): the server numbers it, makes it a Draft and works its days out from the
+/// trip's dates — the payload's <c>VersionNumber</c> and day totals left the contract.
+/// </summary>
 public class CreateStaffTravelItineraryDto : CreateDtoBase
 {
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Range(1, int.MaxValue)]
-    public int VersionNumber { get; set; } = 1;
-
-    public bool IsCurrentVersion { get; set; } = true;
+    /// <summary>Asks for the new version to become the current one, replacing (superseding) the one in force. A trip's
+    /// first version is current whatever this says.</summary>
+    public bool IsCurrentVersion { get; set; }
 
     [Required]
     [MaxLength(300)]
     public string Title { get; set; } = string.Empty;
-
-    [Range(0, 365)]
-    public int TotalTravelDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWorkingDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWeekendDays { get; set; }
 
     [MaxLength(2000)]
     public string? SummaryNotes { get; set; }
 }
 
+/// <summary>
+/// The words of a version still being written (lane 5, slice 5b, D-25): its title and summary. The status moves by
+/// Finalise and by a newer version becoming current; the current flag by set-current; the days follow the trip.
+/// </summary>
 public class UpdateStaffTravelItineraryDto : UpdateDtoBase
 {
-    [Required]
-    public TravelItineraryStatus Status { get; set; }
-
     [Required]
     [MaxLength(300)]
     public string Title { get; set; } = string.Empty;
 
-    public bool IsCurrentVersion { get; set; }
-
-    [Range(0, 365)]
-    public int TotalTravelDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWorkingDays { get; set; }
-
-    [Range(0, 365)]
-    public int TotalWeekendDays { get; set; }
-
     [MaxLength(2000)]
     public string? SummaryNotes { get; set; }
-
-    public DateTime? FinalizedAt { get; set; }
 }
 
 #endregion
@@ -649,6 +871,18 @@ public class StaffTravelItineraryLegDto : BaseDto
     public Guid? GroundTransportId { get; set; }
     public string? Notes { get; set; }
     public List<StaffTravelItineraryActivityDto> Activities { get; set; } = new();
+
+    /// <summary>The booking the leg is linked to, as the desk would name it — "Flight H4RB9L (Confirmed)" (lane 5, T-19).</summary>
+    public string? LinkedBooking { get; set; }
+
+    /// <summary>The booking's own dates — a flight's segment days, a hotel's stay, a pick-up.</summary>
+    public string? LinkedBookingDates { get; set; }
+
+    /// <summary>
+    /// T-19: the leg's date is not one of its booking's — a flight segment's day, inside a hotel stay, a pick-up's day.
+    /// Flagged, not refused: the plan or the booking may be the one that moved.
+    /// </summary>
+    public bool LinkedBookingDateMismatch { get; set; }
 }
 
 public class CreateStaffTravelItineraryLegDto : CreateDtoBase
@@ -847,6 +1081,15 @@ public class StaffTravelFlightBookingDto : BaseDto
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
     public decimal? CancellationFee { get; set; }
+    /// <summary>Lane 4, D-8: a booking that breaches the policy waits for a different travel administrator.</summary>
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public Guid? ExceptionRequestedById { get; set; }
+    public string? ExceptionRequestedByName { get; set; }
+    /// <summary>Who decided the exception — authorised it, or refused it (<see cref="ExceptionState"/> says which).</summary>
+    public Guid? ExceptionAuthorisedById { get; set; }
+    public string? ExceptionAuthorisedByName { get; set; }
+    public DateTime? ExceptionAuthorisedAt { get; set; }
     public List<StaffTravelFlightSegmentDto> Segments { get; set; } = new();
 }
 
@@ -863,6 +1106,9 @@ public class StaffTravelFlightBookingSummaryDto
     public string StatusName => Status.ToString();
     public string? TicketNumber { get; set; }
     public int SegmentCount { get; set; }
+    public string? VendorName { get; set; }
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
 }
 
 public class CreateStaffTravelFlightBookingDto : CreateDtoBase
@@ -883,16 +1129,10 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     public FlightCabinClass BookingClass { get; set; }
 
     /// <summary>
-    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
-    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
-    /// declared what the policy permitted them to book.
-    /// </summary>
-    public FlightCabinClass PolicyAllowedClass { get; set; }
-
-    /// <summary>
-    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
-    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
-    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
+    /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
+    /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
+    /// says whether the exception is authorised.
     /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
@@ -917,7 +1157,8 @@ public class CreateStaffTravelFlightBookingDto : CreateDtoBase
     [MaxLength(50)]
     public string? TicketNumber { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
+    // Lane 5 (D1, D5): no Status — a booking is created Pending and moves by its verbs (hold, confirm, ticket,
+    // cancel, no-show, complete). The policy's cap (PolicyAllowedClass) is the server's and left the contract.
 }
 
 public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
@@ -935,16 +1176,10 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     public FlightCabinClass BookingClass { get; set; }
 
     /// <summary>
-    /// <b>Server-assigned.</b> The cap comes from the travel policy in force for this traveller and
-    /// trip; anything sent here is overwritten. It was a client input, which meant the caller
-    /// declared what the policy permitted them to book.
-    /// </summary>
-    public FlightCabinClass PolicyAllowedClass { get; set; }
-
-    /// <summary>
-    /// Requests authorisation to book above the policy cap. <b>Honoured only for a caller holding
-    /// <c>HR.Travel.Admin</c></b> — a Write-only travel clerk asking for it gets 403, and a booking
-    /// over the cap without it gets 422. Stored as granted or not; never as claimed.
+    /// ASKS for an exception to the policy, with <c>ClassExceptionReason</c> (lane 4, D-8): a class above the cap, or
+    /// a flight booked later than the policy asks, is saved awaiting authorisation instead of refused (422 without
+    /// it). It no longer grants anything — a travel administrator other than the booker authorises it. Read back, it
+    /// says whether the exception is authorised.
     /// </summary>
     public bool ClassExceptionApproved { get; set; }
 
@@ -966,19 +1201,32 @@ public class UpdateStaffTravelFlightBookingDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
+    /// <summary>A correction to the ticket number; the number is first given by the ticket verb.</summary>
     [MaxLength(50)]
     public string? TicketNumber { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
+    // Lane 5 (D1, D5): an edit no longer writes the status — the verbs do — nor what the server stamps or derives:
+    // BookedAt and CancelledAt (stamped by confirm and cancel), the cancellation fee (the cancel verb's) and the
+    // policy's cap.
+}
 
-    /// <summary>
-    /// <b>Server-stamped from <see cref="Status"/>.</b> Both were client inputs, so a caller
-    /// asserted that a booking had been made or cancelled and nothing checked — the same fiction
-    /// shape as F-09's <c>NotificationSentAt</c>. Kept on the DTO because the mapper reads them.
-    /// </summary>
-    public DateTime? BookedAt { get; set; }
-    public DateTime? CancelledAt { get; set; }
+/// <summary>Tickets a confirmed flight (lane 5): the ticket number, and — on a trip needing a visa — an approved
+/// visa application or one recorded as not required (T-24).</summary>
+public class TicketStaffTravelFlightDto
+{
+    [Required]
+    [MaxLength(50)]
+    public string TicketNumber { get; set; } = string.Empty;
+}
+
+/// <summary>Cancels a booking (lane 5): why, kept on the trip as an internal note, and — on a flight or hotel — what
+/// the supplier charged for it, which the budget counts as committed.</summary>
+public class CancelStaffTravelBookingDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 
     [Range(0, double.MaxValue)]
     public decimal? CancellationFee { get; set; }
@@ -1156,6 +1404,14 @@ public class StaffTravelHotelBookingDto : BaseDto
     public DateTime? BookedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
     public decimal? CancellationFee { get; set; }
+    /// <summary>Lane 4, D-8 — as on the flight booking.</summary>
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public Guid? ExceptionRequestedById { get; set; }
+    public string? ExceptionRequestedByName { get; set; }
+    public Guid? ExceptionAuthorisedById { get; set; }
+    public string? ExceptionAuthorisedByName { get; set; }
+    public DateTime? ExceptionAuthorisedAt { get; set; }
 }
 
 public class StaffTravelHotelBookingSummaryDto
@@ -1170,6 +1426,46 @@ public class StaffTravelHotelBookingSummaryDto
     public string CurrencyCode { get; set; } = string.Empty;
     public TravelBookingStatus Status { get; set; }
     public string StatusName => Status.ToString();
+    public string? VendorName { get; set; }
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+}
+
+/// <summary>
+/// One row of the policy-breach register (lane 4, D-8): a flight or hotel booking that breaches its trip's policy —
+/// a cabin class or nightly rate above the cap, or booked later than the policy asks — with the exception's state.
+/// </summary>
+public class StaffTravelBookingExceptionDto
+{
+    public Guid BookingId { get; set; }
+    /// <summary><c>Flight</c> or <c>Hotel</c>.</summary>
+    public string Kind { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
+    public string RequestNumber { get; set; } = string.Empty;
+    public string TravellerName { get; set; } = string.Empty;
+    public DateOnly TravelStartDate { get; set; }
+    /// <summary>What was booked — "Kenya Airways · Business", "Hotel Ibis · USD 140.00 a night".</summary>
+    public string Booking { get; set; } = string.Empty;
+    /// <summary>The policy's cap for the booked figure — "Economy", "900.00 a night" — when one applied.</summary>
+    public string? PolicyCap { get; set; }
+    public string? Reason { get; set; }
+    public TravelBookingStatus BookingStatus { get; set; }
+    public string BookingStatusName => BookingStatus.ToString();
+    public TravelBookingExceptionState ExceptionState { get; set; }
+    public string ExceptionStateName => ExceptionState.ToString();
+    public string? RequestedByName { get; set; }
+    public string? DecidedByName { get; set; }
+    public DateTime? DecidedAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+}
+
+/// <summary>Refusing a booking's policy exception (lane 4, D-8): the reason is kept on the trip as an internal note.</summary>
+public class RefuseStaffTravelBookingExceptionDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 public class CreateStaffTravelHotelBookingDto : CreateDtoBase
@@ -1206,37 +1502,20 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
-    /// client input beside the dates that determine it, so a three-night stay could be recorded as
-    /// one and every report downstream would believe it.
-    /// </summary>
-    public int NumberOfNights { get; set; }
-
     [MaxLength(100)]
     public string? RoomType { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
     /// <summary>
-    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
-    /// </summary>
-    public decimal? PolicyMaxRatePerNight { get; set; }
-
-    /// <summary>
-    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
-    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
-    /// the right is 403.
+    /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
+    /// stay booked later than the policy asks is saved awaiting authorisation by a travel administrator other than
+    /// the booker; without it, 422. Read back, it says whether the exception is authorised.
     /// </summary>
     public bool RateExceptionApproved { get; set; }
 
@@ -1248,10 +1527,11 @@ public class CreateStaffTravelHotelBookingDto : CreateDtoBase
     [Required]
     public TravelBookingChannel BookedBy { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
-
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
+
+    // Lane 5 (D1, D5): no Status — created Pending, moved by its verbs; nights, the total and the policy's cap are the
+    // server's and left the contract.
 }
 
 public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
@@ -1285,37 +1565,20 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public DateOnly CheckOutDate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the two dates above; anything sent here is overwritten. It was a
-    /// client input beside the dates that determine it, so a three-night stay could be recorded as
-    /// one and every report downstream would believe it.
-    /// </summary>
-    public int NumberOfNights { get; set; }
-
     [MaxLength(100)]
     public string? RoomType { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal RatePerNight { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
     /// <summary>
-    /// <b>Server-assigned</b> from the travel policy in force for this traveller and trip.
-    /// </summary>
-    public decimal? PolicyMaxRatePerNight { get; set; }
-
-    /// <summary>
-    /// Requests authorisation to book above the policy rate cap. <b>Honoured only for a caller
-    /// holding <c>HR.Travel.Admin</c></b>; over the cap without it is 422, asking for it without
-    /// the right is 403.
+    /// ASKS for an exception to the policy, with <c>RateExceptionReason</c> (lane 4, D-8) — a rate above the cap or a
+    /// stay booked later than the policy asks is saved awaiting authorisation by a travel administrator other than
+    /// the booker; without it, 422. Read back, it says whether the exception is authorised.
     /// </summary>
     public bool RateExceptionApproved { get; set; }
 
@@ -1327,18 +1590,11 @@ public class UpdateStaffTravelHotelBookingDto : UpdateDtoBase
     [Required]
     public TravelBookingChannel BookedBy { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
-
     [MaxLength(1000)]
     public string? CancellationPolicy { get; set; }
 
-    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
-    public DateTime? BookedAt { get; set; }
-    public DateTime? CancelledAt { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal? CancellationFee { get; set; }
+    // Lane 5 (D1, D5): no Status (the verbs move it), and nothing the server derives or stamps — nights, total, the
+    // policy's cap, BookedAt, CancelledAt, the cancellation fee (the cancel verb's).
 }
 
 #endregion
@@ -1366,6 +1622,171 @@ public class StaffTravelGroundTransportDto : BaseDto
     public TravelBookingStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public string? Notes { get; set; }
+
+    // ---- A company vehicle's fleet trip, read from Fleet (lane 6, FX-3) — never copied onto the leg ----
+
+    public Guid? VehicleAssetId { get; set; }
+    public string? VehicleName { get; set; }
+    public string? VehiclePlate { get; set; }
+    public Guid? DriverEmployeeId { get; set; }
+    public string? DriverName { get; set; }
+    /// <summary>Fleet's own status — Draft, Submitted, Approved, Rejected, Dispatched, Completed, Cancelled. The leg's
+    /// <see cref="Status"/> is read from it.</summary>
+    public string? FleetStatus { get; set; }
+    public string? FleetRejectionReason { get; set; }
+    /// <summary>Why the vehicle is not held yet, when it is not — e.g. Fleet publishes no approval route (D-27).</summary>
+    public string? FleetNote { get; set; }
+    public DateTime? DispatchedAt { get; set; }
+    public DateTime? ReturnedAt { get; set; }
+    /// <summary>End mileage less start mileage, once Fleet has both.</summary>
+    public double? Distance { get; set; }
+
+    /// <summary>
+    /// Lane 6 (D-33, D-34): the driver's own travel request, when one was raised for the leg, and whether the leg keeps
+    /// a driver other than the traveller away overnight — drop-off on a later day, or a destination outside the trip's
+    /// origin city — which is when the desk is asked to raise one.
+    /// </summary>
+    public Guid? DriverTravelRequestId { get; set; }
+    public string? DriverTravelRequestNumber { get; set; }
+    public string? DriverTravelRequestStatus { get; set; }
+    public bool DriverAwayOvernight { get; set; }
+}
+
+/// <summary>
+/// Lane 7 (D-36, T-25): a destination health requirement as it stands for one trip — what the traveller must hold, and
+/// whether the desk has checked it (who, when, a note). Nothing is blocked by an unticked one.
+/// </summary>
+public class StaffTravelTripHealthRequirementDto
+{
+    public Guid HealthRequirementId { get; set; }
+    public string RequirementName { get; set; } = string.Empty;
+    public TravelHealthRequirementType RequirementType { get; set; }
+    public string RequirementTypeName => RequirementType.ToString();
+    public bool IsMandatory { get; set; }
+    public int? ValidityDays { get; set; }
+    public string? Notes { get; set; }
+    public bool Cleared { get; set; }
+    public Guid? ClearanceId { get; set; }
+    public DateTime? ClearedAt { get; set; }
+    public Guid? ClearedById { get; set; }
+    public string? ClearedByName { get; set; }
+    public string? ClearanceNote { get; set; }
+}
+
+public class ClearStaffTravelHealthRequirementDto
+{
+    /// <summary>What was checked — e.g. "Yellow-fever certificate seen, valid to 2034".</summary>
+    [MaxLength(1000)]
+    public string? Note { get; set; }
+}
+
+/// <summary>
+/// Lane 6 (D-29, FX-8's read half): an incident Fleet records against one of a trip's company vehicles on its fleet
+/// trip — shown on the trip's Compliance tab, read-only. Fleet owns it.
+/// </summary>
+public class StaffTravelFleetIncidentDto
+{
+    public Guid Id { get; set; }
+    public Guid? FleetTripId { get; set; }
+    public string VehicleName { get; set; } = string.Empty;
+    public string? VehiclePlate { get; set; }
+    public string? DriverName { get; set; }
+    public DateTime OccurredAtUtc { get; set; }
+    public string IncidentType { get; set; } = string.Empty;
+    public string Title { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string? Location { get; set; }
+    public string Severity { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// What the desk chooses a company vehicle from, through travel's own door (lane 6, FX-4) — HR holds no Maintenance
+/// permission. Each vehicle and driver says why it is not available for the trip's days, if it is not.
+/// </summary>
+public class StaffTravelFleetOptionsDto
+{
+    public DateTime WindowStart { get; set; }
+    public DateTime WindowEnd { get; set; }
+    public List<StaffTravelFleetVehicleOptionDto> Vehicles { get; set; } = new();
+    public List<StaffTravelFleetDriverOptionDto> Drivers { get; set; } = new();
+    /// <summary>The traveller's own assigned vehicle, preselected (D-11), and the driver assigned to it.</summary>
+    public Guid? DefaultVehicleAssetId { get; set; }
+    public Guid? DefaultDriverEmployeeId { get; set; }
+    /// <summary>Fleet's settings ask a predefined destination for every trip; choose one of <see cref="Destinations"/>.</summary>
+    public bool DestinationRequired { get; set; }
+    public List<StaffTravelFleetDestinationOptionDto> Destinations { get; set; } = new();
+    /// <summary>Fleet publishes an approval route for its trips; without one the vehicle is reserved as a draft and not
+    /// held (D-27).</summary>
+    public bool ApprovalRoutePublished { get; set; }
+}
+
+public class StaffTravelFleetVehicleOptionDto
+{
+    public Guid VehicleAssetId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? AssetNumber { get; set; }
+    public string? LicensePlate { get; set; }
+    public string? AssignedTo { get; set; }
+    /// <summary>Critical compliance items expired or expiring by the return (FX-5).</summary>
+    public List<string> BlockingCompliance { get; set; } = new();
+    /// <summary>Fleet trips planned on the vehicle over the window (FX-2).</summary>
+    public List<string> Overlaps { get; set; } = new();
+    public bool Available => BlockingCompliance.Count == 0 && Overlaps.Count == 0;
+}
+
+public class StaffTravelFleetDriverOptionDto
+{
+    public Guid EmployeeId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? EmployeeNumber { get; set; }
+    public DateOnly? LicenceExpiry { get; set; }
+    /// <summary>Approved leave or another fleet trip over the window (FX-7) — told, and another trip refused on save.</summary>
+    public List<string> Flags { get; set; } = new();
+}
+
+public class StaffTravelFleetDestinationOptionDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Lane 6, slice 6b: what a fuel expense on a claim chooses from — the trip's company-vehicle trips, with the fuel Fleet
+/// already logs on each (D-30, D-32). Read through travel's door; HR holds no Maintenance permission.
+/// </summary>
+public class StaffTravelFleetFuelOptionsDto
+{
+    /// <summary>D-30: a fuel expense must name one of the live trips — a company vehicle travels and no car is hired.</summary>
+    public bool FuelNamesTrip { get; set; }
+    public bool HasCarRental { get; set; }
+    public List<StaffTravelFleetFuelTripDto> Trips { get; set; } = new();
+}
+
+public class StaffTravelFleetFuelTripDto
+{
+    public Guid FleetTripId { get; set; }
+    public string VehicleName { get; set; } = string.Empty;
+    public string? VehiclePlate { get; set; }
+    public DateTime? PlannedStartAt { get; set; }
+    public DateTime? PlannedEndAt { get; set; }
+    public string Status { get; set; } = string.Empty;
+    /// <summary>Not cancelled or rejected in Fleet — fuel is claimed only for a live trip.</summary>
+    public bool Live { get; set; }
+    public List<StaffTravelFleetFuelEntryDto> Fuel { get; set; } = new();
+}
+
+public class StaffTravelFleetFuelEntryDto
+{
+    public Guid Id { get; set; }
+    public DateTime FuelledAt { get; set; }
+    public decimal Quantity { get; set; }
+    public string Unit { get; set; } = "L";
+    /// <summary>In Finance's base currency, as Fleet keeps it.</summary>
+    public decimal? TotalCost { get; set; }
+    public string? VendorName { get; set; }
+    /// <summary>The paid travel claim that logged it, if one did; otherwise Fleet's own entry.</summary>
+    public string? ClaimNumber { get; set; }
 }
 
 public class CreateStaffTravelGroundTransportDto : CreateDtoBase
@@ -1378,6 +1799,9 @@ public class CreateStaffTravelGroundTransportDto : CreateDtoBase
 
     /// <summary>Optional driver for the reserved vehicle.</summary>
     public Guid? DriverEmployeeId { get; set; }
+
+    /// <summary>Fleet's predefined destination — required when Fleet's settings ask one of every trip (lane 6).</summary>
+    public Guid? FleetTripDestinationId { get; set; }
 
     [Required]
     public Guid StaffTravelRequestId { get; set; }
@@ -1409,10 +1833,10 @@ public class CreateStaffTravelGroundTransportDto : CreateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
-
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    // Lane 5 (D1): no Status — created Pending, moved by its verbs.
 }
 
 public class UpdateStaffTravelGroundTransportDto : UpdateDtoBase
@@ -1444,11 +1868,16 @@ public class UpdateStaffTravelGroundTransportDto : UpdateDtoBase
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
-
     [MaxLength(2000)]
     public string? Notes { get; set; }
+
+    // Lane 5 (D1): an edit no longer writes the status — the verbs do.
+
+    // Lane 6: a company vehicle's leg changes its fleet trip — the vehicle, driver and destination — while Fleet allows
+    // (a draft or rejected trip; an approved one only its driver). Ignored on any other kind of leg.
+    public Guid? VehicleAssetId { get; set; }
+    public Guid? DriverEmployeeId { get; set; }
+    public Guid? FleetTripDestinationId { get; set; }
 }
 
 #endregion
@@ -1510,11 +1939,6 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
@@ -1526,7 +1950,7 @@ public class CreateStaffTravelCarRentalBookingDto : CreateDtoBase
 
     public bool DriverLicenseRequired { get; set; }
 
-    public TravelBookingStatus Status { get; set; } = TravelBookingStatus.Pending;
+    // Lane 5 (D1, D5): no Status — created Pending, moved by its verbs; the total is the server's.
 }
 
 public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
@@ -1557,11 +1981,6 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal DailyRate { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived</b> from the rate and the period; anything sent here is overwritten.
-    /// </summary>
-    public decimal TotalCost { get; set; }
-
     [Required]
     [MaxLength(3)]
     public string CurrencyCode { get; set; } = string.Empty;
@@ -1573,11 +1992,20 @@ public class UpdateStaffTravelCarRentalBookingDto : UpdateDtoBase
 
     public bool DriverLicenseRequired { get; set; }
 
-    [Required]
-    public TravelBookingStatus Status { get; set; }
+    // Lane 5 (D1, D5): no Status (the verbs move it), total or BookedAt (stamped by confirm).
+}
 
-    /// <summary><b>Server-stamped from <see cref="Status"/></b> — see the flight update DTO.</summary>
-    public DateTime? BookedAt { get; set; }
+/// <summary>
+/// A trip's bookings as its traveller reads them on the portal (lane 7, slice 7c1): every flight with its segments, every
+/// hotel, ground leg and car rental. The policy-exception decision — who asked, who authorised it, why — is the desk's, as
+/// A6 made the request's policy exceptions (P3); a driver's own travel request is the driver's.
+/// </summary>
+public class StaffTravelTravellerBookingsDto
+{
+    public List<StaffTravelFlightBookingDto> Flights { get; set; } = new();
+    public List<StaffTravelHotelBookingDto> Hotels { get; set; } = new();
+    public List<StaffTravelGroundTransportDto> GroundTransports { get; set; } = new();
+    public List<StaffTravelCarRentalBookingDto> CarRentals { get; set; } = new();
 }
 
 #endregion
@@ -1600,13 +2028,30 @@ public class StaffTravelBudgetDto : BaseDto
     public decimal TransportBudget { get; set; }
     public decimal MiscellaneousBudget { get; set; }
     public decimal TotalCommitted { get; set; }
+    /// <summary>Claims paid plus advance cash paid out (less what came back) — lane 3, B10.</summary>
     public decimal TotalActual { get; set; }
+    /// <summary>The part of <see cref="TotalActual"/> paid on claims.</summary>
+    public decimal ActualClaimsPaid { get; set; }
+    /// <summary>The part of <see cref="TotalActual"/> paid out as advances, less cash handed back.</summary>
+    public decimal ActualAdvancesPaidOut { get; set; }
     public decimal Variance { get; set; }
+    /// <summary>The trip's approved budget (its estimate on a trip approved before lane 2), which this budget's
+    /// total may not exceed — the two figures were unlinked (O-9).</summary>
+    public decimal? TripApprovedBudget { get; set; }
+    /// <summary>Committed spend above the approved total. An overrun warns; whether it refuses is TDC's question.</summary>
+    public bool CommittedOverrun { get; set; }
+    /// <summary>Actual spend above the approved total.</summary>
+    public bool ActualOverrun { get; set; }
     public Guid? ApprovedById { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
 }
 
+/// <summary>
+/// A trip's budget (lane 3, B10, O-9, D-16): only once the trip is approved; in the trip's currency, set by the
+/// server; its total defaults to the trip's approved budget and may not exceed it; its allocation is left empty
+/// or adds up to the total exactly.
+/// </summary>
 public class CreateStaffTravelBudgetDto : CreateDtoBase
 {
     [Required]
@@ -1615,12 +2060,11 @@ public class CreateStaffTravelBudgetDto : CreateDtoBase
     [Range(2000, 2100)]
     public short BudgetYear { get; set; }
 
+    /// <summary>0 takes the trip's approved budget.</summary>
     [Range(0, double.MaxValue)]
     public decimal ApprovedTotal { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3): a budget is in its trip's currency, set by the server.
 
     [Range(0, double.MaxValue)]
     public decimal FlightBudget { get; set; }
@@ -1638,17 +2082,17 @@ public class CreateStaffTravelBudgetDto : CreateDtoBase
     public decimal MiscellaneousBudget { get; set; }
 }
 
+/// <summary>As <see cref="CreateStaffTravelBudgetDto"/>. Changing an approved budget withdraws its approval.</summary>
 public class UpdateStaffTravelBudgetDto : UpdateDtoBase
 {
     [Range(2000, 2100)]
     public short BudgetYear { get; set; }
 
+    /// <summary>0 takes the trip's approved budget.</summary>
     [Range(0, double.MaxValue)]
     public decimal ApprovedTotal { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3): the trip's, set by the server.
 
     [Range(0, double.MaxValue)]
     public decimal FlightBudget { get; set; }
@@ -1665,17 +2109,17 @@ public class UpdateStaffTravelBudgetDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal MiscellaneousBudget { get; set; }
 
-    /// <summary>
-    /// <b>Server-derived; anything sent here is overwritten.</b> Committed is the value of
-    /// non-cancelled bookings on the request, actual is the value of paid expense claims, and
-    /// <c>Variance</c> is <c>ApprovedTotal - TotalActual</c>. All three were caller-declared, so a
-    /// budget-versus-actual screen showed whatever was last typed while the records that constitute
-    /// the spend sat unread on the same request. See <c>StaffTravelBudgetRollup</c>.
-    /// </summary>
-    public decimal TotalCommitted { get; set; }
+    // TotalCommitted and TotalActual removed (lane 3, B14): they were ignored — the rollup derives both from the
+    // trip's bookings, claims and advances (StaffTravelBudgetRollup).
+}
 
-    /// <summary><b>Server-derived</b> — see <see cref="TotalCommitted"/>.</summary>
-    public decimal TotalActual { get; set; }
+/// <summary>Voiding a paid claim's payment (lane 3, T-39): a travel administrator other than the payer, with the reason.</summary>
+public class VoidStaffTravelClaimPaymentDto
+{
+    [Required]
+    [MinLength(5)]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
 }
 
 #endregion
@@ -1709,6 +2153,19 @@ public class StaffTravelExpenseClaimDto : BaseDto
     public string? FinanceReviewedByName { get; set; }
     public DateTime? FinanceReviewedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
+    // Travel final closure, lane 3 (slice 3b).
+    /// <summary>The reviewer's words on the outcome — always there for a returned or rejected claim.</summary>
+    public string? ReviewNotes { get; set; }
+    /// <summary>Who recorded the payment — never the claimant, never a reviewer of the claim (D-2).</summary>
+    public Guid? PaidById { get; set; }
+    public string? PaidByName { get; set; }
+    /// <summary>Why the claim was paid in full although the traveller held advance cash the claim does not name (O-2).</summary>
+    public string? AdvanceWaiverReason { get; set; }
+    /// <summary>The last payment voided, by whom and why (lane 3, T-39); the voided payment's details are an
+    /// internal note on the trip.</summary>
+    public DateTime? PaymentVoidedAt { get; set; }
+    public string? PaymentVoidedByName { get; set; }
+    public string? PaymentVoidReason { get; set; }
     public List<StaffTravelExpenseClaimLineDto> Lines { get; set; } = new();
 }
 
@@ -1716,6 +2173,7 @@ public class StaffTravelExpenseClaimSummaryDto
 {
     public Guid Id { get; set; }
     public string ClaimNumber { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public TravelClaimType ClaimType { get; set; }
@@ -1733,17 +2191,15 @@ public class CreateStaffTravelExpenseClaimDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
+    // EmployeeId and CurrencyCode removed (lane 3, B3 and B11): a claim is the trip's traveller's and is kept in
+    // the base currency, both set by the server. A payload could name anyone, and a currency nothing reconciled
+    // with totals that were always in base.
 
     [Required]
     public TravelClaimType ClaimType { get; set; }
 
+    /// <summary>An advance of this trip and traveller that the claim settles when it is paid.</summary>
     public Guid? TravelAdvanceId { get; set; }
-
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
 
     public List<CreateStaffTravelExpenseClaimLineDto> Lines { get; set; } = new();
 }
@@ -1755,9 +2211,7 @@ public class UpdateStaffTravelExpenseClaimDto : UpdateDtoBase
 
     public Guid? TravelAdvanceId { get; set; }
 
-    [Required]
-    [MaxLength(3)]
-    public string CurrencyCode { get; set; } = string.Empty;
+    // CurrencyCode removed (lane 3, B11): the claim's currency is the base currency, set by the server.
 }
 
 public class ReviewStaffTravelExpenseClaimDto
@@ -1765,12 +2219,16 @@ public class ReviewStaffTravelExpenseClaimDto
     [Required]
     public Guid ClaimId { get; set; }
     // FinanceReviewedById removed: stamped from the caller's token, never accepted from the body.
+    // ReviewedAt removed (lane 3, B14): it was ignored — the moment is the clock's.
 
-    public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
-
+    /// <summary>
+    /// UnderReview, Rejected or Returned — or Approved: the server then records Approved or PartiallyApproved
+    /// from what the lines' reviews approved (PartiallyApproved is accepted as the same request).
+    /// </summary>
     [Required]
     public TravelClaimStatus NewStatus { get; set; }
 
+    /// <summary>Kept on the claim; required to reject or return it.</summary>
     [MaxLength(2000)]
     public string? Notes { get; set; }
 }
@@ -1780,13 +2238,21 @@ public class PayStaffTravelExpenseClaimDto
     [Required]
     public Guid ClaimId { get; set; }
 
+    /// <summary>Not payroll offset: payroll cannot receive travel claims yet (D-10).</summary>
     [Required]
     public TravelPaymentMethod PaymentMethod { get; set; }
 
     [MaxLength(100)]
     public string? PaymentReference { get; set; }
 
-    public DateTime PaidAt { get; set; } = DateTime.UtcNow;
+    // PaidAt removed (lane 3, B14): it was ignored — when money left is the clock's answer.
+
+    /// <summary>
+    /// Required only when the traveller holds paid-out advance cash on this trip that the claim does not name
+    /// (O-2): why the claim is paid in full rather than recovering it.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? AdvanceWaiverReason { get; set; }
 }
 
 #endregion
@@ -1817,6 +2283,13 @@ public class StaffTravelExpenseClaimLineDto : BaseDto
     public Guid? ReviewedById { get; set; }
     public string? ReviewedByName { get; set; }
     public DateTime? ReviewedAt { get; set; }
+
+    /// <summary>Lane 6 (D-30): a fuel expense's company-vehicle trip, and the litres bought.</summary>
+    public Guid? FleetTripId { get; set; }
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>Fleet's fuel record the payment wrote (D-31); cleared when the payment is voided.</summary>
+    public Guid? FleetFuelTransactionId { get; set; }
 }
 
 public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
@@ -1853,6 +2326,22 @@ public class CreateStaffTravelExpenseClaimLineDto : CreateDtoBase
     public Guid? ReceiptAttachmentId { get; set; }
     public bool IsPerDiem { get; set; }
     public Guid? PerDiemRateId { get; set; }
+
+    /// <summary>
+    /// Lane 6 (D-30): the company-vehicle trip a fuel expense was for — one of the claim's own trip's fleet trips — with
+    /// the litres bought. Fleet's fuel log takes both when the claim is paid (D-31).
+    /// </summary>
+    public Guid? FleetTripId { get; set; }
+
+    [Range(0, 100000)]
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>
+    /// D-32: why the fill is claimed when Fleet already logs fuel for that trip that day. Kept as an internal note on the
+    /// trip, not on the line.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? FuelDuplicateReason { get; set; }
 }
 
 public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
@@ -1887,6 +2376,16 @@ public class UpdateStaffTravelExpenseClaimLineDto : UpdateDtoBase
     public Guid? ReceiptAttachmentId { get; set; }
     public bool IsPerDiem { get; set; }
     public Guid? PerDiemRateId { get; set; }
+
+    /// <summary>Lane 6 (D-30): as on the create — the fuel expense's fleet trip and litres.</summary>
+    public Guid? FleetTripId { get; set; }
+
+    [Range(0, 100000)]
+    public decimal? FuelQuantity { get; set; }
+
+    /// <summary>D-32: asked again only when the line moves to another fleet trip or date.</summary>
+    [MaxLength(1000)]
+    public string? FuelDuplicateReason { get; set; }
 }
 
 public class ReviewStaffTravelExpenseClaimLineDto
@@ -1894,18 +2393,21 @@ public class ReviewStaffTravelExpenseClaimLineDto
     [Required]
     public Guid LineId { get; set; }
     // ReviewedById removed: stamped from the caller's token, never accepted from the body.
+    // ReviewedAt removed (lane 3, B14): it was ignored.
 
-    public DateTime ReviewedAt { get; set; } = DateTime.UtcNow;
-
+    /// <summary>Approved or Rejected.</summary>
     [Required]
     public TravelExpenseLineStatus Status { get; set; }
 
+    /// <summary>
+    /// For an approval: the amount approved, in the base currency — the whole line when omitted, never more.
+    /// The rejected part is the rest of the line, worked out by the server (lane 3, B4: approved plus rejected
+    /// could exceed the line). AmountRejected was removed from this DTO for that reason.
+    /// </summary>
     [Range(0, double.MaxValue)]
     public decimal? AmountApproved { get; set; }
 
-    [Range(0, double.MaxValue)]
-    public decimal? AmountRejected { get; set; }
-
+    /// <summary>Required when any of the line is rejected.</summary>
     [MaxLength(1000)]
     public string? RejectionReason { get; set; }
 }
@@ -1936,12 +2438,34 @@ public class StaffTravelAdvanceDto : BaseDto
     public string? ApprovedByName { get; set; }
     public Guid? DisbursedById { get; set; }
     public string? DisbursedByName { get; set; }
+
+    // Travel final closure, lane 3 — the verbs' records.
+    public DateTime? RejectedAt { get; set; }
+    public string? RejectedByName { get; set; }
+    public string? RejectionReason { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancelledByName { get; set; }
+    public string? CancellationReason { get; set; }
+    public DateTime? WrittenOffAt { get; set; }
+    public string? WrittenOffByName { get; set; }
+    public string? WriteOffReason { get; set; }
+    /// <summary>What was written off: the approved amount less what claims recovered and cash came back.</summary>
+    public decimal? WrittenOffAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
+    public DateTime? RefundedAt { get; set; }
+    public string? RefundedByName { get; set; }
+    public string? RefundReference { get; set; }
+    /// <summary>Cash out past its settlement deadline — true from the day after the deadline, whether or not the
+    /// nightly sweep has written <see cref="TravelAdvanceStatus.Overdue"/> yet.</summary>
+    public bool IsOverdue { get; set; }
 }
 
 public class StaffTravelAdvanceSummaryDto
 {
     public Guid Id { get; set; }
     public string AdvanceNumber { get; set; } = string.Empty;
+    public Guid StaffTravelRequestId { get; set; }
+    public string? RequestNumber { get; set; }
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
     public decimal RequestedAmount { get; set; }
@@ -1951,8 +2475,15 @@ public class StaffTravelAdvanceSummaryDto
     public string AdvanceTypeName => AdvanceType.ToString();
     public TravelAdvanceStatus Status { get; set; }
     public string StatusName => Status.ToString();
+    public decimal SettledAmount { get; set; }
     public decimal UnsettledAmount { get; set; }
+    public decimal RefundedAmount { get; set; }
     public DateOnly? SettlementDeadline { get; set; }
+    public DateTime? DisbursedAt { get; set; }
+    /// <summary>As on <see cref="StaffTravelAdvanceDto.IsOverdue"/>.</summary>
+    public bool IsOverdue { get; set; }
+    /// <summary>Why a rejected, cancelled or written-off advance ended as it did; otherwise null.</summary>
+    public string? OutcomeReason { get; set; }
 }
 
 public class CreateStaffTravelAdvanceDto : CreateDtoBase
@@ -1960,8 +2491,8 @@ public class CreateStaffTravelAdvanceDto : CreateDtoBase
     [Required]
     public Guid StaffTravelRequestId { get; set; }
 
-    [Required]
-    public Guid EmployeeId { get; set; }
+    // EmployeeId removed (lane 3, B3): an advance is the trip's traveller's, set by the server. A payload could name
+    // anyone, and a claim recovers only an advance of its own traveller.
 
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
@@ -1981,12 +2512,7 @@ public class UpdateStaffTravelAdvanceDto : UpdateDtoBase
     [Range(0, double.MaxValue)]
     public decimal RequestedAmount { get; set; }
 
-    /// <summary>
-    /// <b>Ignored.</b> Approving an advance is <c>POST advances/{id}/approve</c>, which stamps the
-    /// approver from the token and checks the status. Accepting it here left an advance with money
-    /// approved and nobody on record as having approved it.
-    /// </summary>
-    public decimal? ApprovedAmount { get; set; }
+    // ApprovedAmount removed (lane 3, B14): it was ignored — approving is POST advances/{id}/approve.
 
     [Required]
     [MaxLength(3)]
@@ -2013,13 +2539,27 @@ public class DisburseStaffTravelAdvanceDto
     [Required]
     public Guid AdvanceId { get; set; }
     // DisbursedById removed: stamped from the caller's token, never accepted from the body.
+    // DisbursedAt removed (lane 3, B14): it was ignored — when the money went out is the clock's answer.
+}
 
-    /// <summary>
-    /// <b>Ignored — stamped from the clock.</b> It let a caller state when the money went out, which
-    /// matters because the settlement deadline and the overdue-settlement sweep both run off dates.
-    /// Kept on the DTO so existing callers do not break; the value is not read.
-    /// </summary>
-    public DateTime DisbursedAt { get; set; } = DateTime.UtcNow;
+/// <summary>Reject, cancel or write off an advance: the verb is the route; the reason is required.</summary>
+public class DecideStaffTravelAdvanceDto
+{
+    [Required]
+    [MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>Unused advance cash handed back by the traveller (lane 3, O-8). One refund per advance.</summary>
+public class RefundStaffTravelAdvanceDto
+{
+    [Range(0, double.MaxValue)]
+    public decimal Amount { get; set; }
+
+    /// <summary>The receipt or bank reference for the cash received.</summary>
+    [Required]
+    [MaxLength(100)]
+    public string Reference { get; set; } = string.Empty;
 }
 
 #endregion
@@ -2161,12 +2701,14 @@ public class StaffTravelPolicyDto : BaseDto
     public string MaxFlightClassInternationalName => MaxFlightClassInternational.ToString();
     public decimal MaxHotelRateDomestic { get; set; }
     public decimal MaxHotelRateInternational { get; set; }
+    /// <summary>The currency the policy's money limits are set in (lane 4, C3/T-9) — the base currency when
+    /// the policy was written before policies had one.</summary>
+    public string? CurrencyCode { get; set; }
     public int AdvanceBookingDaysFlight { get; set; }
     public int AdvanceBookingDaysHotel { get; set; }
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
     public decimal MaxSingleTripBudget { get; set; }
-    public decimal MaxAnnualTravelBudget { get; set; }
+    // RequiresCheapestFare and MaxAnnualTravelBudget left the DTOs (lane 4, D-1): nothing reads them; the columns stay.
     public decimal ReceiptRequiredAbove { get; set; }
     public int ExpenseSubmissionDays { get; set; }
     public Guid? ApprovedById { get; set; }
@@ -2196,16 +2738,20 @@ public class StaffTravelPolicySummaryDto
     public DateTime? ApprovedAt { get; set; }
 }
 
+/// <summary>
+/// A draft travel policy (lane 4): its version is the server's — the next for its name — and it is in force only once
+/// approved, so neither <c>VersionNumber</c> nor <c>IsCurrentVersion</c> is taken from the caller (T-50). Cabin classes
+/// must be real classes (C2); the end is not before the start; the staff-level band runs low to high (C3).
+/// </summary>
 public class CreateStaffTravelPolicyDto : CreateDtoBase
 {
     [Required]
     [MaxLength(200)]
     public string PolicyName { get; set; } = string.Empty;
 
-    [Range(1, int.MaxValue)]
-    public int VersionNumber { get; set; } = 1;
-
-    public bool IsCurrentVersion { get; set; } = true;
+    /// <summary>The currency the money limits are set in; the base currency when omitted (C3/T-9).</summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? CurrencyCode { get; set; }
 
     public Guid? AppliesToLevelFromId { get; set; }
     public Guid? AppliesToLevelToId { get; set; }
@@ -2234,14 +2780,10 @@ public class CreateStaffTravelPolicyDto : CreateDtoBase
     [Range(0, 365)]
     public int AdvanceBookingDaysHotel { get; set; }
 
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal MaxSingleTripBudget { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal MaxAnnualTravelBudget { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal ReceiptRequiredAbove { get; set; }
@@ -2250,13 +2792,17 @@ public class CreateStaffTravelPolicyDto : CreateDtoBase
     public int ExpenseSubmissionDays { get; set; }
 }
 
+/// <summary>A draft's correction, under <see cref="CreateStaffTravelPolicyDto"/>'s rules. An approved policy is not
+/// edited — a new version is raised.</summary>
 public class UpdateStaffTravelPolicyDto : UpdateDtoBase
 {
     [Required]
     [MaxLength(200)]
     public string PolicyName { get; set; } = string.Empty;
 
-    public bool IsCurrentVersion { get; set; }
+    /// <summary>The currency the money limits are set in; the base currency when omitted.</summary>
+    [StringLength(3, MinimumLength = 3)]
+    public string? CurrencyCode { get; set; }
 
     public Guid? AppliesToLevelFromId { get; set; }
     public Guid? AppliesToLevelToId { get; set; }
@@ -2285,14 +2831,10 @@ public class UpdateStaffTravelPolicyDto : UpdateDtoBase
     [Range(0, 365)]
     public int AdvanceBookingDaysHotel { get; set; }
 
-    public bool RequiresCheapestFare { get; set; }
     public bool PreferredVendorMandatory { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal MaxSingleTripBudget { get; set; }
-
-    [Range(0, double.MaxValue)]
-    public decimal MaxAnnualTravelBudget { get; set; }
 
     [Range(0, double.MaxValue)]
     public decimal ReceiptRequiredAbove { get; set; }
@@ -2434,10 +2976,11 @@ public class DecideStaffTravelPolicyExceptionDto
     public Guid ExceptionId { get; set; }
     // ApprovedById removed: stamped from the caller's token.
 
+    /// <summary>Approved or Rejected (lane 4, C4).</summary>
     [Required]
     public TravelPolicyExceptionStatus Status { get; set; }
 
-    public DateTime DecidedAt { get; set; } = DateTime.UtcNow;
+    // DecidedAt removed (lane 4, C4): the clock's, not the caller's.
 
     /// <summary>
     /// Why the exception was granted or refused.
@@ -2466,7 +3009,12 @@ public class StaffTravelDocumentDto : BaseDto
     public string EmployeeName { get; set; } = string.Empty;
     public TravelDocumentType DocumentType { get; set; }
     public string DocumentTypeName => DocumentType.ToString();
+    /// <summary>
+    /// Lane 7 (O-7): masked to its last four in every list and on the request's screens — <see cref="NumberMasked"/>
+    /// says so; the full number only on the document's own read (<c>documents/{id}</c>).
+    /// </summary>
     public string DocumentNumber { get; set; } = string.Empty;
+    public bool NumberMasked { get; set; }
     public Guid IssuingCountryId { get; set; }
     public string? IssuingCountryName { get; set; }
     public DateOnly? IssueDate { get; set; }
@@ -2541,6 +3089,8 @@ public class StaffTravelVisaRequirementDto : BaseDto
     public int? ProcessingDays { get; set; }
     public string? OfficialSourceUrl { get; set; }
     public DateOnly? LastVerifiedAt { get; set; }
+    /// <summary>Lane 7 (T-40): never verified, or not in the last 365 days.</summary>
+    public bool IsStale { get; set; }
     public string? Notes { get; set; }
 }
 
@@ -2622,6 +3172,14 @@ public class StaffTravelVisaApplicationDto : BaseDto
     public string? Notes { get; set; }
 }
 
+/// <summary>A visa application as every list shows it.</summary>
+/// <remarks>
+/// ⚠ The request's Compliance tab lists visas from this shape under "Number" and "Fee" columns, and
+/// it carried neither, so both always read "—" (travel final closure, lane 0 — finding E3). The fee
+/// and its currency are here now. The number is here MASKED — only its last four characters show —
+/// because a list is read by every travel reader; the full number stays on the single-record read
+/// (finding O-7).
+/// </remarks>
 public class StaffTravelVisaApplicationSummaryDto
 {
     public Guid Id { get; set; }
@@ -2632,9 +3190,20 @@ public class StaffTravelVisaApplicationSummaryDto
     public VisaApplicationStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateOnly? SubmittedDate { get; set; }
+    public DateOnly? ApprovedDate { get; set; }
     public DateOnly? ExpiryDate { get; set; }
+    /// <summary>The visa number with all but its last four characters masked; null when none.</summary>
+    public string? VisaNumberMasked { get; set; }
+    public decimal? ProcessingFee { get; set; }
+    public string? CurrencyCode { get; set; }
 }
 
+/// <remarks>
+/// ⚠ The record dialog asks for the status, the number and three dates, and this DTO had none of
+/// them, so all five were dropped without a word and every visa was saved Not Started with no
+/// number (travel final closure, lane 0 — finding E3). They are accepted now, as the update DTO
+/// already accepted them. An omitted status is still Not Started.
+/// </remarks>
 public class CreateStaffTravelVisaApplicationDto : CreateDtoBase
 {
     [Required]
@@ -2648,6 +3217,15 @@ public class CreateStaffTravelVisaApplicationDto : CreateDtoBase
 
     [MaxLength(100)]
     public string? VisaType { get; set; }
+
+    public VisaApplicationStatus Status { get; set; } = VisaApplicationStatus.NotStarted;
+
+    public DateOnly? SubmittedDate { get; set; }
+    public DateOnly? ApprovedDate { get; set; }
+    public DateOnly? ExpiryDate { get; set; }
+
+    [MaxLength(100)]
+    public string? VisaNumber { get; set; }
 
     public Guid? VendorId { get; set; }
 
@@ -2823,6 +3401,10 @@ public class StaffTravelAlertSummaryDto
     public string Title { get; set; } = string.Empty;
     public DateTime EffectiveFrom { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>The alert's text and end — on a trip's destination alerts (lane 7, 7c1: the traveller reads them).</summary>
+    public string? Body { get; set; }
+    public DateTime? EffectiveTo { get; set; }
 }
 
 public class CreateStaffTravelAlertDto : CreateDtoBase
@@ -3128,8 +3710,35 @@ public class StaffTravelReminderRunResultDto
     public string Trigger { get; set; } = string.Empty;
     public int RemindersQueued { get; set; }
 
-    /// <summary>How many candidates were found but already claimed by an earlier sweep.</summary>
+    /// <summary>How many candidates were found but already sent by an earlier sweep.</summary>
     public int AlreadySent { get; set; }
+
+    /// <summary>
+    /// Reminders an earlier sweep claimed and never published — it stopped between the two — sent by this one (travel
+    /// final closure, lane 8, slice 8b).
+    /// </summary>
+    public int Retried { get; set; }
+
+    /// <summary>Advances this sweep marked Overdue — cash out past its settlement deadline (lane 3).</summary>
+    public int AdvancesMarkedOverdue { get; set; }
+
+    /// <summary>Approved trips this sweep moved under way — the departure date, or Fleet's dispatch (lane 8, slice 8c, D-6).</summary>
+    public int TripsStarted { get; set; }
+
+    /// <summary>Trips under way this sweep marked completed, the day after they ended (D-47).</summary>
+    public int TripsCompleted { get; set; }
+
+    /// <summary>Completed trips this sweep closed — the claim window passed and nothing left to settle (D-6, D-51).</summary>
+    public int TripsClosed { get; set; }
+
+    /// <summary>Group trips this sweep moved under way or completed, from their travellers' trips.</summary>
+    public int GroupsUpdated { get; set; }
+
+    /// <summary>Working days this sweep put on travellers' attendance as on duty (lane 9, D-54).</summary>
+    public int AttendanceDaysAdded { get; set; }
+
+    /// <summary>Attendance days this sweep gave up — trips cancelled, sent back, shortened or deleted.</summary>
+    public int AttendanceDaysRemoved { get; set; }
 }
 
 /// <summary>
@@ -3147,8 +3756,12 @@ public class StaffTravelReminderPreviewItemDto
     public int EscalationTier { get; set; }
     public string DedupeKey { get; set; } = string.Empty;
 
-    /// <summary>True when a previous sweep already claimed this key, so a real run would skip it.</summary>
+    /// <summary>True when a previous sweep already sent this key, so a real run would skip it.</summary>
     public bool AlreadySent { get; set; }
+
+    /// <summary>Whom it reaches — Traveller, Desk, Approvers (lane 8, slice 8b). The traveller's goes to the desk when they
+    /// have neither a login nor an email address.</summary>
+    public List<string> SentTo { get; set; } = new();
 }
 
 public class StaffTravelReminderRunDto
@@ -3173,6 +3786,9 @@ public class StaffTravelReminderLogEntryDto
     public int DaysRemaining { get; set; }
     public int EscalationTier { get; set; }
     public DateTime CreatedAt { get; set; }
+
+    /// <summary>When the sweep made the publish call (lane 8, slice 8b); null for a claim not yet published.</summary>
+    public DateTime? PublishedAt { get; set; }
 }
 
 #endregion

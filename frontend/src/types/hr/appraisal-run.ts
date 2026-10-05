@@ -210,6 +210,20 @@ export interface PerformanceAppraisal extends AuditFields {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
+  /**
+   * Set once the appraisal is withdrawn from its cycle (performance closure E-d1). A withdrawn
+   * appraisal comes back without its score, grade or ranks, for every reader.
+   */
+  withdrawnReason?: string | null;
+  withdrawnDate?: string | null;
+  withdrawnById?: string | null;
+  withdrawnByName?: string | null;
+}
+
+/** HR's withdraw action (performance closure E-d1). */
+export interface WithdrawAppraisalRequest {
+  /** Required; at most 1,000 characters. */
+  reason: string;
 }
 
 /**
@@ -302,6 +316,8 @@ export interface EvaluationItem {
   kpiTargetValue?: number | null;
   kpiMinValue?: number | null;
   kpiMaxValue?: number | null;
+  /** The snapshot's tolerance (D-32): an actual within it of the target scores as met. */
+  kpiTolerancePercent?: number | null;
   kpiTargetSource?: KpiTargetSource | null;
   gradeRanges: EvaluationGradeRange[];
 }
@@ -431,6 +447,11 @@ export interface SelfEvaluationContext {
   selfEvaluationSubmittedDate?: string | null;
   isEditable: boolean;
   selfEvaluationDeadline?: string | null;
+  /**
+   * Submitted, but its entries are not this reader's to see yet — the line manager, while the
+   * cycle shows self scores only after they submit their own evaluation (closure B2).
+   */
+  selfEntriesWithheld: boolean;
   allowSelfSoftSkillRating: boolean;
   settings?: AppraisalSettings | null;
   sections: SelfEvaluationSection[];
@@ -517,6 +538,8 @@ export interface ViewSubmittedEvaluation {
   requireHRReview: boolean;
   hrReviewComplete: boolean;
   allowSelfSoftSkillRating: boolean;
+  /** The employee's entries are withheld from this reader (the line manager before they submit — B2). */
+  entriesWithheld: boolean;
   sections: SubmittedEvaluationSection[];
   attachments: SubmittedAttachment[];
 }
@@ -573,13 +596,19 @@ export interface ManagerEvaluationContext {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
-  appealedKpiIds: string[];
-  /** The appealed criteria's keys — compare with `criterionKey` (a goal row's is its snapshot row). */
+  /** The appealed criteria's keys, KPI rows among them — compare with `criterionKey` (a goal row's is its snapshot row). */
   appealedTemplateItemIds: string[];
   managerEvaluatorEvaluationId?: string | null;
   isManagerEvaluationSubmitted: boolean;
   managerEvaluationSubmittedDate?: string | null;
   isEditable: boolean;
+  /** The employee has submitted their self-evaluation; a draft is never on this form (B2). */
+  selfEvaluationSubmitted: boolean;
+  /**
+   * Submitted, but the cycle shows self scores to the manager only once they have submitted their
+   * own evaluation — the `employeeSelf*` fields are empty until then (B2).
+   */
+  selfScoresWithheld: boolean;
   selfEvaluationWeight: number;
   managerEvaluationWeight: number;
   peerEvaluationWeight: number;
@@ -594,8 +623,22 @@ export interface ManagerEvaluationContext {
   recommendTraining: boolean;
   recommendPIP: boolean;
   recommendTermination: boolean;
+  /** The Award tick — a Recognition recommendation at the submission (F2, D-92). */
+  recommendAward?: boolean;
   recommendationNotes?: string | null;
+  /** The appraisal's interim reviews, read-only context for the year-end judgement (D-90). */
+  interimReviews?: InterimReviewContext[];
   sections: ManagerEvaluationSection[];
+}
+
+/** One interim review on the manager's year-end form (D-90): a full interim appraisal carries a period score. */
+export interface InterimReviewContext {
+  id: string;
+  type: string;
+  eventDate: string;
+  status: string;
+  isFullAppraisal: boolean;
+  overallPeriodScore?: number | null;
 }
 
 export interface SaveManagerEvaluation {
@@ -615,6 +658,7 @@ export interface SaveManagerEvaluation {
   recommendTraining: boolean;
   recommendPIP: boolean;
   recommendTermination: boolean;
+  recommendAward: boolean;
   recommendationNotes?: string | null;
   isDraft: boolean;
   goalAssessments: GoalAssessmentInput[];
@@ -650,13 +694,18 @@ export interface PeerNomination extends AuditFields {
 }
 
 /**
- * `canSubmit` reports whether the nomination *count* is within the configured min/max — it is
- * about the list, not about approval. `canEdit` is false once the appraisal leaves Draft or
- * Active.
+ * `canSubmit` reports whether the *active* count (pending + approved) is within the configured
+ * min/max — it is about the list, not about approval. A rejected nomination counts in
+ * `totalNominations` only: it leaves room for a replacement (performance closure D2). `canEdit` is
+ * the cycle's window: in Employee mode while the appraisal is Draft or Active, in Manager mode
+ * until it is completed or closed.
  */
 export interface PeerNominationSummary {
   appraisalId: string;
+  /** Every nomination, rejected ones included. */
   totalNominations: number;
+  /** Pending and approved — what the minimum and the maximum count. */
+  activeNominations: number;
   pendingCount: number;
   approvedCount: number;
   rejectedCount: number;
@@ -665,6 +714,12 @@ export interface PeerNominationSummary {
   canSubmit: boolean;
   canEdit: boolean;
   nominationMode: PeerNominationMode;
+  /**
+   * The appraisee, in Manager mode with anonymous peer reviews, is told the counts only (D-40):
+   * `nominations` comes back empty. The manager chose the peers, and with one peer the peer average
+   * is that person's score.
+   */
+  peersWithheld: boolean;
   nominations: PeerNomination[];
 }
 
@@ -702,8 +757,11 @@ export interface PeerEvaluationAssignment {
   status: string;
   startedDate?: string | null;
   submittedDate?: string | null;
+  /** The nomination's due date, else the cycle's peer deadline (D5). */
   dueDate?: string | null;
   evaluatorWeight: number;
+  /** What the nominator asked this peer to comment on. */
+  instructionsToPeer?: string | null;
 }
 
 /**
@@ -721,7 +779,10 @@ export interface PeerEvaluationDetail {
   allowPeerKpiEvaluation: boolean;
   isAnonymous: boolean;
   isSubmitted: boolean;
+  /** The nomination's due date, else the cycle's peer deadline (D5). */
   dueDate?: string | null;
+  /** What the nominator asked this peer to comment on. */
+  instructionsToPeer?: string | null;
   sections: PeerEvaluationSection[];
 }
 
@@ -732,27 +793,31 @@ export interface SavePeerEvaluation {
 
 // ── The manager's view of peer feedback ──────────────────────────────────────────
 
-export interface PeerCompetencyScore {
+/**
+ * One criterion a peer scored, named and weighted from the appraisal's snapshot, and scored as the
+ * appeal pages describe a row (C6): a rated row's score on its scale, a measured row's achievement %
+ * with the actual and the target beside it. It replaced a competency list at weight 0 and a KPI
+ * list that was always empty (performance closure lane D).
+ */
+export interface PeerCriterionScore {
   criterionScoreId: string;
-  criteriaName: string;
-  criteriaDescription?: string | null;
+  /** The template item for a template row, the snapshot row for a goal row. */
+  criterionKey: string;
+  templateItemId?: string | null;
+  criterionConfigId?: string | null;
+  itemType: 'Competency' | 'KPI' | 'Goal' | 'Question' | 'Criterion';
+  scoringMethod: CriterionScoringMethod;
+  itemName: string;
+  description?: string | null;
+  sectionName?: string | null;
+  /** The row's weight within its section. */
   weight: number;
-  numericScore: number;
+  score?: number | null;
+  actualValue?: number | null;
+  targetValue?: number | null;
+  unit?: string | null;
   weightedScore: number;
   comments?: string | null;
-  achievedGrade?: string | null;
-}
-
-export interface PeerKpiEvaluation {
-  kpiEvaluationRecordId: string;
-  kpiName: string;
-  kpiDescription?: string | null;
-  targetValue?: number | null;
-  actualValue?: number | null;
-  achievementPercent?: number | null;
-  unit?: string | null;
-  notes?: string | null;
-  achievedGrade?: string | null;
 }
 
 export interface PeerEvaluatorDetail {
@@ -764,8 +829,8 @@ export interface PeerEvaluatorDetail {
   isSubmitted: boolean;
   submittedDate?: string | null;
   totalScore?: number | null;
-  competencyScores: PeerCompetencyScore[];
-  kpiEvaluations: PeerKpiEvaluation[];
+  /** Every criterion the peer scored, in the forms' order — empty while the scores are withheld. */
+  criterionScores: PeerCriterionScore[];
 }
 
 export interface ManagerPeerEvaluationReview {
@@ -774,6 +839,11 @@ export interface ManagerPeerEvaluationReview {
   allowKpiEvaluation: boolean;
   totalPeerEvaluators: number;
   submittedEvaluations: number;
+  /**
+   * The peers' scores and comments are withheld until the manager has submitted their own
+   * evaluation (the cycle's `showPeerScoresToManager` is off — B2). Who they are is still listed.
+   */
+  scoresWithheld: boolean;
   peerEvaluations: PeerEvaluatorDetail[];
 }
 
@@ -854,6 +924,16 @@ export interface HRReview {
    * manager evaluation, peer summary, manager/peer/final score, grade or HR remarks.
    */
   outcomeReleased?: boolean;
+  /**
+   * The appraisee's copy carries each evaluator's criteria and totals. False before the release,
+   * and after it when the cycle shows the employee only the overall, the grade and the narrative
+   * (`showScoreBreakdownToEmployee` off — B2). Always true for HR and the manager.
+   */
+  scoreBreakdownShown: boolean;
+  /** The self-evaluation is withheld from this reader (the manager before they submit, or a draft — B2). */
+  selfScoresWithheld: boolean;
+  /** The peer scores are withheld from the manager until they submit their own evaluation (B2). */
+  peerScoresWithheld: boolean;
   isSelfEvaluationComplete: boolean;
   isManagerEvaluationComplete: boolean;
   requiresPeerReviews: boolean;
@@ -886,6 +966,20 @@ export interface HRReview {
   appealRemandedDate?: string | null;
   appealRemandDeadline?: string | null;
   isRemandDeadlineExceeded: boolean;
+  /** Set once the appraisal is withdrawn from its cycle (performance closure E-d1). */
+  withdrawnReason?: string | null;
+  withdrawnDate?: string | null;
+  withdrawnByName?: string | null;
+  /**
+   * HR may withdraw it: Draft, Active, or Governance before it is final (D-52), and not the
+   * reader's own appraisal. The server decides again on the write.
+   */
+  canWithdraw: boolean;
+  /**
+   * Its form has no rows and nobody has scored it, so HR may rebuild the form from its template
+   * (performance closure E-g2, D-86). The server decides again on the write.
+   */
+  canRebuildForm?: boolean;
 }
 
 export interface HRReviewListItem {
@@ -1037,18 +1131,24 @@ export function resolveGrade(
  * marks. The stored value is always the server's — this only saves a round trip while the user
  * types. It used to divide actual by target and nothing else, so it showed 150 % for a score
  * the server caps at 100 % and ignored the floor altogether (performance closure A12).
+ *
+ * `tolerance` is the snapshot's (D-32): an actual short of the target by no more than that
+ * percentage of the target scores as met, as the server reads it.
  */
 export function kpiAchievementPercent(
   actual: number | null | undefined,
   target: number | null | undefined,
   min?: number | null,
   max?: number | null,
+  tolerance?: number | null,
 ): number | null {
   if (actual === null || actual === undefined) return null;
   if (!target) return null;
 
   let value = actual;
   if (max !== null && max !== undefined && value > max) value = max;
+
+  if (tolerance && tolerance > 0 && value >= target - (Math.abs(target) * tolerance) / 100) return 100;
 
   let percent: number;
   if (min !== null && min !== undefined && target !== min) {

@@ -53,9 +53,11 @@ import type {
  * KPI may not appear twice anywhere in the template, in any section. That comes back as a 409
  * with a readable message.
  *
- * ⚠ When the template is assigned to an Open or InProgress cycle every write below is refused —
- * the form an appraisal was scored on must not change underneath it. Clone it instead. The
- * parent passes `readOnly` in that case so the affordances disappear rather than failing.
+ * ⚠ A locked template refuses every write below (performance closure E-e, D-66): appraisals are
+ * scored on it, or an open cycle has it — the form an appraisal was scored on must not change
+ * underneath it. Copy it instead. Nothing changes while it awaits approval either, and a change to
+ * an approved template sends it back to Draft. The parent passes `readOnly` from the server's
+ * `isLocked` (and the pending status), so the affordances disappear rather than failing.
  */
 
 interface SectionDraft {
@@ -213,10 +215,20 @@ export function TemplateStructureEditor({
     }
   }
 
+  // A structural change sends an approved template back to Draft (E-e), so the template record —
+  // the page header's status, the list's row — is re-read with the sections and items.
+  const refreshTemplate = () =>
+    queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-templates'] });
   const refreshSections = () =>
-    queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-template-sections', templateId] });
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-template-sections', templateId] }),
+      refreshTemplate(),
+    ]);
   const refreshItems = (sectionId: string) =>
-    queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-template-items', sectionId] });
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['hr', 'appraisal-template-items', sectionId] }),
+      refreshTemplate(),
+    ]);
 
   const failed = (verb: string) => (e: any) =>
     toast({

@@ -32,6 +32,7 @@ const KEEP_OPEN = new Set<string>([
   '/hr/training/approvals', // line supervisors approve nominations and hold no HR permission
   '/hr/probation/reviews', // "reviews to conduct" — the reviewer's own queue
   '/hr/discipline/approvals', // "awaiting my confirmation" — headship is data, not a role
+  '/hr/travel/approvals', // the traveller's line manager approves stage 1 and holds no travel permission (travel closure lane 2)
 ]);
 
 const MODULE_GATES = new Set(['hr.access', 'she.access']);

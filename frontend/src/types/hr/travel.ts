@@ -13,12 +13,23 @@
  */
 
 import type { AuditFields } from './common';
+import type { FlightCabinClass } from './travel-bookings';
+import type {
+  StaffTravelInsurancePolicy,
+  StaffTravelRiskAssessment,
+  StaffTravelVisaApplicationSummary,
+} from './travel-compliance';
+import type { StaffTravelAdvanceSummary, StaffTravelExpenseClaimSummary } from './travel-finance';
 
 /**
- * ⚠ This union had four members and `StaffTravelType` in C# has ten. The six missing ones —
- * every value from `OverseasAssignment` down — are states the API returns and TypeScript said
- * could not exist, so a `switch` over this type looked exhaustive and was not. Written from four
- * examples rather than from the enum; corrected 2026-08-30 by reading it.
+ * ⚠ Every union in this file is written from its C# enum in `src/ErpSystem.Core/Enums/HREnums.cs`,
+ * member for member, and `travel-enums.test.ts` fails the frontend suite if one drifts again.
+ *
+ * Four had drifted (travel final closure, lane 0 — findings A7, A8, A9). This one had four members,
+ * then ten, while C# has eleven (`Emergency` was missing). The purpose union offered `Negotiation`,
+ * which the API refuses, and hid five real purposes. The risk union offered `Extreme` (refused) and
+ * hid `Critical` and `Prohibited`. The comment and attachment unions shared one member with C#
+ * between them, so the desk's every comment and five of six upload types failed.
  */
 export type StaffTravelType =
   | 'Domestic'
@@ -30,16 +41,21 @@ export type StaffTravelType =
   | 'Training'
   | 'Conference'
   | 'ClientVisit'
-  | 'GovernmentDuty';
+  | 'GovernmentDuty'
+  | 'Emergency';
 
 export type StaffTravelPurpose =
   | 'BusinessDevelopment'
   | 'ClientMeeting'
   | 'Conference'
   | 'Training'
-  | 'SiteVisit'
   | 'Audit'
-  | 'Negotiation'
+  | 'Inspection'
+  | 'ProjectWork'
+  | 'SiteVisit'
+  | 'GovernmentEngagement'
+  | 'PersonalCombined'
+  | 'Emergency'
   | 'Other';
 
 export type StaffTravelPriority = 'Routine' | 'Urgent' | 'Emergency';
@@ -60,18 +76,26 @@ export type StaffTravelRequestStatus =
   | 'Completed'
   | 'Closed';
 
-export type TravelInitiatorRole = 'Employee' | 'Manager' | 'HrAdmin' | 'TravelDesk';
+export type TravelInitiatorRole = 'Employee' | 'Manager' | 'HrAdmin' | 'TravelDesk' | 'System';
 
-export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Extreme';
+/** One definition for the whole area — `travel-compliance.ts` re-exports this one. */
+export type TravelRiskLevel = 'Low' | 'Medium' | 'High' | 'Critical' | 'Prohibited';
 
-export type TravelRequestCommentType = 'General' | 'Query' | 'Instruction' | 'Justification';
+export type TravelRequestCommentType =
+  | 'Comment'
+  | 'InternalNote'
+  | 'RejectionReason'
+  | 'Query'
+  | 'Response'
+  | 'SystemNote';
 
 export type TravelAttachmentType =
-  | 'Invitation'
-  | 'Agenda'
-  | 'Quotation'
-  | 'Approval'
-  | 'VisaSupport'
+  | 'InvitationLetter'
+  | 'ConferenceBrochure'
+  | 'Receipt'
+  | 'VisaDocument'
+  | 'InsuranceCertificate'
+  | 'MedicalCertificate'
   | 'Other';
 
 /**
@@ -110,6 +134,7 @@ export interface StaffTravelRequestSummary extends AuditFields {
   currencyCode: string;
   isInternational: boolean;
   riskLevel: TravelRiskLevel;
+  submittedAt?: string | null;
 }
 
 export interface StaffTravelRequestComment extends AuditFields {
@@ -151,17 +176,28 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   initiatedByName: string;
   initiatedByRole: TravelInitiatorRole;
   purposeDescription?: string | null;
+  /** The traveller's own unit, set by the server from their employee record (lane 1, O-5). */
   organizationUnitId?: string | null;
   organizationUnitName?: string | null;
   originCountryId: string;
   originCountryName: string;
   estimatedDurationDays: number;
+  /** The policy the trip was checked against when it was submitted; null before, or when none covers it. */
   policyId?: string | null;
+  policyName?: string | null;
   requiresVisa: boolean;
+  /** Lane 7 (D-39): why `requiresVisa` differs from the visa register; without it the server sets the flag from the
+   *  register whenever the traveller's primary passport is on file. */
+  visaOverrideReason?: string | null;
   requiresHealthClearance: boolean;
   groupTravelId?: string | null;
   parentRequestId?: string | null;
   amendmentReason?: string | null;
+  /** Lane 6 (D-33): a driver's own request names the trip whose company vehicle they drive. */
+  driverForRequestId?: string | null;
+  driverForRequestNumber?: string | null;
+  /** Lane 9 (D-54): the trip's working days on the traveller's attendance as on duty — on the single read only. */
+  attendanceDaysRecorded?: number | null;
   cancellationReason?: string | null;
   cancelledById?: string | null;
   cancelledByName?: string | null;
@@ -169,8 +205,34 @@ export interface StaffTravelRequest extends StaffTravelRequestSummary {
   submittedAt?: string | null;
   approvedAt?: string | null;
   completedAt?: string | null;
+  /**
+   * Who decided and what happened after (travel final closure, lane 1). The approval stamps stay when
+   * a change is requested — they record the approval being changed until the next one replaces them.
+   */
+  approvedById?: string | null;
+  approvedByName?: string | null;
+  returnedAt?: string | null;
+  returnedById?: string | null;
+  returnedByName?: string | null;
+  returnReason?: string | null;
+  changeRequestedAt?: string | null;
+  changeRequestedById?: string | null;
+  changeRequestedByName?: string | null;
+  changeReason?: string | null;
+  closedAt?: string | null;
+  closedById?: string | null;
+  closedByName?: string | null;
   comments?: StaffTravelRequestComment[];
   attachments?: StaffTravelRequestAttachment[];
+  /**
+   * The trip's records as the request's own read carries them (lane 7, 7c1 — the portal reads these). The bookings and
+   * itinerary arrive here as summaries only; their detail is a read of its own.
+   */
+  advances?: StaffTravelAdvanceSummary[];
+  expenseClaims?: StaffTravelExpenseClaimSummary[];
+  visaApplications?: StaffTravelVisaApplicationSummary[];
+  riskAssessments?: StaffTravelRiskAssessment[];
+  insurancePolicies?: StaffTravelInsurancePolicy[];
 }
 
 /**
@@ -215,9 +277,10 @@ export interface StaffTravelMonthlyCount {
  *
  * `totalEstimatedCost` and `totalApprovedBudget` on the dashboard add every request's figure
  * together regardless of the currency it was costed in, so they are only meaningful when a tenant
- * travels in one. They are not converted to a base currency: travel does not invent a rate, and
- * Finance's conversion is currently inverted, so a converted headline would be confidently wrong
- * rather than visibly incomplete. Show one figure for one currency and this breakdown otherwise.
+ * travels in one. They are not converted to a base currency: travel does not invent a rate, and a
+ * headline converted at one day's rate would hide that the trips were costed in different
+ * currencies. Show one figure for one currency and this breakdown otherwise. (This comment also said
+ * Finance's conversion was inverted; Finance fixed that on 2026-09-10.)
  */
 export interface StaffTravelCurrencyTotal {
   currencyCode: string;
@@ -257,11 +320,19 @@ export interface StaffTravelDashboard {
 
 /**
  * ⚠ `currencyCode` must be one Finance holds — the server refuses anything else. Bind the picker
- * to `GET /api/finance/currencies`; travel deliberately keeps no currency list of its own.
+ * to `GET /api/hr/currencies` (`useCurrencyOptions`), **not** `/api/finance/currencies`: that one
+ * needs Finance's own read permission, so it answers 403 to the HR desk and to every traveller, and
+ * the picker renders empty (travel final closure, lane 0 — finding O-19). Travel keeps no currency
+ * list of its own.
  *
  * ⚠ There is no `initiatedById`. Who raised the request is the caller's employee id, stamped
  * server-side — the desk raises travel for other people, so it is neither the traveller nor
  * anything a form can be trusted to say. Only the *role* it was raised under is an input.
+ *
+ * ⚠ No organisation unit, `isInternational` or `policyId` either (travel final closure, lane 1 —
+ * findings A5, O-5). The unit is the traveller's own, the international flag follows from the two
+ * countries, and the policy is the one the trip is checked against at submission — all three set by
+ * the server, which ignores them if they are sent.
  */
 export interface CreateStaffTravelRequest {
   employeeId: string;
@@ -269,7 +340,6 @@ export interface CreateStaffTravelRequest {
   travelType: StaffTravelType;
   travelPurpose: StaffTravelPurpose;
   purposeDescription?: string;
-  organizationUnitId?: string | null;
   priority: StaffTravelPriority;
   destinationCountryId: string;
   destinationCity: string;
@@ -279,20 +349,110 @@ export interface CreateStaffTravelRequest {
   travelEndDate: string;
   estimatedTotalCost: number;
   currencyCode: string;
-  policyId?: string | null;
-  isInternational: boolean;
   requiresVisa: boolean;
+  /** Lane 7 (D-39): why `requiresVisa` differs from the visa register; without it the server sets the flag from the
+   *  register whenever the traveller's primary passport is on file. */
+  visaOverrideReason?: string | null;
   requiresHealthClearance: boolean;
   riskLevel: TravelRiskLevel;
-  groupTravelId?: string | null;
   parentRequestId?: string | null;
   amendmentReason?: string | null;
 }
 
+/**
+ * ⚠ A REPLACE, not a patch: the server writes every field it receives, and an omitted one as its
+ * default. Since lane 1 it writes only what the requester may change — the unit, the international
+ * flag, the policy, the approved budget and (slice 1c) the group are no longer on it — and only while
+ * the request is a Draft or returned for revision. Group membership is the group's own routes'
+ * (add, link, remove): an edit that omitted the group link used to take the traveller out of their
+ * group (finding A8).
+ */
 export type UpdateStaffTravelRequest = Omit<
   CreateStaffTravelRequest,
   'employeeId' | 'initiatedByRole'
 > & { id: string };
+
+/** How the caller decides a request at the stage it is on (travel final closure, lane 2 — D-7). */
+export type TravelDecidesAs = 'LineAuthority' | 'TravelDesk' | 'Approver';
+
+/**
+ * What the caller may decide on a request, at which stage and as whom — the screen's answer for whether
+ * to offer Approve, Reject and Return, and whether the approve dialog asks for the budget (lane 2).
+ */
+export interface StaffTravelViewerActions {
+  requestId: string;
+  canDecide: boolean;
+  /** The stage the request is on, as its route names it; null when it is not out for approval. */
+  stageName?: string | null;
+  isLineStage: boolean;
+  /** The last approval stage of the route — its approval approves the trip and sets the budget. */
+  isFinalStage: boolean;
+  /** The stage the request goes to after this one; null at the last. */
+  nextStageName?: string | null;
+  decidesAs?: TravelDecidesAs | null;
+  /** As a line authority: "supervisor", or "head of …". */
+  relation?: string | null;
+  /** At the line manager's stage: the line authorities it waits for, named. */
+  waitingFor: string[];
+  /** Why the caller cannot decide, when the request is out for approval and they cannot. */
+  reason?: string | null;
+}
+
+/** One row of an approver's travel queue: the request, and the caller's part in it (lane 2). */
+export interface StaffTravelApprovalQueueItem {
+  request: StaffTravelRequestSummary;
+  originCity?: string | null;
+  stageName?: string | null;
+  isLineStage: boolean;
+  isFinalStage: boolean;
+  decidesAs: TravelDecidesAs;
+  relation?: string | null;
+  /** Whole days since it was submitted. */
+  daysWaiting: number;
+}
+
+/** What an approval did: approved the trip, or sent it on to the next stage (lane 2). */
+export interface StaffTravelApproveResult {
+  message: string;
+  status: StaffTravelRequestStatus;
+}
+
+/** What a submission did (lane 1). */
+export interface StaffTravelSubmitResult {
+  message: string;
+  status: StaffTravelRequestStatus;
+  statusName: string;
+  /** The policy the trip was checked against; null when no approved policy covers it. */
+  policyId?: string | null;
+  policyName?: string | null;
+  /**
+   * What did not stop the submission but should be known — approved leave over the same days. A
+   * conflict that must stop it is refused with a 422 instead.
+   */
+  warnings: string[];
+}
+
+/**
+ * The approved policy a trip would be checked against, before it is saved (finding T-16): the same
+ * resolution the server applies at submission — the traveller's own unit, the two countries, the
+ * departure date.
+ */
+export interface StaffTravelPolicyPreview {
+  employeeId: string;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  isInternational: boolean;
+  hasPolicy: boolean;
+  policyId?: string | null;
+  policyName?: string | null;
+  versionNumber?: number | null;
+  /** The currency the policy's money limits are set in. */
+  currencyCode?: string | null;
+  /** The most one trip may be estimated at; null when the policy sets no such limit. */
+  maxSingleTripBudget?: number | null;
+  maxFlightClass?: FlightCabinClass | null;
+  maxHotelRatePerNight?: number | null;
+}
 
 /**
  * ⚠ No `authorId`. Authorship is taken from the caller's token — sending one is ignored, because
@@ -329,11 +489,11 @@ export interface CreateStaffGroupTravel {
 }
 
 /**
- * ⚠ Wider than the create by exactly one field: `status`. A group's status is set by editing it —
- * there is no separate transition route — so an edit form that omits it would send the enum's
- * default and silently move the trip back to its first state.
+ * The create's fields plus the id — and no status. Since travel closure lane 1 (slice 1c) a group
+ * opens, closes and is cancelled by its own routes; the edit used to carry the status, and a form that
+ * left it out moved the trip back to Planning. A new destination or new dates are given to the
+ * travellers whose trips are still drafts or returned for revision.
  */
 export type UpdateStaffGroupTravel = CreateStaffGroupTravel & {
   id: string;
-  status: GroupTravelStatus;
 };

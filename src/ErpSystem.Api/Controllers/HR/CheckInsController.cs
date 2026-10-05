@@ -428,6 +428,11 @@ public class CheckInsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A held check-in is not deleted (performance closure E-g1, D-80).
+            return BusinessRuleRejected(ex, "deleting the check-in");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error deleting check-in {Id}", id);
@@ -484,6 +489,11 @@ public class CheckInsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "adding a goal update");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error adding goal update to check-in {CheckInId}", checkInId);
@@ -534,6 +544,11 @@ public class CheckInsController : ControllerBase
         {
             return NotFound(new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "changing a goal update");
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error updating goal update {UpdateId} for check-in {CheckInId}", updateId, checkInId);
@@ -558,6 +573,11 @@ public class CheckInsController : ControllerBase
         catch (ArgumentException ex)
         {
             return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            // A goal whose cycle is not open (performance closure E-d2b) — a rule, answered 422.
+            return BusinessRuleRejected(ex, "removing a goal update");
         }
         catch (Exception ex)
         {

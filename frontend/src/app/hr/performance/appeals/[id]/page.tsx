@@ -4,8 +4,9 @@ import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { CheckCircle2, Lock, RotateCcw, Scale, TriangleAlert, XCircle } from 'lucide-react';
+import { CheckCircle2, Lock, RotateCcw, Scale, ShieldAlert, TriangleAlert, XCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -28,23 +29,41 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate } from '@/lib/hr/attendance-format';
 import { appraisalAppealService } from '@/services/hr/appeals.service';
-import type { AppraisalAppealStatus, CriterionScoreModification } from '@/types/hr/appeals';
+import {
+  formatActualAgainstTarget,
+  formatCriterionScore,
+  type AppraisalAppealStatus,
+  type CriterionScoreModification,
+} from '@/types/hr/appeals';
+import type { CriterionScoringMethod } from '@/types/hr/appraisal-run';
 
 /**
  * HR's adjudication of one appeal.
  *
- * **The screen shows one of two things**, depending on where the appeal is. Before a remand it
+ * **The screen shows one of three things**, depending on where the appeal is. Before a remand it
  * is the review: the contested items with all three evaluation legs side by side, and the three
  * decisions. After a remand it is the comparison: what the manager scored before against what
- * they scored on re-evaluation, and a final Uphold/Reject.
+ * they scored on re-evaluation, and a final Uphold/Reject. Once decided it is the record: the
+ * decision, who made it, and what moved (closure D-37 — a decided appeal opened to an error).
  *
- * **Remand is not a verdict.** It rolls the appraisal back to Active, freezes a snapshot of the
- * manager's evaluation for the comparison, sets a re-evaluation deadline and notifies the
- * manager. Nothing is decided until they re-submit and HR rules again.
+ * **Every kind of row** (closure C6, C9): a competency, a KPI or one of the employee's goals, named
+ * and weighted from the appraisal's snapshot. A measured row's score is its achievement %, with the
+ * actual against the target beside it; HR's new score on it restates that percentage (D-22).
+ *
+ * **Remand is not a verdict.** The appraisal stays under appeal; a snapshot of the manager's
+ * evaluation is frozen for the comparison, the evaluation reopens until a re-evaluation deadline,
+ * and the manager is notified. Nothing is decided until they re-submit and HR rules again — or the
+ * deadline passes without it, when HR can extend it or decide on the scores from before the remand
+ * (closure C3, D-34). A final *Reject* restores those scores (C5).
  *
  * **Score changes depend on the cycle, not on HR's judgement.** `hrCanModifyScores` comes from
  * the settings profile the cycle runs on; when it is false the server refuses modifications, so
- * the fields are not offered.
+ * the fields are not offered. Changes go only with *Uphold*, only on a contested row, each with a
+ * justification HR writes (C4) — the server refuses a rejection or a remand that carries any.
+ *
+ * **An officer party to the appeal acts on none of it** (D-35): the appellant, the author of the
+ * contested evaluation, the appellant's line manager. The page says so rather than offering
+ * buttons the server refuses.
  */
 type Decision = Extract<AppraisalAppealStatus, 'Upheld' | 'Rejected' | 'Remanded'>;
 
@@ -61,6 +80,9 @@ export default function AppealReviewPage() {
   const [finalOpen, setFinalOpen] = useState(false);
   const [finalDecision, setFinalDecision] = useState<'Upheld' | 'Rejected'>('Upheld');
   const [finalNotes, setFinalNotes] = useState('');
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [extendDate, setExtendDate] = useState('');
+  const [extendReason, setExtendReason] = useState('');
 
   const review = useQuery({
     queryKey: ['hr', 'appeal-review', appraisalId],
@@ -105,9 +127,12 @@ export default function AppealReviewPage() {
         templateItemId: c.templateItemId ?? null,
         criterionConfigId: c.criterionConfigId ?? null,
         newScore: Number(scoreEdits[c.criterionKey]),
-        justification: justifications[c.criterionKey]?.trim() || 'Adjusted on appeal',
+        // HR's own words — the server requires one per change, and this used to fill an empty box
+        // with "Adjusted on appeal" (closure C4).
+        justification: justifications[c.criterionKey]?.trim() ?? '',
       }));
   }, [review.data, scoreEdits, justifications]);
+  const unjustified = modifications.some((m) => !m.justification);
 
   const resolve = useMutation({
     // The decision is passed in rather than read off state, so the call cannot be made
@@ -116,7 +141,10 @@ export default function AppealReviewPage() {
       appraisalAppealService.resolveAppeal(appraisalId, {
         resolutionDecision,
         resolutionNotes: notes.trim(),
-        criteriaModifications: modifications.length ? modifications : null,
+        // Only an upheld appeal changes a score (C4): typed scores are not sent with a rejection
+        // or a remand, which the server refuses with any.
+        criteriaModifications:
+          resolutionDecision === 'Upheld' && modifications.length ? modifications : null,
       }),
     onSuccess: () => {
       toast({
@@ -158,6 +186,26 @@ export default function AppealReviewPage() {
     onError: fail('Could not finalise the appeal'),
   });
 
+  // D-34: while the manager has not re-evaluated, HR can move the deadline to a later day.
+  const extend = useMutation({
+    mutationFn: () =>
+      appraisalAppealService.extendRemand(appraisalId, {
+        newDeadline: extendDate,
+        reason: extendReason.trim(),
+      }),
+    onSuccess: () => {
+      toast({
+        title: 'Deadline moved',
+        description: `The manager has been told the new deadline, ${formatDate(extendDate)}.`,
+      });
+      setExtendOpen(false);
+      setExtendDate('');
+      setExtendReason('');
+      refresh();
+    },
+    onError: fail('Could not move the deadline'),
+  });
+
   if (review.isLoading) {
     return (
       <div className="space-y-6 p-6">
@@ -188,7 +236,13 @@ export default function AppealReviewPage() {
 
   const data = review.data;
   const isFinal = data.status === 'Upheld' || data.status === 'Rejected';
-  const canDecide = data.status === 'Submitted' || data.status === 'UnderReview';
+  // D-35: an officer party to the appeal acts on none of it.
+  const party = !!data.partyToAppealReason;
+  const canDecide = !party && (data.status === 'Submitted' || data.status === 'UnderReview');
+  const overallMoved =
+    data.originalOverallScore != null &&
+    data.overallScore != null &&
+    Number(data.originalOverallScore) !== Number(data.overallScore);
 
   return (
     <div className="space-y-6 p-6">
@@ -198,7 +252,7 @@ export default function AppealReviewPage() {
         backHref="/hr/performance/appeals"
         actions={
           <div className="flex items-center gap-2">
-            {data.status === 'Submitted' && (
+            {data.status === 'Submitted' && !party && (
               <Button variant="outline" onClick={() => pickUp.mutate()} disabled={pickUp.isPending}>
                 <Scale className="mr-2 h-4 w-4" />
                 {pickUp.isPending ? 'Picking up…' : 'Pick up'}
@@ -223,9 +277,22 @@ export default function AppealReviewPage() {
         </span>
       </div>
 
+      {party && (
+        <Alert variant="destructive">
+          <ShieldAlert className="h-4 w-4" />
+          <AlertTitle>You cannot act on this appeal</AlertTitle>
+          <AlertDescription>{data.partyToAppealReason}</AlertDescription>
+        </Alert>
+      )}
+
       <MetricTiles
         tiles={[
-          { label: 'Self', value: fmt(data.selfEvaluationScore) },
+          {
+            label: 'Self',
+            value: fmt(data.selfEvaluationScore),
+            // A draft — one HR waived — is not read (B2).
+            hint: data.selfEvaluationSubmitted ? undefined : 'No submitted self-evaluation',
+          },
           { label: 'Peers', value: fmt(data.peerEvaluationScore) },
           { label: 'Manager', value: fmt(data.managerEvaluationScore) },
           { label: 'Overall', value: fmt(data.overallScore) },
@@ -241,35 +308,91 @@ export default function AppealReviewPage() {
         </CardContent>
       </Card>
 
+      {/* ── The record of a decided appeal (D-37) ───────────────────────────── */}
       {isFinal && (
-        <Alert>
-          <Lock className="h-4 w-4" />
-          <AlertTitle>Decided</AlertTitle>
-          <AlertDescription>
-            This appeal is final and the scores are locked. It is kept here for the record; the
-            employee can see the outcome on their own appraisal.
-          </AlertDescription>
-        </Alert>
+        <>
+          <Alert>
+            <Lock className="h-4 w-4" />
+            <AlertTitle>Decided</AlertTitle>
+            <AlertDescription>
+              This appeal is final and the scores are locked. It is kept here for the record; the
+              employee can see the outcome on their own appraisal.
+            </AlertDescription>
+          </Alert>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                {data.status === 'Upheld' ? 'Upheld' : 'Rejected'}
+                {data.resolvedDate ? ` on ${formatDate(data.resolvedDate)}` : ''}
+                {data.reviewedByName ? ` by ${data.reviewedByName}` : ''}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex flex-wrap gap-8">
+                <div>
+                  <div className="text-muted-foreground">Overall appealed</div>
+                  <div className="text-lg tabular-nums">{fmt(data.originalOverallScore)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Overall now</div>
+                  <div className="text-lg font-medium tabular-nums">{fmt(data.overallScore)}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Moved by the appeal</div>
+                  <div className="text-lg">
+                    {data.originalOverallScore == null ? '—' : overallMoved ? 'Yes' : 'No'}
+                  </div>
+                </div>
+              </div>
+              <div className="whitespace-pre-wrap">
+                {data.resolutionNotes || 'No notes were recorded.'}
+              </div>
+            </CardContent>
+          </Card>
+        </>
       )}
 
       {isRemanded && (
-        <Alert>
+        <Alert variant={postRemand.data?.deadlinePassed ? 'destructive' : 'default'}>
           <RotateCcw className="h-4 w-4" />
-          <AlertTitle>With the manager</AlertTitle>
+          <AlertTitle>
+            {postRemand.data && !postRemand.data.awaitingReevaluation
+              ? 'Re-evaluated — your decision'
+              : postRemand.data?.deadlinePassed
+                ? 'The re-evaluation deadline has passed'
+                : 'With the manager'}
+          </AlertTitle>
           <AlertDescription>
-            {postRemand.data?.managerReevaluationDate
-              ? 'The manager has re-submitted. Compare the two evaluations below and make the final decision.'
-              : `Waiting on the manager's re-evaluation${
-                  postRemand.data?.appealRemandDeadline
-                    ? `, due ${formatDate(postRemand.data.appealRemandDeadline)}`
-                    : ''
-                }. The final decision opens once they submit.`}
+            {!postRemand.data
+              ? 'Loading where the remand stands…'
+              : !postRemand.data.awaitingReevaluation
+                ? 'The manager has re-submitted. Compare the two evaluations below and make the final decision.'
+                : postRemand.data.deadlinePassed
+                  ? `The manager did not re-evaluate by ${formatDate(postRemand.data.appealRemandDeadline)}. Extend the deadline, or decide now on the scores from before the remand.`
+                  : `Waiting on the manager's re-evaluation, due ${formatDate(postRemand.data.appealRemandDeadline)}. The final decision opens once they submit or the deadline passes; you can extend it meanwhile.`}
           </AlertDescription>
         </Alert>
       )}
 
+      {isRemanded && !party && postRemand.data && (postRemand.data.canExtend || postRemand.data.canDecide) && (
+        <div className="flex flex-wrap justify-end gap-2">
+          {postRemand.data.canExtend && (
+            <Button variant="outline" onClick={() => setExtendOpen(true)}>
+              <RotateCcw className="mr-2 h-4 w-4" />
+              Extend the deadline
+            </Button>
+          )}
+          {postRemand.data.canDecide && postRemand.data.awaitingReevaluation && (
+            <Button onClick={() => setFinalOpen(true)}>
+              <CheckCircle2 className="mr-2 h-4 w-4" />
+              Decide on the original scores
+            </Button>
+          )}
+        </div>
+      )}
+
       {/* ── Post-remand comparison ───────────────────────────────────────────── */}
-      {isRemanded && postRemand.data && (
+      {isRemanded && postRemand.data && !postRemand.data.awaitingReevaluation && (
         <>
           <Card>
             <CardHeader>
@@ -278,15 +401,22 @@ export default function AppealReviewPage() {
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-8 text-sm">
                 <div>
-                  <div className="text-muted-foreground">Pre-remand overall</div>
+                  <div className="text-muted-foreground">Overall appealed</div>
                   <div className="text-lg tabular-nums">
                     {fmt(postRemand.data.preRemandOverallScore)}
                   </div>
                 </div>
                 <div>
-                  <div className="text-muted-foreground">Post-remand overall</div>
+                  <div className="text-muted-foreground">Overall after re-evaluation</div>
                   <div className="text-lg font-medium tabular-nums">
                     {fmt(postRemand.data.postRemandOverallScore)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Manager before → after</div>
+                  <div className="text-lg tabular-nums">
+                    {fmt(postRemand.data.preRemandManagerScore)} →{' '}
+                    {fmt(postRemand.data.postRemandManagerScore)}
                   </div>
                 </div>
               </div>
@@ -307,17 +437,29 @@ export default function AppealReviewPage() {
                     {postRemand.data.criteriaComparisons.map((c) => (
                       <TableRow key={c.criterionKey}>
                         <TableCell>
-                          <div className="font-medium">{c.itemName}</div>
+                          <CriterionLabel name={c.itemName} kind={c.itemType} section={c.sectionName} />
                           {c.appealReason && (
                             <div className="text-xs text-muted-foreground">{c.appealReason}</div>
                           )}
                         </TableCell>
-                        <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
+                        <TableCell className="text-right tabular-nums">{c.weight}%</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          {fmt(c.preRemandScore)}
+                          <ScoreCell
+                            score={c.preRemandScore}
+                            method={c.scoringMethod}
+                            actual={c.preRemandActualValue}
+                            target={c.targetValue}
+                            unit={c.unit}
+                          />
                         </TableCell>
                         <TableCell className="text-right tabular-nums font-medium">
-                          {fmt(c.postRemandScore)}
+                          <ScoreCell
+                            score={c.postRemandScore}
+                            method={c.scoringMethod}
+                            actual={c.postRemandActualValue}
+                            target={c.targetValue}
+                            unit={c.unit}
+                          />
                         </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {c.scoreDifference != null && c.scoreDifference !== 0 ? (
@@ -329,8 +471,11 @@ export default function AppealReviewPage() {
                               }
                             >
                               {c.scoreDifference > 0 ? '+' : ''}
-                              {c.scoreDifference}
+                              {Number(c.scoreDifference.toFixed(2))}
+                              {c.scoringMethod === 'Measured' ? ' pts' : ''}
                             </span>
+                          ) : c.scoreChanged ? (
+                            <span className="text-xs text-muted-foreground">actual moved</span>
                           ) : (
                             <span className="text-muted-foreground">—</span>
                           )}
@@ -350,7 +495,7 @@ export default function AppealReviewPage() {
             </CardContent>
           </Card>
 
-          {postRemand.data.managerReevaluationDate && (
+          {postRemand.data.canDecide && !party && (
             <div className="flex justify-end">
               <Button onClick={() => setFinalOpen(true)}>
                 <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -383,9 +528,10 @@ export default function AppealReviewPage() {
                     <TableRow>
                       <TableHead>Criterion</TableHead>
                       <TableHead className="text-right">Weight</TableHead>
+                      <TableHead className="text-right">When appealed</TableHead>
                       <TableHead className="text-right">Self</TableHead>
                       <TableHead className="text-right">Peers</TableHead>
-                      <TableHead className="text-right">Manager</TableHead>
+                      <TableHead className="text-right">{isFinal ? 'Manager, final' : 'Manager'}</TableHead>
                       <TableHead className="text-right">Weighted</TableHead>
                       {data.hrCanModifyScores && canDecide && (
                         <TableHead className="w-64">New score</TableHead>
@@ -393,65 +539,95 @@ export default function AppealReviewPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.appealedCriteria.map((c) => (
-                      <TableRow key={c.appealItemId}>
-                        <TableCell className="max-w-xs">
-                          <div className="font-medium">{c.itemName}</div>
-                          <div className="mt-1 text-xs text-muted-foreground">
-                            <span className="font-medium">Their reason:</span> {c.appealReason}
-                          </div>
-                          {c.managerComments && (
+                    {data.appealedCriteria.map((c) => {
+                      const measured = c.scoringMethod === 'Measured';
+                      return (
+                        <TableRow key={c.appealItemId}>
+                          <TableCell className="max-w-xs">
+                            <CriterionLabel name={c.itemName} kind={c.itemType} section={c.sectionName} />
+                            {measured && c.targetValue != null && (
+                              <div className="text-xs text-muted-foreground">
+                                {formatActualAgainstTarget(null, c.targetValue, c.unit)}
+                              </div>
+                            )}
                             <div className="mt-1 text-xs text-muted-foreground">
-                              <span className="font-medium">Manager:</span> {c.managerComments}
+                              <span className="font-medium">Their reason:</span> {c.appealReason}
                             </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">{c.weight}</TableCell>
-                        <TableCell className="text-right tabular-nums">{fmt(c.selfScore)}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmt(c.peerAverageScore)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums font-medium">
-                          {fmt(c.managerScore)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {fmt(c.finalWeightedScore)}
-                        </TableCell>
-                        {data.hrCanModifyScores && canDecide && (
-                          <TableCell>
-                            <div className="space-y-2">
-                              <Input
-                                type="number"
-                                min={0}
-                                max={100}
-                                placeholder="Leave blank to keep"
-                                value={scoreEdits[c.criterionKey] ?? ''}
-                                onChange={(e) =>
-                                  setScoreEdits({
-                                    ...scoreEdits,
-                                    [c.criterionKey]: e.target.value,
-                                  })
-                                }
-                                aria-label={`New score for ${c.itemName}`}
-                              />
-                              {scoreEdits[c.criterionKey]?.trim() && (
+                            {c.managerComments && (
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                <span className="font-medium">Manager:</span> {c.managerComments}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">{c.weight}%</TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">
+                            {formatCriterionScore(c.scoreWhenAppealed, c.scoringMethod)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <ScoreCell
+                              score={c.selfScore}
+                              method={c.scoringMethod}
+                              actual={c.selfActualValue}
+                            />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCriterionScore(c.peerAverageScore, c.scoringMethod)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums font-medium">
+                            <ScoreCell
+                              score={c.managerScore}
+                              method={c.scoringMethod}
+                              actual={c.managerActualValue}
+                            />
+                            {c.achievementOverridden && (
+                              <div className="text-xs font-normal text-amber-700 dark:text-amber-400">
+                                restated
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {fmt(c.managerWeightedScore)}
+                          </TableCell>
+                          {data.hrCanModifyScores && canDecide && (
+                            <TableCell>
+                              <div className="space-y-2">
                                 <Input
-                                  placeholder="Justification (required)"
-                                  value={justifications[c.criterionKey] ?? ''}
+                                  type="number"
+                                  min={0}
+                                  max={c.scaleTop}
+                                  placeholder={
+                                    measured
+                                      ? 'Achievement %, blank to keep'
+                                      : `0–${c.scaleTop}, blank to keep`
+                                  }
+                                  value={scoreEdits[c.criterionKey] ?? ''}
                                   onChange={(e) =>
-                                    setJustifications({
-                                      ...justifications,
+                                    setScoreEdits({
+                                      ...scoreEdits,
                                       [c.criterionKey]: e.target.value,
                                     })
                                   }
-                                  aria-label={`Justification for ${c.itemName}`}
+                                  aria-label={`New score for ${c.itemName}`}
                                 />
-                              )}
-                            </div>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    ))}
+                                {scoreEdits[c.criterionKey]?.trim() && (
+                                  <Input
+                                    placeholder="Justification (required)"
+                                    value={justifications[c.criterionKey] ?? ''}
+                                    onChange={(e) =>
+                                      setJustifications({
+                                        ...justifications,
+                                        [c.criterionKey]: e.target.value,
+                                      })
+                                    }
+                                    aria-label={`Justification for ${c.itemName}`}
+                                  />
+                                )}
+                              </div>
+                            </TableCell>
+                          )}
+                        </TableRow>
+                      );
+                    })}
                   </TableBody>
                 </Table>
               </div>
@@ -502,8 +678,10 @@ export default function AppealReviewPage() {
             </DialogTitle>
             <DialogDescription>
               {decision === 'Remanded'
-                ? "The appraisal returns to the manager, a snapshot of their current evaluation is frozen for comparison, and a deadline is set. Nothing is decided until they re-submit."
-                : 'This is final. The employee is notified and can read your notes on their outcome page.'}
+                ? "The manager's evaluation reopens until a deadline, and a snapshot of it is frozen for the comparison. Nothing is decided until they re-submit — or the deadline passes, when you can extend it or decide on the original scores."
+                : decision === 'Upheld' && modifications.length === 0
+                  ? 'This is final, and no score changes: the employee is told the appeal was upheld and that their scores stand. They can read your notes on their outcome page.'
+                  : 'This is final. The employee is notified and can read your notes on their outcome page.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -518,10 +696,19 @@ export default function AppealReviewPage() {
               onChange={(e) => setNotes(e.target.value)}
               placeholder="The employee reads this. Be specific about what was and was not accepted."
             />
-            {modifications.length > 0 && decision !== 'Remanded' && (
+            {modifications.length > 0 && decision === 'Upheld' && (
               <p className="text-xs text-muted-foreground">
-                {modifications.length} score change(s) will be applied and the overall score
-                recalculated.
+                {unjustified
+                  ? 'Every new score needs a justification in the table before the appeal can be upheld.'
+                  : `${modifications.length} score change(s) will be applied and the overall score recalculated.`}
+              </p>
+            )}
+            {modifications.length > 0 && decision !== 'Upheld' && (
+              <p className="text-xs text-muted-foreground">
+                The new scores you typed are not applied:{' '}
+                {decision === 'Remanded'
+                  ? 'on a remand the manager re-evaluates.'
+                  : 'a rejected appeal changes no score.'}
               </p>
             )}
           </div>
@@ -532,7 +719,12 @@ export default function AppealReviewPage() {
             </Button>
             <Button
               onClick={() => decision && resolve.mutate(decision)}
-              disabled={!decision || !notes.trim() || resolve.isPending}
+              disabled={
+                !decision ||
+                !notes.trim() ||
+                (decision === 'Upheld' && unjustified) ||
+                resolve.isPending
+              }
             >
               {resolve.isPending ? 'Recording…' : 'Confirm'}
             </Button>
@@ -546,9 +738,9 @@ export default function AppealReviewPage() {
           <DialogHeader>
             <DialogTitle>Final decision</DialogTitle>
             <DialogDescription>
-              The manager has re-evaluated. Upholding accepts the appeal as having had merit;
-              rejecting confirms the scores as they now stand. Either way the appraisal is
-              complete and the scores lock.
+              {postRemand.data?.awaitingReevaluation
+                ? 'The manager did not re-evaluate by the deadline, so the scores from before the remand stand either way — anything they drafted is discarded. Upholding records that the appeal had merit. The appraisal completes and the scores lock.'
+                : 'The manager has re-evaluated. Upholding keeps the re-evaluation; rejecting restores the scores from before the remand. Either way the appraisal is complete and the scores lock.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -595,10 +787,102 @@ export default function AppealReviewPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* ── Extend the re-evaluation deadline (D-34) ─────────────────────────── */}
+      <Dialog open={extendOpen} onOpenChange={setExtendOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Extend the re-evaluation deadline</DialogTitle>
+            <DialogDescription>
+              The manager has until the end of the day you choose, and is told the new date with
+              your reason.
+              {postRemand.data?.appealRemandDeadline
+                ? ` The deadline is now ${formatDate(postRemand.data.appealRemandDeadline)}.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="extendDate">New deadline</Label>
+              <Input
+                id="extendDate"
+                type="date"
+                value={extendDate}
+                onChange={(e) => setExtendDate(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="extendReason">Why</Label>
+              <Textarea
+                id="extendReason"
+                rows={3}
+                value={extendReason}
+                onChange={(e) => setExtendReason(e.target.value)}
+                placeholder="The manager reads this."
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExtendOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => extend.mutate()}
+              disabled={!extendDate || !extendReason.trim() || extend.isPending}
+            >
+              {extend.isPending ? 'Saving…' : 'Extend'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 function fmt(value?: number | null): string {
   return value != null ? Number(value).toFixed(1) : '—';
+}
+
+/** A row's name, its kind and its section. */
+function CriterionLabel({ name, kind, section }: { name: string; kind: string; section?: string | null }) {
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-medium">{name}</span>
+        <Badge variant="secondary">{kind}</Badge>
+      </div>
+      {section && <div className="text-xs text-muted-foreground">{section}</div>}
+    </div>
+  );
+}
+
+/** A leg's score as the row is scored: a rated score, or a measured row's achievement % over its actual. */
+function ScoreCell({
+  score,
+  method,
+  actual,
+  target,
+  unit,
+}: {
+  score?: number | null;
+  method: CriterionScoringMethod;
+  actual?: number | null;
+  target?: number | null;
+  unit?: string | null;
+}) {
+  // With the target, the whole reading; without it (it sits under the criterion's name), the actual.
+  const detail =
+    method !== 'Measured' || actual == null
+      ? null
+      : target != null
+        ? formatActualAgainstTarget(actual, target, unit)
+        : `actual ${Number(actual).toLocaleString()}${unit ? ` ${unit}` : ''}`;
+  return (
+    <>
+      <div>{formatCriterionScore(score, method)}</div>
+      {detail && <div className="text-xs font-normal text-muted-foreground">{detail}</div>}
+    </>
+  );
 }

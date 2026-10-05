@@ -79,12 +79,12 @@ public class StaffTravelPoliciesController : HrControllerBase
     /// <remarks>
     /// <para><b>Admin-gated, deliberately.</b> A policy decides what everyone may spend on travel
     /// and its caps genuinely refuse bookings, so approving one is the same authority as
-    /// authorising a booking above a cap — <c>HR.Travel.Admin</c>, which HR does not hold. Before
-    /// this endpoint existed nothing wrote <c>ApprovedById</c> at all, so every policy was
-    /// unapproved and the field was decoration.</para>
+    /// authorising a booking above a cap — <c>HR.Travel.Admin</c>, which HR holds since the travel final
+    /// closure's lane 4 (D-3); the policy's author does not approve it (C3). Before this endpoint existed nothing
+    /// wrote <c>ApprovedById</c> at all, so every policy was unapproved and the field was decoration.</para>
     ///
-    /// <para>Approving supersedes whichever policy covered the same scope, so exactly one is ever
-    /// in force for a given unit and staff-level band.</para>
+    /// <para>Approving makes room among the versions for the same scope by date (O-4): an earlier one stays in
+    /// force until the day before this one starts.</para>
     /// </remarks>
     [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpPost("{id:guid}/approve")]
@@ -185,7 +185,11 @@ public class StaffTravelPoliciesController : HrControllerBase
         return Ok(await _service.CreateExceptionAsync(dto, ctx.Value.tenantId, ctx.Value.userId));
     }
 
-    [Authorize(Policy = HrPermissions.TravelWritePolicy)]
+    /// <summary>
+    /// Lane 4, C4: a travel administrator's act, as authorising a booking's breach is — it was Write, so whoever
+    /// could raise an exception could grant it. The decision's time is the server's, and the requester does not decide.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.TravelAdminPolicy)]
     [HttpPost("exceptions/{id:guid}/decide")]
     public async Task<IActionResult> DecideException(Guid id, [FromBody] DecideStaffTravelPolicyExceptionDto dto)
     {

@@ -187,6 +187,55 @@ public static class HrFinancePostingCommandFactory
         };
     }
 
+    /// <summary>Unused advance cash handed back (travel final closure, lane 3): the receivable falls by what came
+    /// back, in the advance's own currency, as the disbursement raised it.</summary>
+    public static HrFinancePostingCommand TravelAdvanceRefunded(StaffTravelAdvance advance)
+    {
+        var amount = advance.RefundedAmount;
+        var reference = advance.AdvanceNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TravelAdvanceRefunded,
+            SourceDocumentId = advance.Id,
+            SourceReference = reference,
+            EmployeeId = advance.EmployeeId,
+            SourceDate = advance.RefundedAt,
+            TransactionCurrencyCode = advance.CurrencyCode,
+            Description = $"Travel advance {reference} — {advance.CurrencyCode} {amount:N2} handed back" +
+                          (string.IsNullOrWhiteSpace(advance.RefundReference) ? string.Empty : $" ref {advance.RefundReference}"),
+            SkipReason = amount <= 0m ? "Nothing was handed back; there is nothing to post." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"Travel advance {reference} — cash handed back"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffAdvancesReceivable, false, amount, $"Travel advance {reference} — receivable settled by refund")
+            ]
+        };
+    }
+
+    /// <summary>An advance's unsettled balance written off (travel final closure, lane 3): what is written off is
+    /// the approved amount less what claims recovered and cash came back.</summary>
+    public static HrFinancePostingCommand TravelAdvanceWrittenOff(StaffTravelAdvance advance)
+    {
+        var amount = (advance.ApprovedAmount ?? 0m) - advance.SettledAmount;
+        var reference = advance.AdvanceNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TravelAdvanceWrittenOff,
+            SourceDocumentId = advance.Id,
+            SourceReference = reference,
+            EmployeeId = advance.EmployeeId,
+            SourceDate = advance.WrittenOffAt,
+            TransactionCurrencyCode = advance.CurrencyCode,
+            Description = $"Travel advance {reference} — {advance.CurrencyCode} {amount:N2} written off",
+            SkipReason = amount <= 0m ? "Nothing is left on the advance; there is nothing to write off." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, amount, $"Travel advance {reference} — written off"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffAdvancesReceivable, false, amount, $"Travel advance {reference} — receivable written off")
+            ]
+        };
+    }
+
     // ── Leave (slice 2) ──────────────────────────────────────────────────────────────────────
 
     /// <summary>

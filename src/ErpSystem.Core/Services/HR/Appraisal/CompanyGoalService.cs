@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Appraisal;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,9 @@ public class CompanyGoalService : ICompanyGoalService
     private readonly IGenericRepository<CompanyGoal> _companyGoalRepository;
     private readonly IGenericRepository<UnitGoal> _unitGoalRepository;
     private readonly IGenericRepository<EmployeeGoal> _employeeGoalRepository;
+    private readonly IGenericRepository<CheckInObjectiveLink> _objectiveLinkRepository;
+    private readonly IGenericRepository<AppraisalCycle> _cycleRepository;
+    private readonly IGenericRepository<StrategicGoal> _strategicGoalRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<CompanyGoalService> _logger;
@@ -24,6 +28,9 @@ public class CompanyGoalService : ICompanyGoalService
         IGenericRepository<CompanyGoal> companyGoalRepository,
         IGenericRepository<UnitGoal> unitGoalRepository,
         IGenericRepository<EmployeeGoal> employeeGoalRepository,
+        IGenericRepository<CheckInObjectiveLink> objectiveLinkRepository,
+        IGenericRepository<AppraisalCycle> cycleRepository,
+        IGenericRepository<StrategicGoal> strategicGoalRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<CompanyGoalService> logger)
@@ -31,6 +38,9 @@ public class CompanyGoalService : ICompanyGoalService
         _companyGoalRepository = companyGoalRepository;
         _unitGoalRepository = unitGoalRepository;
         _employeeGoalRepository = employeeGoalRepository;
+        _objectiveLinkRepository = objectiveLinkRepository;
+        _cycleRepository = cycleRepository;
+        _strategicGoalRepository = strategicGoalRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -123,10 +133,69 @@ public class CompanyGoalService : ICompanyGoalService
         return entities.ToDtoList();
     }
 
+    /// <summary>
+    /// What hangs off a company goal (performance closure E-g1, D-78): the unit goals cascaded from it, the employee
+    /// goals aligned to it, and the check-ins it anchors. Null when nothing does. A link on a deleted check-in is not
+    /// a use.
+    /// </summary>
+    private async Task<string?> DescribeUseAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var unitGoals = await _unitGoalRepository.GetQueryable()
+            .CountAsync(u => u.TenantId == tenantId && u.ParentCompanyGoalId == id, cancellationToken);
+        var employeeGoals = await _employeeGoalRepository.GetQueryable()
+            .CountAsync(g => g.TenantId == tenantId && g.CompanyGoalId == id, cancellationToken);
+        var checkIns = await _objectiveLinkRepository.GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.CompanyGoalId == id && !l.CheckIn.IsDeleted)
+            .Select(l => l.CheckInId)
+            .Distinct()
+            .CountAsync(cancellationToken);
+
+        return DefinitionUse.Describe(
+            new DefinitionUse.Use(unitGoals, "a unit goal", "unit goals"),
+            new DefinitionUse.Use(employeeGoals, "an employee goal", "employee goals"),
+            new DefinitionUse.Use(checkIns, "a check-in", "check-ins"));
+    }
+
+    /// <summary>
+    /// The cycle and strategic goal a company goal names are this tenant's (performance closure E-g1, D-79): create and
+    /// update stored whatever ids they were sent. A strategic goal newly named must be active — the picker offers only
+    /// those; one already linked stays linked. A goal with a cascade under it stays in its cycle: its unit and employee
+    /// goals are that cycle's.
+    /// </summary>
+    private async Task ValidateReferencesAsync(CompanyGoal candidate, CompanyGoal? stored, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        if ((stored == null || candidate.AppraisalCycleId != stored.AppraisalCycleId)
+            && !await _cycleRepository.GetQueryable()
+                .AnyAsync(c => c.Id == candidate.AppraisalCycleId && c.TenantId == tenantId, cancellationToken))
+            throw new InvalidOperationException("The appraisal cycle named was not found.");
+
+        if (candidate.StrategicGoalId is Guid strategicId && strategicId != stored?.StrategicGoalId)
+        {
+            var strategic = await _strategicGoalRepository.GetQueryable()
+                .Where(s => s.Id == strategicId && s.TenantId == tenantId)
+                .Select(s => new { s.IsActive })
+                .FirstOrDefaultAsync(cancellationToken)
+                ?? throw new InvalidOperationException("The strategic goal named was not found.");
+            if (!strategic.IsActive)
+                throw new InvalidOperationException("The strategic goal named is inactive; link the objective to an active one.");
+        }
+
+        if (stored != null && candidate.AppraisalCycleId != stored.AppraisalCycleId)
+        {
+            var uses = await DescribeUseAsync(stored.Id, cancellationToken);
+            if (uses != null)
+                throw new InvalidOperationException(
+                    $"The company goal \"{stored.Title}\" is used by {uses} in its cycle, so it cannot move to another cycle.");
+        }
+    }
+
     public async Task<CompanyGoalDto> CreateAsync(CreateCompanyGoalDto createDto, CancellationToken cancellationToken = default)
     {
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ValidateReferencesAsync(entity, null, cancellationToken);
 
         await _companyGoalRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -140,7 +209,9 @@ public class CompanyGoalService : ICompanyGoalService
     {
         var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
+        var stored = new CompanyGoal { Id = entity.Id, Title = entity.Title, AppraisalCycleId = entity.AppraisalCycleId, StrategicGoalId = entity.StrategicGoalId };
         updateDto.UpdateEntity(entity);
+        await ValidateReferencesAsync(entity, stored, cancellationToken);
 
         await _companyGoalRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -153,6 +224,13 @@ public class CompanyGoalService : ICompanyGoalService
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id, cancellationToken);
+
+        // A company goal with a cascade is not deleted (E-g1, D-78): its unit and employee goals lost their parent
+        // and the check-ins it anchored lost their objective.
+        var uses = await DescribeUseAsync(id, cancellationToken);
+        if (uses != null)
+            throw DefinitionUse.DeleteRefused("company goal", entity.Title, uses,
+                "Hide it instead, and it is no longer offered for alignment.");
 
         await _companyGoalRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

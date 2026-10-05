@@ -143,7 +143,9 @@ public class StrategicGoalsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            // A rule, not a malformed request (performance closure E-g1): it answered 400.
+            _logger.LogWarning("Strategic goal rule rejected while deleting: {Message}", ex.Message);
+            return UnprocessableEntity(new { message = ex.Message });
         }
         catch (Exception ex)
         {

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Filters;
 
@@ -21,6 +22,11 @@ namespace ErpSystem.Api.Filters;
 ///   missing record and for one belonging to another tenant, which must be indistinguishable.</description></item>
 ///   <item><description><see cref="InvalidOperationException"/> → <b>422</b> with the rule's own message.</description></item>
 ///   <item><description><see cref="UnauthorizedAccessException"/> → <b>403</b> with its message.</description></item>
+///   <item><description><see cref="DbUpdateException"/> → <b>409</b> with a fixed sentence (added
+///   2026-10-01, travel final closure lane 0). A unique-index collision — a claim or advance number
+///   issued twice after a delete is the known case (finding B9, fixed in lane 3) — reached the client
+///   as a bare 500 naming nothing. The database's own text is logged, never returned: it names
+///   tables and indexes.</description></item>
 /// </list>
 ///
 /// Applied per controller rather than globally — changing the middleware would alter the contract
@@ -55,6 +61,18 @@ public sealed class StaffTravelBusinessRulesAttribute : ExceptionFilterAttribute
                 logger?.LogWarning("Staff travel authorization refused on {Path}: {Message}",
                     context.HttpContext.Request.Path, ex.Message);
                 context.Result = new ObjectResult(new { message = ex.Message }) { StatusCode = StatusCodes.Status403Forbidden };
+                context.ExceptionHandled = true;
+                break;
+
+            case DbUpdateException ex:
+                logger?.LogWarning(ex, "Staff travel save conflicted on {Path}: {Message}",
+                    context.HttpContext.Request.Path, ex.InnerException?.Message ?? ex.Message);
+                context.Result = new ConflictObjectResult(new
+                {
+                    message = "This could not be saved because it conflicts with a record that already exists — " +
+                              "for example a number that has already been issued. Refresh and try again; if it " +
+                              "happens again, tell your system administrator.",
+                });
                 context.ExceptionHandled = true;
                 break;
         }

@@ -28,7 +28,8 @@ import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitP
  * Goals at risk across the whole organisation — HR's counterpart to the manager workspace's
  * at-risk tab, with the manager scope removed.
  *
- * Same two rules and the same thresholds decide what appears; only the population differs.
+ * Same three rules and the same thresholds decide what appears — over every agreed goal not yet
+ * completed (closure D-71); only the population differs.
  * The thresholds themselves are shown here so a surprising result can be read against the
  * rule that produced it rather than guessed at.
  *
@@ -105,7 +106,8 @@ export default function OrgWideAtRiskPage() {
           </AlertTitle>
           <AlertDescription>
             A goal is also flagged when it is more than {settings.expectedProgressTolerancePercent}%
-            behind the straight-line progress its dates imply.
+            behind the straight-line progress its dates imply, or when a progress update marked it at
+            risk. Only goals agreed with the manager and not yet completed are watched.
             {!settings.isConfigured && ' These are the built-in defaults — nothing has been saved.'}
           </AlertDescription>
         </Alert>

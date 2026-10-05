@@ -1927,6 +1927,18 @@ public class SimpleWorkflowService : IWorkflowService
             context["travelEndDate"] = travel.TravelEndDate;
             context["travelDays"] = travel.TravelEndDate.DayNumber - travel.TravelStartDate.DayNumber + 1;
             context["status"] = travel.Status.ToString();
+
+            // Travel final closure, lane 2 (D-7): the line-manager stage is addressed BY NAME to the
+            // traveller's two nearest line authorities who can sign in — supervisor first, then the head
+            // of their unit and of each unit above — through the stage's Dynamic approver rules. With
+            // none, neither key resolves and the engine falls back to the step's required role, HR.
+            var lineApprovers = await ErpSystem.Core.Services.HR.HrLineAuthority.GetLineApproversAsync(
+                _unitOfWork, _userManager.Users, travel.TenantId, travel.EmployeeId,
+                ErpSystem.Core.Services.HR.StaffTravelApprovalLadder.LineApproverCount);
+            context[ErpSystem.Core.Services.HR.StaffTravelApprovalLadder.LineApproverKey] =
+                lineApprovers.ElementAtOrDefault(0)?.UserId;
+            context[ErpSystem.Core.Services.HR.StaffTravelApprovalLadder.SecondLineApproverKey] =
+                lineApprovers.ElementAtOrDefault(1)?.UserId;
         }
 
         if (IsEntityType(entityTypeRecord, "STAFF_DISCIPLINARY_ACTION", "StaffDisciplinaryAction", "Staff Disciplinary Action"))

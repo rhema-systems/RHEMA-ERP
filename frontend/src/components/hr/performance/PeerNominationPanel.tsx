@@ -39,10 +39,13 @@ import {
  *     shown rather than enforced here — the API refuses a nomination from the wrong party.
  *   • Approval is `canApprove`, passed in by the manager's screen. Approving is what creates
  *     the peers' evaluation records and notifies them, so it is not something the appraisee
- *     does for themselves.
+ *     does for themselves. In Manager mode there is no approval step: the manager chooses the
+ *     peers, and a nomination is approved as it is made (performance closure D4).
  *
- * `canSubmit` on the summary is about the *count* being within the configured range, not about
- * approval — it is what the self-evaluation submit rule checks.
+ * `canSubmit` on the summary is about the *active* count (pending + approved) being within the
+ * configured range, not about approval — it is what the self-evaluation submit rule checks. A
+ * rejected nomination leaves room for a replacement (D2). Only a pending nomination can be
+ * withdrawn: an approved peer has been asked for their feedback.
  */
 export function PeerNominationPanel({
   appraisalId,
@@ -80,6 +83,8 @@ export function PeerNominationPanel({
   const fail = (title: string) => (e: Error) =>
     toast({ title, description: e.message, variant: 'destructive' });
 
+  const managerChooses = summary?.nominationMode === 'Manager';
+
   const nominate = useMutation({
     mutationFn: () =>
       performanceAppraisalService.nominatePeers(appraisalId, {
@@ -89,7 +94,12 @@ export function PeerNominationPanel({
         instructionsToPeer: instructions.trim() || null,
       }),
     onSuccess: () => {
-      toast({ title: 'Peer nominated', description: 'Waiting for approval before they are asked.' });
+      toast({
+        title: 'Peer nominated',
+        description: managerChooses
+          ? 'They have been asked for their feedback.'
+          : 'Waiting for approval before they are asked.',
+      });
       setAddOpen(false);
       setPeerId(null);
       setDueDate('');
@@ -142,7 +152,7 @@ export function PeerNominationPanel({
 
   const rows = summary?.nominations ?? [];
   const pendingSelected = selected.length > 0;
-  const atMax = summary ? summary.totalNominations >= summary.maxAllowed : false;
+  const atMax = summary ? summary.activeNominations >= summary.maxAllowed : false;
 
   return (
     <Card>
@@ -152,7 +162,8 @@ export function PeerNominationPanel({
             <CardTitle className="text-base">Peer nominations</CardTitle>
             {summary && (
               <p className="mt-1 text-sm text-muted-foreground">
-                {summary.totalNominations} nominated · {summary.approvedCount} approved ·{' '}
+                {summary.activeNominations} nominated · {summary.approvedCount} approved ·{' '}
+                {summary.rejectedCount > 0 && <>{summary.rejectedCount} not approved · </>}
                 {summary.minRequired}–{summary.maxAllowed} required ·{' '}
                 {summary.nominationMode === 'Employee'
                   ? 'the employee nominates'
@@ -183,21 +194,30 @@ export function PeerNominationPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {summary && !summary.canSubmit && summary.totalNominations < summary.minRequired && (
+        {summary && !summary.canSubmit && summary.activeNominations < summary.minRequired && (
           <Alert>
             <TriangleAlert className="h-4 w-4" />
             <AlertTitle>
-              {summary.minRequired - summary.totalNominations} more nomination(s) needed
+              {summary.minRequired - summary.activeNominations} more nomination(s) needed
             </AlertTitle>
             <AlertDescription>
-              This cycle requires between {summary.minRequired} and {summary.maxAllowed} peers.
-              The self-evaluation cannot be submitted until the list is within that range.
+              This cycle requires between {summary.minRequired} and {summary.maxAllowed} peers.{' '}
+              {managerChooses
+                ? `The appraisal does not move past peer nomination until ${summary.minRequired} are nominated.`
+                : 'The self-evaluation cannot be submitted until the list is within that range.'}
             </AlertDescription>
           </Alert>
         )}
 
         {isLoading ? (
           <p className="py-6 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : summary?.peersWithheld ? (
+          // D-40: the manager chose the peers and the reviews are anonymous, so the appraisee is
+          // told how many, not who.
+          <p className="py-6 text-center text-sm text-muted-foreground">
+            Your manager chooses your peer evaluators in this cycle, and peer reviews are
+            anonymous: {summary.approvedCount} colleague(s) have been asked for feedback.
+          </p>
         ) : rows.length === 0 ? (
           <EmptyState
             icon={UserPlus}
@@ -253,8 +273,8 @@ export function PeerNominationPanel({
                   </TableCell>
                   {canManage && (
                     <TableCell className="text-right">
-                      {/* Refused server-side once the invitation has been sent, which approval does. */}
-                      {!row.invitationSentDate && summary?.canEdit && (
+                      {/* Only a pending nomination can be withdrawn — an approved peer has been asked. */}
+                      {row.nominationStatus === 'Pending' && summary?.canEdit && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -278,7 +298,9 @@ export function PeerNominationPanel({
           <DialogHeader>
             <DialogTitle>Nominate a peer</DialogTitle>
             <DialogDescription>
-              They are only asked for feedback once the nomination is approved.
+              {managerChooses
+                ? 'You choose the peers in this cycle, so they are asked for their feedback as soon as you nominate them.'
+                : 'They are only asked for feedback once the nomination is approved.'}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

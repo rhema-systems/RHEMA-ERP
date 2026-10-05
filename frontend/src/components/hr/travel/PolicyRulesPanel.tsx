@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { travelComplianceService } from '@/services/hr/travel-compliance.service';
+import { TravelQueryError } from './TravelQueryError';
 
 const spaced = (v?: string | null) => (v ? v.replace(/([a-z])([A-Z0-9])/g, '$1 $2') : '—');
 
@@ -35,7 +36,7 @@ const spaced = (v?: string | null) => (v ? v.replace(/([a-z])([A-Z0-9])/g, '$1 $
  * not an identity, so reviving keeps the wrong row's audit stamps.
  */
 export function PolicyRulesPanel({ policyId }: { policyId: string }) {
-  const { data: rules, isLoading } = useQuery({
+  const { data: rules, isLoading, isError, error } = useQuery({
     queryKey: ['travel-policies', policyId, 'rules'],
     queryFn: () => travelComplianceService.getPolicyRules(policyId),
     enabled: !!policyId,
@@ -53,7 +54,7 @@ export function PolicyRulesPanel({ policyId }: { policyId: string }) {
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
           <p className="text-sm text-amber-900 dark:text-amber-100">
             <span className="font-medium">Rules are not in service.</span> What refuses a booking
-            is the policy&apos;s own caps above — cabin class, hotel rate and the budgets. This
+            is two of the policy&apos;s own caps above — the cabin class and the hotel rate. This
             register is shown for reference and cannot be edited until rule enforcement is built.
           </p>
         </div>
@@ -61,6 +62,10 @@ export function PolicyRulesPanel({ policyId }: { policyId: string }) {
         {isLoading ? (
           <div className="flex justify-center py-10">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError && !rules ? (
+          <div className="px-6 pb-6">
+            <TravelQueryError error={error} what="the policy rules" />
           </div>
         ) : rows.length === 0 ? (
           <div className="px-6 pb-6">

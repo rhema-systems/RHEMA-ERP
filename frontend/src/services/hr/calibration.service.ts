@@ -54,12 +54,16 @@ class CalibrationSessionService {
     return apiService.post<CalibrationSession>(this.baseUrl, data);
   }
 
-  /** Particulars only — status and the lifecycle stamps are owned by the actions below. */
+  /**
+   * Particulars only — status and the lifecycle stamps are owned by the actions below. The scope
+   * (cycle, unit, level) changes only while the session is Pending: 422 once it is open. 422 on a
+   * completed or cancelled session.
+   */
   update(id: string, data: UpdateCalibrationSession): Promise<CalibrationSession> {
     return apiService.put<CalibrationSession>(`${this.baseUrl}/${id}`, data);
   }
 
-  /** 422 once the session is completed. */
+  /** Admin only. 422 once the session is completed; the appraisals it holds are released. */
   remove(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
   }
@@ -67,21 +71,26 @@ class CalibrationSessionService {
   // ── Lifecycle ────────────────────────────────────────────────────────────────────
 
   /**
-   * Pending → InProgress. Records the caller as facilitator and links every appraisal in scope
-   * to the session, so their computed phase reads "calibration in progress".
+   * Pending → InProgress. Records the caller as facilitator, stamps the start and links every
+   * appraisal in scope waiting for calibration to the session, so their computed phase reads
+   * "calibration in progress". (There is no separate start any more.)
    */
   open(id: string): Promise<CalibrationSession> {
     return apiService.post<CalibrationSession>(`${this.baseUrl}/${id}/open`);
   }
 
-  /** Stamps the session as having convened. Only from InProgress. */
-  start(id: string): Promise<CalibrationSession> {
-    return apiService.post<CalibrationSession>(`${this.baseUrl}/${id}/start`);
-  }
-
   /** Closes the room and notifies the panel. Adjustments are refused afterwards. */
   complete(id: string, data: CompleteCalibrationSession = {}): Promise<CalibrationSession> {
     return apiService.post<CalibrationSession>(`${this.baseUrl}/${id}/complete`, data);
+  }
+
+  /**
+   * Calls off a Pending or InProgress session, with a reason (kept at the head of its meeting
+   * notes). The appraisals it holds are released for the next session; nothing of it is applied.
+   * 422 on a completed or cancelled session, or with a blank reason.
+   */
+  cancel(id: string, reason: string): Promise<CalibrationSession> {
+    return apiService.post<CalibrationSession>(`${this.baseUrl}/${id}/cancel`, { reason });
   }
 
   // ── Participants ─────────────────────────────────────────────────────────────────
@@ -142,6 +151,10 @@ class CalibrationSessionService {
     );
   }
 
+  /**
+   * A new score and rationale. The body's appraisal and criterion must be the adjustment's own —
+   * 422 otherwise (an adjustment stays on what it restated; remove it and record a new one).
+   */
   updateAdjustment(
     sessionId: string,
     adjustmentId: string,
@@ -153,13 +166,17 @@ class CalibrationSessionService {
     );
   }
 
+  /** 422 unless the session is in progress — as recording and changing one are. */
   removeAdjustment(sessionId: string, adjustmentId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/${sessionId}/adjustments/${adjustmentId}`);
   }
 
   /**
    * Commits the session — irreversible. Writes the agreed ratings onto the appraisals and lifts
-   * the calibration gate on everyone in scope, adjusted or not. Only from Completed.
+   * the calibration gate on everyone in scope at the step, adjusted or not; each grid row's
+   * `commitSkipReason` says in advance why one would be left alone. Once per appraisal: run again,
+   * it skips what it calibrated and anything whose manager submitted after the panel closed.
+   * Only from Completed.
    */
   applyAdjustments(sessionId: string): Promise<CalibrationApplyResult> {
     return apiService.post<CalibrationApplyResult>(`${this.baseUrl}/${sessionId}/apply-adjustments`);

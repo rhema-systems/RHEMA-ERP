@@ -3495,8 +3495,30 @@ public class ProbationPeriod : TenantEntity
     /// </summary>
     public int ExtensionCount { get; set; } = 0;
 
+    // ── The confirming authority's decision (performance closure batch 2, D-99) ──
+    // Submit resolved an authority and only logged it, and approval checked the caller's role rather than that the
+    // caller was that authority. These record whom the confirmation was sent to and who decided it, so the decision
+    // can be narrowed to them and a screen can say whom it awaits.
+
+    /// <summary>The confirming authority the probation was sent to for confirmation, as resolved at submit.</summary>
+    public Guid? ConfirmationAuthorityEmployeeId { get; set; }
+
+    [ForeignKey(nameof(ConfirmationAuthorityEmployeeId))]
+    public virtual Employee? ConfirmationAuthorityEmployee { get; set; }
+
+    public DateTime? ConfirmationSubmittedDate { get; set; }
+
+    /// <summary>The employee who approved or rejected the confirmation, and when.</summary>
+    public Guid? ConfirmationDecidedById { get; set; }
+
+    [ForeignKey(nameof(ConfirmationDecidedById))]
+    public virtual Employee? ConfirmationDecidedBy { get; set; }
+
+    public DateTime? ConfirmationDecidedDate { get; set; }
+
     public virtual ICollection<ProbationReview> Reviews { get; set; } = new List<ProbationReview>();
     public virtual ICollection<ProbationExtension> Extensions { get; set; } = new List<ProbationExtension>();
+    public virtual ICollection<ProbationExtensionRequest> ExtensionRequests { get; set; } = new List<ProbationExtensionRequest>();
 }
 
 // =============================================================================
@@ -3536,6 +3558,103 @@ public class ProbationExtension : TenantEntity
 
     [MaxLength(2000)]
     public string? Comments { get; set; }
+
+    /// <summary>
+    /// The request this extension applied (performance closure batch 2, D-99), when one did; extensions written by the
+    /// direct door before the route have none. <see cref="ExtendedById"/> is then the deciding authority — an employee
+    /// by construction, because a confirming-authority rule names one.
+    /// </summary>
+    public Guid? ExtensionRequestId { get; set; }
+
+    [ForeignKey(nameof(ExtensionRequestId))]
+    public virtual ProbationExtensionRequest? ExtensionRequest { get; set; }
+}
+
+// =============================================================================
+// SECTION 23b — PROBATION EXTENSION REQUEST (performance closure batch 2, D-99)
+// =============================================================================
+
+/// <summary>
+/// A request to extend a probation period, decided by the probation's confirming authority on the workflow engine — the
+/// confirmation route (D-99) — and applied by the service.
+/// </summary>
+/// <remarks>
+/// <para>Before this, an extension was a direct write by HR (<c>POST extend</c>), and an approved Extend-Probation
+/// recommendation called it with a user id where an employee id belongs. Now an approved recommendation, or HR acting on
+/// a probation review, raises a request; the authority approves or rejects it; an approved request is applied — a
+/// <see cref="ProbationExtension"/> row written and <see cref="ProbationPeriod.CurrentEndDate"/> moved — and lands at
+/// <see cref="ProbationExtensionRequestStatus.Applied"/>. HR raises and applies; it never decides.</para>
+/// <para>Its own row and its own engine entity type, because the engine keeps one running instance per (entity type,
+/// entity id): a second request on the ProbationPeriod would reuse the confirmation's instance and land on its
+/// adapter.</para>
+/// <para>The open request IS the probation's pending-extension state. No <see cref="ProbationStatus"/> member was added:
+/// the probation is still running, and two dozen reads of <c>Active</c> would each have to learn a new value. A unique
+/// index keeps it to one open request per probation.</para>
+/// </remarks>
+public class ProbationExtensionRequest : TenantEntity
+{
+    public Guid ProbationPeriodId { get; set; }
+
+    [ForeignKey(nameof(ProbationPeriodId))]
+    public virtual ProbationPeriod ProbationPeriod { get; set; } = null!;
+
+    public ProbationExtensionRequestStatus Status { get; set; } = ProbationExtensionRequestStatus.PendingApproval;
+
+    /// <summary>The months asked for.</summary>
+    public int ExtensionMonths { get; set; }
+
+    /// <summary>The probation's end date when the request was raised, so the authority reads what was true when asked.</summary>
+    public DateOnly EndDateWhenRaised { get; set; }
+
+    /// <summary>The end date asked for: <see cref="EndDateWhenRaised"/> plus the months.</summary>
+    public DateOnly ProposedEndDate { get; set; }
+
+    [Required]
+    [MaxLength(2000)]
+    public string Reason { get; set; } = string.Empty;
+
+    [MaxLength(2000)]
+    public string? Comments { get; set; }
+
+    /// <summary>
+    /// Who raised it — a user, because the recommendation handler and HR's desk act as users, and a desk account may have
+    /// no employee record.
+    /// </summary>
+    public Guid RequestedByUserId { get; set; }
+
+    public DateTime RequestedDate { get; set; }
+
+    /// <summary>
+    /// The confirming authority it was sent to, as resolved at submit. A request is refused when none resolves, as
+    /// confirmation is.
+    /// </summary>
+    public Guid AuthorityEmployeeId { get; set; }
+
+    [ForeignKey(nameof(AuthorityEmployeeId))]
+    public virtual Employee AuthorityEmployee { get; set; } = null!;
+
+    /// <summary>The employee who approved or rejected it, and when.</summary>
+    public Guid? DecidedById { get; set; }
+
+    [ForeignKey(nameof(DecidedById))]
+    public virtual Employee? DecidedBy { get; set; }
+
+    public DateTime? DecidedDate { get; set; }
+
+    [MaxLength(2000)]
+    public string? DecisionNotes { get; set; }
+
+    /// <summary>The approved Extend-Probation recommendation that raised it, when one did.</summary>
+    public Guid? SourceRecommendationId { get; set; }
+
+    [ForeignKey(nameof(SourceRecommendationId))]
+    public virtual ErpSystem.Core.Entities.HR.Performance.AppraisalOutcomeRecommendation? SourceRecommendation { get; set; }
+
+    /// <summary>The probation review whose Extend recommendation HR acted on, when one did.</summary>
+    public Guid? SourceProbationReviewId { get; set; }
+
+    [ForeignKey(nameof(SourceProbationReviewId))]
+    public virtual ProbationReview? SourceProbationReview { get; set; }
 }
 
 // =============================================================================
