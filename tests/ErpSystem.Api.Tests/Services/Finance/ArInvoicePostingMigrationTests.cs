@@ -457,6 +457,67 @@ public sealed partial class ArInvoicePostingMigrationTests
             .BusinessPartnerArProfileVersionId.Should().Be(nextProfile.Id);
     }
 
+    [Fact]
+    public async Task DraftUpdateRemovingTaxPersistsZeroTaxInsteadOfReapplyingDefaults()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = InvoiceStatus.Draft;
+            invoice.TaxAmount = 15m;
+            invoice.TotalAmount = 115m;
+            invoice.BaseCurrencyAmount = 115m;
+            var line = invoice.LineItems.Single();
+            line.TaxGroupId = Guid.NewGuid();
+            line.TaxTreatment = TaxTreatment.Standard;
+            line.TaxRate = 15m;
+            line.TaxAmount = 15m;
+        });
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+        var line = fixture.Invoice.LineItems.Single();
+
+        var updated = await service.UpdateAsync(new InvoiceUpdateDto
+        {
+            Id = fixture.Invoice.Id,
+            InvoiceDate = fixture.Invoice.InvoiceDate,
+            DueDate = fixture.Invoice.DueDate,
+            CurrencyCode = fixture.Invoice.CurrencyCode,
+            ExchangeRate = fixture.Invoice.ExchangeRate,
+            LineItems = new List<InvoiceLineItemUpdateDto>
+            {
+                new()
+                {
+                    Id = line.Id,
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = line.Description,
+                    Quantity = line.Quantity,
+                    UnitPrice = line.UnitPrice,
+                    TaxGroupId = null,
+                    TaxTreatment = TaxTreatment.Exempt
+                }
+            }
+        });
+
+        updated.TaxAmount.Should().Be(0m);
+        updated.TotalAmount.Should().Be(100m);
+        updated.LineItems.Single().TaxGroupId.Should().BeNull();
+        updated.LineItems.Single().TaxTreatment.Should().Be(TaxTreatment.Exempt);
+        db.ChangeTracker.Clear();
+        var persisted = await db.Invoices.Include(invoice => invoice.LineItems)
+            .SingleAsync(invoice => invoice.Id == fixture.Invoice.Id);
+        persisted.TaxAmount.Should().Be(0m);
+        persisted.TotalAmount.Should().Be(100m);
+        persisted.LineItems.Single().TaxAmount.Should().Be(0m);
+        persisted.LineItems.Single().TaxGroupId.Should().BeNull();
+        persisted.LineItems.Single().TaxTreatment.Should().Be(TaxTreatment.Exempt);
+        taxEngine.Verify(engine => engine.CalculateDocumentTaxesAsync(
+            It.IsAny<TaxDocumentCalculationRequestDto>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Theory]
     [InlineData(101, 0)]
     [InlineData(0, 101)]

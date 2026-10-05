@@ -72,6 +72,7 @@ import {
     isEligibleManualArRevenueAccount,
     taxGroupForNewArInvoiceLine,
 } from '@/lib/finance/ar-invoice-entry';
+import { resolveInvoiceLineTaxSelection } from '@/lib/finance/invoice-tax-selection';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -83,6 +84,7 @@ const lineItemSchema = z.object({
     unitPrice: z.coerce.number().min(0, 'Unit price must be positive'),
     discountPercentage: z.coerce.number().min(0).max(100).optional().default(0),
     taxGroupId: z.string().optional(),
+    taxTreatment: z.coerce.number().int().min(1).max(5).optional().default(1),
 });
 
 const invoiceSchema = z.object({
@@ -461,16 +463,6 @@ export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
     const totalTax = taxEstimate.totalTaxAmount;
     const totalAmount = Math.max(0, taxEstimate.grandTotal);
 
-    const resolveLineTaxGroupId = (
-        item: any,
-        isOpeningBalance = watchIsOpeningBalance,
-        headerTaxGroupId = watchTaxGroupId
-    ) => {
-        if (isOpeningBalance) return null;
-        const activeGroupId = item.taxGroupId || headerTaxGroupId;
-        return activeGroupId && activeGroupId !== 'none' ? activeGroupId : null;
-    };
-
     const formatAmountWithCurrency = (amount: number) => {
         return formatCurrency(amount, watchCurrencyCode);
     };
@@ -570,6 +562,7 @@ export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
                 unitPrice: line.unitPrice,
                 discountPercentage: line.discountPercentage || 0,
                 taxGroupId: line.taxGroupId || 'none',
+                taxTreatment: Number(line.taxTreatment ?? 1),
             })),
         });
     }, [customersData?.items, editInvoice, form, isEditMode]);
@@ -609,17 +602,26 @@ export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
                 discountAmount: Number(data.discountAmount) || 0,
                 discountReason: hasInvoiceDiscount ? data.discountReason?.trim() : null,
                 isOpeningBalance,
-                lineItems: data.lineItems.map(item => ({
-                    id: item.sourceLineId,
-                    lineItemType: item.lineItemType,
-                    productId: item.productId,
-                    glAccountId: isOpeningBalance ? undefined : (item.glAccountId || undefined),
-                    description: item.description,
-                    quantity: Number(item.quantity),
-                    unitPrice: Number(item.unitPrice),
-                    discountPercentage: Number(item.discountPercentage),
-                    taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId)
-                })),
+                lineItems: data.lineItems.map(item => {
+                    const taxSelection = resolveInvoiceLineTaxSelection({
+                        lineTaxGroupId: item.taxGroupId,
+                        defaultTaxGroupId: data.taxGroupId,
+                        taxTreatment: item.taxTreatment,
+                        isOpeningBalance,
+                    });
+                    return {
+                        id: item.sourceLineId,
+                        lineItemType: item.lineItemType,
+                        productId: item.productId,
+                        glAccountId: isOpeningBalance ? undefined : (item.glAccountId || undefined),
+                        description: item.description,
+                        quantity: Number(item.quantity),
+                        unitPrice: Number(item.unitPrice),
+                        discountPercentage: Number(item.discountPercentage),
+                        taxGroupId: taxSelection.taxGroupId,
+                        taxTreatment: taxSelection.taxTreatment,
+                    };
+                }),
                 financeDimensions: {
                     defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
                     lines: data.lineItems.flatMap(item => {
@@ -1168,6 +1170,7 @@ export function InvoiceFormPage({ editInvoiceId }: { editInvoiceId?: string }) {
                                 unitPrice: 0,
                                 discountPercentage: 0,
                                 taxGroupId: taxGroupForNewArInvoiceLine(watchTaxGroupId, watchIsOpeningBalance),
+                                taxTreatment: 1,
                             })}
                         >
                             <Plus className="mr-2 h-4 w-4" /> Add invoice line

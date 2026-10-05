@@ -76,6 +76,10 @@ import {
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
 import { calculateNetTradeDiscountLineAmount } from '@/lib/finance/invoice-trade-discount';
+import {
+    resolveInvoiceLineTaxSelection,
+    shouldBlockApInvoiceSaveForSupplierDefaults,
+} from '@/lib/finance/invoice-tax-selection';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -1044,6 +1048,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 acceptedSupplySourceId: data.acceptedSupplySourceId,
                 lineItems: data.lineItems.map(item => {
                     const lineTax = calculateLineTax(item, isOpeningBalance, data.taxGroupId);
+                    const taxSelection = resolveInvoiceLineTaxSelection({
+                        lineTaxGroupId: item.taxGroupId,
+                        defaultTaxGroupId: data.taxGroupId,
+                        taxTreatment: item.taxTreatment,
+                        isOpeningBalance,
+                    });
                     return {
                         id: item.sourceLineId,
                         lineItemType: item.lineItemType,
@@ -1055,8 +1065,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         unitPrice: Number(item.unitPrice),
                         discountPercentage: Number(item.discountPercentage),
                         taxRate: lineTax.taxRate,
-                        taxTreatment: item.taxTreatment,
-                        taxGroupId: resolveLineTaxGroupId(item, isOpeningBalance, data.taxGroupId),
+                        taxTreatment: taxSelection.taxTreatment,
+                        taxGroupId: taxSelection.taxGroupId,
                         unit: item.unit || null,
                         inventoryItemId: item.inventoryItemId || null,
                         warehouseId: item.warehouseId || null,
@@ -1144,6 +1154,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             invalid?.scrollIntoView({ block: 'center', behavior: 'smooth' });
         });
     };
+
+    const saveBlockedBySupplierDefaults = shouldBlockApInvoiceSaveForSupplierDefaults({
+        isEditMode,
+        isOpeningBalance: watchIsOpeningBalance,
+        isLoading: supplierDefaultsLoading,
+    });
 
     const editSupplierMissing = Boolean(
         isEditMode &&
@@ -2178,7 +2194,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     </CardContent>
                     <CardFooter className="flex justify-end space-x-2 bg-muted/50 p-4">
                         <Button variant="outline" type="button" onClick={() => router.back()}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting || (!watchIsOpeningBalance && supplierDefaultsLoading && (!isEditMode || withholdingDecision === null)) || Boolean(goodsCategory && (goodsEntryLoading || goodsEntryError || !goodsEntry || fields.length === 0))}>
+                        <Button type="submit" disabled={isSubmitting || saveBlockedBySupplierDefaults || Boolean(goodsCategory && (goodsEntryLoading || goodsEntryError || !goodsEntry || fields.length === 0))}>
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {isEditMode ? 'Save Changes' : 'Record Invoice'}
                         </Button>

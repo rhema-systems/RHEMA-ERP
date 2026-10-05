@@ -202,3 +202,12 @@ The safe local code work is complete. For AUTH-11, capture the rejected Journal 
 ## Authorization boundaries retained
 
 Push/update of PR #352 is authorized. Deployment and restart are authorized only through the repository's guarded release path after a green build; the current PR branch is not an eligible deployment candidate. Do not merge PR #352, bypass release guards, apply migrations, or mutate UAT data without separate authorization.
+
+## 2026-10-05 local exchange-rate runtime follow-up
+
+- The frontend production server was confirmed running from .w/fin-uat-remediation-20261004/frontend.
+- The local API process started at 07:22, while the remediation API DLL in that worktree was rebuilt at 07:34. The process therefore retained the older assembly and could not expose the committed exchange-rate queue/reconciliation changes.
+- Local testing does not require merging PR #352 to master; the master restriction applies to the guarded UAT deployment only.
+- The user authorized manually restarting the local API from the remediation worktree. Codex did not restart it.
+- Directly changing exchange-rate approval-status columns remains unsafe and unauthorized because it bypasses workflow history, approval evidence, and schedule lifecycle.
+- Exchange-rate dialog Cancel and in-flight submission defects are tracked separately in FINANCE_EXCHANGE_RATE_DEMO_BLOCKERS_20261005.md.

@@ -68,6 +68,7 @@ export interface InvoiceLineItem {
     taxAmount?: number;
     taxCode?: string;
     taxGroupId?: string | null;
+    taxTreatment?: number;
     unit?: string;
     discountPercentage: number;
     discountAmount: number;
@@ -167,6 +168,7 @@ export interface InvoiceLineItemRequest {
     unitPrice: number;
     taxCode?: string;
     taxGroupId?: string | null;
+    taxTreatment?: number;
     taxRate?: number;
     discountPercentage?: number;
 }

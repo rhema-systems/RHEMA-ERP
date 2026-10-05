@@ -30,4 +30,21 @@ describe('Exchange Rates retained-data boundary', () => {
   it('labels average rates as reporting and valuation evidence', () => {
     expect(pageSource).toContain('Average — reporting/valuation only');
   });
+
+  it('prevents duplicate create and update submissions while showing progress', () => {
+    expect(pageSource).toContain('if (isCreatingRate) return');
+    expect(pageSource).toContain('disabled={isCreatingRate}');
+    expect(pageSource).toContain("isCreatingRate ? 'Creating Rate…' : 'Create Rate'");
+    expect(pageSource).toContain('if (!editingRate || isUpdatingRate) return');
+    expect(pageSource).toContain('disabled={isUpdatingRate}');
+    expect(pageSource).toContain("isUpdatingRate ? 'Updating Rate…' : 'Update Rate'");
+  });
+
+  it('controls the edit dialog so Cancel closes it and resets the form', () => {
+    expect(pageSource).toContain('open={editingRate?.id === rate.id}');
+    expect(pageSource).toContain('if (!open) closeEditDialog()');
+    expect(pageSource).toContain('onClick={closeEditDialog}');
+    expect(pageSource).toContain('setEditingRate(null)');
+    expect(pageSource).toContain('resetForm()');
+  });
 });
