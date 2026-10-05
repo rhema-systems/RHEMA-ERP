@@ -76,8 +76,9 @@ There is currently no dedicated till-closure workflow instance, shared Finance a
 
 - Schema migration authored: `20261005191611_AddCashierTillSessionCancellationControls` adds nullable `CancelledAt`, `CancelledById`, and `CancellationReason` columns to `CashierTillSessions`.
 - Migration scope was reviewed and stripped of unrelated pre-existing Estate model drift before commit.
-- Migration application: not applied locally or to UAT.
-- UAT data mutation: none.
+- Migration application: applied and verified on `RHEMAERP_BOOKV2_UAT_20260922` on 2026-10-05; all three columns exist and the migration is the latest recorded history entry.
+- Earlier in the same authorized application turn, the running local API configuration was incorrectly treated as the intended target. EF advanced the separate `RhemaERP` database from `20261003090000_AddSalesCommercialQuantityAuthorities` through five pending migrations, ending at this till migration. No rollback was attempted because reversing those migrations is destructive and requires a separate impact decision.
+- UAT data mutation: schema migration only; no business-row mutation was performed.
 - Deployment/restart: not performed.
 
 ## Completed commit

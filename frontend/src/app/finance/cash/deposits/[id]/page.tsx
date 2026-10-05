@@ -20,7 +20,10 @@ import {
     toFinancePostingDimensionValues,
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
-import { isIndependentBankDepositReviewer } from '@/lib/finance/bank-deposit-access';
+import {
+    canRecordBankDepositAcknowledgement,
+    isIndependentBankDepositReviewer,
+} from '@/lib/finance/bank-deposit-access';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
 import { useAuth } from '@/hooks/use-auth';
@@ -164,12 +167,17 @@ export default function BankDepositDetailPage() {
     const canSubmitDeposit = hasPermission('Finance.Banking.Deposits.Submit');
     const canApproveDeposit = hasPermission('Finance.Banking.Deposits.Approve');
     const canPostDeposit = hasPermission('Finance.Workflow.PostAfterApproval');
-    const canConfirmDeposit = hasPermission('Finance.Banking.Deposits.Confirm');
+    const hasConfirmDepositPermission = hasPermission('Finance.Banking.Deposits.Confirm');
     const isOwnSubmission = Boolean(
         user?.id && deposit.submittedById && user.id.toLowerCase() === deposit.submittedById.toLowerCase(),
     );
     const canReviewDeposit = canApproveDeposit &&
         isIndependentBankDepositReviewer(user?.id, deposit.submittedById);
+    const canConfirmDeposit = canRecordBankDepositAcknowledgement(
+        user?.id,
+        deposit.submittedById,
+        hasConfirmDepositPermission,
+    );
 
     return (
         <div className="space-y-6 p-6">
@@ -295,6 +303,19 @@ export default function BankDepositDetailPage() {
                     </CardContent>
                 </Card>
             )}
+            {deposit.status === 'Posted' &&
+                deposit.confirmationStatus === 'Pending' &&
+                hasConfirmDepositPermission &&
+                isOwnSubmission && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Bank acknowledgement requires an independent user</CardTitle>
+                            <CardDescription>
+                                A different authorized user must record the bank acknowledgement. You cannot confirm a deposit you submitted.
+                            </CardDescription>
+                        </CardHeader>
+                    </Card>
+                )}
         </div>
     );
 }
