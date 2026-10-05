@@ -27,6 +27,7 @@ Build and verify the Finance authorization contract from workflow entity and lif
 - Exact audit start: 089336fa9
 - Authorized: repository inspection, read-only UAT database inspection, focused local implementation, tests, and this ledger.
 - Not authorized: push, PR #352 mutation, deployment, service restart, migration application, or UAT data mutation.
+- Subsequent authorization on 2026-10-05: push the committed remediation through PR #352, then deploy and restart only after a successful build and focused contract tests. UAT data mutation and migration application remain unauthorized.
 
 ## Authority model
 
@@ -184,10 +185,20 @@ The persisted route -> permission -> role -> stage chain is valid. ACCESS_FORBID
 - Existing FinanceRouteContractTests: passed 17/17.
 - git diff --check: passed.
 
+### Post-push missing-type report triage
+
+- A later local build report showed CS0234 at `Program.cs` and `ServiceCollectionExtensions.cs` for `ErpSystem.Api.Services.Finance.GL.RecurringJournalWorkflowReconciliationService`.
+- The implementation file is tracked in both local and remote PR head `348d8a37b85de2543d15c274b1fd809b426b19ac`, and its declared namespace and public type exactly match both references.
+- `ErpSystem.Api.csproj` uses the SDK default compile-item rules and does not exclude the implementation file.
+- A full rebuild of `src/ErpSystem.Api/ErpSystem.Api.csproj --no-restore` from that exact head passed with 0 errors. The focused approval-authority and reconciliation suite passed 21/21, and the reconciliation tests directly construct the reported service type.
+- GitHub checks on that exact head passed: `Finance consumer and SQL Server contracts` and `Validate Windows VPS release contracts`.
+- Classification: stale or incomplete local build snapshot, not a committed source/namespace mismatch. No corrective source change is warranted.
+- Deployment and restart were not performed: the repository's Windows test-VPS workflow rejects non-`master` deployment candidates, while PR #352 remains open. Bypassing that release guard or merging the PR was not inferred from the deployment request.
+
 ## Remaining work
 
 The safe local code work is complete. For AUTH-11, capture the rejected Journal Batch request authenticated user ID, tenant claim, role claims, permission claims, route/action, HTTP status/body, correlation ID, and matching authorization log. This needs a deployed/runtime evidence pass and is not authorization to deploy, restart, or mutate UAT.
 
 ## Authorization boundaries retained
 
-Do not push, update PR #352, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
+Push/update of PR #352 is authorized. Deployment and restart are authorized only through the repository's guarded release path after a green build; the current PR branch is not an eligible deployment candidate. Do not merge PR #352, bypass release guards, apply migrations, or mutate UAT data without separate authorization.
