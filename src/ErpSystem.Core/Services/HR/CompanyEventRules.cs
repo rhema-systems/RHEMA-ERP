@@ -66,6 +66,21 @@ public static class CompanyEventRules
         && (e.Status is EventStatus.Confirmed or EventStatus.InProgress
             || (!IsAwaitingApproval(e) && e.Status is EventStatus.Scheduled or EventStatus.Rescheduled));
 
+    /// <summary>
+    /// A cancelled event takes no more files (lane 2h); a completed one may still take its minutes. A file says what it is.
+    /// The controller asks it before a byte is stored, the service again against a race.
+    /// </summary>
+    public static string? RefuseAttaching(string eventName, bool isCancelled, EventStatus status, EventAttachmentType type) =>
+        isCancelled || status == EventStatus.Cancelled ? $"{eventName} is cancelled, so no file can be added to it."
+        : !Enum.IsDefined(type) ? "Choose what the file is: an agenda, minutes, a presentation or a resource."
+        : null;
+
+    /// <summary>
+    /// <see cref="CompanyEvent.SourceEntityType"/> of an event a Safety drill made (lane 2h, C-51). The user's ruling: such
+    /// an event neither refuses another nor is refused — an overlap with it is a warning only.
+    /// </summary>
+    public const string DrillSource = "EmergencyDrill";
+
     // ── Event against event (lane 2g-2, C-15: the user's rulings, as D-9) ────────────────────────────
 
     /// <summary>Going ahead: not cancelled, completed or postponed. One awaiting approval counts — it may go ahead.</summary>
@@ -104,6 +119,8 @@ public static class CompanyEventRules
         var ra = AudienceRuleOf(a);
         var rb = AudienceRuleOf(b);
         if (ra is null && rb is null) return EventClash.None;
+        // Lane 2h (C-51, the user's ruling): a drill's event is never refused and never refuses.
+        if (a.SourceEntityType == DrillSource || b.SourceEntityType == DrillSource) return EventClash.Warning;
         if (ra is { TargetType: HrAudienceTargetType.AllEmployees } && rb is { TargetType: HrAudienceTargetType.AllEmployees })
             return EventClash.Refused;
         if (ra is { TargetType: HrAudienceTargetType.OrganizationUnit } && rb is { TargetType: HrAudienceTargetType.OrganizationUnit }

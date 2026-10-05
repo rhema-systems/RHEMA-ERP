@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -46,6 +47,12 @@ public class CompanyScheduleController : HrControllerBase
     private readonly ICompanyMilestoneService _milestoneService;
     private readonly IBusinessClosureService _closureService;
     private readonly IFiscalYearService _fiscalYearService;
+    // Lane 2h (C-18): event attachments through the upload gate, and their download.
+    private readonly ErpSystem.Api.Services.HR.IHrControlledDocumentService _hrDocuments;
+    private readonly ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ErpSystem.Data.ApplicationDbContext _db;
+    private readonly ILogger<CompanyScheduleController> _logger;
 
     public CompanyScheduleController(
         ICompanyEventService eventService,
@@ -55,7 +62,12 @@ public class CompanyScheduleController : HrControllerBase
         IBusinessClosureService closureService,
         IFiscalYearService fiscalYearService,
         ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService personalSchedule,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ErpSystem.Api.Services.HR.IHrControlledDocumentService hrDocuments,
+        ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ErpSystem.Data.ApplicationDbContext db,
+        ILogger<CompanyScheduleController> logger)
         : base(currentUser)
     {
         _eventService = eventService;
@@ -65,6 +77,11 @@ public class CompanyScheduleController : HrControllerBase
         _closureService = closureService;
         _fiscalYearService = fiscalYearService;
         _personalSchedule = personalSchedule;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     #region Company Events
@@ -467,13 +484,41 @@ public class CompanyScheduleController : HrControllerBase
 
     #region Event Attachments
 
+    /// <summary>
+    /// Attaches a file to an event — its agenda, minutes, slides or a resource — through the upload gate: scanned, stored
+    /// and registered (lane 2h, C-18). It took a file name and a path in JSON, and stored no file (F-54).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The event is resolved — and a cancelled one refused — BEFORE a byte is stored: the gate cannot roll a stored
+    /// file back once its registration has run (the asset photographs' lesson).
+    /// </remarks>
     [HttpPost("events/{eventId:guid}/attachments")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<EventAttachmentDto>> AddEventAttachment(Guid eventId, [FromBody] CreateEventAttachmentDto dto)
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddEventAttachment(
+        Guid eventId,
+        IFormFile file,
+        [FromForm] EventAttachmentType type,
+        [FromForm] string? description,
+        CancellationToken ct)
     {
-        dto.EventId = eventId;
-        var created = await _eventService.AddAttachmentAsync(dto);
-        return CreatedAtAction(nameof(GetEventAttachments), new { eventId }, created);
+        var ev = await _eventService.GetByIdAsync(eventId, ct);
+        if (ErpSystem.Core.Services.HR.CompanyEventRules.RefuseAttaching(ev.EventName, ev.IsCancelled, ev.Status, type) is { } refusal)
+            throw new InvalidOperationException(refusal);
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "CompanyEvent",
+            sourceRecordId: eventId,
+            sourceLabel: $"Company event {ev.EventNumber}",
+            documentType: "CompanyEventAttachment",
+            description: description,
+            persist: (uploadedById, document) => _eventService.AddUploadedAttachmentAsync(
+                eventId, type, description, uploadedById,
+                document.OriginalFileName, document.FilePath, document.FileSize, document.FileUploadRecordId,
+                document.DocumentRecordId, document.DocumentVersionId, ct),
+            ct,
+            category: ControlledFileUploadCategories.HrCompanyScheduleAttachments);
     }
 
     [HttpGet("events/{eventId:guid}/attachments")]
@@ -481,8 +526,37 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<EventAttachmentDto>>> GetEventAttachments(Guid eventId)
         => Ok(await _eventService.GetAttachmentsAsync(eventId));
 
+    /// <summary>
+    /// Downloads an event's file (lane 2h, C-18), on the register's read permission. A row from before the gate is a
+    /// reference with no file stored (F-54): it answers 404, saying so.
+    /// </summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> DownloadEventAttachment(Guid attachmentId, CancellationToken ct)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is this endpoint's: the download helper performs none. The service applies the tenant.
+        var attachment = await _eventService.GetAttachmentAsync(attachmentId, ct);
+        if (!attachment.HasFile)
+            return NotFound(new { message = "Reference only — no file stored. It was recorded before files were uploaded here." });
+
+        // ⚠ No legacy path: a path a caller once typed is not a file this server stored (F-54).
+        var stored = await _db.EventAttachments.AsNoTracking()
+            .Where(a => a.Id == attachmentId && a.TenantId == tenantId)
+            .Select(a => new { a.DocumentRecordId, a.DocumentVersionId, a.FileUploadRecordId })
+            .FirstAsync(ct);
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            stored.DocumentRecordId, stored.DocumentVersionId, stored.FileUploadRecordId,
+            legacyPath: null, attachment.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Removes an event's file — organiser work, on Write (lane 2h, the user's ruling); it was Admin.</summary>
     [HttpDelete("attachments/{attachmentId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> DeleteEventAttachment(Guid attachmentId)
     {
         await _eventService.DeleteAttachmentAsync(attachmentId);

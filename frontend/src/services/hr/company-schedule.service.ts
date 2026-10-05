@@ -1,4 +1,5 @@
 import { apiService } from '../api.service';
+import { hrDocumentService } from './hr-document.service';
 import type { PagedResult } from '@/types/hr/common';
 import type { HrAnnouncement } from './announcements.service';
 import type {
@@ -37,7 +38,6 @@ import type {
   CreateBusinessClosure,
   CreateCompanyEvent,
   CreateCompanyMilestone,
-  CreateEventAttachment,
   CreateEventParticipant,
   CreateEventTask,
   CreateFiscalPeriod,
@@ -337,11 +337,17 @@ class CompanyEventService {
     return apiService.get<EventAttachment[]>(`${this.baseUrl}/events/${eventId}/attachments`);
   }
 
-  addAttachment(eventId: string, data: Omit<CreateEventAttachment, 'eventId'>): Promise<EventAttachment> {
-    return apiService.post<EventAttachment>(`${this.baseUrl}/events/${eventId}/attachments`, {
-      ...data,
-      eventId,
-    });
+  /**
+   * The gated upload route for an event's files (lane 2h, C-18) — for `DocumentUploadField`, with `type` and
+   * `description` as its form fields. A file is scanned and stored; a name and a path are no longer accepted (F-54).
+   */
+  attachmentUploadEndpoint(eventId: string): string {
+    return `${this.baseUrl}/events/${eventId}/attachments`;
+  }
+
+  /** Saves an event's file (lane 2h). A row from before the gate has no file and answers 404. */
+  downloadAttachment(attachment: EventAttachment): Promise<void> {
+    return hrDocumentService.download(`${this.baseUrl}/attachments/${attachment.id}/download`, attachment.fileName);
   }
 
   removeAttachment(attachmentId: string): Promise<void> {

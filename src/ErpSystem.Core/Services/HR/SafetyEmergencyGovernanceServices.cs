@@ -25,6 +25,7 @@ public class SheEmergencyService : ISheEmergencyService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<SheEmergencyService> _logger;
+    private readonly ICompanyEventService _companyEvents;
 
     public SheEmergencyService(
         IEmergencyPlanRepository planRepository,
@@ -32,7 +33,8 @@ public class SheEmergencyService : ISheEmergencyService
         IEmergencyResponseTeamRepository teamRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<SheEmergencyService> logger)
+        ILogger<SheEmergencyService> logger,
+        ICompanyEventService companyEvents)
     {
         _planRepository = planRepository;
         _drillRepository = drillRepository;
@@ -40,6 +42,40 @@ public class SheEmergencyService : ISheEmergencyService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _companyEvents = companyEvents;
+    }
+
+    /// <summary>
+    /// Keeps the drill's company event in step (company-schedule final closure, lane 2h, C-51): its next date becomes an
+    /// all-day event for everyone at its site, moved with the date, cancelled when the date is cleared or the drill
+    /// deleted. Server-side, so a Safety user needs no HR permission.
+    /// </summary>
+    /// <remarks>
+    /// The drill is already saved: an event that cannot be kept in step is logged, never a reason to undo the drill. A
+    /// drill's event is never refused by the company schedule's clash rule (the user's ruling), so this should not fail.
+    /// </remarks>
+    private async Task SyncCompanyEventAsync(EmergencyDrill drill, string planName, bool removed, CancellationToken cancellationToken,
+        string? removedReason = null)
+    {
+        try
+        {
+            await _companyEvents.SyncDrillEventAsync(new DrillEventSyncDto
+            {
+                DrillId = drill.Id,
+                DrillNumber = drill.DrillNumber,
+                PlanName = planName,
+                CoordinatorId = drill.CoordinatorId,
+                LocationId = drill.LocationId,
+                NextDate = drill.NextDrillScheduledDate,
+                Removed = removed,
+                RemovedReason = removedReason,
+            }, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The company event for emergency drill {DrillNumber} could not be kept in step; the drill is saved.",
+                drill.DrillNumber);
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -211,8 +247,16 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<bool> DeletePlanAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedPlanAsync(id);
+        // Company-schedule lane 2h (C-51): the plan's delete leaves its drills, so their events are cancelled here —
+        // nothing else would ever touch them again.
+        var drills = await _drillRepository.GetQueryable()
+            .Where(d => d.EmergencyPlanId == entity.Id && d.TenantId == entity.TenantId && !d.IsDeleted)
+            .ToListAsync(cancellationToken);
         await _planRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        foreach (var drill in drills)
+            await SyncCompanyEventAsync(drill, entity.PlanName, removed: true, cancellationToken,
+                $"Emergency plan {entity.PlanName}, and with it drill {drill.DrillNumber}, was deleted in Safety.");
         return true;
     }
 
@@ -294,7 +338,7 @@ public class SheEmergencyService : ISheEmergencyService
     public async Task<EmergencyDrillDto> AddDrillAsync(CreateEmergencyDrillDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default)
     {
         tenantId = RequireCurrentTenant(tenantId);
-        await GetOwnedPlanAsync(dto.EmergencyPlanId);
+        var plan = await GetOwnedPlanAsync(dto.EmergencyPlanId);
         var drillNumber = dto.DrillNumber.Trim();
         var exists = await _drillRepository.GetQueryable()
             .AnyAsync(d => d.TenantId == tenantId && d.DrillNumber == drillNumber, cancellationToken);
@@ -306,6 +350,8 @@ public class SheEmergencyService : ISheEmergencyService
         var entity = dto.ToEntity(tenantId, userId);
         await _drillRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Company-schedule lane 2h (C-51): the next date becomes a company event.
+        await SyncCompanyEventAsync(entity, plan.PlanName, removed: false, cancellationToken);
         return entity.ToDto();
     }
 
@@ -317,6 +363,9 @@ public class SheEmergencyService : ISheEmergencyService
         entity.UpdateEntity(dto, userId);
         await _drillRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Company-schedule lane 2h (C-51): its event moves with the next date, or is cancelled when the date is cleared.
+        var plan = await GetOwnedPlanAsync(entity.EmergencyPlanId);
+        await SyncCompanyEventAsync(entity, plan.PlanName, removed: false, cancellationToken);
         return entity.ToDto();
     }
 
@@ -325,6 +374,8 @@ public class SheEmergencyService : ISheEmergencyService
         var entity = await GetOwnedDrillAsync(drillId);
         await _drillRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // Company-schedule lane 2h (C-51): deleting the drill cancels its event.
+        await SyncCompanyEventAsync(entity, string.Empty, removed: true, cancellationToken);
         return true;
     }
 

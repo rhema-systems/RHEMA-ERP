@@ -139,9 +139,24 @@ public interface ICompanyEventService
     Task RemoveAttendanceAsync(Guid eventId, Guid attendanceId, CancellationToken cancellationToken = default);
 
     // Attachment operations
-    Task<EventAttachmentDto> AddAttachmentAsync(CreateEventAttachmentDto createDto, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Records a file the upload gate stored and scanned as one of an event's papers (lane 2h, C-18) — the gate's persist
+    /// step, after the controller resolved the event.
+    /// </summary>
+    Task<EventAttachmentDto> AddUploadedAttachmentAsync(
+        Guid eventId, EventAttachmentType type, string? description, Guid uploadedById,
+        string fileName, string filePath, long fileSize, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        CancellationToken cancellationToken = default);
     Task<IEnumerable<EventAttachmentDto>> GetAttachmentsAsync(Guid eventId, CancellationToken cancellationToken = default);
+    /// <summary>One attachment, this tenant's — for its download (lane 2h).</summary>
+    Task<EventAttachmentDto> GetAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Keeps a drill's company event in step with the drill (lane 2h, C-51): makes it, moves it, or cancels it. Called by
+    /// Safety, server-side, so its users need no HR permission.
+    /// </summary>
+    Task SyncDrillEventAsync(DrillEventSyncDto drill, CancellationToken cancellationToken = default);
 
     // Task operations
     Task<EventTaskDto> AddTaskAsync(CreateEventTaskDto createDto, CancellationToken cancellationToken = default);

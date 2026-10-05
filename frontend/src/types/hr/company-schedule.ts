@@ -208,6 +208,9 @@ export interface CompanyEvent extends AuditFields {
   recurrenceSeriesId?: string | null;
   occurrenceNumber?: number | null;
   occurrenceCount?: number | null;
+  /** The record that made it (lane 2h) — "EmergencyDrill" — or null for an event HR made. */
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
 
   locationType: EventLocationType;
   locationTypeName: string;
@@ -333,6 +336,8 @@ export interface CompanyEventDetail extends CompanyEvent {
   seriesOccurrences: EventSeriesOccurrence[];
   /** "Falls on a public holiday: …" — flagged, not skipped (D-12). */
   dayOffNote?: string | null;
+  /** Lane 2h (C-51): the Safety drill that made it, worded and linked; null for an event HR made. */
+  source?: EventSource | null;
 }
 
 /** One occurrence of a series, as its list shows it (lane 2f-1). */
@@ -744,14 +749,21 @@ export interface EventAttachment extends AuditFields {
   typeName: string;
   description?: string | null;
   uploadDate: string;
+  /**
+   * Lane 2h (C-18): a file uploaded through the gate, which downloads. False for a row from before it — a name and a
+   * path typed in, no file stored (F-54): "reference only — no file stored".
+   */
+  hasFile: boolean;
+  fileSizeBytes?: number | null;
+  uploadedById?: string | null;
 }
 
-export interface CreateEventAttachment {
-  eventId: string;
-  fileName: string;
-  filePath: string;
-  type: EventAttachmentType;
-  description?: string | null;
+/** Where an event came from (lane 2h, C-51) — the Safety drill that made it, worded and linked. */
+export interface EventSource {
+  kind: string;
+  label: string;
+  /** Null when the source has since been deleted. */
+  link?: string | null;
 }
 
 export interface EventTask extends AuditFields {

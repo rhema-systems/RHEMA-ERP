@@ -32,14 +32,15 @@ has not started (the user: "don't start the actual development yet").
    at lane 2's source check (2026-10-05, § 1c, all as refined there). **Two remain pending the user** —
    D-13 and D-18, both lane 3's.
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
-   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
-   way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
+   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. ✅ **Lane 2 (events) is done (2026-10-05):**
+   source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
    issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
    2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b), and 2g, the registers' search, paging,
-   export and dashboard (2g-1) and the event-against-event clash rule (2g-2) — none with a migration. **Next: 2h,
-   attachments on the upload gate (C-18, F-54) and the drill's event (C-51); it closes lane 2.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   export and dashboard (2g-1) and the event-against-event clash rule (2g-2), and 2h, files through the upload gate
+   (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
+   **Next: lane 3 (rooms and bookings): source-check it, then put D-13 and D-18 to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -314,7 +315,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2g built and proved (718/718 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2h next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -1015,13 +1016,13 @@ change.
       other event; the form shows the rest as warnings before save.
 
 **Attachments and the drill**
-- [ ] Attachments on the gate: multipart `POST events/{id}/attachments` through
+- [x] *✅ 2h, as listed; removal moved to Write (the user's ruling), and a cancelled event takes no file.* Attachments on the gate: multipart `POST events/{id}/attachments` through
       `HrAttachmentUpload.ExecuteAsync`; `GET attachments/{id}/download` through
       `HrDocumentDownload.ServeAsync` after proving the event is the caller's tenant's;
       `CreateEventAttachmentDto` deleted; `AttachmentsPanel` becomes an upload panel with download
       links (the recruitment requisition pattern). **Legacy path-only rows read "reference only — no
       file stored", with no download link (F-54).**
-- [ ] (D-9, C-51) `SourceEntityType` / `SourceEntityId`: `SheEmergencyService` (`AddDrillAsync` /
+- [x] *✅ 2h, as listed, for everyone and never blocked (the user's ruling); clearing the next date, or deleting the plan, cancels it too.* (D-9, C-51) `SourceEntityType` / `SourceEntityId`: `SheEmergencyService` (`AddDrillAsync` /
       `UpdateDrillAsync` / `DeleteDrillAsync` in `SafetyEmergencyGovernanceServices.cs`; *the first
       text named an `EmergencyDrillService` that does not exist*) creates a company
       event (category CompanyEvent, type Internal, organiser = the drill's coordinator, site = the
@@ -1166,7 +1167,110 @@ built, proved twice and handed over on its own:
   *Applied without a ruling (stated here):* a clash counts live events only, not cancelled, completed or postponed
   ones, and includes those awaiting approval. On a series every date is checked; a refused date refuses the
   action, named, as 2f-2b's refusals do.
-- **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+- **2h** ✅ (2026-10-05; built and proved, below) attachments on the gate (C-18, F-54) and the drill (C-51). **2h closes
+  lane 2.**
+  *Source check (2026-10-05, at HEAD c01a398cf):*
+  - **Attachments:**
+    - lane 0 added `UploadedById`, `FileSizeBytes` and `FileUploadRecordId`;
+    - the upload category `HrCompanyScheduleAttachments` exists and is registered scan-mandatory, its limits coming
+      from the tenant's upload policies;
+    - `HrDocumentDownload.ServeAsync` serves a file from its upload record alone (clean scans only), so no central
+      document columns are needed;
+    - the endpoint still takes JSON (`CreateEventAttachmentDto`, a name and a path), and removal is Admin;
+    - UAT holds 25 rows, every one path-only. Four are on live demo events (scenario 110's board agenda and Q2
+      minutes, durbar programme and retreat communique), and 21 on harness events since deleted;
+    - scenario 110 and `run-slice2` post JSON attachments.
+  - **The drill:**
+    - `EmergencyDrill` carries `DrillNumber` (typed by hand), `DrillName`, `CoordinatorId` (required),
+      `LocationId` and `NextDrillScheduledDate`; its plan has `PlanName`;
+    - drills are shown on the emergency plan's page (`/hr/safety/emergency/{planId}`);
+    - UAT has one drill with a next date: DRILL-2026-001, 13 December 2026, Ashaiman Market (demo data);
+    - no event has a source yet.
+
+  *Rulings by the user (2026-10-05, all as recommended):*
+  - **A drill's event is for everyone and is never blocked:** a drill neither refuses another event nor is refused;
+    overlaps with it are warnings only, so recording a drill in SHE can never fail because of an HR event.
+  - **UAT's one drill gets its event once,** by saving it again through the SHE API at the proof.
+  - **The demo papers become real files:** UAT's four are replaced by small generated PDFs through the new upload,
+    and scenario 110 uploads files.
+  - **Removing an attachment is Write,** as removing a guest moved to Write in lane 2d.
+
+*2h — what was built (2026-10-05): files through the gate, and the drill's event (D-3, D-9; C-18, C-51, F-54). It
+closes lane 2.*
+- **No migration** (lane 0 added the attachment's upload columns and the event's source).
+- **Attachments are files** (C-18, F-54):
+  - `POST events/{id}/attachments` is multipart (a file, its type, a note; 25 MB) through `HrAttachmentUpload` on
+    `HrCompanyScheduleAttachments`: scanned, stored, registered in the document register. The row keeps the uploader,
+    the size, the upload record and the document-register ids, as the other HR doors keep them.
+    `CreateEventAttachmentDto` is gone.
+  - **Refused before a byte is stored** (`CompanyEventRules.RefuseAttaching`, asked by the controller and again by the
+    service): a cancelled event ("… is cancelled, so no file can be added to it"; a completed one may still take its
+    minutes), and a file that does not say what it is.
+  - `GET attachments/{id}/download` (Read) serves the file from the document register, else its upload record, clean
+    scans only. A path-only row from before answers 404, "Reference only — no file stored…". No path a caller once
+    typed is ever served.
+  - Removing a file is Write (the user's ruling); it was Admin. The row is soft-deleted, and the stored file stays in
+    the document register as the retained record.
+  - The event page's Attachments tab: an "Add a file" box (type, a note, the upload field) and the list — file, type,
+    note, size, added — with a Download action, and "Reference only — no file stored" on a path-only row. A cancelled
+    event shows no box.
+- **The drill's event** (C-51; `CompanyEventService.SyncDrillEventAsync`, called by `SheEmergencyService` after its own
+  save, server-side):
+  - a drill saved with a next date makes one event: "Emergency drill: {plan}" (cut to 100 characters), all day on that
+    date, at the drill's site, organised by its coordinator, for everyone, public, on the company calendar, high
+    priority, no approval, no reminders (Safety sends its own "DrillDue"), its source the drill;
+  - a new next date moves the same event, as a reschedule does (it reads Rescheduled; anyone invited is told);
+  - clearing the next date, deleting the drill, or **deleting its plan** cancels it, saying why. A plan's delete
+    leaves its drills, so nothing else would ever have touched their events. A date set again makes a new event;
+  - **never blocked** (the user's ruling): no clash is checked for it, and `ClashOf` makes any overlap with a drill's
+    event a warning, both ways;
+  - a failure to keep the event in step is logged and never undoes the drill;
+  - the event's detail carries `Source`: "Emergency drill DRILL-2026-001 — {drill} ({plan})", linked to the plan's
+    page in Safety; "…, since deleted" with no link once the drill or its plan is gone. The event page shows it as a
+    "From …" line under the title.
+- ⚠ **Found by the proof, fixed, and a latent 2f-2a defect beside it:** `GetQueryable().IgnoreQueryFilters()` cannot see
+  deleted rows — the generic repository's `GetQueryable` filters them with a `Where` of its own (the trap eight other
+  services already warn of). A deleted drill read as "no longer recorded". The same read in 2f-2a's
+  `ExtendSeriesAsync` meant deleted occurrences did **not** hold their place: a series whose latest date was deleted
+  had it made again under the same number, and one whose first date was deleted had every new date counted from the
+  second. Both now read `GetQueryableIncludingDeleted`; the series block gained the case the 2f suites never ran.
+- **UAT, once, on the user's rulings** (`dev-harness/hr-company-schedule/tools/apply-2h-uat.mjs`, dry run by default):
+  the four papers on live demo events (EVT-2026-00001's agenda and Q2 minutes, EVT-2026-00002's programme,
+  EVT-2026-00004's communique) were uploaded as small generated PDFs as `hr.head`, and their path-only rows removed;
+  DRILL-2026-001 was saved again as `she.officer`, which made **EVT-2026-02641**, 13 December 2026, Ashaiman Market. A
+  second dry run finds nothing. ⚠ They were "scanned" by the local scanner stub, which passes every file: they are
+  generated samples, and nobody may say UAT's files were scanned.
+- **The demo pack:** scenario 110 uploads its four papers as files, replacing a path-only row of the same name;
+  scenario 170 saves each seeded drill with a next date and no event once more through the SHE API (SheDataSeeder
+  writes DRILL-2026-001 past the service).
+
+*Proof (UAT, API in Staging, the local scanner stub on 3310 for the runs only):*
+- `run-final-review.mjs` blocks 1a–2h: **759/759 on two clean passes**, the blocking watcher beside both and silent.
+  2h has **40 assertions**, in a window 160 days past the others and checked empty of live events; the series block
+  one more:
+  - **a file:** stored with its size, its uploader (the signed-in person), its type and note; a clean scan on the
+    gate's record and registered in the document register; it downloads as the same bytes, as a PDF; listed on the
+    event with its file;
+  - **refused:** a program file, by the gate; a file that does not say what it is, before a byte was stored; neither
+    left a row; a cancelled event, saying so, before a byte was stored;
+  - **a path-only row from before:** `hasFile` false; its download answers 404, "Reference only — no file stored";
+  - **removal** on Write, by the HR desk;
+  - **the drill** (Safety's doors as the run's own SHE Manager, linked to the coordinator — the SHE API refuses a
+    login with no employee, which `admin` is): one event made, with the name, day, site, organiser, audience,
+    visibility, calendar, approval, reminders and status above; its source and the detail's line and link; a
+    whole-company event at its site that day allowed with a warning naming it, and the form's check listing it as a
+    warning; a new next date moving the same event onto a day the whole company already has an event there; a save
+    that leaves the date alone moving nothing; clearing the date cancelling it, saying why; a date set again making a
+    new one; deleting the drill cancelling that, saying why, its source "since deleted" with no link; a drill with no
+    next date making nothing; deleting the plan cancelling its other drill's event, saying so;
+  - **the series:** with the first and last of three deleted, one more is number 4, on the rule.
+- **Regression:** the round-4 net **210/210** (slice 2 uploads its agenda and checks a file is stored); recruitment
+  **58/58**; the templates probe **30/30**; `run-lane-n` **109/115**, the six section-J failures of #40.
+- **The API log:** no request answered 500, and no drill sync was logged as failing. Its ERR lines are the known kinds:
+  notifications with no mail server, payroll's foreign key on minted fixtures (#23), and the unique indexes refusing
+  the suites' duplicate guests and register rows.
+- **After the runs:** every harness login is off (28; the no-email one by SQL, #42). The R4D requisition's notices to
+  real staff were withdrawn twice (43, then 0), 0 live. The API and the scanner stub are stopped.
 
 *2g-2 — what was built (2026-10-05): event against event (D-9; C-15).*
 - **No migration.**
@@ -2452,7 +2556,8 @@ built, proved twice and handed over on its own:
       `preventInitiatorApproval`.
 - [ ] `run-slice0..3.mjs` and `run-round4-d.mjs` re-run as the regression net; the assertions the new
       guards change (approve without `RequiresApproval`, the status edit, the fiscal block) updated.
-- [ ] Scenario 110: event files uploaded as files (F-54), no HR fiscal year, `hr.head` books the
+- [ ] *(2h: the event files are uploaded as files, replacing a path-only row of the same name; scenario 170 saves
+      each seeded drill once more through the SHE API so its event is made.)* Scenario 110: event files uploaded as files (F-54), no HR fiscal year, `hr.head` books the
       second room (R4-2.3); the D suites get a tidy step (R4-2.1).
 - [ ] The guide: § 21 "Final review" closing every finding this plan closes; the eight rules
       rewritten; **every changed chapter rewritten**, not only § 21 (events, bookings, rooms, closures,
@@ -2505,7 +2610,7 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | C-41 | **Closed by decision D-17** (2026-10-01) | not built: a company milestone is not one employee's award; the certificate is a milestone document |
 | C-42…C-48 | Lane 4 | closed by retirement (D-6) |
 | C-49, C-50 | Lane 4 (D-9) | buttons hidden; the logo a versioned asset; the free-text URL retired (F-55) |
-| C-51 | Lane 2 (D-9) | the drill creates its event |
+| C-51 | ✅ Lane 2, slice 2h (D-9) | the drill creates its event, for everyone, never blocked; UAT's one drill given its event |
 | R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1: the D suites get a tidy step; R4-2.3: scenario 110's booking by `hr.head`) | R4-2.4 is the demo database, not the code |
 | R4-3.1 | Lane 5 | **live** — the first draft had it as kept |
 | R4-5.1, R4-6.1, R4-6.2, R4-6.4…R4-6.7, R4-7.1 | Lanes 2 and 5 | |
@@ -2934,3 +3039,18 @@ built API, so no web host and no seeders).
     `run-lane-n` 109/115 (section J, #40). No request answered 500, and no query timed out.
 
   Next: 2h, attachments on the upload gate (C-18, F-54) and the drill's event (C-51). It closes lane 2.
+- **2026-10-05, later** — **2g-2 committed** (`c01a398cf`). **2h source-checked**, four rulings taken, all as
+  recommended (lane 2 State). **Lane 2, slice 2h built and proved**: files through the gate and the drill's event (D-3,
+  D-9; C-18, C-51, F-54) (lane 2 State). No migration. **Lane 2 is done.**
+  - **Built:**
+    - event files uploaded through the gate, downloaded, removed on Write; path-only rows read "reference only";
+    - a drill's next date kept as an all-day event for everyone, never blocked, moved and cancelled with the drill
+      or its plan, and shown on the event as where it came from;
+    - UAT's four demo papers replaced by files and DRILL-2026-001's event made, once (the user's rulings).
+  - **Found by the proof:** `GetQueryable().IgnoreQueryFilters()` cannot see deleted rows. It hid a deleted drill,
+    and — in 2f-2a's extend, committed — made deleted occurrences lose their place. Both fixed.
+  - **Results:** `run-final-review.mjs` scored 759/759 on two clean passes, with 40 checks in 2h; the blocking
+    watcher was silent. The round-4 net was 210/210, recruitment 58/58, the templates probe 30/30 and `run-lane-n`
+    109/115 (section J, #40). No request answered 500.
+
+  Next: lane 3, rooms and bookings — source-check it, and put D-13 and D-18 to the user.

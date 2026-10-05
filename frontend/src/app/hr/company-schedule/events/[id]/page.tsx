@@ -2,6 +2,7 @@
 
 import { use, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BellRing,
@@ -408,6 +409,21 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         </p>
       )}
 
+      {/* Lane 2h (C-51): made by Safety from a drill's next date — and kept in step with it. */}
+      {event.source && (
+        <p className="rounded-md border bg-muted/40 p-3 text-sm">
+          From{' '}
+          {event.source.link ? (
+            <Link className="font-medium text-primary underline underline-offset-2" href={event.source.link}>
+              {event.source.label}
+            </Link>
+          ) : (
+            <span className="font-medium">{event.source.label}</span>
+          )}
+          . Its date follows the drill&apos;s next date in Safety: a change there moves or cancels it here.
+        </p>
+      )}
+
       <Card>
         <CardHeader><CardTitle>Overview</CardTitle></CardHeader>
         <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -583,7 +599,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           />
         </TabsContent>
         <TabsContent value="tasks" className="pt-4"><TasksPanel eventId={id} /></TabsContent>
-        <TabsContent value="attachments" className="pt-4"><AttachmentsPanel eventId={id} /></TabsContent>
+        <TabsContent value="attachments" className="pt-4">
+          <AttachmentsPanel eventId={id} cancelled={event.isCancelled || event.status === 'Cancelled'} />
+        </TabsContent>
         {event.requiresApproval && (
           <WorkflowTabContent
             {...workflow.tabProps}

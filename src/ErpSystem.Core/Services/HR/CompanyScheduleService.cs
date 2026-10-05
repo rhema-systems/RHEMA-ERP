@@ -580,6 +580,8 @@ public class CompanyEventService : ICompanyEventService
         var notes = await DayOffNotesAsync(tenantId, spans, cancellationToken);
         foreach (var o in detail.SeriesOccurrences) o.DayOffNote = notes.GetValueOrDefault(o.Id);
         detail.DayOffNote = notes.GetValueOrDefault(entity.Id);
+        // Lane 2h (C-51): the drill that made it, worded and linked.
+        detail.Source = await SourceOfAsync(entity, cancellationToken);
         return detail;
     }
 
@@ -864,6 +866,133 @@ public class CompanyEventService : ICompanyEventService
                 Message = ClashMessage(probe, c.Other, c.Kind),
             })
             .ToList();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2h — the drill's event (C-51)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>One live event per drill</b>, found by <see cref="CompanyEventRules.DrillSource"/> and the drill's id:
+    /// all-day on its next date, at its site, organised by its coordinator, "Emergency drill: {plan}" (cut to the event's
+    /// 100 characters), for everyone (the user's ruling) and on the company calendar. Reminders are off — Safety sends its
+    /// own "DrillDue" — and no approval is asked.</para>
+    ///
+    /// <para><b>Never blocked</b> (the user's ruling): no clash is checked, and <see cref="CompanyEventRules.ClashOf"/>
+    /// makes any overlap with it a warning. A new next date moves the event, as a reschedule does (anyone invited is told);
+    /// no next date, or the drill deleted, cancels it. A date set again after a cancellation makes a new one.</para>
+    /// </remarks>
+    public async Task SyncDrillEventAsync(DrillEventSyncDto drill, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var existing = await _eventRepository.GetQueryable()
+            .Include(e => e.Organizer)
+            .Include(e => e.SiteLocation)
+            .Where(e => e.TenantId == tenantId && e.SourceEntityType == CompanyEventRules.DrillSource && e.SourceEntityId == drill.DrillId
+                        && !e.IsCancelled && e.Status != EventStatus.Cancelled && e.Status != EventStatus.Completed)
+            .OrderByDescending(e => e.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var name = $"Emergency drill: {drill.PlanName}".Trim();
+        if (name.Length > 100) name = name[..99].TrimEnd() + "…";
+
+        if (drill.Removed || drill.NextDate is null)
+        {
+            if (existing is null) return;
+            var reason = drill.Removed
+                ? drill.RemovedReason ?? $"Emergency drill {drill.DrillNumber} was deleted in Safety."
+                : $"Emergency drill {drill.DrillNumber} no longer has a next date.";
+            existing.IsCancelled = true;
+            existing.CancellationDate = DateTime.UtcNow;
+            existing.CancellationReason = reason;
+            existing.Status = EventStatus.Cancelled;
+            existing.CalendarSequence++;
+            await CancelLinkedBookingsAsync(existing, $"{existing.EventNumber} was cancelled: {reason}", cancellationToken);
+            await _eventRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Drill event {EventNumber} cancelled: {Reason}", existing.EventNumber, reason);
+            await NotifyParticipantsAsync(existing, CompanyScheduleEmailCatalog.Events.EventCancelled,
+                tokens => { tokens["CancellationReason"] = reason; return tokens; },
+                "event cancelled", CompanyScheduleNotices.Cancelled,
+                calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
+            return;
+        }
+
+        var day = drill.NextDate.Value.Date;
+        if (existing is not null)
+        {
+            existing.EventName = name;
+            existing.LocationId = drill.LocationId;
+            existing.OrganizerId = drill.CoordinatorId;
+            CompanyEventChangeDto? moved = null;
+            if (existing.StartDate.Date != day || existing.EndDate.Date != day)
+            {
+                var before = EventWindow.Of(existing);
+                ApplyWindow(existing, new EventWindow(day, null, day, null, true));
+                moved = await MoveAsync(existing, before, $"The next date of emergency drill {drill.DrillNumber} changed in Safety.", cancellationToken);
+            }
+            await _eventRepository.UpdateAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            if (moved is not null)
+            {
+                _logger.LogInformation("Drill event {EventNumber} moved to {Day:yyyy-MM-dd}", existing.EventNumber, day);
+                await NotifyRescheduledAsync(existing, cancellationToken);
+            }
+            return;
+        }
+
+        var created = new CompanyEvent
+        {
+            TenantId = tenantId,
+            EventName = name,
+            Description = $"The next emergency drill of {drill.PlanName}, recorded in Safety as drill {drill.DrillNumber}. "
+                          + "Its date follows the drill's next date.",
+            Category = EventCategory.CompanyEvent,
+            Type = EventType.Internal,
+            Priority = EventPriority.High,
+            StartDate = day,
+            EndDate = day,
+            IsAllDayEvent = true,
+            LocationType = EventLocation.OnSite,
+            LocationId = drill.LocationId,
+            OrganizerId = drill.CoordinatorId,
+            Scope = ParticipantScope.AllStaff,
+            Visibility = EventVisibility.Public,
+            ShowOnCompanyCalendar = true,
+            ShowOnIntranet = false,
+            RequiresApproval = false,
+            SendReminders = false,
+            Status = EventStatus.Scheduled,
+            SourceEntityType = CompanyEventRules.DrillSource,
+            SourceEntityId = drill.DrillId,
+        };
+        created.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
+        StampCreator(created);
+        await _eventRepository.AddAsync(created);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Drill event {EventNumber} made for emergency drill {DrillNumber} on {Day:yyyy-MM-dd}",
+            created.EventNumber, drill.DrillNumber, day);
+    }
+
+    /// <summary>"Emergency drill DRILL-2026-001 — Q1 Fire Evacuation Drill (Head Office plan)", linked to its plan's page.</summary>
+    private async Task<EventSourceDto?> SourceOfAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        if (e.SourceEntityType != CompanyEventRules.DrillSource || e.SourceEntityId is not { } drillId) return null;
+        // ⚠ IncludingDeleted, not GetQueryable().IgnoreQueryFilters(): GetQueryable drops deleted rows with a Where of its
+        // own, which no filter switch brings back — a deleted drill read as "no longer recorded" (the 2h proof).
+        var drill = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Safety.EmergencyDrill>()
+            .GetQueryableIncludingDeleted(d => d.Id == drillId && d.TenantId == e.TenantId).AsNoTracking()
+            // A drill outlives a deleted plan (the plan's delete leaves its drills), so either one gone means no page to open.
+            .Select(d => new { d.DrillNumber, d.DrillName, Gone = d.IsDeleted || d.EmergencyPlan.IsDeleted, d.EmergencyPlanId, d.EmergencyPlan.PlanName })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (drill is null) return new EventSourceDto { Kind = CompanyEventRules.DrillSource, Label = "Emergency drill (no longer recorded)" };
+        return new EventSourceDto
+        {
+            Kind = CompanyEventRules.DrillSource,
+            Label = $"Emergency drill {drill.DrillNumber} — {drill.DrillName} ({drill.PlanName}){(drill.Gone ? ", since deleted" : string.Empty)}",
+            Link = drill.Gone ? null : $"/hr/safety/emergency/{drill.EmergencyPlanId}",
+        };
     }
 
     /// <remarks>
@@ -1396,8 +1525,9 @@ public class CompanyEventService : ICompanyEventService
             throw new InvalidOperationException($"{ev.EventName} is a single event, not a series. Make a new recurring event instead.");
 
         // Deleted occurrences hold their place in the numbering and the rule, as a deleted event holds its number.
-        var all = await _eventRepository.GetQueryable().IgnoreQueryFilters()
-            .Where(e => e.TenantId == tenantId && e.RecurrenceSeriesId == seriesId)
+        // ⚠ IncludingDeleted (lane 2h's proof): this was GetQueryable().IgnoreQueryFilters(), and GetQueryable drops deleted
+        // rows with a Where of its own — a deleted latest occurrence was made again under its own number.
+        var all = await _eventRepository.GetQueryableIncludingDeleted(e => e.TenantId == tenantId && e.RecurrenceSeriesId == seriesId)
             .Select(e => new { e.Id, e.OccurrenceNumber, e.StartDate, e.OriginalStartDate, e.IsDeleted })
             .ToListAsync(cancellationToken);
         var anchor = all.Where(x => x.OccurrenceNumber == 1).Select(x => x.OriginalStartDate ?? x.StartDate).FirstOrDefault();
@@ -3676,21 +3806,52 @@ public class CompanyEventService : ICompanyEventService
 
     #region Attachment Operations
 
-    public async Task<EventAttachmentDto> AddAttachmentAsync(CreateEventAttachmentDto createDto, CancellationToken cancellationToken = default)
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>⚠ Lane 2h (C-18, F-54): the attachment WAS a file name and a path the caller typed, and no file was ever
+    /// stored — every row on UAT was one. It is now a file through the upload gate: scanned, stored, and downloadable.</para>
+    ///
+    /// <para>Not on a cancelled event; a completed one may still take its minutes. The controller resolves the event
+    /// before a byte is stored; this check stands against a race.</para>
+    /// </remarks>
+    public async Task<EventAttachmentDto> AddUploadedAttachmentAsync(
+        Guid eventId, EventAttachmentType type, string? description, Guid uploadedById,
+        string fileName, string filePath, long fileSize, Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        await GetOwnedEventAsync(createDto.EventId, cancellationToken);
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        Refuse(CompanyEventRules.RefuseAttaching(ev.EventName, ev.IsCancelled, ev.Status, type));
 
-        var entity = createDto.ToEntity();
-        entity.TenantId = tenantId;
-        entity.UploadDate = DateTime.UtcNow;
-
+        var entity = new EventAttachment
+        {
+            TenantId = tenantId,
+            EventId = eventId,
+            FileName = fileName,
+            FilePath = filePath,
+            Type = type,
+            Description = CompanyEventRules.Clean(description),
+            UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSize,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
+        };
         await _attachmentRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Attachment added to event: {EventId}", createDto.EventId);
-
+        _logger.LogInformation("File {FileName} attached to event {EventNumber}", fileName, ev.EventNumber);
         return entity.ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<EventAttachmentDto> GetAttachmentAsync(Guid attachmentId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await _attachmentRepository.GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.TenantId == tenantId && !a.IsDeleted, cancellationToken);
+        return entity?.ToDto() ?? throw new ArgumentException("That attachment was not found.");
     }
 
     public async Task<IEnumerable<EventAttachmentDto>> GetAttachmentsAsync(Guid eventId, CancellationToken cancellationToken = default)

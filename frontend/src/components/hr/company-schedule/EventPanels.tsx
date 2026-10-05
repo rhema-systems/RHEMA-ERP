@@ -17,6 +17,11 @@ import {
   toIsoInstant,
 } from '@/components/hr/employee/tabs/fields';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { DocumentUploadField } from '@/components/hr/common/DocumentUploadField';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useToast } from '@/components/ui/use-toast';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 import {
   EVENT_ATTACHMENT_TYPES,
@@ -413,69 +418,107 @@ export function AttendancePanel({
 
 // ── Attachments ───────────────────────────────────────────────────────────────
 
-const attachmentSchema = z.object({
-  fileName: z.string().min(1, 'File name is required').max(200),
-  filePath: z.string().min(1, 'File path is required').max(500),
-  type: z.string().min(1, 'Type is required'),
-  description: z.string().max(1000).optional().or(z.literal('')),
-});
-
+// Nothing is typed into a form any more: a file is uploaded (below), and a row cannot be edited.
+const attachmentSchema = z.object({});
 type AttachmentForm = z.infer<typeof attachmentSchema>;
 
-const emptyAttachment: AttachmentForm = {
-  fileName: '',
-  filePath: '',
-  type: 'Agenda',
-  description: '',
-};
+/** "1.2 MB", "340 KB". */
+const size = (bytes?: number | null) =>
+  bytes == null ? '—' : bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 
-export function AttachmentsPanel({ eventId }: { eventId: string }) {
+/**
+ * An event's files (lane 2h, C-18): uploaded through the gate — scanned, stored and downloadable — with what they are
+ * and a line about them. A row from before the gate is a name and a path someone typed, with no file stored (F-54): it
+ * reads "Reference only — no file stored" and offers no download. Removing one is Write (the user's ruling). A
+ * cancelled event takes no more files.
+ */
+export function AttachmentsPanel({ eventId, cancelled = false }: { eventId: string; cancelled?: boolean }) {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+  const key = ['hr', 'company-schedule', 'events', eventId, 'attachments'];
+  const [type, setType] = useState<string>('Agenda');
+  const [description, setDescription] = useState('');
+
   return (
-    <ResourceCollectionTab<EventAttachment, AttachmentForm>
-      parentId={eventId}
-      title="attachments"
-      singular="attachment"
-      queryKey={['hr', 'company-schedule', 'events', eventId, 'attachments']}
-      dialogHint="Agendas, minutes, presentations and handouts for this event."
-      emptyDescription="No documents are attached to this event."
-      list={(id) => companyEventService.getAttachments(id)}
-      create={(id, v) =>
-        companyEventService.addAttachment(id, {
-          fileName: v.fileName.trim(),
-          filePath: v.filePath.trim(),
-          type: v.type as EventAttachment['type'],
-          description: orNull(v.description),
-        })
-      }
-      allowUpdate={false}
-      update={async () => undefined}
-      remove={(_id, attachmentId) => companyEventService.removeAttachment(attachmentId)}
-      getId={(a) => a.id}
-      columns={[
-        { header: 'File', cell: (a) => a.fileName },
-        { header: 'Type', cell: (a) => spaced(a.type) },
-        { header: 'Description', cell: (a) => a.description || '—' },
-        { header: 'Uploaded', cell: (a) => a.uploadDate?.slice(0, 10) ?? '—' },
-      ]}
-      schema={attachmentSchema}
-      emptyForm={emptyAttachment}
-      toForm={(a) => ({
-        fileName: a.fileName,
-        filePath: a.filePath,
-        type: a.type,
-        description: a.description ?? '',
-      })}
-      renderFields={(form) => (
-        <>
-          <FieldRow>
-            <TextField form={form} name="fileName" label="File name" required />
-            <SelectField form={form} name="type" label="Type" required options={opts(EVENT_ATTACHMENT_TYPES)} />
-          </FieldRow>
-          <TextField form={form} name="filePath" label="File path" required />
-          <TextareaField form={form} name="description" label="Description" />
-        </>
+    <div className="space-y-4">
+      {!cancelled && (
+        <div className="space-y-3 rounded-md border p-4">
+          <p className="text-sm font-medium">Add a file</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label>What it is</Label>
+              <Select value={type} onValueChange={(v) => v && setType(v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {EVENT_ATTACHMENT_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>{spaced(t)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="attachmentDescription">About it (optional)</Label>
+              <Input id="attachmentDescription" value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} />
+            </div>
+          </div>
+          <DocumentUploadField
+            label="File"
+            endpoint={companyEventService.attachmentUploadEndpoint(eventId)}
+            fields={{ type, description: description.trim() || undefined }}
+            maxSizeMb={25}
+            helpText="Agendas, minutes, presentations and handouts. Each file is scanned before it is stored."
+            onUploaded={async () => {
+              await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events', eventId] });
+              setDescription('');
+              toast({ title: 'File attached' });
+            }}
+          />
+        </div>
       )}
-    />
+      <ResourceCollectionTab<EventAttachment, AttachmentForm>
+        parentId={eventId}
+        title="attachments"
+        singular="attachment"
+        queryKey={key}
+        emptyDescription="No files are attached to this event."
+        list={(id) => companyEventService.getAttachments(id)}
+        allowCreate={false}
+        create={async () => undefined}
+        allowUpdate={false}
+        update={async () => undefined}
+        remove={(_id, attachmentId) => companyEventService.removeAttachment(attachmentId)}
+        getId={(a) => a.id}
+        columns={[
+          {
+            header: 'File',
+            cell: (a) =>
+              a.hasFile ? (
+                a.fileName
+              ) : (
+                <span>
+                  {a.fileName}
+                  <span className="block text-xs text-muted-foreground">Reference only — no file stored</span>
+                </span>
+              ),
+          },
+          { header: 'Type', cell: (a) => spaced(a.type) },
+          { header: 'About it', cell: (a) => a.description || '—' },
+          { header: 'Size', cell: (a) => (a.hasFile ? size(a.fileSizeBytes) : '—') },
+          { header: 'Added', cell: (a) => a.uploadDate?.slice(0, 10) ?? '—' },
+        ]}
+        actions={[
+          {
+            label: 'Download',
+            visible: (a: EventAttachment) => a.hasFile,
+            run: (a: EventAttachment) => companyEventService.downloadAttachment(a),
+          },
+        ]}
+        schema={attachmentSchema}
+        emptyForm={{}}
+        toForm={() => ({})}
+        renderFields={() => null}
+      />
+    </div>
   );
 }
 

@@ -39,6 +39,8 @@ public static class CompanyScheduleMappingExtensions
         dto.RecurrenceCount = entity.RecurrenceCount;
         dto.RecurrenceSeriesId = entity.RecurrenceSeriesId;
         dto.OccurrenceNumber = entity.OccurrenceNumber;
+        dto.SourceEntityType = entity.SourceEntityType;
+        dto.SourceEntityId = entity.SourceEntityId;
         dto.LocationType = entity.LocationType;
         dto.VenueName = entity.VenueName;
         dto.VenueAddress = entity.VenueAddress;
@@ -341,22 +343,14 @@ public static class CompanyScheduleMappingExtensions
             Type = entity.Type,
             Description = entity.Description,
             UploadDate = entity.UploadDate,
+            // Lane 2h (C-18, F-54): a file the gate stored, or a reference from before it.
+            HasFile = entity.FileUploadRecordId != null,
+            FileSizeBytes = entity.FileSizeBytes,
+            UploadedById = entity.UploadedById,
             CreatedAt = entity.CreatedAt,
             CreatedBy = entity.CreatedBy ?? string.Empty,
             UpdatedAt = entity.UpdatedAt,
             UpdatedBy = entity.UpdatedBy
-        };
-    }
-
-    public static EventAttachment ToEntity(this CreateEventAttachmentDto dto)
-    {
-        return new EventAttachment
-        {
-            EventId = dto.EventId,
-            FileName = dto.FileName,
-            FilePath = dto.FilePath,
-            Type = dto.Type,
-            Description = dto.Description
         };
     }
 

@@ -49,6 +49,10 @@ public class CompanyEventDto : BaseDto
     /// <summary>How many occurrences the series has, deleted ones apart — "occurrence 3 of 10".</summary>
     public int? OccurrenceCount { get; set; }
 
+    /// <summary>The record that made the event (lane 2h, C-51) — "EmergencyDrill" — or null for one HR made.</summary>
+    public string? SourceEntityType { get; set; }
+    public Guid? SourceEntityId { get; set; }
+
     // Location
     public EventLocation LocationType { get; set; }
     public string LocationTypeName => LocationType.ToString();
@@ -221,6 +225,9 @@ public class CompanyEventDetailDto : CompanyEventDto
     /// (lane 2f-1, D-12: an occurrence there is generated and flagged, not skipped). Null on an ordinary day.
     /// </summary>
     public string? DayOffNote { get; set; }
+
+    /// <summary>Where it came from, worded and linked (lane 2h, C-51) — the emergency drill; null for an event HR made.</summary>
+    public EventSourceDto? Source { get; set; }
 }
 
 /// <summary>One occurrence of a series, as its list shows it (lane 2f-1).</summary>
@@ -1029,29 +1036,45 @@ public class EventAttachmentDto : BaseDto
     public string TypeName => Type.ToString();
     public string? Description { get; set; }
     public DateTime UploadDate { get; set; }
+
+    /// <summary>
+    /// Lane 2h (C-18): a file stored through the upload gate, which downloads. False for a row from before the gate — a
+    /// name and a path typed in, with no file ever stored (F-54): "reference only — no file stored".
+    /// </summary>
+    public bool HasFile { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public Guid? UploadedById { get; set; }
 }
 
+// Lane 2h: CreateEventAttachmentDto is gone — an attachment is a file uploaded through the gate (C-18), never a name and
+// a path the caller types (F-54).
+
 /// <summary>
-/// DTO for creating an event attachment
+/// What a drill in Safety tells the company schedule (lane 2h, C-51): its next date becomes an all-day company event at
+/// its site, organised by its coordinator, moved when the date moves and cancelled when it is cleared or the drill
+/// deleted.
 /// </summary>
-public class CreateEventAttachmentDto : CreateDtoBase
+public class DrillEventSyncDto
 {
-    [Required]
-    public Guid EventId { get; set; }
+    public Guid DrillId { get; set; }
+    public string DrillNumber { get; set; } = string.Empty;
+    public string PlanName { get; set; } = string.Empty;
+    public Guid CoordinatorId { get; set; }
+    public Guid? LocationId { get; set; }
+    public DateTime? NextDate { get; set; }
+    /// <summary>The drill was deleted, or its plan was.</summary>
+    public bool Removed { get; set; }
+    /// <summary>Why, when <see cref="Removed"/>; the drill's own deletion when left out.</summary>
+    public string? RemovedReason { get; set; }
+}
 
-    [Required]
-    [MaxLength(200)]
-    public string FileName { get; set; } = string.Empty;
-
-    [Required]
-    [MaxLength(500)]
-    public string FilePath { get; set; } = string.Empty;
-
-    [Required]
-    public EventAttachmentType Type { get; set; }
-
-    [MaxLength(1000)]
-    public string? Description { get; set; }
+/// <summary>Where an event came from (lane 2h, C-51): "Emergency drill DRILL-2026-001 — …", with a link to it.</summary>
+public class EventSourceDto
+{
+    public string Kind { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    /// <summary>The page to open it on; null when the source has since been deleted.</summary>
+    public string? Link { get; set; }
 }
 
 #endregion
