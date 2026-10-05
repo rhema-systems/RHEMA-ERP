@@ -70,7 +70,7 @@ The existing `BankDepositStatus` and `BankDepositConfirmationStatus` fields rema
 
 ## Remaining work
 
-- Commit the completed lifecycle change locally as an atomic remediation commit.
+- Completed local commit: `95ad224a5` (`fix(finance): require bank acknowledgement before deposit posting`).
 - Retain it for the user's later finalized, unified Finance PR.
 - Do not push or update an existing PR until the user explicitly authorizes the consolidated PR step.
 
