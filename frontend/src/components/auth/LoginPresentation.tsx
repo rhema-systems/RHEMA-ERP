@@ -5,6 +5,7 @@ import type { LoginPageStyle } from '../../services/login-appearance';
 
 interface LoginShellProps {
   children: ReactNode;
+  backgroundUrl?: string | null;
 }
 
 interface LoginBenefit {
@@ -137,11 +138,13 @@ function EnterpriseMessage({ premium = false }: { premium?: boolean }) {
 function ShellFrame({
   children,
   style,
+  backgroundUrl,
 }: LoginShellProps & { style: LoginPageStyle }) {
   const dark = style === 'DarkPremium';
-  const backgroundImage = dark
-    ? "url('/images/auth/login-dark-premium.webp')"
-    : "url('/images/auth/login-light-corporate.webp')";
+  const bundledBackground = dark
+    ? '/images/auth/login-dark-premium.webp'
+    : '/images/auth/login-light-corporate.webp';
+  const backgroundImage = `url(${JSON.stringify(backgroundUrl || bundledBackground)})`;
 
   return (
     <main
@@ -873,21 +876,22 @@ function ShellFrame({
   );
 }
 
-export function LightCorporateLogin({ children }: LoginShellProps) {
-  return <ShellFrame style="LightCorporate">{children}</ShellFrame>;
+export function LightCorporateLogin({ children, backgroundUrl }: LoginShellProps) {
+  return <ShellFrame style="LightCorporate" backgroundUrl={backgroundUrl}>{children}</ShellFrame>;
 }
 
-export function DarkPremiumLogin({ children }: LoginShellProps) {
-  return <ShellFrame style="DarkPremium">{children}</ShellFrame>;
+export function DarkPremiumLogin({ children, backgroundUrl }: LoginShellProps) {
+  return <ShellFrame style="DarkPremium" backgroundUrl={backgroundUrl}>{children}</ShellFrame>;
 }
 
 export function LoginPresentation({
   style,
   children,
+  backgroundUrl,
 }: LoginShellProps & { style: LoginPageStyle }) {
   return style === 'DarkPremium' ? (
-    <DarkPremiumLogin>{children}</DarkPremiumLogin>
+    <DarkPremiumLogin backgroundUrl={backgroundUrl}>{children}</DarkPremiumLogin>
   ) : (
-    <LightCorporateLogin>{children}</LightCorporateLogin>
+    <LightCorporateLogin backgroundUrl={backgroundUrl}>{children}</LightCorporateLogin>
   );
 }

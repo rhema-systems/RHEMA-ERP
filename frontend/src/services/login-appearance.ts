@@ -4,6 +4,8 @@ export type LoginPageStyle = 'LightCorporate' | 'DarkPremium';
 
 export interface PublicLoginAppearance {
   loginPageStyle: LoginPageStyle;
+  lightBackgroundUrl: string | null;
+  darkBackgroundUrl: string | null;
 }
 
 export const DEFAULT_LOGIN_PAGE_STYLE: LoginPageStyle = 'LightCorporate';
@@ -14,7 +16,11 @@ export const normalizeLoginPageStyle = (value: unknown): LoginPageStyle =>
 class LoginAppearanceService {
   async getPublicLoginAppearance(): Promise<PublicLoginAppearance> {
     try {
-      const response = await apiService.publicRequest<{ loginPageStyle?: unknown }>(
+      const response = await apiService.publicRequest<{
+        loginPageStyle?: unknown;
+        lightBackgroundUrl?: unknown;
+        darkBackgroundUrl?: unknown;
+      }>(
         '/public/config/login',
         {
           method: 'GET',
@@ -24,9 +30,17 @@ class LoginAppearanceService {
 
       return {
         loginPageStyle: normalizeLoginPageStyle(response?.loginPageStyle),
+        lightBackgroundUrl:
+          typeof response?.lightBackgroundUrl === 'string' ? response.lightBackgroundUrl : null,
+        darkBackgroundUrl:
+          typeof response?.darkBackgroundUrl === 'string' ? response.darkBackgroundUrl : null,
       };
     } catch {
-      return { loginPageStyle: DEFAULT_LOGIN_PAGE_STYLE };
+      return {
+        loginPageStyle: DEFAULT_LOGIN_PAGE_STYLE,
+        lightBackgroundUrl: null,
+        darkBackgroundUrl: null,
+      };
     }
   }
 }

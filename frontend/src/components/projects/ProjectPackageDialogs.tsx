@@ -523,14 +523,12 @@ export function ProjectPackageDialogs({
       const phaseEndDate = phase?.plannedEndDate?.slice(0, 10);
       const plannedStartDate =
         phaseStartDate &&
-        current.plannedStartDate &&
-        current.plannedStartDate < phaseStartDate
+        (!current.plannedStartDate || current.plannedStartDate < phaseStartDate)
           ? phaseStartDate
           : current.plannedStartDate;
       const plannedEndDate =
         phaseEndDate &&
-        current.plannedEndDate &&
-        current.plannedEndDate > phaseEndDate
+        (!current.plannedEndDate || current.plannedEndDate > phaseEndDate)
           ? phaseEndDate
           : current.plannedEndDate;
 
@@ -546,8 +544,6 @@ export function ProjectPackageDialogs({
     });
   };
 
-  const formatWeight = (value?: number) =>
-    `${Number(value ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`;
   const formatDateWindow = (startDate?: string, endDate?: string) => {
     if (!startDate && !endDate) {
       return 'Not set';
@@ -607,6 +603,11 @@ export function ProjectPackageDialogs({
             ))}
           </SelectContent>
         </Select>
+        <div className="text-xs text-muted-foreground">
+          Select a phase before allocating a completion weight. Leave this as No
+          phase only when the component should carry 0% completion weight.
+          Selecting a phase also fills any blank dates from its schedule.
+        </div>
       </div>
       <div className="grid gap-2">
         <Label>Work Component Type</Label>
@@ -670,9 +671,18 @@ export function ProjectPackageDialogs({
                 : undefined,
             }))
           }
-          readOnly={readOnly}
-          className={readOnly ? 'bg-slate-50 text-slate-700' : undefined}
+          readOnly={readOnly || !selectedPhase}
+          className={
+            readOnly || !selectedPhase
+              ? 'bg-slate-50 text-slate-700'
+              : undefined
+          }
         />
+        <div className="text-xs text-muted-foreground">
+          {selectedPhase
+            ? `This is the component's share of the ${selectedPhase.name} phase. Components in that phase may not exceed 100% in total.`
+            : 'Unphased work components use 0%. Choose a phase to enter a completion weight.'}
+        </div>
       </div>
       <div className="grid gap-2">
         <Label>Currency</Label>
@@ -735,30 +745,32 @@ export function ProjectPackageDialogs({
           className={readOnly ? 'bg-slate-50 text-slate-700' : undefined}
         />
       </div>
-      <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-3 text-sm text-blue-950 md:col-span-2">
-        <div className="font-medium">
-          {selectedPhase ? `${selectedPhase.name} phase guide` : 'Phase guide'}
-        </div>
-        <div className="mt-1 flex flex-wrap gap-3 text-xs text-blue-900">
-          <span>
-            Phase weight{' '}
-            {selectedPhase
-              ? formatWeight(selectedPhase.completionWeightPercent)
-              : 'Not available'}
-          </span>
-          <span>
+      {selectedPhase ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50/70 px-3 py-3 text-sm text-blue-950 md:col-span-2">
+          <div className="font-medium">{selectedPhase.name} phase schedule</div>
+          <div className="mt-1 text-xs text-blue-900">
             Phase window{' '}
             {formatDateWindow(
-              selectedPhase?.plannedStartDate,
-              selectedPhase?.plannedEndDate
+              selectedPhase.plannedStartDate,
+              selectedPhase.plannedEndDate
             )}
-          </span>
+          </div>
+          <div className="mt-1 text-xs text-blue-800">
+            {selectedPhase.plannedStartDate || selectedPhase.plannedEndDate
+              ? 'Keep the work component dates inside this phase window.'
+              : 'This phase has no planned dates yet. Set them on the Phases tab if its work components need a controlled date window.'}
+          </div>
         </div>
-        <div className="mt-1 text-xs text-blue-800">
-          Work component dates should stay inside the selected phase window, and
-          work component weights within that phase must total 100%.
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-3 text-sm text-slate-700 md:col-span-2">
+          <div className="font-medium text-slate-900">No phase selected</div>
+          <div className="mt-1 text-xs">
+            The component will remain unphased and its completion weight will be
+            0%. Select a phase when this component contributes to phase
+            progress.
+          </div>
         </div>
-      </div>
+      )}
       <div className="grid gap-2">
         <Label>Business Partner</Label>
         <Select
