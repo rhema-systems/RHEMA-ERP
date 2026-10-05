@@ -695,13 +695,28 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Deletes a closure, and answers what recounting the leave it covered did (lane 1c, D-15a) —
+    /// 200 with the recount rather than 204, because the person deleting should see whose leave changed.
+    /// </summary>
     [HttpDelete("closures/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteClosure(Guid id)
-    {
-        await _closureService.DeleteAsync(id);
-        return NoContent();
-    }
+    public async Task<ActionResult<LeaveRechargeResultDto>> DeleteClosure(Guid id)
+        => Ok(await _closureService.DeleteAsync(id));
+
+    /// <summary>
+    /// The one-time recount (lane 1c): all granted leave in the current and later leave years, against
+    /// the closures and holidays as they stand. For closures recorded before the recount existed. Safe
+    /// to run again — leave whose count is right is left alone, and nobody is told anything about it.
+    /// </summary>
+    /// <remarks>
+    /// Company ADMIN: it can change many people's balances at once. <c>?dryRun=true</c> answers the
+    /// same list without saving anything or telling anyone — run it first.
+    /// </remarks>
+    [HttpPost("closures/recharge-leave")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    public async Task<ActionResult<LeaveRechargeResultDto>> RechargeLeave([FromQuery] bool dryRun = false)
+        => Ok(await _closureService.RechargeAllOpenLeaveAsync(dryRun));
 
     #endregion
 

@@ -151,7 +151,14 @@ public interface IBusinessClosureService
     Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? organizationUnitId = null, CancellationToken cancellationToken = default);
     Task<BusinessClosureDto> CreateAsync(CreateBusinessClosureDto createDto, Guid announcedById, CancellationToken cancellationToken = default);
     Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Deletes the closure, and answers the recount of the leave it covered (lane 1c, D-15a).</summary>
+    Task<LeaveRechargeResultDto> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The one-time recount of granted leave against the closures and holidays as they stand (lane 1c).
+    /// <paramref name="dryRun"/> answers what it would change, saving nothing and telling nobody.
+    /// </summary>
+    Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(bool dryRun = false, CancellationToken cancellationToken = default);
 }
 
 #endregion Business Closure Service

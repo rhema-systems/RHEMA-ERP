@@ -41,4 +41,16 @@ public interface ILeaveReminderService
 
     Task<IEnumerable<LeaveReminderLogEntryDto>> GetRecentLogAsync(
         int days = 14, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tells an employee their granted leave was recounted, because the days off under it changed
+    /// (company-schedule final closure, lane 1c: D-15a, D-15b) — in the app and by email when they
+    /// have a login, and to HR when they have none.
+    /// </summary>
+    /// <remarks>
+    /// Not a reminder and not deduplicated: it is said once, by the act that changed the count.
+    /// It lives here because these are leave's topics and leave's recipient rules.
+    /// </remarks>
+    Task NotifyLeaveRechargedAsync(
+        Guid tenantId, LeaveRechargeLineDto line, string because, CancellationToken cancellationToken = default);
 }

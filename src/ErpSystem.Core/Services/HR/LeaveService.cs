@@ -34,6 +34,7 @@ public class LeaveService : ILeaveService
     private readonly IGenericRepository<EmployeeReliever> _employeeRelieverRepository;
     private readonly IHrWorkingDayCalculator _workingDayCalculator;
     private readonly IHrClosureCalendar _closureCalendar;
+    private readonly ILeaveReminderService _leaveNotices;
     private readonly ILeaveAttendancePostingService _attendancePosting;
     private readonly IGenericRepository<StaffDailyAttendance> _dailyAttendanceRepository;
     private readonly IGenericRepository<PublicHoliday> _holidayNameLookupRepository;
@@ -89,6 +90,7 @@ public class LeaveService : ILeaveService
             IGenericRepository<EmployeeReliever> employeeRelieverRepository,
             IHrWorkingDayCalculator workingDayCalculator,
             IHrClosureCalendar closureCalendar,
+            ILeaveReminderService leaveNotices,
             ILeaveAttendancePostingService attendancePosting,
             IGenericRepository<StaffDailyAttendance> dailyAttendanceRepository,
             IGenericRepository<PublicHoliday> holidayNameLookupRepository,
@@ -121,6 +123,7 @@ public class LeaveService : ILeaveService
         _employeeRelieverRepository = employeeRelieverRepository;
         _workingDayCalculator = workingDayCalculator;
         _closureCalendar = closureCalendar;
+        _leaveNotices = leaveNotices;
         _attendancePosting = attendancePosting;
         _dailyAttendanceRepository = dailyAttendanceRepository;
         _holidayNameLookupRepository = holidayNameLookupRepository;
@@ -3893,6 +3896,146 @@ public class LeaveService : ILeaveService
             "{count} leave request(s) advanced to in-progress for tenant {tenant}", starting.Count, tenantId);
 
         return starting.Count;
+    }
+
+    public async Task<LeaveRechargeResultDto> RechargeForDaysOffChangeAsync(
+        Guid tenantId, IReadOnlyCollection<(DateOnly From, DateOnly To)> spans, string because,
+        CancellationToken ct = default)
+    {
+        var valid = spans.Where(s => s.To >= s.From).ToList();
+        if (valid.Count == 0) return new LeaveRechargeResultDto();
+
+        var from = valid.Min(s => s.From);
+        var to = valid.Max(s => s.To);
+        var touching = (await GrantedLeaveQuery(tenantId)
+                .Where(r => r.StartDate <= to && r.EndDate >= from)
+                .ToListAsync(ct))
+            .Where(r => valid.Any(s => r.StartDate <= s.To && r.EndDate >= s.From))
+            .ToList();
+
+        return await RechargeAsync(tenantId, touching, because, dryRun: false, ct);
+    }
+
+    public async Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(
+        Guid tenantId, bool dryRun = false, CancellationToken ct = default)
+    {
+        var startMonth = await _leaveYear.StartMonthAsync();
+        var openFrom = LeaveYear.StartOf(LeaveYear.For(_clock.TodayUtc, startMonth), startMonth);
+        var open = await GrantedLeaveQuery(tenantId)
+            .Where(r => r.StartDate >= openFrom)
+            .ToListAsync(ct);
+
+        return await RechargeAsync(tenantId, open,
+            "the business closures and public holidays were checked against it", dryRun, ct);
+    }
+
+    /// <summary>Granted leave — the three statuses whose days are being taken — with what a recount reads.</summary>
+    private IQueryable<LeaveRequest> GrantedLeaveQuery(Guid tenantId) => _leaveRepository.GetQueryable()
+        .Include(r => r.LeaveType)
+        .Include(r => r.Employee)
+        .Where(r => r.TenantId == tenantId
+                 && (r.Status == LeaveStatus.Approved
+                     || r.Status == LeaveStatus.InProgress
+                     || r.Status == LeaveStatus.Completed));
+
+    /// <summary>
+    /// Recounts each request with the one definition of chargeable days, and puts right those whose
+    /// count changed (company-schedule final closure, lane 1c).
+    /// </summary>
+    /// <remarks>
+    /// <para>Per request, and in this order: the day count and the balance in one transaction — the
+    /// balance is derived from <c>TotalDays</c>, so re-deriving is what gives the day back and nothing
+    /// is added twice (see <see cref="RecallAsync"/>); then the attendance days, which the reconciler
+    /// re-posts from the same list of dates; then the employee is told. One request failing does not
+    /// stop the rest: it is reported, and running the recount again retries it.</para>
+    ///
+    /// <para>⚠ A request whose leave year is FINISHED is listed, not recounted (D-15a) — see
+    /// <see cref="ILeaveService.RechargeForDaysOffChangeAsync"/>. Its balance year is the year it
+    /// starts in, as everywhere in leave.</para>
+    /// </remarks>
+    private async Task<LeaveRechargeResultDto> RechargeAsync(
+        Guid tenantId, List<LeaveRequest> requests, string because, bool dryRun, CancellationToken ct)
+    {
+        var result = new LeaveRechargeResultDto { DryRun = dryRun };
+        if (requests.Count == 0) return result;
+
+        var startMonth = await _leaveYear.StartMonthAsync();
+        var currentYear = LeaveYear.For(_clock.TodayUtc, startMonth);
+
+        foreach (var request in requests.OrderBy(r => r.StartDate))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+            var newDays = (decimal)(await GetChargeableDaysAsync(
+                request.StartDate, request.EndDate, leaveType, request.EmployeeId, tenantId)).Count;
+            if (newDays == request.TotalDays) continue;
+
+            var line = new LeaveRechargeLineDto
+            {
+                RequestId = request.Id,
+                RequestNumber = request.RequestNumber,
+                EmployeeId = request.EmployeeId,
+                EmployeeName = request.Employee?.FullName ?? string.Empty,
+                LeaveTypeName = leaveType.Name,
+                StartDate = request.StartDate,
+                EndDate = request.EndDate,
+                OldDays = request.TotalDays,
+                NewDays = newDays,
+            };
+
+            var year = LeaveYear.For(request.StartDate, startMonth);
+            if (year < currentYear)
+            {
+                result.NotRecharged.Add(line);
+                continue;
+            }
+
+            if (dryRun)
+            {
+                result.Recharged.Add(line);
+                continue;
+            }
+
+            try
+            {
+                await _unitOfWork.ExecuteInTransactionAsync(async tx =>
+                {
+                    request.TotalDays = newDays;
+                    await _leaveRepository.UpdateAsync(request);
+                    await _unitOfWork.SaveChangesAsync(tx);
+                    await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, year);
+                });
+            }
+            catch (Exception ex)
+            {
+                // Put the tracked value back, so a later save in this scope does not write it after all.
+                request.TotalDays = line.OldDays;
+                _logger.LogError(ex, "Leave request {number} could not be recounted ({old} -> {new})",
+                    request.RequestNumber, line.OldDays, newDays);
+                result.Failures.Add($"{request.RequestNumber}: {ex.Message}");
+                continue;
+            }
+
+            // Best-effort, as on every other transition: the reconciler logs what it cannot write.
+            await ReconcileAttendanceAsync(request.Id, tenantId, ct);
+            result.Recharged.Add(line);
+
+            try
+            {
+                await _leaveNotices.NotifyLeaveRechargedAsync(tenantId, line, because, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Leave request {number} was recounted but its employee could not be told",
+                    request.RequestNumber);
+            }
+
+            _logger.LogInformation("Leave request {number} recounted {old} -> {new} day(s): {because}",
+                request.RequestNumber, line.OldDays, newDays, because);
+        }
+
+        return result;
     }
 
     private async Task PostAttendanceForApprovedLeaveAsync(LeaveRequest request, Guid tenantId)

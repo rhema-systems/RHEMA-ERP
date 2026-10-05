@@ -98,6 +98,10 @@ public class LeaveReminderService : ILeaveReminderService
     private const string KindCarryOverExpiring = "CarryOverExpiring";
     private const string KindAnnualAvailable = "AnnualLeaveAvailable";
 
+    // Not a sweep reminder: said once, by the act that recounted the leave (company-schedule final
+    // closure, lane 1c). It shares the topics because these are leave's words and recipient rules.
+    private const string KindRecharged = "LeaveRecharged";
+
     // Who a message is for: the last part of the topic key.
     private const string ToEmployee = "Employee";
     private const string ToManager = "Manager";
@@ -344,6 +348,35 @@ public class LeaveReminderService : ILeaveReminderService
             Data = data,
         }, cancellationToken);
 
+    public async Task NotifyLeaveRechargedAsync(
+        Guid tenantId, LeaveRechargeLineDto line, string because, CancellationToken cancellationToken = default)
+    {
+        await EnsureTopicsAsync(tenantId, cancellationToken);
+
+        // The same test the sweep makes: an employee with an active login is told; anybody else's
+        // news goes to HR, who can tell them — a message to nobody is what lane I closed.
+        var reachable = await _userManager.Users.AnyAsync(
+            u => u.TenantId == tenantId && u.IsActive && u.EmployeeId == line.EmployeeId, cancellationToken);
+
+        // ⚠ The leave TYPE and number, never a reason: a notice travels further than the record.
+        var data = new Dictionary<string, object>
+        {
+            ["Reference"] = $"{line.RequestNumber} · {line.LeaveTypeName}",
+            ["OldDays"] = line.OldDays.ToString("0.##", CultureInfo.InvariantCulture),
+            ["NewDays"] = line.NewDays.ToString("0.##", CultureInfo.InvariantCulture),
+            ["Because"] = because,
+            ["EmployeeName"] = line.EmployeeName,
+            ["EmployeeId"] = line.EmployeeId,
+        };
+        data["ActionPath"] = reachable ? $"/me/leave/{line.RequestId}" : $"/hr/leave/requests/{line.RequestId}";
+        if (!reachable) data["Why"] = "They have no login to be told, so please let them know.";
+
+        await PublishAsync(
+            tenantId, KindRecharged, reachable ? ToEmployee : ToHr, line.RequestId,
+            _currentUserProvider.UserId == Guid.Empty ? null : _currentUserProvider.UserId,
+            data, cancellationToken);
+    }
+
     /// <summary>What one message about one item carries: the item's facts, then its audience's own.</summary>
     private static Dictionary<string, object> ItemData(Candidate c, Delivery delivery)
     {
@@ -464,6 +497,16 @@ public class LeaveReminderService : ILeaveReminderService
             "Sent to HR once per run, counting the employees who have just qualified for annual leave.",
             "Now able to take annual leave: {{Count}} employee(s)",
             "{{Count}} employee(s) have served the qualifying period and can now take annual leave. {{Reach}}",
+            HrRole),
+        new(KindRecharged, ToEmployee, "Leave: recounted after a closure or holiday changed (employee)",
+            "Sent to the employee when their granted leave is recounted because a business closure or public holiday under it was added, moved or removed.",
+            "Your leave was recounted: {{Reference}}",
+            "{{Reference}} now counts {{NewDays}} day(s) instead of {{OldDays}}, because {{Because}}. Your balance has been updated to match.",
+            SubjectEmployee),
+        new(KindRecharged, ToHr, "Leave: recounted, employee not reachable (HR)",
+            "Sent to HR when an employee's granted leave is recounted and the employee has no login to be told.",
+            "Leave recounted: {{EmployeeName}}",
+            "{{EmployeeName}}'s leave {{Reference}} now counts {{NewDays}} day(s) instead of {{OldDays}}, because {{Because}}. {{Why}}",
             HrRole),
     };
 

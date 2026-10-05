@@ -1074,6 +1074,12 @@ public class BusinessClosureDto : BaseDto
     /// public holiday, or its site has no staff assigned to it. Set on create and update only.
     /// </summary>
     public List<string> Warnings { get; set; } = new();
+
+    /// <summary>
+    /// The granted leave this save recounted, and the leave in a finished year it left for HR to adjust
+    /// (lane 1c, D-15a). Set on create and update only; null on a read.
+    /// </summary>
+    public LeaveRechargeResultDto? LeaveRecharge { get; set; }
 }
 
 /// <summary>

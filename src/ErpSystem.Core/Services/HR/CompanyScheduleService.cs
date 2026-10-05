@@ -1633,6 +1633,7 @@ public class BusinessClosureService : IBusinessClosureService
     private readonly IHrClosureCalendar _closureCalendar;
     private readonly IHrWorkingDayCalculator _workingDays;
     private readonly IHrAudienceResolver _audience;
+    private readonly ILeaveService _leaveService;
     private readonly ILogger<BusinessClosureService> _logger;
 
     public BusinessClosureService(
@@ -1642,6 +1643,7 @@ public class BusinessClosureService : IBusinessClosureService
         IHrClosureCalendar closureCalendar,
         IHrWorkingDayCalculator workingDays,
         IHrAudienceResolver audience,
+        ILeaveService leaveService,
         ILogger<BusinessClosureService> logger)
     {
         _closureRepository = closureRepository;
@@ -1650,6 +1652,7 @@ public class BusinessClosureService : IBusinessClosureService
         _closureCalendar = closureCalendar;
         _workingDays = workingDays;
         _audience = audience;
+        _leaveService = leaveService;
         _logger = logger;
     }
 
@@ -1794,16 +1797,25 @@ public class BusinessClosureService : IBusinessClosureService
 
         _logger.LogInformation("Business closure created: {Title}", entity.Title);
 
+        // D-15a: leave already granted over these days is recounted. After the save, so the
+        // recount sees the closure.
+        var recharge = await _leaveService.RechargeForDaysOffChangeAsync(
+            tenantId, SpansOf(entity), $"a business closure, {entity.Title}, was added", cancellationToken);
+
         // Re-read so the site, unit and announcer names are resolved — see the note on
         // CompanyEventService.CreateAsync.
         var dto = await GetByIdAsync(entity.Id, cancellationToken);
         dto.Warnings = warnings;
+        dto.LeaveRecharge = recharge;
         return dto;
     }
 
     public async Task<BusinessClosureDto> UpdateAsync(UpdateBusinessClosureDto updateDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
+
+        // The days it covered BEFORE the change: a closure moved off a day gives that day back.
+        var before = SpansOf(entity);
 
         updateDto.UpdateEntity(entity);
         var warnings = await ValidateAsync(entity, entity.TenantId, cancellationToken);
@@ -1813,22 +1825,54 @@ public class BusinessClosureService : IBusinessClosureService
 
         _logger.LogInformation("Business closure updated: {Title}", entity.Title);
 
+        // D-15a: before and after. A change that moves no day off (a new title, a note) finds no
+        // count changed, and nobody is told anything.
+        var recharge = await _leaveService.RechargeForDaysOffChangeAsync(
+            entity.TenantId, before.Concat(SpansOf(entity)).ToList(),
+            $"a business closure, {entity.Title}, was changed", cancellationToken);
+
         // Re-read, as create does: the navigations still point at the old site and unit (F-46).
         var dto = await GetByIdAsync(entity.Id, cancellationToken);
         dto.Warnings = warnings;
+        dto.LeaveRecharge = recharge;
         return dto;
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
+    /// <summary>Deletes the closure and recounts the leave it covered (D-15a).</summary>
+    public async Task<LeaveRechargeResultDto> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id, cancellationToken);
+        var covered = SpansOf(entity);
 
         await _closureRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Business closure deleted: {Id}", id);
 
-        return true;
+        return await _leaveService.RechargeForDaysOffChangeAsync(
+            entity.TenantId, covered, $"a business closure, {entity.Title}, was removed", cancellationToken);
+    }
+
+    /// <summary>
+    /// The one-time pass (lane 1c): all granted leave in the current and later leave years recounted
+    /// against the closures and holidays as they stand. For closures recorded before the recount
+    /// existed, which never change and so never trigger it.
+    /// </summary>
+    public Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(bool dryRun = false, CancellationToken cancellationToken = default)
+        => _leaveService.RechargeAllOpenLeaveAsync(GetTenantId(), dryRun, cancellationToken);
+
+    /// <summary>
+    /// The days a closure covers, for the recount: the closure itself, or for a yearly one each
+    /// repeat from its first to two years past today — no granted leave reaches further.
+    /// </summary>
+    private static List<(DateOnly From, DateOnly To)> SpansOf(BusinessClosure closure)
+    {
+        var first = BusinessClosureRules.FirstOccurrence(closure);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var until = (first.End > today ? first.End : today).AddYears(2);
+        return BusinessClosureRules.OccurrencesIn(closure, first.Start, until)
+            .Select(o => (o.Start, o.End))
+            .ToList();
     }
 
     /// <summary>

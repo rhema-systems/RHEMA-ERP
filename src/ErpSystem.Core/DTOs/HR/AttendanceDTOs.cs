@@ -2118,6 +2118,9 @@ public class HolidayCalendarDto : BaseDto
     public bool IsDefault { get; set; }
     public bool IsActive { get; set; }
     public List<PublicHolidaySummaryDto> PublicHolidays { get; set; } = new();
+
+    /// <summary>Set when the save changed which calendar is in use and so recounted granted leave (company-schedule lane 1c).</summary>
+    public LeaveRechargeResultDto? LeaveRecharge { get; set; }
 }
 
 public class HolidayCalendarSummaryDto
@@ -2188,6 +2191,9 @@ public class PublicHolidayDto : BaseDto
     public decimal? HolidayPayMultiplier { get; set; }
     public bool IsRecurringAnnually { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>The granted leave this save recounted (company-schedule lane 1c, D-15b). Set on add and update only.</summary>
+    public LeaveRechargeResultDto? LeaveRecharge { get; set; }
 }
 
 public class PublicHolidaySummaryDto
