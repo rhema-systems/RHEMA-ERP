@@ -58,6 +58,7 @@ import type {
   MarkEventAttendance,
   MeetingRoom,
   MeetingRoomSummary,
+  RoomRetirement,
   MilestoneCategory,
   PersonalSchedule,
   RescheduleEvent,
@@ -418,8 +419,14 @@ class MeetingRoomService {
     return apiService.put<MeetingRoom>(`${this.baseUrl}/rooms/${id}`, { ...data, id });
   }
 
+  /** Refused while the room has any booking on record — deactivate it instead (D-18). */
   remove(id: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/rooms/${id}`);
+  }
+
+  /** Its bookings still to come and its bookings on record: asked before deactivating or deleting (D-18, lane 3a). */
+  retirement(id: string): Promise<RoomRetirement> {
+    return apiService.get<RoomRetirement>(`${this.baseUrl}/rooms/${id}/retirement`);
   }
 }
 

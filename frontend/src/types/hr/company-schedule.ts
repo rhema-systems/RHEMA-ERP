@@ -880,6 +880,21 @@ export interface CreateMeetingRoom {
 
 export interface UpdateMeetingRoom extends CreateMeetingRoom {
   id: string;
+  /**
+   * D-18 (lane 3a): deactivating a room with bookings still to come is refused unless this says to cancel them. Ask
+   * `GET rooms/{id}/retirement` first and list them.
+   */
+  cancelFutureBookings?: boolean;
+}
+
+/** What retiring a room would touch (D-18, lane 3a). A room with any booking on record cannot be deleted. */
+export interface RoomRetirement {
+  roomId: string;
+  roomName: string;
+  isActive: boolean;
+  futureBookings: RoomBookingSummary[];
+  bookingsOnRecord: number;
+  canDelete: boolean;
 }
 
 // ── Room bookings ─────────────────────────────────────────────────────────────
@@ -914,7 +929,9 @@ export interface RoomBooking extends AuditFields {
 export interface RoomBookingSummary {
   id: string;
   bookingNumber: string;
+  roomId: string;
   roomName: string;
+  bookedById: string;
   bookedByName: string;
   startDateTime: string;
   endDateTime: string;

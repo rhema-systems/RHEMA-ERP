@@ -6,8 +6,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, Loader2, Save, XCircle } from 'lucide-react';
+import { CheckCircle2, Loader2, Save, Trash2, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
@@ -77,8 +79,14 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Lane 3a (C-32): Delete here too, beside the register's — Admin only, hidden otherwise. And the booker is never offered
+  // Approve on their own booking: the server refuses it (D-10's guard).
+  const { user, hasPermission } = useAuth();
+  const canDelete = hasPermission('HR.Company.Admin');
+  const myEmployeeId = (user?.employeeId as string | undefined) ?? null;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const key = ['hr', 'company-schedule', 'bookings', id];
@@ -146,6 +154,19 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     onError: fail('Could not cancel the booking'),
   });
 
+  const remove = async () => {
+    try {
+      await roomBookingService.remove(id);
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'bookings'] });
+      toast({ title: 'Booking deleted' });
+      router.push('/hr/company-schedule/bookings');
+      return true;
+    } catch (error: any) {
+      fail('Could not delete the booking')(error);
+      return false;
+    }
+  };
+
   const onSubmit = form.handleSubmit(async (values) => {
     setSaving(true);
     try {
@@ -180,7 +201,10 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     return <div className="p-6 text-muted-foreground">That booking could not be found.</div>;
   }
 
-  const open = !booking.isCancelled && booking.status !== 'Completed';
+  // Lane 3a (F-8): a booking may be changed or cancelled while it holds its room — not once cancelled, completed or
+  // marked a no-show — as the server now rules.
+  const open = !booking.isCancelled && (booking.status === 'Tentative' || booking.status === 'Confirmed');
+  const mine = !!myEmployeeId && booking.bookedById?.toLowerCase() === myEmployeeId.toLowerCase();
 
   return (
     <div className="space-y-6 p-6">
@@ -190,7 +214,7 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
         backHref="/hr/company-schedule/bookings"
         actions={
           <div className="flex items-center gap-2">
-            {booking.status === 'Tentative' && open && (
+            {booking.status === 'Tentative' && open && !mine && (
               <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
                 <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
               </Button>
@@ -200,9 +224,17 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
                 <XCircle className="mr-2 h-4 w-4" /> Cancel
               </Button>
             )}
+            {canDelete && (
+              <Button variant="outline" className="text-destructive" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </Button>
+            )}
           </div>
         }
       />
+      {booking.status === 'Tentative' && open && mine && (
+        <p className="text-sm text-muted-foreground">You booked this, so somebody else must approve it.</p>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Booking</CardTitle></CardHeader>
@@ -292,6 +324,16 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this booking?"
+        description={`${booking.bookingNumber} will be removed from the register. Cancel it instead to keep it on record.`}
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={remove}
+      />
     </div>
   );
 }

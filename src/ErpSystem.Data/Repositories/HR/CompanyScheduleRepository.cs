@@ -135,61 +135,8 @@ public class MeetingRoomRepository : GenericRepository<MeetingRoom>, IMeetingRoo
                     .ToListAsync(cancellationToken)),
             cancellationToken);
 
-    public async Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode)
-    {
-        return await _dbSet
-            .Include(r => r.SiteLocation)
-            .FirstOrDefaultAsync(r => r.RoomCode == roomCode);
-    }
-
-    public async Task<IEnumerable<MeetingRoom>> GetByLocationAsync(Guid locationId)
-    {
-        return await _dbSet
-            .Include(r => r.SiteLocation)
-            .Where(r => r.LocationId == locationId)
-            .OrderBy(r => r.RoomName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<MeetingRoom>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null)
-    {
-        var bookedRoomIds = await _context.Set<RoomBooking>()
-            .Where(b => b.Status != BookingStatus.Cancelled &&
-                       !b.IsCancelled &&
-                       b.StartDateTime < endDateTime &&
-                       b.EndDateTime > startDateTime)
-            .Select(b => b.RoomId)
-            .ToListAsync();
-
-        var query = _dbSet
-            .Include(r => r.SiteLocation)
-            .Where(r => r.IsActive && r.IsBookable && !bookedRoomIds.Contains(r.Id));
-
-        if (minCapacity.HasValue)
-        {
-            query = query.Where(r => r.Capacity >= minCapacity.Value);
-        }
-
-        return await query.OrderBy(r => r.RoomName).ToListAsync();
-    }
-
-    public async Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync()
-    {
-        return await _dbSet
-            .Include(r => r.SiteLocation)
-            .Where(r => r.IsActive)
-            .OrderBy(r => r.RoomName)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync()
-    {
-        return await _dbSet
-            .Include(r => r.SiteLocation)
-            .Where(r => r.IsActive && r.IsBookable)
-            .OrderBy(r => r.RoomName)
-            .ToListAsync();
-    }
+    // ⚠ Lane 3a (F-30, F-15, C-28): the by-code, by-site, available, active and bookable reads are gone — none had a
+    // tenant. The room service reads on its own tenant-scoped query.
 }
 
 #endregion Meeting Room Repository
@@ -225,81 +172,8 @@ public class RoomBookingRepository : GenericRepository<RoomBooking>, IRoomBookin
             cancellationToken);
     }
 
-    public async Task<RoomBooking?> GetByBookingNumberAsync(string bookingNumber)
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .Include(b => b.ApprovedBy)
-            .Include(b => b.Event)
-            .FirstOrDefaultAsync(b => b.BookingNumber == bookingNumber);
-    }
-
-    public async Task<IEnumerable<RoomBooking>> GetByRoomIdAsync(Guid roomId)
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .Where(b => b.RoomId == roomId)
-            .OrderByDescending(b => b.StartDateTime)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<RoomBooking>> GetByBookerAsync(Guid bookedById)
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Where(b => b.BookedById == bookedById)
-            .OrderByDescending(b => b.StartDateTime)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<RoomBooking>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .Where(b => b.StartDateTime >= startDate && b.EndDateTime <= endDate)
-            .OrderBy(b => b.StartDateTime)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<RoomBooking>> GetByStatusAsync(BookingStatus status)
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .Where(b => b.Status == status)
-            .OrderByDescending(b => b.StartDateTime)
-            .ToListAsync();
-    }
-
-    public async Task<bool> HasConflictingBookingAsync(Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null)
-    {
-        var query = _dbSet
-            .Where(b => b.RoomId == roomId &&
-                       !b.IsCancelled &&
-                       b.Status != BookingStatus.Cancelled &&
-                       b.StartDateTime < endDateTime &&
-                       b.EndDateTime > startDateTime);
-
-        if (excludeBookingId.HasValue)
-        {
-            query = query.Where(b => b.Id != excludeBookingId.Value);
-        }
-
-        return await query.AnyAsync();
-    }
-
-    public async Task<IEnumerable<RoomBooking>> GetPendingApprovalsAsync()
-    {
-        return await _dbSet
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .Where(b => b.Status == BookingStatus.Tentative && !b.IsCancelled)
-            .OrderBy(b => b.StartDateTime)
-            .ToListAsync();
-    }
+    // ⚠ Lane 3a (F-30): the by-number, room, booker, range, status, pending and clash reads are gone — none had a
+    // tenant. The booking service reads on its own tenant-scoped query.
 }
 
 #endregion Room Booking Repository

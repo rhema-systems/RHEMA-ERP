@@ -443,3 +443,94 @@ public static class CompanyEventRules
     /// <summary>Trimmed, or null when blank.</summary>
     public static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 }
+
+/// <summary>
+/// A room booking's rules (company-schedule final closure, lane 3a): pure, so the booking service, the room service
+/// and the event service read them alike. Each Refuse… answers the sentence to refuse with, or null.
+/// </summary>
+public static class RoomBookingRules
+{
+    /// <summary>
+    /// An instant as UTC (F-50). A booking's times are stored as UTC; one read back from SQL Server is unmarked, and one
+    /// bound from an offset ("+01:00") is the server's local time.
+    /// </summary>
+    public static DateTime AsUtc(DateTime when) => when.Kind switch
+    {
+        DateTimeKind.Local => when.ToUniversalTime(),
+        DateTimeKind.Utc => when,
+        _ => DateTime.SpecifyKind(when, DateTimeKind.Utc),
+    };
+
+    /// <inheritdoc cref="AsUtc(DateTime)"/>
+    public static DateTime? AsUtc(DateTime? when) => when is { } w ? AsUtc(w) : null;
+
+    /// <summary>Holds its room: not cancelled, and still to happen or happening — Tentative or Confirmed.</summary>
+    public static bool IsLive(RoomBooking b) =>
+        !b.IsCancelled && b.Status is BookingStatus.Tentative or BookingStatus.Confirmed;
+
+    /// <summary>"Tuesday 14 October 2026, 09:00–11:00" (UTC, which is Ghana's time).</summary>
+    public static string Describe(DateTime start, DateTime end) =>
+        start.Date == end.Date
+            ? $"{start.ToString("dddd d MMMM yyyy, HH:mm", CultureInfo.InvariantCulture)}–{end.ToString("HH:mm", CultureInfo.InvariantCulture)}"
+            : $"{start.ToString("d MMMM yyyy, HH:mm", CultureInfo.InvariantCulture)} – {end.ToString("d MMMM yyyy, HH:mm", CultureInfo.InvariantCulture)}";
+
+    /// <summary>
+    /// A start and an end, the end after the start. ⚠ <c>[Required]</c> on a non-nullable <see cref="DateTime"/> does
+    /// nothing: a missing time binds as 1 January of year 1, and a booking from then passed "end after start".
+    /// </summary>
+    public static string? RefuseWindow(DateTime start, DateTime end) =>
+        start == default || end == default ? "Say when the booking starts and when it ends."
+        : end <= start ? "A booking must end after it starts."
+        : null;
+
+    /// <summary>A booking may be changed while it holds its room: not once cancelled, completed or marked a no-show.</summary>
+    public static string? RefuseEditing(RoomBooking b) =>
+        IsLive(b) ? null : $"{b.BookingNumber} is {Word(b)}, so it can no longer be changed.";
+
+    /// <summary>
+    /// Approval: a Tentative booking, not cancelled — whether or not its room still needs approval, so a booking made
+    /// before that switch was turned off is not stranded (the review). Never by the person who booked it (D-10).
+    /// </summary>
+    public static string? RefuseApproving(RoomBooking b, Guid approverEmployeeId) =>
+        b.IsCancelled || b.Status != BookingStatus.Tentative
+            ? $"{b.BookingNumber} is {Word(b)}, not awaiting approval."
+        : b.BookedById == approverEmployeeId
+            ? $"You booked {b.BookingNumber}, so somebody else must approve it."
+        : null;
+
+    /// <summary>Cancelling: not once cancelled, completed or marked a no-show.</summary>
+    public static string? RefuseCancelling(RoomBooking b) =>
+        IsLive(b) ? null : $"{b.BookingNumber} is already {Word(b)}.";
+
+    /// <summary>Cancels it, with the reason. The one place a booking is cancelled, so each path reads the same.</summary>
+    public static void Cancel(RoomBooking b, string reason, DateTime nowUtc)
+    {
+        b.IsCancelled = true;
+        b.CancellationDate = nowUtc;
+        b.CancellationReason = reason;
+        b.Status = BookingStatus.Cancelled;
+    }
+
+    /// <summary>
+    /// A booking linked to an event lies within the event's days (lane 3a, F-7) — set-up before the start time and
+    /// clearing away after it are fine, a booking on another day is not.
+    /// </summary>
+    public static string? RefuseOutsideEvent(DateTime start, DateTime end, CompanyEvent e) =>
+        start.Date < e.StartDate.Date || end > e.EndDate.Date.AddDays(1)
+            ? $"{e.EventName} runs {CompanyEventRules.Describe(EventWindow.Of(e))}; a booking for it must fall on its days."
+            : null;
+
+    /// <summary>The seats to find: the larger of the booking's own count and its event's estimate (lane 3a).</summary>
+    public static int SeatsNeeded(int expectedAttendees, CompanyEvent? e) =>
+        Math.Max(expectedAttendees, e?.EstimatedAttendees ?? 0);
+
+    private static string Word(RoomBooking b) =>
+        b.IsCancelled || b.Status == BookingStatus.Cancelled ? "cancelled"
+        : b.Status switch
+        {
+            BookingStatus.Completed => "completed",
+            BookingStatus.NoShow => "marked a no-show",
+            BookingStatus.Confirmed => "confirmed",
+            _ => "tentative",
+        };
+}

@@ -75,14 +75,13 @@ public interface IEventTaskRepository : IGenericRepository<EventTask>
 
 #region Meeting Room Repository
 
+/// <remarks>
+/// ⚠ Lane 3a (F-30, F-15, C-28): the room reads here — by code, by site, available, active, bookable — loaded every
+/// tenant's rows and filtered in memory, and the availability read's booked-room subquery had no tenant at all. Two had
+/// no caller. The room service builds its lists on its own tenant-scoped query, as the event service does since lane 2.
+/// </remarks>
 public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
 {
-    Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode);
-    Task<IEnumerable<MeetingRoom>> GetByLocationAsync(Guid locationId);
-    Task<IEnumerable<MeetingRoom>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null);
-    Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync();
-    Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync();
-
     /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
     Task<string> GetNextRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
@@ -91,16 +90,13 @@ public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
 
 #region Room Booking Repository
 
+/// <remarks>
+/// ⚠ Lane 3a (F-30): the booking reads here — by number, room, booker, range, status, pending, and a clash check — had
+/// no tenant, and the range read wanted containment, not overlap. The booking service reads on its own tenant-scoped
+/// query.
+/// </remarks>
 public interface IRoomBookingRepository : IGenericRepository<RoomBooking>
 {
-    Task<RoomBooking?> GetByBookingNumberAsync(string bookingNumber);
-    Task<IEnumerable<RoomBooking>> GetByRoomIdAsync(Guid roomId);
-    Task<IEnumerable<RoomBooking>> GetByBookerAsync(Guid bookedById);
-    Task<IEnumerable<RoomBooking>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<RoomBooking>> GetByStatusAsync(BookingStatus status);
-    Task<bool> HasConflictingBookingAsync(Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null);
-    Task<IEnumerable<RoomBooking>> GetPendingApprovalsAsync();
-
     /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
     Task<string> GetNextBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

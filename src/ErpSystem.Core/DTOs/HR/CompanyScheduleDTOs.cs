@@ -1313,6 +1313,27 @@ public class UpdateMeetingRoomDto : UpdateDtoBase
     public bool IsBookable { get; set; }
     public int? MaxBookingDurationHours { get; set; }
     public int? AdvanceBookingDays { get; set; }
+
+    /// <summary>
+    /// D-18 (lane 3a): deactivating a room that still has future bookings is refused unless this says to cancel them,
+    /// each with the reason that the room was taken out of use. The form asks first, listing them
+    /// (<c>GET rooms/{id}/retirement</c>).
+    /// </summary>
+    public bool CancelFutureBookings { get; set; }
+}
+
+/// <summary>
+/// What retiring a room would touch (D-18, lane 3a): its future bookings, which deactivating it offers to cancel, and how
+/// many bookings it has on record — any at all, and it cannot be deleted, only deactivated, so its history stays readable.
+/// </summary>
+public class RoomRetirementDto
+{
+    public Guid RoomId { get; set; }
+    public string RoomName { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public List<RoomBookingSummaryDto> FutureBookings { get; set; } = new();
+    public int BookingsOnRecord { get; set; }
+    public bool CanDelete => BookingsOnRecord == 0;
 }
 
 #endregion
@@ -1357,7 +1378,9 @@ public class RoomBookingSummaryDto
 {
     public Guid Id { get; set; }
     public string BookingNumber { get; set; } = string.Empty;
+    public Guid RoomId { get; set; }
     public string RoomName { get; set; } = string.Empty;
+    public Guid BookedById { get; set; }
     public string BookedByName { get; set; } = string.Empty;
     public DateTime StartDateTime { get; set; }
     public DateTime EndDateTime { get; set; }

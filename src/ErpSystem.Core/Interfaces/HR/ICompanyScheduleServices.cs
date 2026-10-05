@@ -179,8 +179,18 @@ public interface IMeetingRoomService
     Task<IEnumerable<MeetingRoomSummaryDto>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomSummaryDto>> GetActiveRoomsAsync(CancellationToken cancellationToken = default);
     Task<MeetingRoomDto> CreateAsync(CreateMeetingRoomDto createDto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Saves a room. Deactivating one with future bookings is refused unless
+    /// <see cref="UpdateMeetingRoomDto.CancelFutureBookings"/> says to cancel them (D-18, lane 3a).
+    /// </summary>
     Task<MeetingRoomDto> UpdateAsync(UpdateMeetingRoomDto updateDto, CancellationToken cancellationToken = default);
+
+    /// <summary>Deletes a room with no booking on record; one with any is refused — deactivate it instead (D-18, F-49).</summary>
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>What retiring the room would touch: its future bookings and its bookings on record (D-18, lane 3a).</summary>
+    Task<RoomRetirementDto> GetRetirementAsync(Guid id, CancellationToken cancellationToken = default);
 }
 
 #endregion Meeting Room Service

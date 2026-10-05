@@ -1214,12 +1214,7 @@ public class CompanyEventService : ICompanyEventService
         var linked = await LiveLinkedBookings(e).ToListAsync(cancellationToken);
         var now = DateTime.UtcNow;
         foreach (var b in linked)
-        {
-            b.IsCancelled = true;
-            b.CancellationDate = now;
-            b.CancellationReason = reason.Length > 1000 ? reason[..1000] : reason;
-            b.Status = BookingStatus.Cancelled;
-        }
+            RoomBookingRules.Cancel(b, reason.Length > 1000 ? reason[..1000] : reason, now);
         return linked.Select(b => b.BookingNumber).ToList();
     }
 
@@ -1229,7 +1224,8 @@ public class CompanyEventService : ICompanyEventService
     /// </summary>
     /// <remarks>
     /// A booking in a room that needs approval waits for approval again once moved, as the event does.
-    /// The room's own limits (longest booking, furthest ahead) are lane 3's to apply to a moved booking.
+    /// Lane 3a: the room's furthest-ahead limit applies to the moved booking too (its length does not change), and a
+    /// clash is a live booking — Tentative or Confirmed — as the booking service counts one.
     /// </remarks>
     private async Task<List<string>> MoveLinkedBookingsAsync(CompanyEvent e, TimeSpan delta, CancellationToken cancellationToken)
     {
@@ -1240,29 +1236,37 @@ public class CompanyEventService : ICompanyEventService
 
         var moving = linked.Select(b => b.Id).ToList();
         var taken = new List<string>();
+        var tooFar = new List<string>();
         foreach (var b in linked)
         {
             var start = b.StartDateTime + delta;
             var end = b.EndDateTime + delta;
             var clash = await _unitOfWork.Repository<RoomBooking>().GetQueryable()
                 .Where(o => o.TenantId == e.TenantId && o.RoomId == b.RoomId && !o.IsDeleted && !o.IsCancelled
-                            && o.Status != BookingStatus.Cancelled && !moving.Contains(o.Id)
+                            && (o.Status == BookingStatus.Tentative || o.Status == BookingStatus.Confirmed)
+                            && !moving.Contains(o.Id)
                             && o.StartDateTime < end && o.EndDateTime > start)
                 .Select(o => o.BookingNumber)
                 .FirstOrDefaultAsync(cancellationToken);
             if (clash != null) taken.Add($"{b.Room?.RoomName ?? "the room"} ({clash})");
+            if (b.Room is { AdvanceBookingDays: > 0 } r && (start.Date - DateTime.UtcNow.Date).TotalDays > r.AdvanceBookingDays)
+                tooFar.Add($"{r.RoomName} can be booked at most {r.AdvanceBookingDays} day(s) ahead ({b.BookingNumber})");
         }
 
         if (taken.Count > 0)
             throw new InvalidOperationException(
                 $"{e.EventName} cannot move: its room is already booked at the new time — {string.Join(", ", taken)}. "
               + "Move or cancel that booking, or choose another time.");
+        if (tooFar.Count > 0)
+            throw new InvalidOperationException(
+                $"{e.EventName} cannot move that far ahead with its room: {string.Join("; ", tooFar)}. "
+              + "Choose a nearer time, or cancel the booking first.");
 
         foreach (var b in linked)
         {
             b.StartDateTime += delta;
             b.EndDateTime += delta;
-            b.BookingDate = b.StartDateTime.Date;
+            // ⚠ Lane 3a (F-58): BookingDate is when the booking was MADE ("Booked on"); this rewrote it to the new start.
             if (b.Room is { RequiresApproval: true } && b.ApprovalDate != null)
             {
                 b.ApprovedById = null;
@@ -4163,16 +4167,16 @@ public class MeetingRoomService : IMeetingRoomService
         return current;
     }
 
+    /// <summary>This tenant's rooms, with their site — the tenant inside the query (lane 3a, F-30).</summary>
+    private IQueryable<MeetingRoom> TenantRooms(Guid tenantId) =>
+        _roomRepository.GetQueryable()
+            .Include(r => r.SiteLocation)
+            .Where(r => r.TenantId == tenantId);
+
     private async Task<MeetingRoom> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entity = await _roomRepository.GetQueryable()
-            .Include(r => r.SiteLocation)
-            .FirstOrDefaultAsync(r => r.Id == id && r.TenantId == tenantId, cancellationToken);
-
-        if (entity == null)
-            throw new ArgumentException($"Meeting room with ID '{id}' not found.");
-        return entity;
+        var entity = await TenantRooms(GetTenantId()).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        return entity ?? throw new ArgumentException($"Meeting room with ID '{id}' not found.");
     }
 
     public async Task<MeetingRoomDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -4183,21 +4187,13 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<IEnumerable<MeetingRoomDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = await _roomRepository.GetQueryable()
-            .Include(r => r.SiteLocation)
-            .Where(r => r.TenantId == tenantId)
-            .ToListAsync(cancellationToken);
-
+        var entities = await TenantRooms(GetTenantId()).ToListAsync(cancellationToken);
         return entities.ToDtoList();
     }
 
     public async Task<PagedResult<MeetingRoomDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var query = _roomRepository.GetQueryable()
-            .Include(r => r.SiteLocation)
-            .Where(r => r.TenantId == tenantId);
+        var query = TenantRooms(GetTenantId());
 
         var totalCount = await query.CountAsync(cancellationToken);
 
@@ -4218,25 +4214,49 @@ public class MeetingRoomService : IMeetingRoomService
 
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _roomRepository.GetByLocationAsync(locationId))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantRooms(GetTenantId())
+            .Where(r => r.LocationId == locationId)
+            .OrderBy(r => r.RoomName)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
+    /// <summary>
+    /// The rooms free for a window (lane 3a; F-15, C-28, R4-9.1): this tenant's, in use and open for booking, seating
+    /// enough, with no live booking in the window — and only those whose own rules allow it: no longer than the room's
+    /// longest booking, no further ahead than it may be booked. It applied seats only, and its booked-room read had no
+    /// tenant.
+    /// </summary>
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _roomRepository.GetAvailableRoomsAsync(startDateTime, endDateTime, minCapacity))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToSummaryDtoList();
+        var start = RoomBookingRules.AsUtc(startDateTime);
+        var end = RoomBookingRules.AsUtc(endDateTime);
+        if (RoomBookingRules.RefuseWindow(start, end) is { } refusal)
+            throw new InvalidOperationException(refusal);
+
+        var hours = (end - start).TotalHours;
+        var daysAhead = (start.Date - DateTime.UtcNow.Date).TotalDays;
+        var bookings = _unitOfWork.Repository<RoomBooking>().GetQueryable();
+        var query = TenantRooms(tenantId)
+            .Where(r => r.IsActive && r.IsBookable)
+            .Where(r => r.MaxBookingDurationHours == null || r.MaxBookingDurationHours <= 0 || r.MaxBookingDurationHours >= hours)
+            .Where(r => r.AdvanceBookingDays == null || r.AdvanceBookingDays <= 0 || r.AdvanceBookingDays >= daysAhead)
+            .Where(r => !bookings.Any(b => b.TenantId == tenantId && b.RoomId == r.Id && !b.IsCancelled
+                                           && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed)
+                                           && b.StartDateTime < end && b.EndDateTime > start));
+        if (minCapacity is > 0)
+            query = query.Where(r => r.Capacity >= minCapacity.Value);
+
+        return (await query.OrderBy(r => r.RoomName).ToListAsync(cancellationToken)).ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<MeetingRoomSummaryDto>> GetActiveRoomsAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _roomRepository.GetActiveRoomsAsync())
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantRooms(GetTenantId())
+            .Where(r => r.IsActive)
+            .OrderBy(r => r.RoomName)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
@@ -4247,18 +4267,7 @@ public class MeetingRoomService : IMeetingRoomService
         entity.TenantId = tenantId;
 
         await EnsureLocationExistsAsync(tenantId, entity.LocationId, cancellationToken);
-
-        if (string.IsNullOrEmpty(entity.RoomCode))
-        {
-            entity.RoomCode = await _roomRepository.GetNextRoomCodeAsync(tenantId, cancellationToken);
-        }
-        else
-        {
-            var codeExists = await _roomRepository.GetQueryable()
-                .AnyAsync(r => r.TenantId == tenantId && r.RoomCode == entity.RoomCode, cancellationToken);
-            if (codeExists)
-                throw new InvalidOperationException($"Room code '{entity.RoomCode}' already exists for this tenant.");
-        }
+        entity.RoomCode = await ResolveCodeAsync(tenantId, createDto.RoomCode, null, cancellationToken);
 
         await _roomRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -4269,23 +4278,64 @@ public class MeetingRoomService : IMeetingRoomService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>
+    /// <para>⚠ Lane 3a (F-6): the edit checked neither the site nor the code — a bad site was a 500, a taken code a bare
+    /// 500 from the unique index, and a blank code was stored empty. It now checks both as the create does, and a blank
+    /// code is issued afresh.</para>
+    ///
+    /// <para><b>D-18 (the user's ruling):</b> deactivating a room with bookings still to come is refused, naming them,
+    /// unless the caller says to cancel them — the form lists them and asks first. Each is cancelled with the reason that
+    /// the room was taken out of use; lane 3b tells its booker.</para>
+    /// </remarks>
     public async Task<MeetingRoomDto> UpdateAsync(UpdateMeetingRoomDto updateDto, CancellationToken cancellationToken = default)
     {
+        var tenantId = GetTenantId();
         var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
 
-        updateDto.UpdateEntity(entity);
+        await EnsureLocationExistsAsync(tenantId, updateDto.LocationId, cancellationToken);
+        var code = await ResolveCodeAsync(tenantId, updateDto.RoomCode, entity.Id, cancellationToken);
 
-        await _roomRepository.UpdateAsync(entity);
+        var future = entity.IsActive && !updateDto.IsActive
+            ? await FutureBookings(tenantId, entity.Id).ToListAsync(cancellationToken)
+            : new List<RoomBooking>();
+        if (future.Count > 0 && !updateDto.CancelFutureBookings)
+            throw new InvalidOperationException(
+                $"{entity.RoomName} has {Bookings(future.Count)} still to come — {string.Join(", ", future.Take(5).Select(b => b.BookingNumber))}"
+              + $"{(future.Count > 5 ? ", …" : string.Empty)}. Cancel them and tell their bookers, or keep the room in use.");
+
+        updateDto.UpdateEntity(entity);
+        entity.RoomCode = code;
+        var reason = $"{entity.RoomName} was taken out of use.";
+        var now = DateTime.UtcNow;
+        foreach (var booking in future)
+            RoomBookingRules.Cancel(booking, reason, now);
+
+        // ⚠ Saved by tracking, not UpdateAsync: Update() marks the whole loaded graph modified — the site, and through the
+        // cancelled bookings their bookers' Employee rows.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Meeting room updated: {RoomCode}", entity.RoomCode);
+        _logger.LogInformation("Meeting room updated: {RoomCode}; {Cancelled} future booking(s) cancelled", entity.RoomCode, future.Count);
 
-        return entity.ToDto();
+        // ⚠ F-46: re-read, untracked, so a changed site answers with its own name, not the old one's.
+        return (await TenantRooms(tenantId).AsNoTracking().FirstAsync(r => r.Id == entity.Id, cancellationToken)).ToDto();
     }
 
+    /// <remarks>
+    /// ⚠ D-18, F-49: deleting a room hid its history — the register joins each booking to its room, and the soft-delete
+    /// filter drops a deleted room from that join. So a room with any booking on record (any status; a deleted booking
+    /// is not on record) cannot be deleted: deactivate it instead.
+    /// </remarks>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id, cancellationToken);
+        var onRecord = await BookingsOf(entity.TenantId, entity.Id).CountAsync(cancellationToken);
+        if (onRecord > 0)
+        {
+            var toCome = await FutureBookings(entity.TenantId, entity.Id).CountAsync(cancellationToken);
+            throw new InvalidOperationException(
+                $"{entity.RoomName} has {Bookings(onRecord)} on record, so it cannot be deleted — the register would lose them. "
+              + $"Deactivate it instead{(toCome > 0 ? $", which offers to cancel the {Bookings(toCome)} still to come" : string.Empty)}.");
+        }
 
         await _roomRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -4293,6 +4343,62 @@ public class MeetingRoomService : IMeetingRoomService
         _logger.LogInformation("Meeting room deleted: {Id}", id);
 
         return true;
+    }
+
+    /// <inheritdoc />
+    public async Task<RoomRetirementDto> GetRetirementAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var room = await GetOwnedAsync(id, cancellationToken);
+        var future = await FutureBookings(room.TenantId, room.Id).AsNoTracking().ToListAsync(cancellationToken);
+        return new RoomRetirementDto
+        {
+            RoomId = room.Id,
+            RoomName = room.RoomName,
+            IsActive = room.IsActive,
+            FutureBookings = future.ToSummaryDtoList(),
+            BookingsOnRecord = await BookingsOf(room.TenantId, room.Id).CountAsync(cancellationToken),
+        };
+    }
+
+    /// <summary>The room's bookings on record: any status, deleted ones left out.</summary>
+    private IQueryable<RoomBooking> BookingsOf(Guid tenantId, Guid roomId) =>
+        _unitOfWork.Repository<RoomBooking>().GetQueryable()
+            .Where(b => b.TenantId == tenantId && b.RoomId == roomId);
+
+    /// <summary>The room's bookings still holding it, that have not ended: what retiring it would strand.</summary>
+    private IQueryable<RoomBooking> FutureBookings(Guid tenantId, Guid roomId)
+    {
+        var now = DateTime.UtcNow;
+        return BookingsOf(tenantId, roomId)
+            .Include(b => b.Room)
+            .Include(b => b.BookedBy)
+            .Where(b => !b.IsCancelled && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed)
+                        && b.EndDateTime > now)
+            .OrderBy(b => b.StartDateTime);
+    }
+
+    private static string Bookings(int n) => n == 1 ? "1 booking" : $"{n} bookings";
+
+    /// <summary>
+    /// A typed code, trimmed and checked against EVERY room of the tenant, deleted ones too — the unique index covers
+    /// them, so a deleted room's code was a 500 (R4-12.1). A blank one is issued.
+    /// </summary>
+    private async Task<string> ResolveCodeAsync(Guid tenantId, string? typed, Guid? selfId, CancellationToken cancellationToken)
+    {
+        var code = typed?.Trim();
+        if (string.IsNullOrEmpty(code))
+            return await _roomRepository.GetNextRoomCodeAsync(tenantId, cancellationToken);
+
+        var holder = await _roomRepository
+            .GetQueryableIncludingDeleted(r => r.TenantId == tenantId && r.RoomCode == code && (selfId == null || r.Id != selfId))
+            .AsNoTracking()
+            .Select(r => new { r.RoomName, r.IsDeleted })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (holder is not null)
+            throw new InvalidOperationException(holder.IsDeleted
+                ? $"Room code '{code}' belonged to {holder.RoomName}, since deleted, and a code is never given out twice. Choose another, or leave it blank for the next one."
+                : $"Room code '{code}' is {holder.RoomName}'s. Choose another, or leave it blank for the next one.");
+        return code;
     }
 
     /// <summary>
@@ -4364,35 +4470,65 @@ public class RoomBookingService : IRoomBookingService
         return current;
     }
 
-    private async Task<RoomBooking> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await _bookingRepository.GetQueryable()
+    /// <summary>This tenant's bookings, with their room, people and event — the tenant inside the query (lane 3a, F-30).</summary>
+    private IQueryable<RoomBooking> TenantBookings(Guid tenantId) =>
+        _bookingRepository.GetQueryable()
             .Include(b => b.Room)
             .Include(b => b.BookedBy)
             .Include(b => b.ApprovedBy)
             .Include(b => b.Event)
-            .FirstOrDefaultAsync(b => b.Id == id && b.TenantId == tenantId, cancellationToken);
+            .Where(b => b.TenantId == tenantId);
 
-        if (entity == null)
-            throw new ArgumentException($"Room booking with ID '{id}' not found.");
-        return entity;
+    private async Task<RoomBooking> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await TenantBookings(GetTenantId()).FirstOrDefaultAsync(b => b.Id == id, cancellationToken);
+        return entity ?? throw new ArgumentException($"Room booking with ID '{id}' not found.");
     }
 
-    private async Task<bool> HasConflictingBookingAsync(Guid tenantId, Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null, CancellationToken cancellationToken = default)
+    private static void Refuse(string? refusal)
     {
-        var query = _bookingRepository.GetQueryable()
-            .Where(b => b.TenantId == tenantId &&
-                        b.RoomId == roomId &&
-                        !b.IsCancelled &&
-                        b.Status != BookingStatus.Cancelled &&
-                        b.StartDateTime < endDateTime &&
-                        b.EndDateTime > startDateTime);
+        if (refusal is not null) throw new InvalidOperationException(refusal);
+    }
 
-        if (excludeBookingId.HasValue)
-            query = query.Where(b => b.Id != excludeBookingId.Value);
+    /// <summary>The lock a room's bookings are written under (F-47): one per room, held to the end of the transaction.</summary>
+    private static string RoomLock(Guid tenantId, Guid roomId) => $"hr:room-booking:{tenantId:N}:{roomId:N}";
 
-        return await query.AnyAsync(cancellationToken);
+    /// <summary>
+    /// Refuses a window another live booking holds in the room, naming it. Live is Tentative or Confirmed: a completed
+    /// or no-show booking no longer holds its room. ⚠ Asked under <see cref="RoomLock"/>, inside the write's
+    /// transaction — asked outside, two people could book the same slot at the same moment (F-47).
+    /// </summary>
+    private async Task RefuseClashAsync(Guid tenantId, MeetingRoom room, DateTime start, DateTime end, Guid? excludeBookingId, CancellationToken cancellationToken)
+    {
+        var other = await _bookingRepository.GetQueryable().AsNoTracking()
+            .Where(b => b.TenantId == tenantId && b.RoomId == room.Id && !b.IsCancelled
+                        && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed)
+                        && b.StartDateTime < end && b.EndDateTime > start
+                        && (excludeBookingId == null || b.Id != excludeBookingId))
+            .OrderBy(b => b.StartDateTime)
+            .Select(b => new { b.BookingNumber, b.StartDateTime, b.EndDateTime })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (other is not null)
+            throw new InvalidOperationException(
+                $"{room.RoomName} is already booked then: {other.BookingNumber}, "
+              + $"{RoomBookingRules.Describe(RoomBookingRules.AsUtc(other.StartDateTime), RoomBookingRules.AsUtc(other.EndDateTime))}. "
+              + "Choose another time or another room.");
+    }
+
+    /// <summary>
+    /// The event a new booking is for (F-7): this tenant's, and still to happen — never checked before, so any id was
+    /// stored, another tenant's or a cancelled event's included.
+    /// </summary>
+    private async Task<CompanyEvent?> LinkedEventAsync(Guid tenantId, Guid? eventId, CancellationToken cancellationToken)
+    {
+        if (eventId is not { } id || id == Guid.Empty) return null;
+        var ev = await _unitOfWork.Repository<CompanyEvent>().GetQueryable().AsNoTracking()
+                     .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken)
+                 ?? throw new InvalidOperationException("The event this booking is for was not found.");
+        if (ev.IsCancelled || ev.Status is EventStatus.Cancelled or EventStatus.Completed)
+            throw new InvalidOperationException(
+                $"{ev.EventName} is {(ev.Status == EventStatus.Completed ? "completed" : "cancelled")}, so a room cannot be booked for it.");
+        return ev;
     }
 
     public async Task<RoomBookingDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
@@ -4546,71 +4682,101 @@ public class RoomBookingService : IRoomBookingService
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByRoomIdAsync(Guid roomId, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _bookingRepository.GetByRoomIdAsync(roomId))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantBookings(GetTenantId())
+            .Where(b => b.RoomId == roomId)
+            .OrderByDescending(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByBookerAsync(Guid bookedById, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _bookingRepository.GetByBookerAsync(bookedById))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantBookings(GetTenantId())
+            .Where(b => b.BookedById == bookedById)
+            .OrderByDescending(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
+    /// <remarks>By overlap, as lane 2a's event range read: a booking running into the range counts. A date with no time
+    /// takes in its whole day.</remarks>
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _bookingRepository.GetByDateRangeAsync(startDate, endDate))
-            .Where(e => e.TenantId == tenantId);
+        var from = RoomBookingRules.AsUtc(startDate);
+        var to = RoomBookingRules.AsUtc(endDate.TimeOfDay == TimeSpan.Zero ? endDate.Date.AddDays(1) : endDate);
+        var entities = await TenantBookings(GetTenantId())
+            .Where(b => b.StartDateTime < to && b.EndDateTime > from)
+            .OrderBy(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetByStatusAsync(BookingStatus status, CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _bookingRepository.GetByStatusAsync(status))
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantBookings(GetTenantId())
+            .Where(b => b.Status == status)
+            .OrderByDescending(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
     public async Task<IEnumerable<RoomBookingSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default)
     {
-        var tenantId = GetTenantId();
-        var entities = (await _bookingRepository.GetPendingApprovalsAsync())
-            .Where(e => e.TenantId == tenantId);
+        var entities = await TenantBookings(GetTenantId())
+            .Where(b => b.Status == BookingStatus.Tentative && !b.IsCancelled)
+            .OrderBy(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
     }
 
+    /// <remarks>
+    /// Lane 3a:
+    /// <list type="bullet">
+    /// <item>a start and an end are required (F-50's times are UTC);</item>
+    /// <item>the room must be in use as well as open for booking (F-7: <c>IsActive</c> was never read);</item>
+    /// <item>an event named must be this tenant's and still to happen, and the booking must fall on its days (F-7);</item>
+    /// <item>the seats needed are the larger of the booking's count and its event's estimate;</item>
+    /// <item>⚠ the clash check and the write run under one lock per room, in one transaction (F-47) — two people
+    /// could book the same slot at the same moment. The number is taken inside it, before the row is added: the
+    /// sequence saves on the same context.</item>
+    /// </list>
+    /// </remarks>
     public async Task<RoomBookingDto> CreateAsync(CreateRoomBookingDto createDto, Guid bookedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var room = await _roomRepository.GetByIdAsync(createDto.RoomId);
-        if (room == null || room.TenantId != tenantId)
-            throw new ArgumentException("Meeting room not found");
+        var start = RoomBookingRules.AsUtc(createDto.StartDateTime);
+        var end = RoomBookingRules.AsUtc(createDto.EndDateTime);
+        Refuse(RoomBookingRules.RefuseWindow(start, end));
 
+        var room = await _roomRepository.GetQueryable()
+                       .FirstOrDefaultAsync(r => r.Id == createDto.RoomId && r.TenantId == tenantId, cancellationToken)
+                   ?? throw new ArgumentException("Meeting room not found");
+        if (!room.IsActive)
+            throw new InvalidOperationException($"{room.RoomName} is not in use, so it cannot be booked.");
         if (!room.IsBookable)
-            throw new InvalidOperationException("This room is not available for booking");
+            throw new InvalidOperationException($"{room.RoomName} is not open for booking.");
 
-        EnforceRoomRules(room, createDto.StartDateTime, createDto.EndDateTime, createDto.ExpectedAttendees);
-
-        var hasConflict = await HasConflictingBookingAsync(
-            tenantId, createDto.RoomId, createDto.StartDateTime, createDto.EndDateTime, cancellationToken: cancellationToken);
-
-        if (hasConflict)
-            throw new InvalidOperationException("There is a conflicting booking for this time slot");
+        var ev = await LinkedEventAsync(tenantId, createDto.EventId, cancellationToken);
+        if (ev is not null)
+            Refuse(RoomBookingRules.RefuseOutsideEvent(start, end, ev));
+        EnforceRoomRules(room, start, end, RoomBookingRules.SeatsNeeded(createDto.ExpectedAttendees, ev));
 
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        entity.EventId = ev?.Id;
+        entity.StartDateTime = start;
+        entity.EndDateTime = end;
         entity.BookedById = bookedById;
         entity.BookingDate = DateTime.UtcNow;
-        entity.BookingNumber = await _bookingRepository.GetNextBookingNumberAsync(tenantId, cancellationToken);
         entity.Status = room.RequiresApproval ? BookingStatus.Tentative : BookingStatus.Confirmed;
 
-        await _bookingRepository.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _unitOfWork.AcquireTransactionLockAsync(RoomLock(tenantId, room.Id), ct);
+            await RefuseClashAsync(tenantId, room, start, end, null, ct);
+            entity.BookingNumber = await _bookingRepository.GetNextBookingNumberAsync(tenantId, ct);
+            await _bookingRepository.AddAsync(entity);
+        }, cancellationToken);
 
         _logger.LogInformation("Room booking created: {BookingNumber}", entity.BookingNumber);
 
@@ -4619,48 +4785,73 @@ public class RoomBookingService : IRoomBookingService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>
+    /// Lane 3a: not once cancelled, completed or marked a no-show (F-8); the room's rules, the event's days and the seats
+    /// as on create; a new window checked for clashes under the room's lock (F-47). ⚠ A confirmed booking that moves, on a
+    /// room needing approval, waits for approval again — the approval was for the old time.
+    /// </remarks>
     public async Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entity = await _bookingRepository.GetQueryable()
-            .Include(b => b.Room)
-            .Include(b => b.BookedBy)
-            .FirstOrDefaultAsync(b => b.Id == updateDto.Id && b.TenantId == tenantId, cancellationToken);
+        var entity = await TenantBookings(tenantId).FirstOrDefaultAsync(b => b.Id == updateDto.Id, cancellationToken)
+                     ?? throw new ArgumentException($"Room booking with ID '{updateDto.Id}' not found.");
+        Refuse(RoomBookingRules.RefuseEditing(entity));
 
-        if (entity == null)
-            throw new ArgumentException($"Room booking with ID '{updateDto.Id}' not found.");
+        var start = RoomBookingRules.AsUtc(updateDto.StartDateTime);
+        var end = RoomBookingRules.AsUtc(updateDto.EndDateTime);
+        Refuse(RoomBookingRules.RefuseWindow(start, end));
 
         // ⚠ The EDIT enforces them too. A rule checked only on create is a rule anyone can get
         // round by booking something legal and then changing it.
-        var roomForRules = entity.Room ?? await _roomRepository.GetByIdAsync(entity.RoomId);
-        if (roomForRules is not null)
-            EnforceRoomRules(roomForRules, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.ExpectedAttendees);
+        var room = entity.Room;
+        if (entity.Event is { } ev)
+            Refuse(RoomBookingRules.RefuseOutsideEvent(start, end, ev));
+        EnforceRoomRules(room, start, end, RoomBookingRules.SeatsNeeded(updateDto.ExpectedAttendees, entity.Event));
 
-        var hasConflict = await HasConflictingBookingAsync(
-            tenantId, entity.RoomId, updateDto.StartDateTime, updateDto.EndDateTime, updateDto.Id, cancellationToken);
+        var moved = RoomBookingRules.AsUtc(entity.StartDateTime) != start || RoomBookingRules.AsUtc(entity.EndDateTime) != end;
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            if (moved)
+            {
+                await _unitOfWork.AcquireTransactionLockAsync(RoomLock(tenantId, room.Id), ct);
+                await RefuseClashAsync(tenantId, room, start, end, entity.Id, ct);
+            }
 
-        if (hasConflict)
-            throw new InvalidOperationException("There is a conflicting booking for this time slot");
-
-        updateDto.UpdateEntity(entity);
-
-        await _bookingRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            updateDto.UpdateEntity(entity);
+            entity.StartDateTime = start;
+            entity.EndDateTime = end;
+            if (moved && room.RequiresApproval && entity.ApprovalDate is not null)
+            {
+                entity.ApprovedById = null;
+                entity.ApprovedBy = null;
+                entity.ApprovalDate = null;
+                entity.Status = BookingStatus.Tentative;
+            }
+            // Saved by tracking (ExecuteInTransactionAsync saves): UpdateAsync would mark the loaded room, people and
+            // event modified too.
+        }, cancellationToken);
 
         _logger.LogInformation("Room booking updated: {BookingNumber}", entity.BookingNumber);
 
-        return entity.ToDto();
+        // ⚠ F-46: answer with what was saved, re-read.
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>
+    /// Lane 3a (F-8, D-10's guards): a Tentative booking, not cancelled — whether or not its room still needs approval —
+    /// and never by its booker. It approved a cancelled booking into "Confirmed beside IsCancelled". Lane 3b moves it onto
+    /// the workflow engine.
+    /// </remarks>
     public async Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(bookingId, cancellationToken);
+        Refuse(RoomBookingRules.RefuseApproving(entity, approvedById));
 
         entity.ApprovedById = approvedById;
         entity.ApprovalDate = DateTime.UtcNow;
         entity.Status = BookingStatus.Confirmed;
 
-        await _bookingRepository.UpdateAsync(entity);
+        // Saved by tracking: UpdateAsync would mark the loaded room, people and event modified too.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Room booking approved: {BookingNumber}", entity.BookingNumber);
@@ -4668,16 +4859,17 @@ public class RoomBookingService : IRoomBookingService
         return true;
     }
 
+    /// <remarks>Lane 3a (F-8): not once cancelled, completed or marked a no-show, and with a reason.</remarks>
     public async Task<bool> CancelBookingAsync(CancelRoomBookingDto cancelDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(cancelDto.BookingId, cancellationToken);
+        Refuse(RoomBookingRules.RefuseCancelling(entity));
+        var reason = CompanyEventRules.Clean(cancelDto.CancellationReason)
+                     ?? throw new InvalidOperationException("Say why the booking is cancelled.");
 
-        entity.IsCancelled = true;
-        entity.CancellationDate = DateTime.UtcNow;
-        entity.CancellationReason = cancelDto.CancellationReason;
-        entity.Status = BookingStatus.Cancelled;
+        RoomBookingRules.Cancel(entity, reason, DateTime.UtcNow);
 
-        await _bookingRepository.UpdateAsync(entity);
+        // Saved by tracking: UpdateAsync would mark the loaded room, people and event modified too.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Room booking cancelled: {BookingNumber}", entity.BookingNumber);

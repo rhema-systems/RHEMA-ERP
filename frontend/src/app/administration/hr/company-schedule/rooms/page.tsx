@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { DoorOpen, MoreHorizontal, Pencil, Plus, Search, Trash2 } from 'lucide-react';
+import { DoorOpen, MoreHorizontal, Pencil, Plus, PowerOff, Search, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,11 +24,17 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { roomToForm, toRoomPayload } from '@/components/hr/company-schedule/RoomForm';
+import {
+  RoomRetireDialog,
+  roomErrorText,
+  type RoomRetireIntent,
+} from '@/components/hr/company-schedule/RoomRetireDialog';
 import { meetingRoomService } from '@/services/hr/company-schedule.service';
 import type { MeetingRoom } from '@/types/hr/company-schedule';
 
@@ -45,8 +51,14 @@ export default function MeetingRoomsPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // ⚠ Lane 3a (C-33): Delete is HR.Company.Admin server-side, and the HR role does not hold it — the item was offered
+  // to the people it refuses, and the refusal's toast blamed bookings. Hidden here; a 403 still says what it is.
+  const { hasPermission } = useAuth();
+  const canDelete = hasPermission('HR.Company.Admin');
   const [search, setSearch] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<MeetingRoom | null>(null);
+  // D-18 (lane 3a): deactivating lists the bookings still to come and offers to cancel them; deleting is possible only
+  // with no booking on record, and otherwise offers to deactivate instead.
+  const [retire, setRetire] = useState<{ room: MeetingRoom; intent: RoomRetireIntent } | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ['hr', 'company-schedule', 'rooms'],
@@ -67,21 +79,41 @@ export default function MeetingRoomsPage() {
       .sort((a, b) => a.roomName.localeCompare(b.roomName));
   }, [data, search]);
 
-  const handleDelete = async () => {
-    if (!deleteTarget) return false;
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule'] });
+
+  const deactivate = async (cancelFutureBookings: boolean) => {
+    if (!retire) return;
+    const { room } = retire;
     try {
-      await meetingRoomService.remove(deleteTarget.id);
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'rooms'] });
-      toast({ title: 'Room removed', description: `"${deleteTarget.roomName}" is no longer listed.` });
-      setDeleteTarget(null);
-      return true;
-    } catch (error: any) {
-      toast({
-        title: 'Could not remove the room',
-        description: error?.response?.data?.detail ?? error?.message ?? 'It may have bookings against it.',
-        variant: 'destructive',
+      await meetingRoomService.update(room.id, {
+        id: room.id,
+        ...toRoomPayload(roomToForm(room)),
+        isActive: false,
+        cancelFutureBookings,
       });
-      return false;
+      await refresh();
+      toast({
+        title: 'Room deactivated',
+        description: cancelFutureBookings
+          ? `"${room.roomName}" can no longer be booked, and its bookings still to come were cancelled.`
+          : `"${room.roomName}" can no longer be booked.`,
+      });
+      setRetire(null);
+    } catch (error: any) {
+      toast({ title: 'Could not deactivate the room', description: roomErrorText(error, 'change'), variant: 'destructive' });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!retire) return;
+    const { room } = retire;
+    try {
+      await meetingRoomService.remove(room.id);
+      await refresh();
+      toast({ title: 'Room removed', description: `"${room.roomName}" is no longer listed.` });
+      setRetire(null);
+    } catch (error: any) {
+      toast({ title: 'Could not remove the room', description: roomErrorText(error, 'delete'), variant: 'destructive' });
     }
   };
 
@@ -205,13 +237,22 @@ export default function MeetingRoomsPage() {
                             >
                               <Pencil className="mr-2 h-4 w-4" /> Edit
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => setDeleteTarget(r)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" /> Delete
-                            </DropdownMenuItem>
+                            {r.isActive && (
+                              <DropdownMenuItem onClick={() => setRetire({ room: r, intent: 'deactivate' })}>
+                                <PowerOff className="mr-2 h-4 w-4" /> Deactivate
+                              </DropdownMenuItem>
+                            )}
+                            {canDelete && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onClick={() => setRetire({ room: r, intent: 'delete' })}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </TableCell>
@@ -224,14 +265,12 @@ export default function MeetingRoomsPage() {
         </CardContent>
       </Card>
 
-      <ConfirmationDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-        title="Delete this room?"
-        description={`"${deleteTarget?.roomName}" will be removed. Deactivate it instead if it has booking history worth keeping.`}
-        confirmText="Delete"
-        variant="destructive"
-        onConfirm={handleDelete}
+      <RoomRetireDialog
+        room={retire?.room ?? null}
+        intent={retire?.intent ?? null}
+        onClose={() => setRetire(null)}
+        deactivate={deactivate}
+        remove={canDelete ? handleDelete : undefined}
       />
     </div>
   );

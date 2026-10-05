@@ -667,6 +667,10 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Refused while the room has any booking on record — deactivate it instead (D-18, F-49: deleting one hid its
+    /// history from the register).
+    /// </summary>
     [HttpDelete("rooms/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     public async Task<IActionResult> DeleteMeetingRoom(Guid id)
@@ -674,6 +678,15 @@ public class CompanyScheduleController : HrControllerBase
         await _roomService.DeleteAsync(id);
         return NoContent();
     }
+
+    /// <summary>
+    /// What retiring the room would touch (D-18, lane 3a): its bookings still to come, which deactivating it offers to
+    /// cancel, and whether it can be deleted at all. The Rooms screens ask it before deactivating or deleting.
+    /// </summary>
+    [HttpGet("rooms/{id:guid}/retirement")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<RoomRetirementDto>> GetRoomRetirement(Guid id, CancellationToken ct)
+        => Ok(await _roomService.GetRetirementAsync(id, ct));
 
     #endregion
 

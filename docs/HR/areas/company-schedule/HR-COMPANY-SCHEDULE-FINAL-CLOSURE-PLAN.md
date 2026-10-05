@@ -40,7 +40,9 @@ has not started (the user: "don't start the actual development yet").
    2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b), and 2g, the registers' search, paging,
    export and dashboard (2g-1) and the event-against-event clash rule (2g-2), and 2h, files through the upload gate
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
-   **Next: lane 3 (rooms and bookings): source-check it, then put D-13 and D-18 to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
+   rules and guards, built and proved (no migration). Next 3b: approval on the engine, the booking notices, the hourly
+   lapse and completion, no-show.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -100,12 +102,12 @@ before the lanes in its "Blocks" column.
 | **D-10** ✅ | Approval of events and bookings: the workflow engine, or the one-click flag? | **The engine**, like every other HR approval: the four-step recipe, definitions of two steps or more, the auto-approve guard where no definition is published, and `preventInitiatorApproval` to stop self-approval. It gives the approver an inbox entry and a notification (C-3, the approver half of F-34). No schema: the engine links by entity type and id. If the flag is kept instead: refuse self-approval — the approver may not be the organiser or the booker. | Lanes 2, 3; harness definitions |
 | **D-11** ✅ | Who is the organiser? | **An Organiser picker** defaulting to the signed-in employee; the creator stays in `CreatedBy`. Diaries, the clash check and the calendar use the organiser (F-42). | Lane 2 |
 | **D-12** ✅ | Recurring events: a series, or independent occurrences? | **Settled 2026-10-01, as recommended: a light series, in which the occurrences are the series.** Each occurrence stays a full event, with its own number, guest list, RSVPs, attendance register, tasks and papers; `RecurrenceSeriesId` and `OccurrenceNumber` tie them together, and there is **no series table**. Series behaviour is a scope choice, "this occurrence / this and following / the whole series", on adding or removing a guest, editing, rescheduling and cancelling. A guest added to the series gets one invitation listing the dates and answers each date or all at once. "Book this room for every occurrence" makes one booking per date and lists the dates where the room is taken. A series action never changes an occurrence that is past or completed. A series needs an end date or a count, up to 52, and can be extended later. A monthly rule on a day a month lacks falls on that month's last day, counted from the first date; an occurrence on a holiday or company-wide closure is generated and flagged, not skipped. *Why: answers and attendance are per meeting, since people miss one week and not the next; independent occurrences would mean re-inviting everyone every week; and an ordinary event needs no special case in the clash check, the reminder sweep, the diaries or the calendar.* | Lane 2. Lane 0: no series table |
-| **D-13** | May staff book rooms themselves? | **Yes, from the portal**: their own bookings only, the same room rules, approval-required rooms routed to the approver, staff cancel their own. HR keeps the desk. | Lanes 3, 7 |
+| **D-13** ✅ *(2026-10-05, as recommended; lane 3 State)* | May staff book rooms themselves? | **Yes, from the portal**: their own bookings only, the same room rules, approval-required rooms routed to the approver, staff cancel their own. HR keeps the desk. | Lanes 3, 7 |
 | **D-14** ✅ | Calendar invites in the emails? | **Yes**: an `.ics` on invitation, reschedule and cancellation — a stable UID per event, SEQUENCE raised on each change, METHOD REQUEST and CANCEL. The email DTO already carries attachments; the templated send needs an overload. External guests answer from their mail client to the organiser, and HR records it at the desk, which answers F-36. | Lane 2 |
 | **D-15** ✅ | Unpaid closures, and closures added after leave was approved? | **Settled 2026-10-04 at lane 1's source check, refined there into D-15a, D-15b and D-15c (§ 1c); the payroll half goes into the payroll hand-off rather than the register.** *As first recommended:* HR records the pay flag and **exposes closures to payroll read-only**, logged as a cross-module item, because payroll is another developer's module (F-51). **A closure created, moved or deleted re-charges the approved leave it overlaps**, and the employee is told (F-52). | Lane 1 |
 | **D-16** ✅ | Who is "Management only"? | **The heads of organisation units** (`OrganizationUnit.HeadEmployeeId`), plus the organiser and participants; "Management" visibility uses the same population (F-43). | Lanes 2, 7 |
 | **D-17** ✅ | The milestone link to one employee's award or certification (C-41)? | **Settled 2026-10-01, as recommended: dropped.** Company milestones are company facts: the guide's own walkthrough files the ISO 9001 quality certification as one, while a training-module certificate and a long-service award each belong to one employee. A milestone's evidence is its documents (D-3); awards and milestones meet, if anywhere, through a company event for the awards ceremony. C-41 closes as decided, not built, which is a decision rather than a deferral. | Lane 0: no link columns. Lane 4: nothing to build |
-| **D-18** | Retiring a room that has future bookings? | **Offer "cancel these N bookings and tell their bookers"**, and refuse deletion once a room has any booking history — deactivate instead (F-49). | Lane 3 |
+| **D-18** ✅ *(2026-10-05, as recommended; lane 3 State)* | Retiring a room that has future bookings? | **Offer "cancel these N bookings and tell their bookers"**, and refuse deletion once a room has any booking history — deactivate instead (F-49). | Lane 3 |
 
 ### 1c. Decisions from lane source checks
 
@@ -316,7 +318,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a built and proved (820/820 ×2; round-4 net 212/212); 3b next | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2404,20 +2406,21 @@ closes lane 2.*
 
 ### Lane 3 — Rooms and bookings (D-10, D-13, D-18; C-8, C-28, C-30, C-31, C-32, C-33, C-36, R4-9.1, R4-12.1, F-6, F-7, F-15, F-18, F-34, F-47…F-50)
 
-- [ ] Room update validates the site and the code's uniqueness (deleted rooms included, R4-12.1); a
+- [x] *✅ 3a; the create checks deleted rooms' codes too.* Room update validates the site and the code's uniqueness (deleted rooms included, R4-12.1); a
       blank code is regenerated.
-- [ ] **Retiring a room per D-18** (F-49): deactivating or deleting a room with future bookings offers
+- [ ] *◐ 3a: listed, offered and cancelled, deletion refused with history; the bookers are told from 3b.* **Retiring a room per D-18** (F-49): deactivating or deleting a room with future bookings offers
       "cancel these N bookings and tell their bookers"; deletion is refused once the room has any
       booking history — deactivate instead.
-- [ ] Availability: tenant-scoped; `MaxBookingDurationHours` and `AdvanceBookingDays` applied; active
+- [x] *✅ 3a; every room and booking list read is tenant-scoped in its query (F-30).* Availability: tenant-scoped; `MaxBookingDurationHours` and `AdvanceBookingDays` applied; active
       and bookable only.
-- [ ] Booking create: room active; `EventId` validated; a linked event's dates must contain the
+- [x] *✅ 3a; an event must also be still to happen; a start and an end are required.* Booking create: room active; `EventId` validated; a linked event's dates must contain the
       booking; seat check uses the larger of the booking's attendees and the event's estimate.
-- [ ] **(F-47)** Create and update hold an application lock per room (`sp_getapplock` inside a
+- [x] *✅ 3a, through `IUnitOfWork.ExecuteInTransactionAsync` + `AcquireTransactionLockAsync` (the update locks
+      only when the window moves).* **(F-47)** Create and update hold an application lock per room (`sp_getapplock` inside a
       transaction) around the clash check and the write.
-- [ ] Booking update refused on a cancelled or completed booking; moving an approved booking's window
+- [x] *✅ 3a; a no-show is refused too.* Booking update refused on a cancelled or completed booking; moving an approved booking's window
       on an approval-required room returns it to Tentative and clears the approval.
-- [ ] **Approve:** Tentative and not cancelled — *review: the first draft also required the room to
+- [ ] *◐ 3a: the guards, and never the booker; the engine is 3b.* **Approve:** Tentative and not cancelled — *review: the first draft also required the room to
       need approval, which strands bookings made before that switch was turned off*; on the engine per
       D-10. **Cancel:** not cancelled or completed.
 - [ ] **(F-48)** The hourly sweep lapses a Tentative booking whose start has passed — cancelled with
@@ -2426,18 +2429,143 @@ closes lane 2.*
       booking.
 - [ ] **(F-34)** The approver is told a booking awaits them (or the engine inbox, D-10); the booker is
       told when it is approved, cancelled, lapsed or marked no-show — in-app and email.
-- [ ] **(F-50)** Booking instants read back as UTC (`DateTime.SpecifyKind`), as the reminder stamps
+- [x] *✅ 3a (`RoomBookingRules.AsUtc`, on the way in and out).* **(F-50)** Booking instants read back as UTC (`DateTime.SpecifyKind`), as the reminder stamps
       already are.
 - [ ] **Staff booking per D-13**: a self-service door for the signed-in employee's own bookings.
-- [ ] Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
-- [ ] (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
+- [x] *✅ 3a.* Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
+- [x] *✅ 3a.* (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
       register's.
 - [ ] **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
       of a series (lane 2f-1's `RecurrenceSeriesId`): one booking per date, each through this lane's rules and
       lock; the dates where the room is taken are listed, the rest booked. A past or completed occurrence is
       never booked.
 
-**State:** *(filled when it lands)*
+**State:**
+
+*Source check (2026-10-05, at HEAD 20b6f4c7d) — every item above is still open; nothing in lanes 0–2 built any of it
+beyond 2a's linked bookings moving and cancelling with their event and 2g-1's booking register:*
+- **Rooms:**
+  - F-6: `MeetingRoomService.UpdateAsync` checks neither the site nor the code, and stores a blank code;
+  - R4-12.1: create's code check reads live rooms only, but `IX_MeetingRoom_Tenant_RoomCode` covers deleted ones, so
+    a deleted room's code is a 500;
+  - C-36, F-49: delete and deactivate ignore future bookings; delete hides the room's history;
+  - F-15, C-28, R4-9.1: the availability read's booked-room subquery is not tenant-scoped, and it applies seats only;
+  - F-30: the room lists (by site, available, active) load every tenant's rows and filter in memory;
+  - F-46: the update answers without a re-read, so a changed site's name is stale;
+  - C-33: the Rooms page (under Administration) blames bookings for a 403, and shows Delete without Admin.
+- **Bookings:**
+  - F-7: create checks `IsBookable` but not `IsActive`; `EventId` is never checked, nor that the event's days hold
+    the booking; the seat check ignores the event's `EstimatedAttendees`;
+  - F-47: the clash check and the insert are not locked;
+  - F-8 (C-30, C-31): approve and cancel have no state guard; an edit is allowed on a cancelled or completed
+    booking; approval is a Write action, not on the engine, and nothing stops the booker approving their own;
+  - F-48: no lapse for a Tentative booking whose start has passed, no Completed sweep, and no no-show action
+    (`BookingStatus.NoShow` exists, unused);
+  - F-34: no booking notice of any kind, in-app or email;
+  - F-50: `StartDateTime` / `EndDateTime` read back unmarked (`SpecifyKind` is applied only to the event's
+    reminder stamps);
+  - F-30: the booking lists (by room, booker, range, status, pending) load every tenant's rows;
+  - C-32: no Delete on the booking page;
+  - **F-58 (new):** moving an event rewrites its linked bookings' `BookingDate` — "Booked on" on the booking page —
+    to the new start date (`MoveLinkedBookingsAsync`, lane 2a);
+  - D-12: a booking links one event; nothing books a series;
+  - D-13: no staff door. Staff self-service lives under `/me` (`StaffTravelMeController` is the pattern: the token is
+    the actor, another's record answers 404, privileged routes absent by construction).
+- **The engine (D-10):** `RoomBooking` is not in the workflow entity-type catalogue, and has no adapter and no
+  definition.
+- **UAT (read-only):**
+  - three demo rooms (BRD, CONF-A, HUD-1), none needing approval; no booking is Tentative or linked to an event,
+    none overlaps another, and none was approved by its booker;
+  - one demo booking, BK-2026-00001 (Boardroom, 1 October, Confirmed, past) — the Completed sweep will close it;
+  - **34 live "R4D Room" rooms with 76 future Confirmed bookings are harness residue:** this module's
+    `run-round4-d.mjs` makes a room and three bookings every run and removes neither (R4-2.1's tidy step, owed by
+    lane 6).
+
+*Rulings by the user (2026-10-05, all as recommended):*
+- **D-13 — yes, from `/me`:** a "Room bookings" page where staff book any active room under the same rules, and see,
+  change and cancel only their own. Others' bookings show as busy times, with no purpose or booker. A room needing
+  approval routes to the approver. HR keeps the desk.
+- **D-18 — offer to cancel them:** deactivating or deleting a room with future bookings lists them and offers
+  "cancel these N and tell their bookers"; a room with any booking on record cannot be deleted, only deactivated.
+- **Four slices:** 3a rules and guards (rooms, availability, the booking checks, the lock, UTC, retiring a room);
+  3b approval on the engine, the booking notices (in-app and email), the hourly lapse and completion, no-show; 3c
+  staff booking from `/me`; 3d "book this room for every date" of a series.
+- **UAT's residue cleaned in 3a:** the 34 "R4D Room" rooms and their 76 bookings removed through the API, and
+  `run-round4-d.mjs` given its clean-up (R4-2.1, moved here from lane 6), before the retirement rule lands.
+  *Second ruling the same day ("this module's only"):* the 125 live events this module's `run-round4-d.mjs` left ("R4D
+  A|C|Gate|Moving|Notify|Diary …") are removed too; the recruitment suite's 26 ("R4D Board meeting…", "R4D
+  Declined…") stay — its interviews refer to them, and that suite owes its own tidy step. Tool:
+  `dev-harness/hr-company-schedule/tools/remove-r4d-rooms.mjs` (dry run by default).
+
+*3a — what was built (2026-10-05): the rules and guards (F-6, F-7, F-8, F-15, F-30, F-46, F-47, F-49, F-50, F-58; C-28,
+C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
+- **No migration.**
+- **`RoomBookingRules`** (beside `CompanyEventRules`, pure): `AsUtc`; `IsLive` (Tentative or Confirmed, not cancelled);
+  `RefuseWindow` (a start and an end, the end after the start — `[Required]` on a non-nullable `DateTime` does nothing,
+  and a missing start bound as year 1); `RefuseEditing`, `RefuseApproving` (Tentative, not cancelled, never the booker),
+  `RefuseCancelling`; `RefuseOutsideEvent`; `SeatsNeeded`; `Cancel` (the one place a booking is cancelled — the booking,
+  room and event services all use it).
+- **Rooms:**
+  - the room and booking list reads are on the services' own tenant-scoped queries; the unscoped repository reads are
+    deleted (F-30; two had no caller);
+  - the edit checks the site and the code (F-6), against every room including deleted ones, and the create does too
+    (R4-12.1, which was a 500); a blank code is issued afresh; the edit answers with an untracked re-read (F-46);
+  - **D-18:** `GET rooms/{id}/retirement` (Read) lists the bookings still to come and counts those on record;
+    deactivating with bookings to come is refused, naming them, unless `CancelFutureBookings` says to cancel them —
+    each "{room} was taken out of use."; deleting is refused while any booking is on record (a deleted booking is not),
+    pointing to deactivating;
+  - availability: in use and bookable, seating enough, no live booking in the window, and each room's own longest
+    booking and furthest-ahead limits (R4-9.1); a backwards window is refused.
+- **Bookings:**
+  - create: a start and an end; the room in use and bookable (F-7); the event this tenant's and still to happen, the
+    booking on its days, and seats for the larger of the booking's count and the event's estimate; the clash check and
+    the write under one lock per room in one transaction (F-47), the clash naming the booking that holds the slot;
+  - a clash is a live booking — Tentative or Confirmed — everywhere, the event's own move included;
+  - update: refused once cancelled, completed or a no-show; the same checks; locked only when the window moves; a
+    confirmed booking that moves on a room needing approval waits for approval again;
+  - approve and cancel guarded (F-8); a cancellation needs a reason;
+  - the times read back as UTC (F-50);
+  - ⚠ the edited paths save by tracking, not `UpdateAsync`: `Update()` marks the whole loaded graph modified — the room,
+    the people, the event, and through cancelled bookings their bookers' Employee rows.
+- **The event's move (lane 2a's helper):** "Booked on" is no longer rewritten to the new start (**F-58**, new), and the
+  room's furthest-ahead limit applies to a moved booking (lane 2a left that to lane 3).
+- **Screens:** the Rooms page has Deactivate and a retirement dialog (`RoomRetireDialog`: the bookings still to come,
+  "Cancel N bookings and deactivate"; a room with history offers "Deactivate instead"); Delete hidden without Admin, and
+  a 403 says so (C-33); the room edit page asks before switching a room off. The booking page has Delete for Admin
+  (C-32), offers actions only while the booking holds its room, and never Approve to its booker. Until 3b nobody is
+  told of a cancellation, and the dialog does not say they are.
+- **Harness:** `run-final-review.mjs` block 3a; `run-slice1` asserts the two approval refusals (its booking is
+  Confirmed and approved by its own booker before); both round-4 D suites clean up after themselves (R4-2.1).
+
+*Proof (UAT, API in Staging):*
+- **UAT's residue first** (`tools/remove-r4d-rooms.mjs --apply`, on the user's rulings): 76/76 bookings, 34/34 rooms and
+  125/125 events removed; the 3 demo rooms and the recruitment suite's 26 events untouched.
+- `run-final-review.mjs` blocks 1a–3a: **820/820 on two clean passes**, first time, the blocking watcher silent. 3a has
+  **61 assertions**, on its own rooms and events near today:
+  - **a room's edit:** a bad site refused; another room's code refused, naming it; a blank code issued afresh; a new
+    site answering with its own name; a deleted room's code refused, saying so;
+  - **retiring:** the bookings still to come listed (the cancelled one left out), three on record, not deletable;
+    deactivating without the word refused, naming them; deleting refused, pointing to deactivating; deactivating with
+    it cancels them, saying why, the cancelled one keeping its reason; a room out of use cannot be booked; a room with
+    nothing on record deleted;
+  - **availability:** offered inside its rules; not for longer, further ahead, more people, a held window, or out of
+    use; a backwards window refused;
+  - **a booking:** no start refused; a missing event, another day, too many seats counting the event's estimate, and a
+    cancelled event refused; a linked booking made, its times read back as UTC; a booking over it refused, naming it;
+  - **an event's move:** its booking moved, "Booked on" kept (F-58); too far ahead for the room refused;
+  - **the lock:** four identical bookings at once — one made, three refused, one row;
+  - **guards:** a blank reason refused; a cancelled booking not edited, cancelled again or approved;
+  - **approval:** Tentative on a room needing it; its booker refused; a second HR login approves it; again refused; an
+    edit keeping the time keeps the approval; a new time waits again.
+- **Regression:** the round-4 net **212/212** (slice 1 +1, round4-d's tidy +1); recruitment **59/59** (its tidy +1);
+  the templates probe **30/30**; `run-lane-n` **109/115**, the six section-J failures of #40. After the runs no
+  "R4D Room" is left; the recruitment suite still leaves two events a run (its own tidy step, not this lane's).
+- **The API log:** no request answered 500 and no lock failed to be taken; the clash refusals name the booking. Its
+  ERR lines are the known kinds: payroll's foreign key on minted fixtures (#23), the unique indexes refusing the suites'
+  duplicate guests and register rows, and notifications with no mail server.
+- **After the runs:** every harness login is off (28; the no-email one by SQL, #42); the R4D requisition's notices to
+  real staff withdrawn twice (43, then 0), 0 live; nothing of this module's reached anyone real in the hour. The API
+  and the scanner stub are stopped.
 
 ### Lane 4 — Milestones, fiscal years, company profile (D-3, D-6, D-17; C-40, C-41, C-42…C-50, R4-2.2, F-3, F-13, F-14, F-25, F-55, F-56)
 
@@ -2596,31 +2724,31 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | C-4, C-6, C-17, C-27, C-34 | closed in round 4 | — |
 | C-5 | Lane 1 | leave and the statutory clocks; attendance logged |
 | C-7, C-14, C-18, C-19, C-20, C-23, C-24, C-29 | Lane 2 | C-14's series model settled by D-12 |
-| C-8, C-30, C-31, C-33, C-36 | Lane 3 | C-36 per D-18 |
-| C-28 | Lanes 2, 3 | the availability read and every other list read (F-30) |
+| C-8, C-30, C-31, C-33, C-36 | Lane 3 (✅ 3a: C-30, C-31 guards, C-33, C-36 per D-18; the approval engine, C-8 and the bookers told in 3b–3c) | C-36 per D-18 |
+| C-28 | ✅ Lanes 2, 3 (3a: rooms and bookings) | the availability read and every other list read (F-30) |
 | C-9 | Lane 7 | |
 | C-10, C-11, C-12, C-13, C-25 | Lane 2 (D-9) | search, paging, date filter, CSV export, one dashboard read |
 | C-15 | Lane 2 (D-9) | the clash rule and the warnings |
 | C-16 | Lane 5 | reopened by the review; recommendation to confirm |
 | C-21, C-22 | Lane 2 (D-9) | attendance row removable on Write; participant editable and removable on Write; the reply door (D-8) covers the invitee's side |
 | C-26, C-35 | Lane 7 | the calendar's room filter is the room view |
-| C-32 | Lane 3 (D-9) | |
+| C-32 | ✅ Lane 3, slice 3a (D-9) | |
 | C-37, C-38, C-39 | Lane 1 | C-38 recurs annually (D-9) |
 | C-40 | Lane 4 | |
 | C-41 | **Closed by decision D-17** (2026-10-01) | not built: a company milestone is not one employee's award; the certificate is a milestone document |
 | C-42…C-48 | Lane 4 | closed by retirement (D-6) |
 | C-49, C-50 | Lane 4 (D-9) | buttons hidden; the logo a versioned asset; the free-text URL retired (F-55) |
 | C-51 | ✅ Lane 2, slice 2h (D-9) | the drill creates its event, for everyone, never blocked; UAT's one drill given its event |
-| R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1: the D suites get a tidy step; R4-2.3: scenario 110's booking by `hr.head`) | R4-2.4 is the demo database, not the code |
+| R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1 ✅ in lane 3a: both D suites tidy their rooms, bookings and — this module's — events; R4-2.3: scenario 110's booking by `hr.head`) | R4-2.4 is the demo database, not the code |
 | R4-3.1 | Lane 5 | **live** — the first draft had it as kept |
 | R4-5.1, R4-6.1, R4-6.2, R4-6.4…R4-6.7, R4-7.1 | Lanes 2 and 5 | |
 | R4-6.3 | ✅ Lane 2, slice 2e-2 (deliveries counted, and the card built with them); lane 5 walks it | the card is "Invitations and reminders" |
-| R4-9.1 | Lane 3 | |
+| R4-9.1 | ✅ Lane 3, slice 3a | |
 | R4-10A.1, R4-10B.1…R4-10B.4, R4-10A.3 | Lane 5 | |
 | R4-10A.2 | **Lane 2** (backend) + Lane 5 (screens) | the first draft had it in lane 5 only |
 | R4-10A.4 | Lane 1 | closures and holidays both |
 | R4-10A.5 | Lane 6 | the browser walk |
-| R4-12.1 | Lane 3 | a typed code is checked against deleted rooms too |
+| R4-12.1 | ✅ Lane 3, slice 3a | a typed code is checked against deleted rooms too |
 | R4-13.1 | Lane 1 | |
 | D-02 (finish plan) | Lane 7 | closed by D-8 |
 
@@ -3054,3 +3182,21 @@ built API, so no web host and no seeders).
     109/115 (section J, #40). No request answered 500.
 
   Next: lane 3, rooms and bookings — source-check it, and put D-13 and D-18 to the user.
+- **2026-10-05, later** — **2h committed** (`20b6f4c7d`). **Lane 3 source-checked** (lane 3 State): every item open,
+  one new finding (F-58, an event's move rewrote "Booked on"), and UAT holding the round-4 suites' residue. **D-13 and
+  D-18 settled**, four slices, and the residue cleaned in 3a — all as recommended; the residue's events too, this
+  module's only (a second ruling). **Lane 3, slice 3a built and proved**: the rules and guards (lane 3 State). No
+  migration.
+  - **Built:**
+    - rooms: the edit's checks, codes against deleted rooms, retiring a room per D-18, availability by each room's rules,
+      tenant-scoped reads;
+    - bookings: the room, event, day and seat checks, the per-room lock, the state guards, UTC times;
+    - an event's move keeps "Booked on" (F-58) and the room's furthest-ahead limit;
+    - the Rooms page's Deactivate and retirement dialog, Delete for Admin only on both pages;
+    - UAT's residue removed: 76 bookings, 34 rooms, 125 events; both round-4 D suites now tidy up.
+  - **Results:** `run-final-review.mjs` scored 820/820 on two clean passes, with 61 checks in 3a, first time; the
+    blocking watcher was silent. The round-4 net was 212/212, recruitment 59/59, the templates probe 30/30 and
+    `run-lane-n` 109/115 (section J, #40). No request answered 500.
+
+  Next: 3b — approval on the workflow engine, the booking notices (in-app and email), the hourly lapse and completion,
+  no-show.
