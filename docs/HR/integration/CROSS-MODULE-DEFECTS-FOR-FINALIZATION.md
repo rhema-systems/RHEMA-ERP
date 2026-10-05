@@ -2245,6 +2245,64 @@ HR offers a read-only availability read (approved leave and staff travel) for th
 for a Fleet-owned read of a trip's incidents: travel reads the `FleetIncidents` table directly today, because Fleet's
 reads need `MaintenanceRead`.
 
+## 39. Platform (identity) — the HR/Identity reconciliation sweep fails, every run, for anyone whose manager has two logins (2026-10-05)
+
+**Owner:** Platform, identity (`src/ErpSystem.Api/Services/Identity/HrIdentityReconciliationService.cs`, run every 5
+minutes by `HrIdentityReconciliationBackgroundService`; arrived with master's #31). **Severity:** low to medium. The
+sweep goes on past a failure, but the person it fails on is never reconciled. Each failure is logged as an error,
+which buries real errors in the API log. **Found:** HR's company-schedule final closure, lane 1d, reading the API log
+after a harness run.
+
+### What is broken
+
+1. **One login per employee is assumed, and a second login breaks the people that employee manages.**
+   `ReconcileCandidateAsync` looks up the login of the candidate's manager with `ResolveEligibleUserForEmployeeAsync`
+   (l.1054). It reads the manager's active logins with `SingleOrDefaultAsync`. A manager with two active logins
+   throws "Sequence contains more than one element", so each person reporting to them fails. The failure happens
+   again in every run: nothing about the data changes between runs.
+2. **A person removed while a run is under way is reported as a failure.** A run lists its candidates first (l.75–91:
+   logins joined to employees not deleted). It then reconciles them one by one, re-reading each employee with
+   `SingleAsync` (l.472). On UAT a run takes about five minutes for about 3,800 logins. An employee soft-deleted in
+   that window throws "Sequence contains no elements". The person is then recorded as *Failed, eligible for retry*,
+   when they are simply no longer a candidate.
+3. **A run interrupted by a restart stays *Running* for ever.** The `catch` blocks only handle exceptions, so a run
+   whose process stops never reaches a final state. The next 5-minute window starts a new run under a new key, so
+   nothing is blocked. But the runs list keeps one "Running" row for each restart.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, from `HrIdentityReconciliationItems` and `HrIdentityReconciliationRuns`.
+
+**Item 1: 261 failures, all one login.** Every one is `property.manager` (employee TDC/00052, Danquah), from the
+first run after the rebuild (2026-09-29 12:48) to the last (2026-10-05 01:15). Danquah's manager, Stephen Boateng
+(TDC/00007), has two active logins: the demo personas `head.estate` and `authorised.signatory`. He is the only
+employee on UAT with more than one active login.
+
+**Item 2: 273 failures, one per login.** Every one is a harness login: 272 from the travel closure's suites (`e2e_tv_*`,
+from 2026-10-03) and one from the company-schedule suite (`csv_finUK55S6H`, 2026-10-05 01:15:49). Each was caught
+while its suite's teardown deleted the employee.
+
+**Item 3: 57 of 268 runs never completed.** Each was left by an API stop: UAT's API is started and stopped around
+each harness session.
+
+### What it blocks
+
+- **Reconciliation of anyone whose manager has a second login.** On UAT that is one person. In TDC's data it is
+  every report of anyone given a second account, such as a persona or an admin login.
+- **Reading the API log.** Every 5-minute run adds these errors beside the real ones.
+
+### What a fix needs
+
+- **Item 1:** decide whether an employee may have more than one active login.
+  - If yes: resolve the manager's login by a stated rule, for example the most recently signed-in, or the one marked
+    primary.
+  - If no: refuse the second link where logins are linked to employees, and report the existing pairs for an
+    administrator to resolve.
+- **Item 2:** re-read with `SingleOrDefaultAsync`, and record a candidate whose employee or login has gone as
+  *skipped* rather than *failed*.
+- **Item 3:** on start, mark runs left *Running* by an earlier process as *Interrupted*, or give each run a lease
+  that expires.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

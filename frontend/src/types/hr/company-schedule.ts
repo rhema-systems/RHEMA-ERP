@@ -106,6 +106,35 @@ export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
 export const CLOSURE_TYPES: ClosureType[] = [
   'FullClosure', 'PartialClosure', 'DepartmentClosure', 'StationClosure',
 ];
+
+/**
+ * What each closure type covers (company-schedule final closure, D-1). The type decides the scope:
+ * the server refuses a site on a full closure, a site closure without a site, and so on.
+ * `DepartmentClosure` is the wire name of an organisation-unit closure — the unit replaced the
+ * department (D-5), the enum value stayed.
+ */
+export const CLOSURE_TYPE_OPTIONS: { value: ClosureType; label: string; hint: string }[] = [
+  {
+    value: 'FullClosure',
+    label: 'Whole company',
+    hint: 'Everybody is off. Not a working day, so leave over it is not charged.',
+  },
+  {
+    value: 'StationClosure',
+    label: 'One site',
+    hint: 'The staff based at the site are off. Not a working day for them.',
+  },
+  {
+    value: 'DepartmentClosure',
+    label: 'One organisation unit',
+    hint: 'The unit and every unit beneath it are off, wherever their staff sit. Not a working day for them.',
+  },
+  {
+    value: 'PartialClosure',
+    label: 'Reduced operations',
+    hint: 'Open with reduced service, for the whole company, one site or one unit. Still a working day.',
+  },
+];
 export const FISCAL_YEAR_STATUSES: FiscalYearStatus[] = ['Active', 'Closed', 'Archived'];
 export const FISCAL_PERIOD_TYPES: FiscalPeriodType[] = ['Quarter', 'Month', 'SemiAnnual'];
 
@@ -669,32 +698,91 @@ export interface BusinessClosure extends AuditFields {
   endDate: string;
   type: ClosureType;
   typeName: string;
+  /** Derived by the server from the type: true for every type but a partial closure with a site or unit. */
   affectsAllStations: boolean;
   locationId?: string | null;
   locationName?: string | null;
+  /** ⚠ Retired (D-5). Still on the read; no row on any database carries one (L0-1). */
   departmentId?: string | null;
   departmentName?: string | null;
+  /** The unit an organisation-unit closure covers, with everything beneath it. */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  /** Who it covers, as a sentence for the register: "Whole company", "Site: Tema", "Unit: Finance and everything beneath it". */
+  scopeDescription: string;
+  /** Falls on the same month and day every later year. */
+  recursAnnually: boolean;
   isPaidClosure: boolean;
+  /** Derived by the server from the type: only a partial closure is a working day. */
   countsAsWorkingDay: boolean;
   announcementDate: string;
   announcedById?: string | null;
   announcedByName?: string | null;
   communicationNotes?: string | null;
+  /** What the person saving should know that did not stop the save. Create and update only. */
+  warnings?: string[];
+  /** The granted leave this save recounted. Create and update only; null on a read. */
+  leaveRecharge?: LeaveRechargeResult | null;
 }
 
-/** ⚠ No `announcedById` — the API takes the announcer from the token. */
+/**
+ * ⚠ No `announcedById` — the API takes the announcer from the token. No `departmentId` either: the
+ * server refuses one (D-5), so the form cannot send it.
+ */
 export interface CreateBusinessClosure {
   title: string;
   reason?: string | null;
   startDate: string;
   endDate: string;
   type: ClosureType;
+  /** Read only for a partial closure; every other type sets it from the type. */
   affectsAllStations: boolean;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  recursAnnually: boolean;
   isPaidClosure: boolean;
+  /** Ignored: the server sets it from the type. Sent so the shape matches the DTO. */
   countsAsWorkingDay: boolean;
   communicationNotes?: string | null;
+}
+
+/**
+ * What recounting granted leave did after the days off under it changed — a closure or a public
+ * holiday added, moved or removed (lane 1c). Mirrors `LeaveRechargeResultDto`. Only requests whose
+ * count changed are listed.
+ */
+export interface LeaveRechargeResult {
+  dryRun: boolean;
+  /** Recounted: the days, the balance and the attendance changed, and the employee was told. */
+  recharged: LeaveRechargeLine[];
+  /** In a finished leave year, so left as charged for HR to adjust by hand. */
+  notRecharged: LeaveRechargeLine[];
+  /** Requests the recount could not save, each with why. */
+  failures: string[];
+}
+
+export interface LeaveRechargeLine {
+  requestId: string;
+  requestNumber: string;
+  employeeId: string;
+  employeeName: string;
+  leaveTypeName: string;
+  startDate: string;
+  endDate: string;
+  oldDays: number;
+  newDays: number;
+}
+
+/** What announcing a closure would say, and to how many — mirrors `ClosureAnnouncementPreviewDto`. */
+export interface ClosureAnnouncementPreview {
+  closureId: string;
+  /** Active staff the closure covers: the announcement's reach. */
+  staffCovered: number;
+  /** False when nobody is covered — show "no staff to tell", not the button. */
+  canAnnounce: boolean;
+  title: string;
+  summary: string;
+  body: string;
 }
 
 export interface UpdateBusinessClosure extends CreateBusinessClosure {

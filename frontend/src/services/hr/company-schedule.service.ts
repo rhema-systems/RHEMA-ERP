@@ -1,5 +1,6 @@
 import { apiService } from '../api.service';
 import type { PagedResult } from '@/types/hr/common';
+import type { HrAnnouncement } from './announcements.service';
 import type {
   BookingStatus,
   BusinessClosure,
@@ -7,6 +8,7 @@ import type {
   CancelRoomBooking,
   CheckOutEvent,
   CloseFiscalPeriod,
+  ClosureAnnouncementPreview,
   ClosureType,
   CompanyEvent,
   CompanyEventDetail,
@@ -35,6 +37,7 @@ import type {
   FiscalYear,
   FiscalYearDetail,
   FiscalYearStatus,
+  LeaveRechargeResult,
   MarkEventAttendance,
   MeetingRoom,
   MeetingRoomSummary,
@@ -431,12 +434,16 @@ class BusinessClosureService {
     return apiService.get<BusinessClosure[]>(`${this.baseUrl}/closures/upcoming`, { daysAhead });
   }
 
-  /** Whether a given date is closed for the whole company, or for one site/department. */
-  isClosureDate(date: string, locationId?: string, departmentId?: string): Promise<boolean> {
+  /**
+   * Whether a date is a day off: a company-wide closure, or one of the site's or the unit's (the unit's
+   * own or an ancestor's). A partial closure is a working day, so it never answers true. With neither
+   * a site nor a unit, company-wide closures only.
+   */
+  isClosureDate(date: string, locationId?: string, organizationUnitId?: string): Promise<boolean> {
     return apiService.get<boolean>(`${this.baseUrl}/closures/is-closure-date`, {
       date,
       ...(locationId ? { locationId } : {}),
-      ...(departmentId ? { departmentId } : {}),
+      ...(organizationUnitId ? { organizationUnitId } : {}),
     });
   }
 
@@ -448,8 +455,22 @@ class BusinessClosureService {
     return apiService.put<BusinessClosure>(`${this.baseUrl}/closures/${id}`, { ...data, id });
   }
 
-  remove(id: string): Promise<void> {
-    return apiService.delete<void>(`${this.baseUrl}/closures/${id}`);
+  /** Company Admin. Answers the leave the removal recounted (the days are working days again). */
+  remove(id: string): Promise<LeaveRechargeResult> {
+    return apiService.delete<LeaveRechargeResult>(`${this.baseUrl}/closures/${id}`);
+  }
+
+  /** What announcing the closure would say, and to how many active staff. Saves nothing. */
+  getAnnouncementPreview(id: string): Promise<ClosureAnnouncementPreview> {
+    return apiService.get<ClosureAnnouncementPreview>(`${this.baseUrl}/closures/${id}/announcement`);
+  }
+
+  /**
+   * Publishes the announcement to the staff the closure covers — HR's click, never a save's side
+   * effect (L1-1). Refused (422) when the closure is over or covers nobody.
+   */
+  announce(id: string): Promise<HrAnnouncement> {
+    return apiService.post<HrAnnouncement>(`${this.baseUrl}/closures/${id}/announce`);
   }
 }
 

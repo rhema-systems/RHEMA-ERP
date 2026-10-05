@@ -31,8 +31,9 @@ has not started (the user: "don't start the actual development yet").
    contains. D-15 was settled at lane 1's source check (§ 1c). **Six remain pending the user** —
    D-10, D-11, D-13, D-14, D-16 and D-18 — each
    needed before the lanes § 2 lists against it; none blocks lane 0.
-2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** **Lane 1 is under way:** slices
-   1a–1d are built and proved (2026-10-05), and **1e, the closures screen, is next** (lane 1 State). *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
+   slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Next: lane 2 (events).** Its
+   source check comes first, and it waits on four of the pending decisions: D-10, D-11, D-14 and D-16. *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -162,7 +163,7 @@ lane 1's source check (✅ below).** The other six are pending; each is needed b
 | Lane | Scope | Waits on | Status | Proof |
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
-| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ◐ 1a–1d built and proved (134/134 ×2; 1d's real publish not yet proved); 1e to come | `run-final-review.mjs` closures block |
+| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
@@ -391,8 +392,8 @@ it was applied to UAT (§ 6).
       after `StartDate`; site and unit must exist in the tenant; an overlapping closure of the same
       scope refused with a sentence naming the other (C-39), recurrence included; a closure over a
       public holiday warned. *✅ 1a — and a scope with nobody in it warned too.*
-- [ ] **Scope through the existing audience resolver** *(✅ 1a for `IsClosureDateAsync` and
-      `ClosureCommitmentSource`; leave is 1b)* (*review: the first draft invented a new scope
+- [x] **Scope through the existing audience resolver** *(✅ 1a for `IsClosureDateAsync` and
+      `ClosureCommitmentSource`; ✅ 1b for leave; ✅ 1d for the announcement's audience)* (*review: the first draft invented a new scope
       helper*). A closure's scope is an audience rule — `AllEmployees`, `Location` or
       `OrganizationUnit`, which already reaches the unit's subtree — evaluated with
       `IHrAudienceResolver.IncludesAsync` / `ResolveAsync`. ⚠ A `Location` rule matches one location
@@ -436,14 +437,15 @@ it was applied to UAT (§ 6).
       (`integration/handoffs/HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md` § 2.1 and the § 3 table), *not*
       a new entry in the cross-module register. *✅ 1d — `IHrClosureCalendar.GetClosureDaysAsync` and
       `GET closures/employee-days`; the hand-off's § 2.1 paragraph and § 3 item 4.*
-- [ ] **(L1-1, F-34) Announce on HR's click, not on save.** *✅ 1d for the preview and the announce;
-      the button is 1e. The real publish is not yet proved on UAT (see 1d's proof).* Saving a non-working closure offers
+- [x] **(L1-1, F-34) Announce on HR's click, not on save.** *✅ 1d for the preview and the announce;
+      ✅ 1e for the button and the real publish, proved on a unit of the suite's own (1e's proof).* Saving a non-working closure offers
       "Announce to the N staff it covers". It prepares an `HrAnnouncement` addressed by the closure's
       audience rule and worded from it (title, dates, whether staff are paid), and publishes it when HR
       confirms. Publishing raises the in-app topic, and email where the topic has it on. A scope that
       reaches nobody shows "no staff to tell" instead of the button and never fails the closure's
       save.
-- [ ] **(R4-10A.4, the holiday half — in no lane before the review)** The diary's and the calendar's
+- [x] **(R4-10A.4, the holiday half — in no lane before the review)** *Lane 1's part ✅ 1a; the
+      calendar's part is handed to lane 7, which now names it.* The diary's and the calendar's
       holidays come from `IHrWorkingDayCalculator` — the default calendar, active, mandatory and
       substitute days — not from every calendar. *✅ 1a for the diaries and the clash check, through
       the calculator's new `GetHolidaysAsync`, which names each day; the calendar is lane 7.*
@@ -452,12 +454,14 @@ it was applied to UAT (§ 6).
       marked half closed. Leave, the statutory clocks and travel's posting now read closures;
       attendance's own working-day builder is still open. The cross-module register is for other
       teams' defects, and attendance is HR's own.*
-- [ ] (D-9, C-38) `RecursAnnually`: the resolver path, `is-closure-date`, the diary source, the leave
+- [x] (D-9, C-38) *✅ 1a rules, range and upcoming reads, `is-closure-date` and the diary source;
+      ✅ 1b the leave reader; ✅ 1e the form's switch and the register's "Every year"; the calendar is
+      handed to lane 7, which now names it.* `RecursAnnually`: the resolver path, `is-closure-date`, the diary source, the leave
       reader and the calendar all treat a recurring closure as covering the same month and day in
       every later year; the form has the switch ("Recurs every year — the year-end stocktake is typed
       once"); the register says "Every year". *✅ 1a for the rules, the range and upcoming reads,
       `is-closure-date` and the diary source; the leave reader is 1b, the form 1e, the calendar lane 7.*
-- [ ] `closures/page.tsx`: the type decides what renders (Full → nothing; Site → the site select,
+- [x] *✅ 1e — see the State; not yet walked in a browser (lane 5's walk).* `closures/page.tsx`: the type decides what renders (Full → nothing; Site → the site select,
       required; Organisation unit → `OrganizationUnitPickerField`, required; Partial → exactly ONE of
       the whole company, a site or a unit, and the working-day switch shown on and locked, described).
       *1a: a partial closure takes one scope, not a site and a unit together, because the audience
@@ -466,7 +470,8 @@ it was applied to UAT (§ 6).
       `departmentId` on the wire. No legacy department rows exist (L0-1), so nothing is shown for them;
       once lanes 1 and 2 read only the unit, a later migration drops `DepartmentId` from both tables.
 
-**State (2026-10-05): slices 1a–1d built and proved; 1e to come.** Slices: **1a** closure rules and
+**State (2026-10-05): ✅ lane 1 built and proved, slices 1a–1e.** It is not yet walked in a browser;
+that is lane 5's walk. Slices: **1a** closure rules and
 scope · **1b** leave counts closures · **1c** the re-charge routine for closures and holidays · **1d**
 announce on HR's click, payroll reader and hand-off · **1e** the closures screen.
 
@@ -653,7 +658,7 @@ not the 400 the first suite draft expected.
   - **The preview:** a unit with nobody in it reaches 0 and offers no announcement. Announcing it is
     refused, saying why. So is announcing a closure that is over. A live closure's preview is titled
     as a closure, says who, when and why, says staff are paid, and reaches the unit's staff.
-- **⚠ Not proved: the real publish.** The suite announces for real only when the closure reaches
+- **⚠ Not proved in 1d: the real publish** *(proved in 1e, on a unit of the suite's own)*. The suite announces for real only when the closure reaches
   nobody but the run's own people. The fixture unit reaches 44 active people, so it skipped. That unit
   is harness residue: `A25Ver Unit S53H0TG`, made by a harness on 2026-10-01. Its 52 employees are all
   harness-made, the round-4 suites' among them (R4-2.1). The publish itself is
@@ -674,7 +679,75 @@ not the 400 the first suite draft expected.
       ("Sequence contains no elements");
     - one is UAT data: `property.manager` and employee TDC/00052 ("more than one element").
 
-  Not yet in `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`.
+  *Logged 2026-10-05 as cross-module **#39**, on the user's go.* The first error recurs: `property.manager` has failed
+  in every run since the rebuild, 261 times, because that employee's manager has two active demo logins.
+
+*1e — what was built (2026-10-05):* the closures screen,
+`frontend/src/app/administration/hr/company-schedule/closures/page.tsx`. Frontend only; no backend
+change.
+- **"What closes" decides the form.** The choices are whole company, one site, one organisation unit,
+  or reduced operations, each with a line saying what it covers:
+  - a site closure shows the site select, required. Its note says a region covers nobody (C-16, lane 5).
+  - a unit closure shows `OrganizationUnitPickerField`, required.
+  - reduced operations asks for exactly one of the whole company, a site or a unit.
+
+  The form sends only the scope the kind uses, so a site left over from an earlier choice is not sent
+  and refused. `departmentId` is gone from the wire: the server refuses it, so today's screen failed
+  whenever a department was picked.
+- **"A working day" is shown locked**, with the reason: off for a closure (leave over it is not
+  charged), on for reduced operations. The server sets it from the type.
+- **"Recurs every year"** is a switch. The register shows "Every year" under the dates, and a "Covers"
+  column with the server's `scopeDescription`.
+- **After a save or a removal, a panel above the list keeps the result** until dismissed:
+  - the warnings;
+  - the leave recounted (request, person, type, dates, old → new days);
+  - the leave left for HR in a finished year;
+  - any failures.
+
+  After saving a closure that is a day off and not over, the panel offers "Announce to the N staff it
+  covers", with N from the preview. It says "nobody to tell" when nobody is covered.
+- **Announcing** (`ClosureAnnounceDialog`) shows the reach and the exact title, summary and body, as
+  text. It publishes only on its button. Each row's menu has "Announce to staff…" until the closure
+  is over.
+- **Also:**
+  - the delete answers the recount, which the panel shows;
+  - `is-closure-date` takes `organizationUnitId` on the client too;
+  - the HR landing page's closure list shows the scope sentence; it showed "—" for unit closures;
+  - the "Announced by" column is renamed "Recorded by", which is what it holds.
+
+*Proof:*
+- Type-check: `tsconfig.company-schedule.json` (new, scoped to the module), **0 errors**; the four
+  touched files are confirmed in its file list. ESLint on the touched files: clean, after three
+  non-null assertions were replaced.
+- `run-final-review.mjs` blocks 1a–1e: **156/156 on two clean passes.** 1e has 22 assertions:
+  - **The screen's payloads**, one per kind, built the way the form builds them. Each is saved with
+    the scope sentence the list will show, and is a working day only for reduced operations.
+    Reduced operations at one site and at one unit are new on the screen. A reduced-operations day
+    stays "not a closure date" at its site.
+  - **The real publish (L1-1),** on a unit and a post the run makes beneath P, holding only H, the
+    HR actor:
+    - the preview reaches exactly 1;
+    - the announcement is published, to 1, addressed by that unit, in the preview's words, and shown
+      until the day after the closure;
+    - it is in H's own announcements (`/api/employee-portal/announcements`);
+    - H's login is told in the app, and nobody else is told.
+- **The suite changed:**
+  - H is minted into the run's own unit. On UAT no unit can be made outside P: P is the root of
+    TDC's structure, and C's unit "General" is the only unit of a second, one-level structure. No
+    earlier assertion reads H's unit.
+  - Clean-up deletes the post and the unit after the employees, and archives as the HR login. The
+    admin login has no employee record and is refused (403), which is how the first full run left
+    its announcement live; the next run's clean-up archived it.
+  - `tools/sql.mjs` reads retry twice and report sqlcmd's own words: one read failed once in 1c,
+    then answered at once by hand.
+- Regression, the round-4 net, **201/201 twice** (lane close).
+- In SQL afterwards: each run's announcement notified only that run's login, in the app, with no
+  email. All three are archived. No `CSF` unit, post or employee is left, and no harness login is on;
+  9 leave types; the one live closure is the stocktake.
+- API log: only #23, #39 and the mail failures. One `/health` answered 500 on the API's first second,
+  and 200 four seconds later.
+- **Not done: a browser walk of the screen** (lane 5). The payload checks build the form's shape in
+  the suite; they do not drive the page.
 
 ### Lane 2 — Events (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
 
@@ -913,6 +986,11 @@ not the 400 the first suite draft expected.
       rules allow them (lane 2, D-16) and the closures that cover them (lane 1), plus calendar milestones
       and holidays, with their own diary (leave, travel, interviews, training, bookings) overlaid as
       Mine. **Closures and holidays appear once**, in the company layer, not again in Mine.
+      *Handed over from lane 1 (2026-10-05), whose other readers already do both:*
+      - holidays come from `IHrWorkingDayCalculator.GetHolidaysAsync`: the default calendar, active,
+        mandatory and substitute days, each named. This is R4-10A.4's calendar half.
+      - closures come through `IHrClosureCalendar`, and a closure that recurs every year is drawn on
+        every later year. This is C-38's calendar half.
 - [ ] **A staff view of an event** (*review: staff clicking through would otherwise land on HR-only
       pages and be refused*). `GET CompanySchedule/calendar/events/{id}` for anyone in the event's
       audience: name, when, where, link, organiser, and the caller's own invitation and answer; the
@@ -1176,3 +1254,18 @@ built API, so no web host and no seeders).
   - The log showed two errors from master's identity reconciliation sweep, not caused by 1d.
 
   Next: 1e, the closures screen.
+- **2026-10-05, later** — **Lane 1 done: slice 1e built and proved** (the closures screen; lane 1 State).
+  The user's two decisions:
+  - prove the real publish on a unit of the suite's own;
+  - log the reconciliation errors. They are cross-module **#39**: the sweep fails on `property.manager`
+    in every run, because that employee's manager has two demo logins.
+
+  Results:
+  - `run-final-review.mjs` scored 156/156 on two clean passes. The real announcement reached the
+    run's one login and nobody else.
+  - The round-4 net scored 201/201 twice, for the lane close.
+  - The screen type-checks clean in a new scoped config.
+
+  The calendar halves of R4-10A.4 and C-38 are handed to lane 7 in writing.
+
+  Next: lane 2. Its source check comes first, and it waits on D-10, D-11, D-14 and D-16.

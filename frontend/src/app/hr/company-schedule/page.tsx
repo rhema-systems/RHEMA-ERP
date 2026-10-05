@@ -154,7 +154,7 @@ export default function CompanySchedulePage() {
                         {c.endDate.slice(0, 10) !== c.startDate.slice(0, 10)
                           ? ` → ${c.endDate.slice(0, 10)}`
                           : ''}{' '}
-                        · {c.affectsAllStations ? 'Whole company' : c.locationName || c.departmentName || '—'}
+                        · {c.scopeDescription || '—'}
                       </p>
                     </div>
                     <StatusBadge status={c.isPaidClosure ? 'Paid' : 'Unpaid'} />

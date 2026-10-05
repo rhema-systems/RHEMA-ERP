@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/company-schedule.ts",
+    "src/services/hr/company-schedule.service.ts",
+    "src/services/hr/announcements.service.ts",
+    "src/app/hr/company-schedule/**/*.tsx",
+    "src/app/administration/hr/company-schedule/**/*.tsx",
+    "src/components/hr/company-schedule/**/*.ts",
+    "src/components/hr/company-schedule/**/*.tsx"
+  ]
+}
