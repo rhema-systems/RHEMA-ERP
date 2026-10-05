@@ -28,7 +28,8 @@ export default function NewCompanyEventPage() {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
       toast({
         title: 'Event scheduled',
-        description: `${created.eventNumber} — ${created.eventName}.`,
+        // An audience that reaches nobody is said, not refused (lane 2c, D-16).
+        description: [`${created.eventNumber} — ${created.eventName}.`, ...(created.warnings ?? []).map((w) => `⚠ ${w}`)].join(' '),
       });
       router.push(`/hr/company-schedule/events/${created.id}`);
     } catch (error: any) {

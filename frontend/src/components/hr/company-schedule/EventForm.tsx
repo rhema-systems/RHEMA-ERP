@@ -24,6 +24,7 @@ import { locationService } from '@/services/hr/location.service';
 import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
+import { companyEventService } from '@/services/hr/company-schedule.service';
 import {
   EVENT_CATEGORIES_FOR_NEW,
   EVENT_EDITABLE_STATUSES,
@@ -38,6 +39,8 @@ import type {
   CompanyEvent,
   CreateCompanyEvent,
   EventStatus,
+  EventVisibility,
+  ParticipantScope,
   UpdateCompanyEvent,
 } from '@/types/hr/company-schedule';
 
@@ -410,7 +413,14 @@ export function EventFormFields({
             <SelectField form={form} name="type" label="Type" required options={opts(EVENT_TYPES)} />
           </FieldRow>
           <FieldRow>
-            <SelectField form={form} name="priority" label="Priority" required options={opts(EVENT_PRIORITIES)} />
+            <SelectField
+              form={form}
+              name="priority"
+              label="Priority"
+              required
+              options={opts(EVENT_PRIORITIES)}
+              description="A label for HR's own sorting; it changes nothing about the event."
+            />
             {mode === 'edit' && (
               <SelectField
                 form={form}
@@ -521,7 +531,14 @@ export function EventFormFields({
       <Card>
         <CardHeader><CardTitle>Who</CardTitle></CardHeader>
         <CardContent className="space-y-4">
-          <SelectField form={form} name="scope" label="Audience" required options={opts(PARTICIPANT_SCOPES)} />
+          <SelectField
+            form={form}
+            name="scope"
+            label="Audience"
+            required
+            options={opts(PARTICIPANT_SCOPES)}
+            description="Who the event is for: all staff; a unit and the units beneath it (Department); management — unit heads and line managers; or only the people you invite (Selected, External only)."
+          />
           <OrganizationUnitPickerField
             form={form}
             name="organizationUnitId"
@@ -537,15 +554,32 @@ export function EventFormFields({
           />
           <FieldRow>
             <NumberField form={form} name="estimatedAttendees" label="Estimated attendees" />
-            <SelectField form={form} name="visibility" label="Visibility" options={opts(EVENT_VISIBILITIES)} />
+            <SelectField
+              form={form}
+              name="visibility"
+              label="Visibility"
+              options={opts(EVENT_VISIBILITIES)}
+              description="Public follows the audience. Department narrows it to the unit, Management to management. Private and Confidential: the guests and the organiser only."
+            />
           </FieldRow>
+          <AudienceLine scope={scope} visibility={form.watch('visibility')} unitId={form.watch('organizationUnitId')} />
           <SwitchField form={form} name="requiresRsvp" label="Requires RSVP" />
           {requiresRsvp && (
             <DateTimeField form={form} name="rsvpDeadline" label="RSVP deadline" />
           )}
           <FieldRow>
-            <SwitchField form={form} name="showOnCompanyCalendar" label="Show on company calendar" />
-            <SwitchField form={form} name="showOnIntranet" label="Show on intranet" />
+            <SwitchField
+              form={form}
+              name="showOnCompanyCalendar"
+              label="Show on company calendar"
+              description="On the company calendar, and in the diary of everyone it is for — who may then look busy to an interview panel."
+            />
+            <SwitchField
+              form={form}
+              name="showOnIntranet"
+              label="Show on intranet"
+              description="Lets HR announce it to everyone it is for, from the event page, once it is approved. Nothing is sent on save."
+            />
           </FieldRow>
         </CardContent>
       </Card>
@@ -584,6 +618,31 @@ export function EventFormFields({
           <TextareaField form={form} name="additionalNotes" label="Notes" />
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Who the event reaches, as the server counts it, before it is saved (lane 2c, D-16) — and a warning
+ * when that is nobody (management with no unit heads or line managers named, an empty unit).
+ */
+function AudienceLine({ scope, visibility, unitId }: { scope: string; visibility: string; unitId?: string | null }) {
+  const { data } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'events', 'audience-preview', scope, visibility, unitId ?? ''],
+    queryFn: () =>
+      companyEventService.previewAudience(scope as ParticipantScope, visibility as EventVisibility, unitId || null),
+    enabled: !!scope && !!visibility,
+  });
+  if (!data) return null;
+  return (
+    <div className="space-y-1 rounded-md border bg-muted/40 p-3 text-sm">
+      <p>
+        <span className="font-medium">For:</span> {data.audience}
+        {!data.guestListOnly && (
+          <span className="text-muted-foreground"> — {data.reach} active staff</span>
+        )}
+      </p>
+      {data.warning && <p className="text-amber-700 dark:text-amber-300">⚠ {data.warning}</p>}
     </div>
   );
 }

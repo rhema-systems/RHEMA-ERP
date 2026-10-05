@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   Loader2,
   MailQuestion,
+  Megaphone,
   Pencil,
   Trash2,
   XCircle,
@@ -43,6 +44,7 @@ import { toIsoInstant } from '@/components/hr/employee/tabs/fields';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
+import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
 import type { CompanyEventChange } from '@/types/hr/company-schedule';
 
 /** What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a). */
@@ -109,6 +111,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
   const [completeOpen, setCompleteOpen] = useState(false);
   const [complete, setComplete] = useState({ actualAttendance: '', outcomeSummary: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [announceOpen, setAnnounceOpen] = useState(false);
 
   const detailKey = ['hr', 'company-schedule', 'events', id, 'detail'];
   const { data: event, isLoading } = useQuery({
@@ -276,6 +279,12 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
                 </Button>
               </>
             )}
+            {/* Lane 2c: "Show on intranet" marks it to announce; HR sends it here, once it is approved. */}
+            {open && event.showOnIntranet && (
+              <Button variant="outline" onClick={() => setAnnounceOpen(true)}>
+                <Megaphone className="mr-2 h-4 w-4" /> Announce on the intranet
+              </Button>
+            )}
             {/* A cancelled or completed event can no longer be edited (lane 2a). */}
             {open && (
               <Button variant="outline" onClick={() => router.push(`/hr/company-schedule/events/${id}/edit`)}>
@@ -316,6 +325,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <Detail label="Site">{event.locationName || '—'}</Detail>
           <Detail label="Venue">{event.venueName || '—'}</Detail>
           <Detail label="Organisation unit">{event.organizationUnitName || event.departmentName || '—'}</Detail>
+          <Detail label="For">{event.audienceDescription || '—'}</Detail>
 
           {event.locationType !== 'OnSite' && (
             <Detail label="Meeting link">
@@ -476,6 +486,8 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <EventAnnounceDialog eventId={id} eventName={event.eventName} open={announceOpen} onOpenChange={setAnnounceOpen} />
 
       {/* Reschedule */}
       <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>

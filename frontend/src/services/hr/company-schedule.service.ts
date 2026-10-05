@@ -13,6 +13,10 @@ import type {
   CompanyEvent,
   CompanyEventChange,
   CompanyEventDetail,
+  EventAnnouncementPreview,
+  EventAudiencePreview,
+  EventVisibility,
+  ParticipantScope,
   CompanyEventSummary,
   CompanyMilestone,
   CompanyScheduleReminderRun,
@@ -155,6 +159,25 @@ class CompanyEventService {
    */
   approve(id: string, comments?: string | null): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/events/${id}/approve`, { comments: comments ?? null });
+  }
+
+  /** Who an event with this scope and visibility would be for, and how many — before saving (lane 2c, D-16). */
+  previewAudience(scope: ParticipantScope, visibility: EventVisibility, organizationUnitId?: string | null): Promise<EventAudiencePreview> {
+    return apiService.get<EventAudiencePreview>(`${this.baseUrl}/events/audience-preview`, {
+      scope,
+      visibility,
+      ...(organizationUnitId ? { organizationUnitId } : {}),
+    });
+  }
+
+  /** What announcing the event on the intranet would say, and to how many. Saves nothing (lane 2c). */
+  getAnnouncementPreview(id: string): Promise<EventAnnouncementPreview> {
+    return apiService.get<EventAnnouncementPreview>(`${this.baseUrl}/events/${id}/announcement`);
+  }
+
+  /** Announces the event on the intranet to its audience — HR's click (lane 2c). */
+  announce(id: string): Promise<HrAnnouncement> {
+    return apiService.post<HrAnnouncement>(`${this.baseUrl}/events/${id}/announce`);
   }
 
   /** Rejects an event awaiting approval: it is cancelled with the reason, its room bookings with it (lane 2b). */

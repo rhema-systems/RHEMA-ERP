@@ -1278,13 +1278,12 @@ public sealed class OrientationEnrollmentTriggerService : IOrientationEnrollment
                 break;
 
             case OrientationAudiencePopulation.Management:
-                var heads = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
-                    .Where(u => u.TenantId == tenantId && !u.IsDeleted && u.HeadEmployeeId != null)
-                    .Select(u => u.HeadEmployeeId!.Value).ToListAsync(cancellationToken);
-                var managers = await employees
-                    .Where(e => e.ManagerId != null)
-                    .Select(e => e.ManagerId!.Value).Distinct().ToListAsync(cancellationToken);
-                set = heads.Concat(managers).ToHashSet();
+                // One definition across HR (company-schedule final closure D-16): the audience resolver's
+                // Management rule — unit heads and line managers, active. It was computed here, the same
+                // two sets, without dropping a head or manager who had left.
+                set = (await _audienceResolver.ResolveForTenantAsync(
+                        tenantId, [new HrAudienceRule(HrAudienceTargetType.Management, null, false)], cancellationToken))
+                    .ToHashSet();
                 break;
 
             case OrientationAudiencePopulation.Contractors:

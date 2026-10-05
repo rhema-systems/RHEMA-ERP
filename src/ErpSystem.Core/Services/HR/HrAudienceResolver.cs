@@ -58,6 +58,22 @@ public class HrAudienceResolver : IHrAudienceResolver
         IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default)
         => (await ResolveAsync(rules, cancellationToken)).Count;
 
+    public async Task<IReadOnlySet<Guid>> IncludedAmongForTenantAsync(
+        Guid tenantId, IEnumerable<HrAudienceRule> rules, IEnumerable<Guid> employeeIds,
+        CancellationToken cancellationToken = default)
+    {
+        var all = rules?.ToList() ?? [];
+        var among = employeeIds?.Where(id => id != Guid.Empty).Distinct().ToList() ?? [];
+        if (all.Count == 0 || among.Count == 0 || tenantId == Guid.Empty) return new HashSet<Guid>();
+
+        var included = new HashSet<Guid>();
+        foreach (var rule in all.Where(r => !r.IsExclusion))
+            included.UnionWith(await MatchAsync(tenantId, rule, cancellationToken, among));
+        foreach (var rule in all.Where(r => r.IsExclusion))
+            included.ExceptWith(await MatchAsync(tenantId, rule, cancellationToken, among));
+        return included;
+    }
+
     public async Task<bool> IncludesAsync(
         IEnumerable<HrAudienceRule> rules, Guid employeeId, CancellationToken cancellationToken = default)
     {
@@ -105,6 +121,8 @@ public class HrAudienceResolver : IHrAudienceResolver
             // target is their unit or any ancestor of it.
             HrAudienceTargetType.OrganizationUnit =>
                 rule.TargetId is { } u && (await UnitChainAsync()).Contains(u),
+            HrAudienceTargetType.Management =>
+                await Management(tenantId).AnyAsync(id => id == employee.Id, cancellationToken),
             _ => false,
         };
 
@@ -184,15 +202,43 @@ public class HrAudienceResolver : IHrAudienceResolver
             .GetQueryable()
             .Where(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive);
 
+    /// <summary>
+    /// Management (company-schedule D-16): the ids of everyone who heads a live unit or is named as an
+    /// active employee's line manager — still to be narrowed to active employees by the caller.
+    /// </summary>
+    /// <remarks>
+    /// Orientation's Management population was the same two sets, computed in its own service; it reads
+    /// this rule now, so the word means one thing across HR.
+    /// </remarks>
+    private IQueryable<Guid> Management(Guid tenantId)
+    {
+        var heads = _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .Where(u => u.TenantId == tenantId && !u.IsDeleted && u.HeadEmployeeId != null)
+            .Select(u => u.HeadEmployeeId!.Value);
+        var managers = Employees(tenantId)
+            .Where(e => e.ManagerId != null)
+            .Select(e => e.ManagerId!.Value);
+        return Employees(tenantId)
+            .Where(e => heads.Contains(e.Id) || managers.Contains(e.Id))
+            .Select(e => e.Id);
+    }
+
     private async Task<IEnumerable<Guid>> MatchAsync(
-        Guid tenantId, HrAudienceRule rule, CancellationToken ct)
+        Guid tenantId, HrAudienceRule rule, CancellationToken ct, IReadOnlyCollection<Guid>? among = null)
     {
         var employees = Employees(tenantId);
+        // Narrowed in the query when the caller only asks about some people (IncludedAmongForTenantAsync):
+        // a whole-company rule must not load every id to answer for three.
+        if (among is not null) employees = employees.Where(e => among.Contains(e.Id));
 
         switch (rule.TargetType)
         {
             case HrAudienceTargetType.AllEmployees:
                 return await employees.Select(e => e.Id).ToListAsync(ct);
+
+            case HrAudienceTargetType.Management:
+                var management = Management(tenantId);
+                return await employees.Where(e => management.Contains(e.Id)).Select(e => e.Id).ToListAsync(ct);
 
             case HrAudienceTargetType.Employee:
                 return rule.TargetId is { } empId

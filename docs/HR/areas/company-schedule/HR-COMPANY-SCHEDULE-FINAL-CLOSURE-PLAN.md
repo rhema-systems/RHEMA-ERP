@@ -34,7 +34,8 @@ has not started (the user: "don't start the actual development yet").
 2. ✅ **Lane 0 is done (2026-10-04): the migration is applied to UAT.** ✅ **Lane 1 is done (2026-10-05)**,
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
-   (2026-10-05) and 2b, approval on the workflow engine (D-10). **Next: 2c, the audience (D-16).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
+   diaries and the intranet. **Next: 2d, participants, attendance and tasks.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -309,7 +310,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a, 2b built and proved (275/275 ×2; round-4 net 207/207); 2c next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2c built and proved (301/301 ×2; round-4 net 208/208); 2d next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -945,12 +946,12 @@ change.
 **Audience and organiser** (*review: reuse the audience resolver; no new `EventAudience` helper*)
 - [ ] *✅ 2a for the picker, the creator stamp, the diaries and the clash check; reminding the organiser is 2e.* The organiser per **D-11**; the organiser and the participants always see and are committed to
       the event.
-- [ ] When `ShowOnCompanyCalendar` is on, the event's audience is an audience rule: `Scope = AllStaff`
+- [x] *✅ 2c (`CompanyEventRules.AudienceRuleOf` / `CalendarAudienceOf`, the resolver's new Management rule); lane 7 reads the same rule.* When `ShowOnCompanyCalendar` is on, the event's audience is an audience rule: `Scope = AllStaff`
       → `AllEmployees`; `Scope = Department` → the event's `OrganizationUnit` (its subtree);
       `ManagementOnly` and `Management` visibility per **D-16**; Private and Confidential reach
       participants and the organiser only. Evaluated with `IHrAudienceResolver`; used by
       `CompanyEventCommitmentSource` and lane 7. Form descriptions say exactly this.
-- [ ] `ShowOnIntranet` publishes an `HrAnnouncement` to the same audience (*review: the first draft
+- [x] *✅ 2c, on HR's click from the event page (L1-1's rule), never on save.* `ShowOnIntranet` publishes an `HrAnnouncement` to the same audience (*review: the first draft
       only relabelled it*); `Priority` stays a label and says so.
 - [x] *✅ 2a (`CompanyEventRules.DailyWindows`).* **(R4-10A.2 — backend, moved here from lane 5)** `CompanyEventCommitmentSource` yields a window
       per day for a multi-day timed event (`WindowOf` takes the start day only today), so days two
@@ -1043,6 +1044,95 @@ built, proved twice and handed over on its own:
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
 
+*2c — what was built (2026-10-05): who an event is for (D-16), the diaries and the intranet.*
+- **One audience rule per event (`CompanyEventRules.AudienceRuleOf`).** The visibility can only narrow
+  the audience; the scope sets how wide it is:
+  - Private or Confidential: the guests and the organiser only;
+  - a Department visibility: the unit and everything beneath it, whatever the scope. A Management
+    visibility: management, whatever the scope;
+  - Public follows the scope: everyone, the unit, or management. "Selected" and "External only" are
+    their guest lists.
+
+  The event is on the company calendar and in people's diaries only when `ShowOnCompanyCalendar` is
+  on (`CalendarAudienceOf`). Lane 7 reads the same rule.
+- **Management (D-16) is a rule in the audience resolver:**
+  - It is a new rule type, `Management` (7): every active employee who heads a live unit, or who is
+    the line manager of an active employee.
+  - Orientation used to compute the same two sets in its own service, without dropping people who had
+    left. It now reads this rule, so "Management" means one thing across HR.
+  - Like Everyone, a Management rule names no record (`HrAudienceTargets.NeedsTarget`). The
+    announcement service's three Everyone checks now go through that method.
+  - No schema change: the type is stored as an int.
+- **The resolver can answer for a few people** (`IncludedAmongForTenantAsync`): which of the given
+  employees a set of rules includes. The narrowing happens in the query, so a diary of three people
+  does not load the whole company.
+- **The diary and clash source:**
+  - An event on the company calendar is in the diary of everyone it is for. It is soft: it never
+    blocks.
+  - The guests and the organiser are entered as 2a left them.
+  - An event that is off the calendar, or private, reaches only its guests and organiser.
+- **The reach before the save:**
+  - `GET events/audience-preview?scope&visibility&organizationUnitId` (read tier) counts the active
+    staff a choice reaches.
+  - The form shows "For: … — n active staff", and warns when that is nobody (management with no unit
+    heads or line managers named, or an empty unit).
+  - The save does not refuse such an event. Create and update answer with `warnings`, which the
+    toasts show.
+  - The event carries `audienceDescription`, which the event page shows as "For".
+- **`ShowOnIntranet`, on HR's click (L1-1's rule):** the switch marks an event to be announced.
+  Nothing is sent on save.
+  - `GET events/{id}/announcement` previews the words and the reach.
+  - `POST events/{id}/announce` (write tier; the caller's employee record is the publisher) publishes
+    an `HrAnnouncement` in the Event category, to the event's own audience rule. It stays up until the
+    day after the event ends.
+  - The announcement is refused (422, saying why) when the event is not marked, is closed or over, is
+    still awaiting approval, is for its guests only, or reaches nobody.
+  - The words are the server's: when, where, what, and who organises it. They never include the
+    meeting password.
+  - The event page's "Announce on the intranet" button opens a dialog. It shows the preview as text,
+    and the count on its button.
+- **The form says what each control does:** Audience, Visibility, and the two Show switches. Priority
+  says it is "a label for HR's own sorting; it changes nothing about the event".
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2c: **301/301 on two clean passes**. 2c has 31 assertions:
+  - **Reach, against SQL oracles:**
+    - everyone;
+    - a unit's subtree, named;
+    - management (orientation's oracle);
+    - a Management visibility narrowing a public all-staff event;
+    - private and "selected guests" events reaching their guest lists only.
+  - **An empty unit** reaches 0, and the warning comes both before the save and on it. The save is not
+    refused.
+  - **The diaries:**
+    - an all-staff event is soft in the diary of someone not invited, but absent when it is off the
+      calendar or private;
+    - a unit event is in B's diary and not C's;
+    - a management event is in C's diary and not B's. For the run, C is made B's line manager by SQL
+      and then unmade.
+  - **The intranet:**
+    - "not marked", "guests only" and "awaiting approval" are each refused with the reason, both in
+      the preview and as a 422;
+    - the preview reaches the run's own one-person unit and is worded from the event;
+    - the announcement is published as an Event to that one person, addressed by the unit, shown
+      until the day after the event, and is in that person's own announcements.
+- Regression:
+  - the round-4 net, **208/208**;
+  - `hr-orientation/run-round4-i`, **184/184**. Orientation's Management population now reads the
+    resolver, and A14 checks it against its SQL oracle.
+- **No message reached real staff:**
+  - each run's one announcement went to a unit the run made, with one person in it, and both were
+    archived;
+  - the approval notices to `hr.head` and `hr.officer` were withdrawn: 38 each today, 0 live after the
+    API stopped.
+- API log: no request answered 500. The errors are:
+  - #23, including a salary-basis insert at a hire;
+  - #39, two reconciliation failures;
+  - 108 email sends refused, because UAT has no SMTP settings.
+- Clean-up: nothing of the run's is left. The review suite switches off its own logins; 21 more (from
+  round-4, recruitment and orientation) were switched off.
+- The screens type-check and lint clean. They are not yet walked in a browser (lane 5).
+
 *2b — what was built (2026-10-05): approval on the workflow engine (D-10).*
 - **The HR recipe, applied a ninth time:**
   - a status adapter (`CompanyEventWorkflowStatusAdapter`, `HrCompanyScheduleWorkflowStatusAdapters.cs`):
@@ -1065,8 +1155,8 @@ built, proved twice and handed over on its own:
     definition, an older event, or a start that failed) `HR.Company.Approve` decides, so the event is
     never stuck;
   - **Reject** (`POST events/{id}/reject`, reason required) cancels the event, its room bookings with
-    it, and tells everybody invited. *The user did not rule on this; the event has no other state for
-    "not going ahead". Recorded for the user to confirm or change.*
+    it, and tells everybody invited. The event has no other state for "not going ahead". **Confirmed
+    by the user on 2026-10-05** ("yes, keep that").
   - Cancel and delete withdraw an approval still under way; a move of an approved event starts a
     fresh one.
   - `HR.Company.Approve`'s description now names events.
@@ -1622,3 +1712,15 @@ built API, so no web host and no seeders).
     against it, 270/270 twice and the round-4 net 208/208.
 
   Next: 2c, the audience.
+- **2026-10-05, later** — **Rejecting an event cancels it: confirmed by the user** ("yes, keep that").
+- **2026-10-05, later** — **Lane 2, slice 2c built and proved**: who an event is for (D-16), the
+  diaries and the intranet (lane 2 State). `run-final-review.mjs` scored 301/301 on two clean passes,
+  with 31 checks in 2c. The round-4 net was 208/208, and orientation's triggers suite 184/184. No
+  request answered 500.
+  - **Management is one rule across HR:** the audience resolver has it, and orientation's own copy
+    now reads it.
+  - **The intranet:** announcing is HR's click from the event page, as for closures. It is proved on
+    the run's own one-person unit.
+  - **No real staff told:** every run notice to `hr.head` and `hr.officer` is withdrawn.
+
+  Next: 2d, participants, attendance and tasks.

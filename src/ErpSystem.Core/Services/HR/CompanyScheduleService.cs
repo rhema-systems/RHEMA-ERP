@@ -45,6 +45,10 @@ public class CompanyEventService : ICompanyEventService
     /// <summary>The engine's entity-type key — registered in the catalogue, the display service and the seeder.</summary>
     private const string WorkflowEntityType = "CompanyEvent";
 
+    /// <summary>Who an event is for (lane 2c, D-16), and the intranet announcement of it.</summary>
+    private readonly IHrAudienceResolver _audience;
+    private readonly IHrAnnouncementService _announcements;
+
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
         IEventParticipantRepository participantRepository,
@@ -57,8 +61,12 @@ public class CompanyEventService : ICompanyEventService
         ILogger<CompanyEventService> logger,
         ICompanyHrPolicySettingsService policySettings,
         IWorkflowIntegrationService workflow,
-        IWorkflowStatusAdapterRegistry workflowAdapters)
+        IWorkflowStatusAdapterRegistry workflowAdapters,
+        IHrAudienceResolver audience,
+        IHrAnnouncementService announcements)
     {
+        _audience = audience;
+        _announcements = announcements;
         _workflow = workflow;
         _workflowAdapters = workflowAdapters;
         _policySettings = policySettings;
@@ -751,6 +759,124 @@ public class CompanyEventService : ICompanyEventService
                 $"You organise {entity.EventName}, so someone else must {verb} it.");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2c — who an event is for (D-16), and its intranet announcement
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// The sentence to warn with when the event's audience reaches nobody (D-16): management on a tenant
+    /// whose units have no heads and whose staff no line managers, or a unit with nobody in it.
+    /// </summary>
+    private async Task<string?> AudienceWarningAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        if (CompanyEventRules.AudienceRuleOf(e) is not { } rule || rule.TargetType == HrAudienceTargetType.AllEmployees)
+            return null;
+        if (await _audience.CountAsync([rule], cancellationToken) > 0) return null;
+        return rule.TargetType == HrAudienceTargetType.Management
+            ? "This event is for management, and nobody counts as management yet: no organisation unit has a head "
+              + "and nobody is named as a line manager. Name them in the organisation set-up, or invite people directly."
+            : "This event is for an organisation unit with no active staff in it or beneath it. Check the unit, or invite people directly.";
+    }
+
+    public async Task<EventAudiencePreviewDto> PreviewAudienceAsync(
+        ParticipantScope scope, EventVisibility visibility, Guid? organizationUnitId, CancellationToken cancellationToken = default)
+    {
+        var draft = new CompanyEvent { Scope = scope, Visibility = visibility, OrganizationUnitId = organizationUnitId, ShowOnCompanyCalendar = true };
+        string? unitName = null;
+        if (organizationUnitId is { } unitId)
+            unitName = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .Where(u => u.Id == unitId && u.TenantId == GetTenantId() && !u.IsDeleted)
+                .Select(u => u.Name).FirstOrDefaultAsync(cancellationToken);
+
+        var rule = CompanyEventRules.AudienceRuleOf(draft);
+        return new EventAudiencePreviewDto
+        {
+            Audience = CompanyEventRules.DescribeAudience(draft, unitName),
+            GuestListOnly = rule is null,
+            Reach = rule is null ? 0 : await _audience.CountAsync([rule], cancellationToken),
+            Warning = await AudienceWarningAsync(draft, cancellationToken),
+        };
+    }
+
+    /// <summary>The intranet announcement's words, from the event: when, where, why, who organises it, the reply-by date.</summary>
+    /// <remarks>⚠ Never the meeting password: the announcement reaches the whole audience, guests or not.</remarks>
+    private static (string Title, string Summary, string Body) WordEventAnnouncement(CompanyEvent e)
+    {
+        var where = e.LocationType == EventLocation.Virtual
+            ? "online"
+            : string.Join(", ", new[] { e.VenueName, e.SiteLocation?.Name }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        var summary = $"{CompanyEventRules.Describe(EventWindow.Of(e))}"
+                      + (string.IsNullOrWhiteSpace(where) ? "." : $", {where}.");
+
+        var body = new System.Text.StringBuilder(summary);
+        if (!string.IsNullOrWhiteSpace(e.Description)) body.Append(' ').Append(e.Description.Trim());
+        if (e.Organizer is { } organiser) body.Append($" Organised by {organiser.FullName}.");
+        if (e.LocationType is EventLocation.Virtual or EventLocation.Hybrid && !string.IsNullOrWhiteSpace(e.OnlineMeetingLink))
+            body.Append($" Join online: {e.OnlineMeetingLink}.");
+        if (e.RequiresRsvp && e.RsvpDeadline is { } deadline)
+            body.Append($" Replies by {CompanyEventRules.Describe(deadline)}.");
+        return (e.EventName, summary, body.ToString());
+    }
+
+    /// <summary>Why the event cannot be announced on the intranet now, or null when it can.</summary>
+    private static string? AnnounceRefusal(CompanyEvent e, HrAudienceRule? rule, int reach)
+    {
+        if (!e.ShowOnIntranet) return "This event is not marked to show on the intranet. Switch that on first.";
+        if (CompanyEventRules.IsClosed(e)) return $"{e.EventName} is {ClosedState(e)}, so there is nothing to announce.";
+        if (e.EndDate.Date < DateTime.UtcNow.Date) return $"{e.EventName} is over, so there is nothing to announce.";
+        if (CompanyEventRules.IsAwaitingApproval(e)) return $"{e.EventName} is still awaiting approval. Announce it once it is approved.";
+        if (rule is null) return "This event is for its guests and organiser only — their invitations tell them. Widen its audience to announce it.";
+        if (reach == 0) return "The event's audience reaches nobody, so there is nobody to tell.";
+        return null;
+    }
+
+    public async Task<EventAnnouncementPreviewDto> PreviewAnnouncementAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedEventAsync(id, cancellationToken);
+        var rule = CompanyEventRules.AudienceRuleOf(entity);
+        var reach = rule is null ? 0 : await _audience.CountAsync([rule], cancellationToken);
+        var (title, summary, body) = WordEventAnnouncement(entity);
+        var refusal = AnnounceRefusal(entity, rule, reach);
+        return new EventAnnouncementPreviewDto
+        {
+            EventId = entity.Id, StaffReached = reach, CanAnnounce = refusal is null, Reason = refusal,
+            Title = title, Summary = summary, Body = body,
+        };
+    }
+
+    /// <remarks>
+    /// <para><b>On HR's click, never on save</b> — the rule closures follow (L1-1): an announcement reaches
+    /// everyone at once and cannot be unsent, and an event is often saved, corrected, then confirmed.
+    /// "Show on intranet" marks the event as one to announce; this sends it.</para>
+    ///
+    /// <para>Addressed by the event's own audience rule — the same people the company calendar and the
+    /// diaries treat as its audience — and shown until the day after it ends. The checks come first, so a
+    /// refusal leaves no draft behind.</para>
+    /// </remarks>
+    public async Task<HrAnnouncementDto> AnnounceAsync(Guid id, Guid publisherEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedEventAsync(id, cancellationToken);
+        var rule = CompanyEventRules.AudienceRuleOf(entity);
+        var reach = rule is null ? 0 : await _audience.CountAsync([rule], cancellationToken);
+        if (AnnounceRefusal(entity, rule, reach) is { } refusal) throw new InvalidOperationException(refusal);
+
+        var (title, summary, body) = WordEventAnnouncement(entity);
+        var draft = await _announcements.CreateAsync(new CreateHrAnnouncementDto
+        {
+            Title = title.Length > 200 ? title[..200] : title,
+            Summary = summary,
+            Body = body,
+            Category = HrAnnouncementCategory.Event,
+            EffectiveFrom = DateTime.UtcNow,
+            // Shown until the event is over.
+            ExpiresOn = DateTime.SpecifyKind(entity.EndDate.Date.AddDays(1), DateTimeKind.Utc),
+            Audiences = [new HrAnnouncementAudienceDto { TargetType = rule!.TargetType, TargetId = rule.TargetId }],
+        }, cancellationToken);
+
+        _logger.LogInformation("Company event {EventNumber} announced on the intranet to {Reach} staff", entity.EventNumber, reach);
+        return await _announcements.PublishAsync(draft.Id, publisherEmployeeId, cancellationToken);
+    }
+
     public async Task<CompanyEventDto> CreateAsync(CreateCompanyEventDto createDto, Guid callerEmployeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -778,7 +904,10 @@ public class CompanyEventService : ICompanyEventService
         // Department and SiteLocation navigations are still null, so mapping it straight to a DTO
         // answers organizerName "" and locationName null. The caller cannot tell that from real
         // missing data, and any screen that renders the create response shows blanks.
-        return await GetByIdAsync(entity.Id, cancellationToken);
+        var created = await GetByIdAsync(entity.Id, cancellationToken);
+        // D-16: an audience that reaches nobody is said, not refused — the guests can still be invited.
+        if (await AudienceWarningAsync(entity, cancellationToken) is { } warning) created.Warnings.Add(warning);
+        return created;
     }
 
     public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
@@ -829,7 +958,9 @@ public class CompanyEventService : ICompanyEventService
 
         // ⚠ Re-read (F-46): the entity's navigations were loaded before the change, so a new organiser,
         // site or unit would answer with the old name.
-        return await GetByIdAsync(entity.Id, cancellationToken);
+        var updated = await GetByIdAsync(entity.Id, cancellationToken);
+        if (await AudienceWarningAsync(entity, cancellationToken) is { } warning) updated.Warnings.Add(warning);
+        return updated;
     }
 
     /// <remarks>

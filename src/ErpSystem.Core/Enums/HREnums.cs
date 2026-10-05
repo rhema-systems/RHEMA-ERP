@@ -10761,7 +10761,18 @@ public enum HrAudienceTargetType
     Location = 5,
 
     /// <summary>One named person — mostly useful as an exclusion.</summary>
-    Employee = 6
+    Employee = 6,
+
+    /// <summary>
+    /// Management: everyone active who heads an organisation unit or is named as somebody's line
+    /// manager. Needs no target id. One definition across HR (company-schedule final closure D-16) —
+    /// orientation's Management population reads this rule too.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Only as full as the data: on TDC's own records (2026-08) few units had a head and few staff a
+    /// line manager, so a screen that targets it should say how many it reaches before it is used.
+    /// </remarks>
+    Management = 7
 }
 
 #endregion

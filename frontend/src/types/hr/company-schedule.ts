@@ -200,6 +200,10 @@ export interface CompanyEvent extends AuditFields {
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
   rsvpDeadline?: string | null;
+  /** Who the event is for, from its scope and visibility (lane 2c, D-16). */
+  audienceDescription: string;
+  /** An audience that reaches nobody, said on save (create and update answers only). */
+  warnings?: string[];
 
   visibility: EventVisibility;
   visibilityName: string;
@@ -393,6 +397,27 @@ export interface RescheduleEvent {
   rescheduleReason: string;
   /** A new reply-by date, when the current one would fall after the new start. */
   newRsvpDeadline?: string | null;
+}
+
+/** Who an event with this scope and visibility would be for, and how many (lane 2c, D-16). */
+export interface EventAudiencePreview {
+  audience: string;
+  reach: number;
+  /** For its guests and organiser only — nothing to count. */
+  guestListOnly: boolean;
+  warning?: string | null;
+}
+
+/** What announcing an event on the intranet would say, and to how many (lane 2c). */
+export interface EventAnnouncementPreview {
+  eventId: string;
+  staffReached: number;
+  canAnnounce: boolean;
+  /** Why it cannot be announced, when it cannot. */
+  reason?: string | null;
+  title: string;
+  summary: string;
+  body: string;
 }
 
 /** What cancelling, rescheduling or deleting an event did beyond the event (lane 2a). */

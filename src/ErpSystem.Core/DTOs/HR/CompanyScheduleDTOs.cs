@@ -68,7 +68,16 @@ public class CompanyEventDto : BaseDto
     public int? EstimatedAttendees { get; set; }
     public bool RequiresRsvp { get; set; }
     public DateTime? RsvpDeadline { get; set; }
-    
+
+    /// <summary>
+    /// Who the event is for, from its scope and visibility (lane 2c, D-16): "Everyone", "Finance and the
+    /// units beneath it", "Management — unit heads and line managers", or "Its guests and organiser".
+    /// </summary>
+    public string AudienceDescription { get; set; } = string.Empty;
+
+    /// <summary>What the person saving should know that did not stop the save — an audience that reaches nobody. Create and update only.</summary>
+    public List<string> Warnings { get; set; } = new();
+
     // Visibility
     public EventVisibility Visibility { get; set; }
     public string VisibilityName => Visibility.ToString();
@@ -463,6 +472,42 @@ public class CompleteEventDto
 
     [MaxLength(2000)]
     public string? OutcomeSummary { get; set; }
+}
+
+/// <summary>
+/// Who an event with this scope and visibility would be for, and how many that is — the line the form
+/// shows before the event is saved (lane 2c, D-16).
+/// </summary>
+public class EventAudiencePreviewDto
+{
+    public string Audience { get; set; } = string.Empty;
+
+    /// <summary>Active staff the audience reaches; 0 when the event is for its guests and organiser only.</summary>
+    public int Reach { get; set; }
+
+    /// <summary>For its guests and organiser only: no wider audience, so nothing to count.</summary>
+    public bool GuestListOnly { get; set; }
+
+    /// <summary>Set when the audience reaches nobody — say so before the event is saved.</summary>
+    public string? Warning { get; set; }
+}
+
+/// <summary>
+/// What announcing an event on the intranet would say, and to how many (lane 2c, "Show on intranet") —
+/// published only when HR confirms, as a closure's announcement is (L1-1).
+/// </summary>
+public class EventAnnouncementPreviewDto
+{
+    public Guid EventId { get; set; }
+    public int StaffReached { get; set; }
+    public bool CanAnnounce { get; set; }
+
+    /// <summary>Why it cannot be announced, when it cannot.</summary>
+    public string? Reason { get; set; }
+
+    public string Title { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
 }
 
 /// <summary>

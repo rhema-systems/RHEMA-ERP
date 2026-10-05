@@ -42,6 +42,15 @@ public interface ICompanyEventService
     /// everybody invited is told (lane 2b).
     /// </summary>
     Task<CompanyEventChangeDto> RejectEventAsync(Guid eventId, Guid rejectedById, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>Who an event with this scope and visibility would be for, and how many (lane 2c, D-16) — for the form, before saving.</summary>
+    Task<EventAudiencePreviewDto> PreviewAudienceAsync(ParticipantScope scope, EventVisibility visibility, Guid? organizationUnitId, CancellationToken cancellationToken = default);
+
+    /// <summary>What announcing the event on the intranet would say, and to how many; saves nothing (lane 2c).</summary>
+    Task<EventAnnouncementPreviewDto> PreviewAnnouncementAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>Announces the event on the intranet to its audience, on HR's click (lane 2c; the closures' rule, L1-1).</summary>
+    Task<HrAnnouncementDto> AnnounceAsync(Guid id, Guid publisherEmployeeId, CancellationToken cancellationToken = default);
     Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default);
     Task<CompanyEventChangeDto> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default);
     Task<bool> CompleteEventAsync(CompleteEventDto completeDto, CancellationToken cancellationToken = default);

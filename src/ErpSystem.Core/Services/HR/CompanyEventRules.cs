@@ -1,6 +1,7 @@
 using System.Globalization;
 using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.HR;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -56,6 +57,59 @@ public static class CompanyEventRules
         !IsClosed(e)
         && (e.Status is EventStatus.Confirmed or EventStatus.InProgress
             || (!IsAwaitingApproval(e) && e.Status is EventStatus.Scheduled or EventStatus.Rescheduled));
+
+    /// <summary>
+    /// Who an event is for, beyond its guest list and organiser, as an audience rule (lane 2c, D-16) — or
+    /// null when it is for the guest list alone.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Visibility narrows, Scope widens.</b> A Private or Confidential event is for its guests and
+    /// organiser only. A Department or Management visibility is the unit (with everything beneath it) or
+    /// management, whatever the scope. A Public one is for its scope: everyone, the unit, or management.
+    /// "Selected" and "External only" are their guest lists.</para>
+    ///
+    /// <para>Management is the resolver's rule: unit heads and line managers (D-16).</para>
+    /// </remarks>
+    public static HrAudienceRule? AudienceRuleOf(CompanyEvent e)
+    {
+        HrAudienceRule? Unit() => e.OrganizationUnitId is { } u
+            ? new HrAudienceRule(HrAudienceTargetType.OrganizationUnit, u, false)
+            : null;
+        var management = new HrAudienceRule(HrAudienceTargetType.Management, null, false);
+
+        return e.Visibility switch
+        {
+            EventVisibility.Private or EventVisibility.Confidential => null,
+            EventVisibility.Management => management,
+            EventVisibility.Department => Unit(),
+            _ => e.Scope switch
+            {
+                ParticipantScope.AllStaff => new HrAudienceRule(HrAudienceTargetType.AllEmployees, null, false),
+                ParticipantScope.Department => Unit(),
+                ParticipantScope.ManagementOnly => management,
+                _ => null,
+            },
+        };
+    }
+
+    /// <summary>
+    /// The event's audience on the company calendar and in the diaries: its audience rule when it is
+    /// shown on the company calendar, otherwise nobody beyond its guests and organiser.
+    /// </summary>
+    public static HrAudienceRule? CalendarAudienceOf(CompanyEvent e) => e.ShowOnCompanyCalendar ? AudienceRuleOf(e) : null;
+
+    /// <summary>The audience as a sentence: "Everyone", "Finance and the units beneath it", "Management", "Its guests and organiser".</summary>
+    public static string DescribeAudience(CompanyEvent e, string? unitName)
+    {
+        var rule = AudienceRuleOf(e);
+        return rule?.TargetType switch
+        {
+            HrAudienceTargetType.AllEmployees => "Everyone",
+            HrAudienceTargetType.OrganizationUnit => $"{unitName ?? "The unit"} and the units beneath it",
+            HrAudienceTargetType.Management => "Management — unit heads and line managers",
+            _ => "Its guests and organiser",
+        };
+    }
 
     /// <summary>A category that belongs elsewhere: public holidays and company milestones have their own registers (F-44).</summary>
     public static string? RefuseCategory(EventCategory category) => category switch

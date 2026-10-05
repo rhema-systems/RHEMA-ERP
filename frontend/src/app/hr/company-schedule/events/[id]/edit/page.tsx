@@ -45,7 +45,8 @@ export default function EditCompanyEventPage({ params }: { params: Promise<{ id:
     }
     setSaving(true);
     try {
-      await companyEventService.update(id, toUpdatePayload(id, values));
+      const saved = await companyEventService.update(id, toUpdatePayload(id, values));
+      const warnings = (saved.warnings ?? []).map((w) => `⚠ ${w}`).join(' ');
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
       toast(
         moved
@@ -54,7 +55,7 @@ export default function EditCompanyEventPage({ params }: { params: Promise<{ id:
               description:
                 'Everybody invited is told. Accepted replies are asked again, and its room bookings moved with it.',
             }
-          : { title: 'Event updated' },
+          : { title: 'Event updated', description: warnings || undefined },
       );
       router.push(`/hr/company-schedule/events/${id}`);
     } catch (error: any) {

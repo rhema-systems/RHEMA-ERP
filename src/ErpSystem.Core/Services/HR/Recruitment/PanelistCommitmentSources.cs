@@ -205,7 +205,13 @@ public sealed class TravelCommitmentSource : IPanelistCommitmentSource
 public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
 {
     private readonly IUnitOfWork _unitOfWork;
-    public CompanyEventCommitmentSource(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly IHrAudienceResolver _audience;
+
+    public CompanyEventCommitmentSource(IUnitOfWork unitOfWork, IHrAudienceResolver audience)
+    {
+        _unitOfWork = unitOfWork;
+        _audience = audience;
+    }
 
     public string SourceName => "meetings and events";
 
@@ -251,10 +257,42 @@ public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
                 $"{p.Event!.EventName} ({p.Event.Status}, invitation {p.InvitationStatus})");
         }
         foreach (var ev in organised.Where(e => !counted.Contains((e.OrganizerId, e.Id))))
+        {
+            counted.Add((ev.OrganizerId, ev.Id));
             AddDays(commitments, q, ev.OrganizerId, ev, accepted: true, $"{ev.EventName} ({ev.Status}, organiser)");
+        }
+
+        // ⚠ The event's audience (lane 2c, D-16): an event on the company calendar is for its audience —
+        // everyone, a unit, management — not only its guests. Each of them not already counted is
+        // committed too, softly: nobody asked them to answer. Private and Confidential events, and
+        // "selected guests" ones, reach nobody here.
+        var forAudiences = await _unitOfWork.Repository<CompanyEvent>().GetQueryable()
+            .Where(e => e.TenantId == q.TenantId && !e.IsDeleted
+                     && !e.IsCancelled && e.Status != EventStatus.Cancelled
+                     && e.ShowOnCompanyCalendar
+                     && e.Visibility != EventVisibility.Private && e.Visibility != EventVisibility.Confidential
+                     && e.StartDate <= dayEnd && e.EndDate >= dayStart)
+            .ToListAsync(ct);
+        foreach (var ev in forAudiences)
+        {
+            if (CompanyEventRules.CalendarAudienceOf(ev) is not { } rule) continue;
+            var asked = q.EmployeeIds.Where(id => !counted.Contains((id, ev.Id))).ToList();
+            if (asked.Count == 0) continue;
+            var reached = await _audience.IncludedAmongForTenantAsync(q.TenantId, [rule], asked, ct);
+            foreach (var employeeId in reached)
+                AddDays(commitments, q, employeeId, ev, accepted: false, $"{ev.EventName} ({ev.Status}, for {AudienceLabel(rule)})");
+        }
 
         return commitments;
     }
+
+    private static string AudienceLabel(HrAudienceRule rule) => rule.TargetType switch
+    {
+        HrAudienceTargetType.AllEmployees => "all staff",
+        HrAudienceTargetType.OrganizationUnit => "their unit",
+        HrAudienceTargetType.Management => "management",
+        _ => "its audience",
+    };
 
     /// <summary>
     /// One commitment per day of the event inside the query (R4-10A.2): a timed event over several days

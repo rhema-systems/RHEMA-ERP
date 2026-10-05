@@ -103,6 +103,37 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByOrganizer(Guid organizerId)
         => Ok(await _eventService.GetByOrganizerAsync(organizerId));
 
+    /// <summary>
+    /// Who an event with this scope and visibility would be for, and how many people that is (lane 2c,
+    /// D-16) — the line the event form shows before saving, with a warning when it reaches nobody.
+    /// </summary>
+    [HttpGet("events/audience-preview")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<EventAudiencePreviewDto>> PreviewEventAudience(
+        [FromQuery] ParticipantScope scope,
+        [FromQuery] EventVisibility visibility,
+        [FromQuery] Guid? organizationUnitId)
+        => Ok(await _eventService.PreviewAudienceAsync(scope, visibility, organizationUnitId));
+
+    /// <summary>What announcing the event on the intranet would say, and to how many; saves nothing (lane 2c).</summary>
+    [HttpGet("events/{id:guid}/announcement")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventAnnouncementPreviewDto>> PreviewEventAnnouncement(Guid id)
+        => Ok(await _eventService.PreviewAnnouncementAsync(id));
+
+    /// <summary>
+    /// Announces the event on the intranet to its audience — HR's click, never a save's side effect
+    /// (lane 2c; the closures' rule, L1-1). 422 with the reason when it cannot be announced.
+    /// </summary>
+    [HttpPost("events/{id:guid}/announce")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<HrAnnouncementDto>> AnnounceEvent(Guid id)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var publisherId, "Announcing an event");
+        if (ctx != null) return ctx;
+        return Ok(await _eventService.AnnounceAsync(id, publisherId));
+    }
+
     /// <summary>Events for one organisation unit (lane 2a; replaces the retired department read, D-5).</summary>
     [HttpGet("events/unit/{organizationUnitId:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]

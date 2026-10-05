@@ -54,6 +54,7 @@ public static class CompanyScheduleMappingExtensions
         dto.EstimatedAttendees = entity.EstimatedAttendees;
         dto.RequiresRsvp = entity.RequiresRsvp;
         dto.RsvpDeadline = entity.RsvpDeadline;
+        dto.AudienceDescription = CompanyEventRules.DescribeAudience(entity, entity.OrganizationUnit?.Name);
         dto.Visibility = entity.Visibility;
         dto.ShowOnCompanyCalendar = entity.ShowOnCompanyCalendar;
         dto.ShowOnIntranet = entity.ShowOnIntranet;
