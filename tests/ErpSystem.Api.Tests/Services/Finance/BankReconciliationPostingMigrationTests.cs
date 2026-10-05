@@ -166,6 +166,136 @@ public sealed class BankReconciliationPostingMigrationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task BookBalance_ShouldExcludeParallelBookReplicaOfSameBankMovement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-MULTIBOOK", 0m);
+        var period = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId);
+        var primaryBook = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
+        var parallelBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "USD_PARALLEL",
+            Name = "USD Parallel",
+            Purpose = "Parallel reporting",
+            BookType = AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "USD",
+            IsDefault = false,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(parallelBook);
+
+        var sourceDocumentId = Guid.NewGuid();
+        var primaryJournalId = Guid.NewGuid();
+        var replicaJournalId = Guid.NewGuid();
+        db.JournalEntries.AddRange(
+            new JournalEntry
+            {
+                Id = primaryJournalId,
+                TenantId = tenantId,
+                JournalEntryNumber = "JE-BASE-DEPOSIT-001",
+                JournalType = "Bank Deposit",
+                EntryDate = new DateTime(2026, 7, 6),
+                PostingDate = new DateTime(2026, 7, 6),
+                Description = "Primary bank deposit",
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch",
+                TotalDebitAmount = 2880m,
+                TotalCreditAmount = 2880m,
+                IsBalanced = true,
+                FiscalPeriodId = period.Id,
+                AccountingBookId = primaryBook.Id,
+                BookClassification = primaryBook.Code,
+                PostingStatus = "Posted"
+            },
+            new JournalEntry
+            {
+                Id = replicaJournalId,
+                TenantId = tenantId,
+                JournalEntryNumber = "JE-USD-DEPOSIT-001",
+                JournalType = "Bank Deposit",
+                EntryDate = new DateTime(2026, 7, 6),
+                PostingDate = new DateTime(2026, 7, 6),
+                Description = "Parallel bank deposit replica",
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch",
+                TotalDebitAmount = 230.40m,
+                TotalCreditAmount = 230.40m,
+                IsBalanced = true,
+                FiscalPeriodId = period.Id,
+                AccountingBookId = parallelBook.Id,
+                BookClassification = parallelBook.Code,
+                PostingStatus = "Posted",
+                ReplicatedFromJournalEntryId = primaryJournalId
+            });
+        db.AccountTransactions.AddRange(
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = primaryJournalId,
+                AccountingBookId = primaryBook.Id,
+                AccountId = setup.BankGlAccount.Id,
+                FiscalPeriodId = period.Id,
+                TransactionDate = new DateTime(2026, 7, 6),
+                DebitAmount = 2880m,
+                CreditAmount = 0m,
+                FunctionalCurrencyCode = "GHS",
+                TransactionCurrency = "GHS",
+                TransactionDebitAmount = 2880m,
+                TransactionCreditAmount = 0m,
+                PostingStatus = "Posted",
+                BookClassification = primaryBook.Code,
+                LineNumber = 1,
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch"
+            },
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = replicaJournalId,
+                AccountingBookId = parallelBook.Id,
+                AccountId = setup.BankGlAccount.Id,
+                FiscalPeriodId = period.Id,
+                TransactionDate = new DateTime(2026, 7, 6),
+                DebitAmount = 230.40m,
+                CreditAmount = 0m,
+                FunctionalCurrencyCode = "USD",
+                TransactionCurrency = "GHS",
+                TransactionDebitAmount = 2880m,
+                TransactionCreditAmount = 0m,
+                PostingStatus = "Posted",
+                BookClassification = parallelBook.Code,
+                LineNumber = 1,
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch"
+            });
+        await db.SaveChangesAsync();
+
+        var reconciliation = await CreateReconciliationService(db, tenantId)
+            .StartReconciliationAsync(new StartReconciliationDto
+            {
+                BankAccountId = setup.BankAccount.Id,
+                ReconciliationDate = new DateTime(2026, 7, 6),
+                StatementBalance = 2880m
+            });
+
+        reconciliation.BookBalance.Should().Be(2880m);
+        reconciliation.Difference.Should().Be(0m);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-CrossCurrencyBankTransfer")]
     [Trait("Category", "CashBank")]
     public async Task CrossCurrencyTransferLegs_ShouldReconcileIndependentlyInEachBankCurrency()

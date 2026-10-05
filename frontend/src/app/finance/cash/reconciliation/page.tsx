@@ -48,6 +48,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { parseBankStatementImportFile } from '@/lib/finance/bank-statement-import';
 import { calendarDayDifference, isWithinStatementDateTolerance } from '@/lib/finance/banking-policy';
+import { isReconciliationDirectionCompatible } from './reconciliation-matching';
 import { cn, formatCurrency } from '@/lib/utils';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
@@ -90,18 +91,6 @@ function errorMessage(error: unknown, fallback: string) {
 
 function formatDate(value: string) {
     return format(new Date(value), 'dd MMM yyyy');
-}
-
-function isDirectionCompatible(transaction: UnmatchedTransaction, line: UnmatchedStatementLine) {
-    if (transaction.transactionType === CashTransactionType.Receipt) return line.creditAmount > 0 && line.debitAmount === 0;
-    if (transaction.transactionType === CashTransactionType.Payment) return line.debitAmount > 0 && line.creditAmount === 0;
-    if (transaction.transactionType === CashTransactionType.Transfer && transaction.transactionNumber.toUpperCase().endsWith('-OUT')) {
-        return line.debitAmount > 0 && line.creditAmount === 0;
-    }
-    if (transaction.transactionType === CashTransactionType.Transfer && transaction.transactionNumber.toUpperCase().endsWith('-IN')) {
-        return line.creditAmount > 0 && line.debitAmount === 0;
-    }
-    return false;
 }
 
 export default function BankReconciliationPage() {
@@ -589,7 +578,7 @@ function ReconciliationWorkspace({
     const selectedBook = summary?.unmatchedBookTransactions.find((item) => item.id === selectedBookId);
     const selectedLine = summary?.unmatchedStatementLines.find((item) => item.id === selectedLineId);
     const amountsAgree = Boolean(selectedBook && selectedLine && Math.abs(selectedBook.amount - selectedLine.amount) < 0.005);
-    const directionsAgree = Boolean(selectedBook && selectedLine && isDirectionCompatible(selectedBook, selectedLine));
+    const directionsAgree = Boolean(selectedBook && selectedLine && isReconciliationDirectionCompatible(selectedBook, selectedLine));
     const statementDateToleranceDays = settingsQuery.data?.bankStatementMatchDateToleranceDays ?? 3;
     const selectedDateDifferenceDays = selectedBook && selectedLine
         ? calendarDayDifference(selectedBook.transactionDate, selectedLine.transactionDate)

@@ -1045,11 +1045,23 @@ public class BankReconciliationService : IBankReconciliationService
             throw new InvalidOperationException("Bank account must be linked to a GL account before reconciliation.");
         }
 
+        var authoritativeBookId = await _context.AccountingBooks
+            .Where(book =>
+                book.TenantId == tenantId &&
+                book.IsDefault &&
+                book.BookType == AccountingBookType.PrimaryFull &&
+                !book.IsDeleted)
+            .Select(book => (Guid?)book.Id)
+            .SingleOrDefaultAsync()
+            ?? throw new InvalidOperationException(
+                "A default primary accounting book is required before bank reconciliation.");
+
         var throughDate = reconciliationDate.Date.AddDays(1).AddTicks(-1);
         var postedLines = await _context.AccountTransactions
             .Where(t =>
                 t.TenantId == tenantId &&
                 t.AccountId == bankAccount.GLAccountId.Value &&
+                t.AccountingBookId == authoritativeBookId &&
                 t.TransactionDate <= throughDate &&
                 t.PostingStatus == "Posted" &&
                 !t.IsDeleted &&
