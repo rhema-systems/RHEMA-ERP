@@ -93,6 +93,9 @@ public class CompanyEventDto : BaseDto
     /// </summary>
     public CompanyEventNoticeResultDto? Told { get; set; }
 
+    /// <summary>Lane 2f-2b: an edit with a series scope — the dates it changed, and who was told. Update only.</summary>
+    public EventSeriesChangeResultDto? Series { get; set; }
+
     // Visibility
     public EventVisibility Visibility { get; set; }
     public string VisibilityName => Visibility.ToString();
@@ -284,6 +287,22 @@ public class EventSeriesGuestResultDto
     public int Waiting { get; set; }
 
     /// <summary>Who the one notice reached; null when nothing was sent.</summary>
+    public CompanyEventNoticeResultDto? Told { get; set; }
+}
+
+/// <summary>
+/// What an edit, a move or a cancellation with a series scope did (lane 2f-2b, D-12): the dates it changed and who was
+/// told — each guest once.
+/// </summary>
+public class EventSeriesChangeResultDto
+{
+    /// <summary>The dates changed, by event number, in date order.</summary>
+    public List<string> EventNumbers { get; set; } = new();
+
+    /// <summary>Dates the scope covered and left alone because they have started, been completed or been cancelled.</summary>
+    public int Closed { get; set; }
+
+    /// <summary>Who the notices reached, each guest counted once per kind of change.</summary>
     public CompanyEventNoticeResultDto? Told { get; set; }
 }
 
@@ -518,6 +537,13 @@ public class UpdateCompanyEventDto : UpdateDtoBase
 
     [MaxLength(2000)]
     public string? AdditionalNotes { get; set; }
+
+    /// <summary>
+    /// Lane 2f-2b (D-12): on a recurring event, this date only (the default), or this and following dates, or every
+    /// date — each taking only what this edit changed (the user's ruling); a new window moves them by the same amount.
+    /// Named apart from <see cref="Scope"/>, which is who the event is for.
+    /// </summary>
+    public SeriesScope SeriesScope { get; set; }
 }
 
 /// <summary>
@@ -531,6 +557,9 @@ public class CancelEventDto
     [Required]
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
+
+    /// <summary>Lane 2f-2b (D-12): on a recurring event, this date only (the default), this and following, or every date.</summary>
+    public SeriesScope SeriesScope { get; set; }
 }
 
 /// <summary>
@@ -560,6 +589,13 @@ public class RescheduleEventDto
     /// new start. Empty keeps the current deadline (F-38).
     /// </summary>
     public DateTime? NewRsvpDeadline { get; set; }
+
+    /// <summary>
+    /// Lane 2f-2b (D-12): on a recurring event, this date only (the default), or this and following dates, or every
+    /// date — each moved by the same number of days, to the new times when given; a new reply-by date keeps its
+    /// distance from each date's start.
+    /// </summary>
+    public SeriesScope SeriesScope { get; set; }
 }
 
 /// <summary>
@@ -649,6 +685,9 @@ public class CompanyEventChangeDto
 
     /// <summary>Who was told of it, and how (lane 2e-2, R4-6.3); null after a delete, which tells nobody.</summary>
     public CompanyEventNoticeResultDto? Told { get; set; }
+
+    /// <summary>Lane 2f-2b: a move or a cancellation with a series scope — the dates it changed, and who was told.</summary>
+    public EventSeriesChangeResultDto? Series { get; set; }
 }
 
 /// <summary>

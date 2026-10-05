@@ -37,9 +37,8 @@ has not started (the user: "don't start the actual development yet").
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
    issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
-   2f-1, a recurring event as a series, and 2f-2a, guests and answers across a series (neither has a migration).
-   **Next: 2f-2b, edit, move and cancel with a series scope, and its three defect fixes (lane 2 State, the 2f-2
-   split).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   2f, recurrence as a light series, in three slices (2f-1, 2f-2a, 2f-2b; none has a migration). **Next: 2g, search,
+   export, the dashboard and clashes on the two registers (C-10…C-13, C-15, C-25); then 2h.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -314,7 +313,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e, 2f-1 and 2f-2a built and proved (619/619 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2f-2b next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2f built and proved (658/658 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2g next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -935,7 +934,8 @@ change.
       Dates are counted from the first, so a monthly rule on a day a month lacks falls on that month's
       last day; an occurrence on a public holiday or a company-wide closure is generated and flagged on
       its page.
-- [ ] *◐ 2f-2a: adding and removing a guest (and the desk's answer); editing, rescheduling and cancelling are 2f-2b's.* A scope choice — "this occurrence / this and following / the whole series" — on adding a guest,
+- [x] *✅ 2f-2a (adding and removing a guest, and the desk's answer) and 2f-2b (editing — only what changed, the
+      user's ruling —, rescheduling and cancelling).* A scope choice — "this occurrence / this and following / the whole series" — on adding a guest,
       removing a guest, editing, rescheduling (the following move by the same offset) and cancelling.
       **A series action never changes an occurrence that is past or completed.**
 - [x] *✅ 2f-2a at the desk, with a calendar file per date and one notice per guest per action (the user's ruling);
@@ -1075,7 +1075,7 @@ built, proved twice and handed over on its own:
     - **The overdue chase goes to the assignee only**, by email and in the app. The organiser sees Overdue on
       the event page.
     - **Cross-module #43 is registered.**
-- **2f** recurrence as a light series (D-12).
+- **2f** ✅ recurrence as a light series (D-12).
   *Source check (2026-10-05):*
   - The five recurrence fields are saved on create and generate nothing (C-14).
   - `RecurrenceSeriesId` and `OccurrenceNumber` are read and written by nothing.
@@ -1130,14 +1130,107 @@ built, proved twice and handed over on its own:
     - **Two slices:**
       - **2f-2a** ✅ (2026-10-05; built and proved, below): guests and answers with scope; the series invitation,
         including the approval's and the extension's;
-      - **2f-2b:** edit, move and cancel with scope; the approval passed on when its occurrence is cancelled or
-        deleted; extending after a series move; one approval for a moved series.
+      - **2f-2b** ✅ (2026-10-05; built and proved, below): edit, move and cancel with scope; the approval passed on
+        when its occurrence is cancelled or deleted; extending after a series move; one approval for a moved series.
+
+    **2f is done** (2f-1, 2f-2a, 2f-2b). "Book this room for every occurrence" is lane 3's.
 
     The four findings above are fixed as defects: the first in 2f-2a, the other three in 2f-2b. Removing a guest
     with series scope needs the series-changed email, so **both templates come in 2f-2a** (52), and 2f-2b adds its
     kinds of change to the same email.
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2f-2b — what was built (2026-10-05): edit, move and cancel across a series (D-12).*
+- **No migration.** The edit, reschedule and cancel requests carry `SeriesScope`. The edit's own `Scope` is who the
+  event is for, so the name differs.
+- **The edit, split:**
+  - `ApplyEditAsync` applies one event's edit: its checks, a move when the window changes, and what its guests would
+    hear of, without saving or telling;
+  - `TellEditAsync` tells, optionally to some guests only;
+  - a single edit is apply, save, tell, as before.
+- **An edit with a series scope** (`UpdateSeriesAsync`):
+  - what changed is measured against the date it was made from, field by field (`SnapshotOf`; an empty text and none
+    are the same);
+  - each date takes only those fields (the user's ruling), so a difference set on one date on purpose is kept unless
+    this edit changed that field;
+  - a new window moves each date by the same number of days, to the new times when they changed;
+  - a new reply-by date keeps its distance from each date's start;
+  - every date is applied before anything is saved, so one refused date refuses all, naming it ("EVT-…, Monday …:
+    … Nothing was changed.").
+- **A move with a series scope** (`RescheduleSeriesAsync`): each date moves by the same number of days, keeping its
+  own hours unless new ones are given. A new reply-by date keeps its distance. One refusal refuses all, named.
+- **A cancellation with a series scope** (`CancelSeriesAsync`): each date is cancelled with its rooms, and "this and
+  following" ends the series there. Their approvals under way are withdrawn.
+- **Told once per guest per kind of change** (`TellAcrossAsync`):
+  - moved, changed (venue, link or site), postponed or cancelled;
+  - a guest on one of the dates gets the single-date notice, on several the series-changed email, with each date's
+    calendar update (REQUEST) or cancellation, and a postponed date's entry never sent back;
+  - moved carries the reason and asks for answers again; changed names the new venue or link; cancelled carries the
+    reason.
+- **The three remaining defects of the source check, fixed:**
+  - **The approval passes on (finding 2):** when the date carrying a series' approval is cancelled (singly or with a
+    scope) or deleted, `PassSeriesApprovalOnAsync` starts it on the next date still waiting, unless one is already
+    under way. `CancelApprovalAsync` now says whether it withdrew one.
+  - **Extending follows a series move (finding 3):** the new dates carry the shift from the rule that the series'
+    latest two consecutive dates share. A date moved on its own differs from its neighbours and is not followed.
+  - **One approval for a moved series (finding 4):** a series move clears each date's approval and starts one, on the
+    first date; its decision covers the rest.
+- **Screens:**
+  - the edit page asks "Which dates" on a series, with what the other dates take;
+  - the reschedule and cancel dialogs ask too (`SeriesScopeField`, new);
+  - the toasts list the dates and who was told (`describeSeriesChange`).
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2f-2b: **658/658 on two clean passes**, the blocking watcher beside both: no
+  memory-grant wait. The longest wait (about 50 s each pass) was the suite's own notice withdrawal for 124 events (lane
+  6's new item). No live `CSF-` event, series row or mail-server row was left. 2f-2b has **39 assertions**:
+  - **An edit takes only what changed:**
+    - a new description from the second date, this and following: dates two to four take it, and the third date's
+      own venue stays; nobody is told, since guests don't hear of a description;
+    - a new venue on every date replaces the third's own, since this edit changed the venue; B is told once, one
+      notice for the four dates and no other.
+  - **Moves:**
+    - an edit moving the third date a day later, to 10:00, this and following: the third and fourth move, the
+      first two stay; B is told once;
+    - every date a week later by reschedule, each keeping its own hours; B is told once;
+    - moving both dates of another series a day earlier, where the second's own reply-by date would fall after its
+      start: refused, naming the second, and the first did not move either.
+  - **Cancelling this and following** from the third date: the third and fourth are cancelled, the first two go on, and
+    B is told once. Cancelling again from there is refused: nothing still to come.
+  - **Extending (finding 3):** a series moved a day later extends a day later; a series whose last date moved alone
+    extends on the rule.
+  - **Approval (UAT's real definition):**
+    - the date carrying it cancelled: the approval passes to the next date waiting, and deciding that one approves
+      the rest;
+    - the date carrying it deleted: the same;
+    - an approved series moved together: every date waits again, one approval under way on the first, deciding
+      another refused naming the first, and its decision covers all.
+  - **Through the sink:**
+    - a series moved: one email, "Moved: … — 3 dates", a REQUEST per date with the same UIDs at SEQUENCE 1 and the
+      new times, with the reason;
+    - this and following cancelled: one email for two dates, a CANCEL each at SEQUENCE 2;
+    - an edit of one date alone sends the single-date email.
+- **Regression:** the round-4 net **209/209**; `hr-recruitment/run-round4-d` **58/58**; the templates probe **30/30**;
+  `run-lane-n` **109/115**, the six section-J failures of #40.
+- **`run-lane-n` repaired (harness, not ours).** It could not start: its pre-clean of the fixture tenant an earlier
+  run left failed on a foreign key. The API's background sweeps walk every tenant, the fixture's too while it exists,
+  and leave rows on it (69 notification topics, eight sweep run logs, a SHE monthly report). That is also why the
+  2f-2a run's own tidy-up had failed. Its pre-clean and tidy-up now clear every row that points at the fixture tenant,
+  in passes, before the tenant. The leftover is gone and the run removed its own.
+- **The API log:** no request answered 500. Its ERR lines are the known kinds:
+  - notifications with no mail server;
+  - the sink's bounces and `run-lane-n`'s test send;
+  - master's identity sweep;
+  - payroll's foreign key on minted fixtures (#23);
+  - the race proofs;
+  - the procurement calendar sweep failing on the fixture tenant (`run-lane-n`'s, gone now);
+  - two timeouts of the notification service's poll behind the suite's own withdrawal (lane 6's item).
+
+  None comes from the series code.
+- **After the runs:** every harness login is off (the no-email one by SQL, #42, so no 500 this time). No
+  company-event notice to anyone real is live. The R4D requisition's approval notices to md.tdc,
+  managing.director, hr.head and hr.officer were withdrawn twice, 0 live.
 
 *2f-2a — what was built (2026-10-05): guests and answers across a series (D-12).*
 - **No migration.** `SeriesScope` (`ThisOccurrence`, `ThisAndFollowing`, `WholeSeries`) is asked for, never stored.
@@ -2212,6 +2305,13 @@ built, proved twice and handed over on its own:
       (closures beside holidays, D-15c);
       the configuration register (new endpoints and topics); the demo runbook's closure aside (in
       `dev-harness/`, outside the repo); memory `hr-company-schedule-guide-findings`.
+- [ ] **(Found at 2f, 2026-10-05) The suite's notice withdrawal grows with the run.** Its clean-up withdraws the
+      run's notices with one `UPDATE … WHERE EntityId = … OR ActionUrl LIKE '%…%'` over every event the run made. That
+      scans `Notifications`, and holds the notification service's own clean-up behind it: 36 s at 85 events (2f-1),
+      42 s at 100 (2f-2a), 50 s at 124 (2f-2b). **At 124 the notification service's poll timed out (30 s) behind it,
+      once per pass, logged as an ERR** (`ProcessPendingNotificationsAsync`; it polls again, nothing lost). Withdraw by
+      `EntityId` (a seek) first, and match the `ActionUrl` only for notices that name the event in their link alone
+      (the engine's approval notices), in batches of events.
 
 **State:** *(filled when it lands)*
 
@@ -2627,3 +2727,20 @@ built API, so no web host and no seeders).
   - **Harness cost noted:** the suite's notice withdrawal now scans for 100 events and takes about 42 s.
 
   Next: 2f-2b, edit, move and cancel with a series scope, and the other three defects.
+- **2026-10-05, later** — **2f-2a committed** (`19eec4b19`). **Lane 2, slice 2f-2b built and proved**: edit, move and
+  cancel across a series (D-12) (lane 2 State). No migration. **2f is done.**
+  - **Built:**
+    - the edit, the move and the cancellation take a series scope;
+    - an edit copies only what it changed (the user's ruling), and a move shifts each date by the same days;
+    - one refused date refuses all, named;
+    - each guest is told once per kind of change.
+  - **The three remaining defects fixed:** the series' approval passes on when its date is cancelled or deleted; a
+    moved approved series is approved once; extending follows a series move but not a lone one.
+  - **Results:** `run-final-review.mjs` scored 658/658 on two clean passes, with 39 checks in 2f-2b, first time; no
+    memory-grant wait. The round-4 net was 209/209, recruitment 58/58, the templates probe 30/30 and `run-lane-n`
+    109/115 (section J, #40). No request answered 500.
+  - **Harness:** `run-lane-n` could not start; the API's sweeps leave rows on its fixture tenant. Its clean-up now
+    clears them. The suite's own notice withdrawal (50 s at 124 events) made the notification service's poll time out
+    twice: lane 6's item, raised.
+
+  Next: 2g, search, export, the dashboard and clashes on the two registers; then 2h.

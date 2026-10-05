@@ -239,6 +239,8 @@ export interface CompanyEvent extends AuditFields {
   warnings?: string[];
   /** Who an edit's notice reached — a move, a postponement, a new venue or link (update only, lane 2e-2). */
   told?: CompanyEventNoticeResult | null;
+  /** Lane 2f-2b: an edit with a series scope — the dates it changed (update only). */
+  series?: EventSeriesChangeResult | null;
 
   visibility: EventVisibility;
   visibilityName: string;
@@ -486,11 +488,18 @@ export interface UpdateCompanyEvent {
   sendReminders: boolean;
   reminderDaysBefore?: number | null;
   additionalNotes?: string | null;
+  /**
+   * Lane 2f-2b: on a recurring event, which dates the edit reaches — each takes only what this edit changed. Not
+   * `scope`, which is who the event is for.
+   */
+  seriesScope?: SeriesScope;
 }
 
 export interface CancelEvent {
   eventId: string;
   cancellationReason: string;
+  /** Lane 2f-2b: on a recurring event, which dates are cancelled ("this and following" ends the series). */
+  seriesScope?: SeriesScope;
 }
 
 export interface RescheduleEvent {
@@ -502,6 +511,16 @@ export interface RescheduleEvent {
   rescheduleReason: string;
   /** A new reply-by date, when the current one would fall after the new start. */
   newRsvpDeadline?: string | null;
+  /** Lane 2f-2b: on a recurring event, which dates move — each by the same number of days. */
+  seriesScope?: SeriesScope;
+}
+
+/** What an edit, move or cancellation with a series scope did (lane 2f-2b): the dates, and who was told. */
+export interface EventSeriesChangeResult {
+  eventNumbers: string[];
+  /** Dates left alone: started, completed or cancelled. */
+  closed: number;
+  told?: CompanyEventNoticeResult | null;
 }
 
 /** Who an event with this scope and visibility would be for, and how many (lane 2c, D-16). */
@@ -537,6 +556,8 @@ export interface CompanyEventChange {
   approvalCleared: boolean;
   /** Who was told of it (lane 2e-2); null after a delete. */
   told?: CompanyEventNoticeResult | null;
+  /** Lane 2f-2b: a move or cancellation with a series scope. */
+  series?: EventSeriesChangeResult | null;
 }
 
 export interface CompleteEvent {

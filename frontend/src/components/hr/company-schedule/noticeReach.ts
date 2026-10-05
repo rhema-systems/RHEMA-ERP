@@ -1,4 +1,16 @@
-import type { CompanyEventNoticeResult } from '@/types/hr/company-schedule';
+import type { CompanyEventNoticeResult, EventSeriesChangeResult } from '@/types/hr/company-schedule';
+
+/**
+ * What an edit, move or cancellation across a series did, for a toast (lane 2f-2b): the dates, those left alone,
+ * and who was told — each guest once per kind of change.
+ */
+export function describeSeriesChange(r: EventSeriesChangeResult): string {
+  const parts = [`${r.eventNumbers.length} date(s): ${r.eventNumbers.join(', ')}.`];
+  if (r.closed) parts.push(`${r.closed} left alone: started, completed or cancelled.`);
+  const reach = describeReach(r.told, 'Guests told once');
+  if (reach) parts.push(reach);
+  return parts.join(' ');
+}
 
 /**
  * What a company-schedule notice did, as one sentence for a toast (lane 2e-2, R4-6.3): "3 of 4 reached — 2 by

@@ -48,8 +48,9 @@ import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
 import { EventSeriesCard } from '@/components/hr/company-schedule/EventSeriesCard';
 import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
-import { describeReach } from '@/components/hr/company-schedule/noticeReach';
-import type { CompanyEventChange, CompanyEventNoticeResult } from '@/types/hr/company-schedule';
+import { describeReach, describeSeriesChange } from '@/components/hr/company-schedule/noticeReach';
+import { SeriesScopeField } from '@/components/hr/company-schedule/SeriesScopeField';
+import type { CompanyEventChange, CompanyEventNoticeResult, SeriesScope } from '@/types/hr/company-schedule';
 
 /**
  * What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a) — and who was
@@ -65,6 +66,11 @@ function describeChange(change?: CompanyEventChange | null): string | undefined 
   if (change.approvalCleared) parts.push('it waits for approval again');
   const told = change.told?.issued ? describeReach(change.told, 'Guests told') : undefined;
   return [parts.length ? `${parts.join('; ')}.` : undefined, told].filter(Boolean).join(' ') || undefined;
+}
+
+/** Lane 2f-2b: the dates a series move or cancellation reached — who was told is in describeChange. */
+function seriesLine(change?: CompanyEventChange | null): string | undefined {
+  return change?.series ? describeSeriesChange({ ...change.series, told: null }) : undefined;
 }
 
 /** A day as the card reads it: "Tue 14 Oct 2026". */
@@ -111,6 +117,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  // Lane 2f-2b: on a recurring event, which dates a cancellation or a move reaches.
+  const [cancelScope, setCancelScope] = useState<SeriesScope>('ThisOccurrence');
+  const [moveScope, setMoveScope] = useState<SeriesScope>('ThisOccurrence');
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [reschedule, setReschedule] = useState({
     newStartDate: '',
@@ -218,12 +227,16 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
   });
 
   const cancel = useMutation({
-    mutationFn: () => companyEventService.cancel(id, cancelReason.trim()),
+    mutationFn: () =>
+      companyEventService.cancel(id, cancelReason.trim(), event?.recurrenceSeriesId ? cancelScope : undefined),
     onSuccess: async (change) => {
       await refresh();
       setCancelOpen(false);
       setCancelReason('');
-      toast({ title: 'Event cancelled', description: describeChange(change) });
+      toast({
+        title: change.series ? 'Dates cancelled' : 'Event cancelled',
+        description: [seriesLine(change), describeChange(change)].filter(Boolean).join(' ') || undefined,
+      });
     },
     onError: fail('Could not cancel the event'),
   });
@@ -237,11 +250,15 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         newEndTime: reschedule.newEndTime ? `${reschedule.newEndTime}:00` : null,
         rescheduleReason: reschedule.rescheduleReason.trim(),
         newRsvpDeadline: toIsoInstant(reschedule.newRsvpDeadline),
+        ...(event?.recurrenceSeriesId ? { seriesScope: moveScope } : {}),
       }),
     onSuccess: async (change) => {
       await refresh();
       setRescheduleOpen(false);
-      toast({ title: 'Event rescheduled', description: describeChange(change) });
+      toast({
+        title: change.series ? 'Dates moved' : 'Event rescheduled',
+        description: [seriesLine(change), describeChange(change)].filter(Boolean).join(' ') || undefined,
+      });
     },
     onError: fail('Could not reschedule the event'),
   });
@@ -599,6 +616,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               placeholder="Why is it being cancelled?"
             />
           </div>
+          {event.recurrenceSeriesId && (
+            <SeriesScopeField
+              value={cancelScope}
+              onChange={setCancelScope}
+              hint="This and following ends the series at this date; their rooms are cancelled with them."
+            />
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>Keep it</Button>
             <Button
@@ -686,6 +710,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               onChange={(e) => setReschedule({ ...reschedule, rescheduleReason: e.target.value })}
             />
           </div>
+          {event.recurrenceSeriesId && (
+            <SeriesScopeField
+              value={moveScope}
+              onChange={setMoveScope}
+              hint="The other dates move by the same number of days, to the new times when you give them; a new reply-by date keeps its distance from each date."
+            />
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setRescheduleOpen(false)}>Cancel</Button>
             <Button

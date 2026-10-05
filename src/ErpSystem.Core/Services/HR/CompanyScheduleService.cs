@@ -955,8 +955,9 @@ public class CompanyEventService : ICompanyEventService
         return change;
     }
 
-    /// <summary>Tells everybody invited that the event moved, and from when (round 4, D6).</summary>
-    private Task<CompanyEventNoticeResultDto> NotifyRescheduledAsync(CompanyEvent entity, CancellationToken cancellationToken)
+    /// <summary>Tells everybody invited that the event moved, and from when (round 4, D6) — or those <paramref name="filter"/> lets through.</summary>
+    private Task<CompanyEventNoticeResultDto> NotifyRescheduledAsync(
+        CompanyEvent entity, CancellationToken cancellationToken, Func<EventParticipant, bool>? filter = null)
     {
         var original = entity.OriginalStartDate is { } os
             ? os.ToString("dddd, d MMMM yyyy")
@@ -972,7 +973,7 @@ public class CompanyEventService : ICompanyEventService
                 tokens["RescheduleReason"] = entity.RescheduleReason;
                 return tokens;
             },
-            "event rescheduled", CompanyScheduleNotices.Rescheduled,
+            "event rescheduled", CompanyScheduleNotices.Rescheduled, filter,
             calendar: HrCalendarMethod.Request, cancellationToken: cancellationToken);
     }
 
@@ -1157,14 +1158,28 @@ public class CompanyEventService : ICompanyEventService
         var templateId = all.Where(x => !x.IsDeleted).OrderByDescending(x => x.OccurrenceNumber).Select(x => x.Id).First();
         var template = templateId == ev.Id ? ev : await GetOwnedEventAsync(templateId, cancellationToken);
 
-        var (total, refusal) = CompanyEventSeries.Plan(pattern, dto.Count, dto.Until, anchor,
+        // Lane 2f-2b (finding 3): a series moved together carries its move into what is added — the shift from the rule
+        // its latest two consecutive dates share. A date moved on its own differs from its neighbours and is not followed.
+        var shifts = all.Where(x => !x.IsDeleted && x.OccurrenceNumber is > 0)
+            .OrderBy(x => x.OccurrenceNumber)
+            .Select(x => x.StartDate.Date - CompanyEventSeries.DateAt(pattern, anchor, x.OccurrenceNumber!.Value - 1))
+            .ToList();
+        var shift = TimeSpan.Zero;
+        for (var i = shifts.Count - 1; i > 0; i--)
+            if (shifts[i] == shifts[i - 1])
+            {
+                shift = shifts[i];
+                break;
+            }
+
+        var (total, refusal) = CompanyEventSeries.Plan(pattern, dto.Count, dto.Until is { } until ? until - shift : null, anchor,
             (template.EndDate.Date - template.StartDate.Date).Days, already: last);
         Refuse(refusal);
 
         var made = new List<CompanyEvent>();
         for (var index = last; index < total; index++)
         {
-            var occurrence = NewOccurrence(template, CompanyEventSeries.DateAt(pattern, anchor, index), index + 1);
+            var occurrence = NewOccurrence(template, CompanyEventSeries.DateAt(pattern, anchor, index) + shift, index + 1);
             occurrence.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
             StampCreator(occurrence);
             await _eventRepository.AddAsync(occurrence);
@@ -1418,7 +1433,7 @@ public class CompanyEventService : ICompanyEventService
     /// <param name="title">The change in a few words ("No longer invited").</param>
     /// <param name="summary">The change in a sentence.</param>
     private async Task<CompanyEventNoticeResultDto> TellSeriesChangeAsync(
-        IReadOnlyList<(CompanyEvent Ev, EventParticipant Guest)> rows, HrCalendarMethod method, string title, string summary,
+        IReadOnlyList<(CompanyEvent Ev, EventParticipant Guest)> rows, HrCalendarMethod? method, string title, string summary,
         string? reason, bool nothingRequired, CancellationToken cancellationToken)
     {
         var (first, guest) = rows[0];
@@ -1440,9 +1455,10 @@ public class CompanyEventService : ICompanyEventService
 
         var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
         var files = new List<EmailAttachmentDto>();
-        if (!string.IsNullOrWhiteSpace(address))
-            foreach (var (ev, row) in rows)
-                files.Add(CalendarFileFor(ev, method, await CalendarOrganizerAsync(ev, cancellationToken), address, name, row.IsRequired));
+        if (method is { } calendar && !string.IsNullOrWhiteSpace(address))
+            // A postponed date's entry was taken away; an update must not put it back at the old date (2e-3).
+            foreach (var (ev, row) in rows.Where(r => !(calendar == HrCalendarMethod.Request && r.Ev.Status == EventStatus.Postponed)))
+                files.Add(CalendarFileFor(ev, calendar, await CalendarOrganizerAsync(ev, cancellationToken), address, name, row.IsRequired));
         var emailed = await SendEventEmailWithFilesAsync(
             first.TenantId, CompanyScheduleEmailCatalog.Events.EventSeriesChanged, address, tokens, "series changed", files);
         if (emailed) tally.Emailed = 1;
@@ -1562,6 +1578,371 @@ public class CompanyEventService : ICompanyEventService
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2f-2b — edit, move and cancel across a series (D-12)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Tells the guests of several dates what happened to them, ONCE each (the user's ruling): the single-date notice
+    /// (<paramref name="single"/>, for that guest alone) to a guest on one of the dates, the series email listing the
+    /// dates to a guest on several. A change goes to the guests who were invited, never to whoever made it (lane 2e-1).
+    /// </summary>
+    private async Task<CompanyEventNoticeResultDto> TellAcrossAsync(
+        IReadOnlyList<CompanyEvent> events,
+        Func<CompanyEvent, Func<EventParticipant, bool>, Task<CompanyEventNoticeResultDto?>> single,
+        HrCalendarMethod? method, string title, string summary, string? reason, bool nothingRequired,
+        CancellationToken cancellationToken)
+    {
+        var tally = new CompanyEventNoticeResultDto();
+        if (events.Count == 0) return tally;
+        var tenantId = events[0].TenantId;
+        tally.MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken);
+
+        var actor = await _notices.ActorEmployeeIdAsync(cancellationToken);
+        var byId = events.ToDictionary(e => e.Id);
+        var ids = byId.Keys.ToList();
+        var guests = await TenantGuests(tenantId)
+            .Where(p => ids.Contains(p.EventId) && p.InvitationStatus != InvitationStatus.NotSent)
+            .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
+            .ToListAsync(cancellationToken);
+
+        foreach (var person in guests.Where(p => actor is null || p.EmployeeId != actor).GroupBy(PersonKey))
+        {
+            var rows = person.Select(p => (Ev: byId[p.EventId], Guest: p))
+                .OrderBy(r => r.Ev.StartDate).ThenBy(r => r.Ev.OccurrenceNumber).ToList();
+            if (rows.Count == 1)
+            {
+                var only = rows[0].Guest.Id;
+                if (await single(rows[0].Ev, p => p.Id == only) is { } told) tally.Add(told);
+            }
+            else tally.Add(await TellSeriesChangeAsync(rows, method, title, summary, reason, nothingRequired, cancellationToken));
+        }
+        return tally;
+    }
+
+    /// <summary>An event's editable fields as they stand — what an edit with a series scope is measured against.</summary>
+    private static UpdateCompanyEventDto SnapshotOf(CompanyEvent e) => new()
+    {
+        Id = e.Id,
+        EventName = e.EventName,
+        Description = e.Description,
+        Category = e.Category,
+        Type = e.Type,
+        Priority = e.Priority,
+        StartDate = e.StartDate,
+        StartTime = e.StartTime,
+        EndDate = e.EndDate,
+        EndTime = e.EndTime,
+        IsAllDayEvent = e.IsAllDayEvent,
+        LocationType = e.LocationType,
+        VenueName = e.VenueName,
+        VenueAddress = e.VenueAddress,
+        OnlineMeetingLink = e.OnlineMeetingLink,
+        MeetingPassword = e.MeetingPassword,
+        LocationId = e.LocationId,
+        DepartmentId = e.DepartmentId,
+        OrganizationUnitId = e.OrganizationUnitId,
+        OrganizerId = e.OrganizerId,
+        Scope = e.Scope,
+        EstimatedAttendees = e.EstimatedAttendees,
+        RequiresRsvp = e.RequiresRsvp,
+        RsvpDeadline = e.RsvpDeadline,
+        Visibility = e.Visibility,
+        ShowOnCompanyCalendar = e.ShowOnCompanyCalendar,
+        ShowOnIntranet = e.ShowOnIntranet,
+        Status = e.Status,
+        HasBudget = e.HasBudget,
+        BudgetAmount = e.BudgetAmount,
+        ActualCost = e.ActualCost,
+        BudgetCode = e.BudgetCode,
+        RequiredResources = e.RequiredResources,
+        CateringRequirements = e.CateringRequirements,
+        TechnicalRequirements = e.TechnicalRequirements,
+        SendReminders = e.SendReminders,
+        ReminderDaysBefore = e.ReminderDaysBefore,
+        AdditionalNotes = e.AdditionalNotes,
+    };
+
+    /// <summary>
+    /// The fields an edit carries field for field — everything but the window and the reply-by date, which move by the
+    /// edit's offset, and what only steers the edit.
+    /// </summary>
+    private static readonly System.Reflection.PropertyInfo[] PlainEditFields = typeof(UpdateCompanyEventDto).GetProperties()
+        .Where(p => p.CanRead && p.CanWrite && !new[]
+        {
+            nameof(UpdateCompanyEventDto.Id), nameof(UpdateCompanyEventDto.RescheduleReason), nameof(UpdateCompanyEventDto.SeriesScope),
+            nameof(UpdateCompanyEventDto.StartDate), nameof(UpdateCompanyEventDto.StartTime), nameof(UpdateCompanyEventDto.EndDate),
+            nameof(UpdateCompanyEventDto.EndTime), nameof(UpdateCompanyEventDto.IsAllDayEvent), nameof(UpdateCompanyEventDto.RsvpDeadline),
+        }.Contains(p.Name))
+        .ToArray();
+
+    /// <summary>Two field values the same — an empty text and none are.</summary>
+    private static bool SameValue(object? a, object? b) =>
+        a is string || b is string
+            ? string.Equals((a as string)?.Trim() ?? string.Empty, (b as string)?.Trim() ?? string.Empty, StringComparison.Ordinal)
+            : Equals(a, b);
+
+    /// <summary>
+    /// Edits several dates of a series at once (lane 2f-2b, D-12). Each date takes ONLY what this edit changed on the
+    /// date it was made from (the user's ruling): a difference set on one date on purpose is kept. A new window moves
+    /// each by the same number of days, to the new times when they changed; a new reply-by date keeps its distance from
+    /// each date's start. Each date is checked and applied before anything is saved, so one refused date refuses all —
+    /// named. Each guest is told once per kind of change; a moved approved series is approved once (finding 4).
+    /// </summary>
+    private async Task<CompanyEventDto> UpdateSeriesAsync(
+        CompanyEvent acted, UpdateCompanyEventDto dto, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var (targets, closed) = await SeriesTargetsAsync(acted, dto.SeriesScope, cancellationToken);
+        if (targets.Count == 0)
+            throw new InvalidOperationException(
+                $"No date of {acted.EventName} {ScopeWords(dto.SeriesScope)} is still to come, so none can be changed.");
+
+        // What this edit changes, measured against the date it was made from.
+        var before = SnapshotOf(acted);
+        var changed = PlainEditFields.Where(p => !SameValue(p.GetValue(before), p.GetValue(dto))).ToList();
+        var shift = dto.StartDate.Date - acted.StartDate.Date;
+        var span = dto.EndDate.Date - dto.StartDate.Date;
+        var timesChanged = dto.StartTime != acted.StartTime || dto.EndTime != acted.EndTime || dto.IsAllDayEvent != acted.IsAllDayEvent;
+        var windowChanged = shift != TimeSpan.Zero || span != (acted.EndDate.Date - acted.StartDate.Date) || timesChanged;
+        var deadlineChanged = dto.RsvpDeadline != acted.RsvpDeadline;
+
+        var applied = new List<(CompanyEvent Ev, EditOutcome Outcome)>();
+        foreach (var target in targets)
+        {
+            var request = SnapshotOf(target);
+            foreach (var field in changed) field.SetValue(request, field.GetValue(dto));
+            if (windowChanged)
+            {
+                request.StartDate = target.StartDate.Date + shift;
+                request.EndDate = request.StartDate + span;
+                if (timesChanged)
+                {
+                    request.StartTime = dto.StartTime;
+                    request.EndTime = dto.EndTime;
+                    request.IsAllDayEvent = dto.IsAllDayEvent;
+                }
+                request.RescheduleReason = dto.RescheduleReason;
+            }
+            if (deadlineChanged)
+                request.RsvpDeadline = dto.RsvpDeadline is { } deadline ? request.StartDate.Date + (deadline - dto.StartDate.Date) : null;
+
+            try
+            {
+                applied.Add((target, await ApplyEditAsync(target, request, tenantId, cancellationToken)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException($"{target.EventNumber}, {SeriesDateLine(target)}: {ex.Message} Nothing was changed.", ex);
+            }
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Company event series edited from {EventNumber}: {Count} date(s) ({Scope}), {Fields}",
+            acted.EventNumber, applied.Count, dto.SeriesScope, string.Join(", ", changed.Select(c => c.Name)));
+
+        // Each guest told once per kind of change.
+        var outcomeOf = applied.ToDictionary(a => a.Ev.Id, a => a.Outcome);
+        Task<CompanyEventNoticeResultDto?> Single(CompanyEvent ev, Func<EventParticipant, bool> filter) =>
+            TellEditAsync(ev, outcomeOf[ev.Id], cancellationToken, filter);
+        var told = new CompanyEventNoticeResultDto { MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken) };
+        var name = acted.EventName;
+        var movedDates = applied.Where(a => a.Outcome.Moving).Select(a => a.Ev).ToList();
+        if (movedDates.Count > 0)
+            told.Add(await TellAcrossAsync(movedDates, Single, HrCalendarMethod.Request, "Moved",
+                $"These dates of {name} have moved; they are now as listed. If you had answered, please answer again for the new times.",
+                dto.RescheduleReason?.Trim(), nothingRequired: false, cancellationToken));
+        var postponed = applied.Where(a => a.Outcome.PostponedNow).Select(a => a.Ev).ToList();
+        if (postponed.Count > 0)
+            told.Add(await TellAcrossAsync(postponed, Single, HrCalendarMethod.Cancel, "Postponed",
+                $"These dates of {name} are postponed. New dates will follow.", reason: null, nothingRequired: true, cancellationToken));
+        foreach (var group in applied.Where(a => a.Outcome.Changed is not null).GroupBy(a => a.Outcome.Changed!.Value.What))
+        {
+            var sample = group.First();
+            var details = new List<string>();
+            if (group.Key.Contains("venue", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(sample.Ev.VenueName))
+                details.Add($"now {sample.Ev.VenueName}{(sample.Outcome.Changed!.Value.SiteName is { } site ? $", {site}" : string.Empty)}");
+            if (group.Key.Contains("link", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(sample.Ev.OnlineMeetingLink))
+                details.Add($"join at {sample.Ev.OnlineMeetingLink}");
+            told.Add(await TellAcrossAsync(group.Select(a => a.Ev).ToList(), Single, HrCalendarMethod.Request, "Changed",
+                $"{group.Key} for these dates of {name} has changed{(details.Count > 0 ? ": " + string.Join("; ", details) : string.Empty)}.",
+                reason: null, nothingRequired: false, cancellationToken));
+        }
+
+        // D-10 with the user's ruling (finding 4): a moved approved series is approved afresh, ONCE — the first date
+        // that lost its approval asks, and its decision covers the rest.
+        if (applied.Where(a => a.Outcome.Moved?.ApprovalCleared == true).Select(a => a.Ev).FirstOrDefault() is { } asks)
+            await StartApprovalAsync(asks, cancellationToken);
+
+        var updated = await GetByIdAsync(acted.Id, cancellationToken);
+        var anyTold = told.Issued > 0 ? told : null;
+        updated.Told = anyTold;
+        updated.Series = new EventSeriesChangeResultDto
+        {
+            EventNumbers = applied.Select(a => a.Ev.EventNumber).ToList(),
+            Closed = closed,
+            Told = anyTold,
+        };
+        if (await AudienceWarningAsync(acted, cancellationToken) is { } warning) updated.Warnings.Add(warning);
+        return updated;
+    }
+
+    /// <summary>
+    /// Moves several dates of a series at once (lane 2f-2b, D-12): each by the same number of days as the date it was
+    /// asked from, to the new times when given (each keeps its own when not); a new reply-by date keeps its distance from
+    /// each date's start. One refused date refuses all, named. Each guest is told once; a moved approved series is
+    /// approved once (finding 4).
+    /// </summary>
+    private async Task<CompanyEventChangeDto> RescheduleSeriesAsync(
+        CompanyEvent acted, RescheduleEventDto dto, CancellationToken cancellationToken)
+    {
+        var (targets, closed) = await SeriesTargetsAsync(acted, dto.SeriesScope, cancellationToken);
+        if (targets.Count == 0)
+            throw new InvalidOperationException(
+                $"No date of {acted.EventName} {ScopeWords(dto.SeriesScope)} is still to come, so none can be moved.");
+
+        var shift = dto.NewStartDate.Date - acted.StartDate.Date;
+        var span = dto.NewEndDate.Date - dto.NewStartDate.Date;
+        var keepHours = dto.NewStartTime is null && dto.NewEndTime is null;
+        var reason = dto.RescheduleReason.Trim();
+
+        var moved = new List<(CompanyEvent Ev, CompanyEventChangeDto Change)>();
+        foreach (var target in targets)
+        {
+            var before = EventWindow.Of(target);
+            var start = target.StartDate.Date + shift;
+            var requested = new EventWindow(start, keepHours ? target.StartTime : dto.NewStartTime,
+                start + span, keepHours ? target.EndTime : dto.NewEndTime, target.IsAllDayEvent);
+            if (requested.SameAs(before)) continue;
+            try
+            {
+                if (dto.NewRsvpDeadline is { } deadline) target.RsvpDeadline = start + (deadline - dto.NewStartDate.Date);
+                ValidateWindow(target, requested);
+                moved.Add((target, await MoveAsync(target, before, reason, cancellationToken)));
+            }
+            catch (InvalidOperationException ex)
+            {
+                throw new InvalidOperationException($"{target.EventNumber}, {SeriesDateLine(target)}: {ex.Message} Nothing was moved.", ex);
+            }
+            await _eventRepository.UpdateAsync(target);
+        }
+        if (moved.Count == 0)
+            throw new InvalidOperationException($"Every date chosen of {acted.EventName} is already there. Choose a different time.");
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Company event series moved from {EventNumber}: {Count} date(s) ({Scope}) by {Days} day(s)",
+            acted.EventNumber, moved.Count, dto.SeriesScope, shift.Days);
+
+        var told = await TellAcrossAsync(moved.Select(m => m.Ev).ToList(),
+            async (ev, filter) => await NotifyRescheduledAsync(ev, cancellationToken, filter),
+            HrCalendarMethod.Request, "Moved",
+            $"These dates of {acted.EventName} have moved; they are now as listed. If you had answered, please answer again for the new times.",
+            reason, nothingRequired: false, cancellationToken);
+        // D-10 with the user's ruling (finding 4): approved afresh, once.
+        if (moved.Where(m => m.Change.ApprovalCleared).Select(m => m.Ev).FirstOrDefault() is { } asks)
+            await StartApprovalAsync(asks, cancellationToken);
+
+        var anyTold = told.Issued > 0 ? told : null;
+        return new CompanyEventChangeDto
+        {
+            Event = await GetByIdAsync(acted.Id, cancellationToken),
+            BookingsMoved = moved.SelectMany(m => m.Change.BookingsMoved).ToList(),
+            AnswersReset = moved.Sum(m => m.Change.AnswersReset),
+            ApprovalCleared = moved.Any(m => m.Change.ApprovalCleared),
+            Told = anyTold,
+            Series = new EventSeriesChangeResultDto
+            {
+                EventNumbers = moved.Select(m => m.Ev.EventNumber).ToList(),
+                Closed = closed,
+                Told = anyTold,
+            },
+        };
+    }
+
+    /// <summary>
+    /// Cancels several dates of a series at once (lane 2f-2b, D-12) — "this and following" ends the series there. Their
+    /// rooms are cancelled with them and their approvals withdrawn; the series' approval passes on when a cancelled date
+    /// carried it (finding 2). Each guest is told once, with each date's calendar entry cancelled.
+    /// </summary>
+    private async Task<CompanyEventChangeDto> CancelSeriesAsync(
+        CompanyEvent acted, CancelEventDto dto, CancellationToken cancellationToken)
+    {
+        var (targets, closed) = await SeriesTargetsAsync(acted, dto.SeriesScope, cancellationToken);
+        if (targets.Count == 0)
+            throw new InvalidOperationException(
+                $"No date of {acted.EventName} {ScopeWords(dto.SeriesScope)} is still to come, so none can be cancelled.");
+
+        var reason = dto.CancellationReason.Trim();
+        var bookings = new List<string>();
+        var cancelledAt = DateTime.UtcNow;
+        foreach (var target in targets)
+        {
+            target.IsCancelled = true;
+            target.CancellationDate = cancelledAt;
+            target.CancellationReason = reason;
+            target.Status = EventStatus.Cancelled;
+            // Lane 2e-3 (D-14): the cancellation takes the guests' calendar entries away.
+            target.CalendarSequence++;
+            bookings.AddRange(await CancelLinkedBookingsAsync(target, $"{target.EventNumber} was cancelled: {reason}", cancellationToken));
+            await _eventRepository.UpdateAsync(target);
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Company event series cancelled from {EventNumber}: {Count} date(s) ({Scope}), {Bookings} room booking(s) with them",
+            acted.EventNumber, targets.Count, dto.SeriesScope, bookings.Count);
+
+        // D-10: nothing left to approve on them — and the series' approval passes on if one of them carried it.
+        var carried = false;
+        foreach (var target in targets)
+            carried |= await CancelApprovalAsync(target, $"The event was cancelled: {reason}");
+        if (carried && acted.RecurrenceSeriesId is { } seriesId)
+            await PassSeriesApprovalOnAsync(acted.TenantId, seriesId, cancellationToken);
+
+        var told = await TellAcrossAsync(targets,
+            async (ev, filter) => await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventCancelled,
+                tokens =>
+                {
+                    tokens["CancellationReason"] = ev.CancellationReason;
+                    return tokens;
+                },
+                "event cancelled", CompanyScheduleNotices.Cancelled, filter,
+                calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken),
+            HrCalendarMethod.Cancel, "Cancelled", $"These dates of {acted.EventName} have been cancelled.",
+            reason, nothingRequired: true, cancellationToken);
+
+        var anyTold = told.Issued > 0 ? told : null;
+        return new CompanyEventChangeDto
+        {
+            Event = await GetByIdAsync(acted.Id, cancellationToken),
+            BookingsCancelled = bookings,
+            Told = anyTold,
+            Series = new EventSeriesChangeResultDto
+            {
+                EventNumbers = targets.Select(t => t.EventNumber).ToList(),
+                Closed = closed,
+                Told = anyTold,
+            },
+        };
+    }
+
+    /// <summary>
+    /// When the date carrying a series' approval is cancelled or deleted (finding 2), the approval passes to the next
+    /// date still waiting — so the rest are not left with nothing under way, which nobody could decide while a
+    /// definition is published. Nothing happens when another approval is already under way, or nothing waits.
+    /// </summary>
+    private async Task PassSeriesApprovalOnAsync(Guid tenantId, Guid seriesId, CancellationToken cancellationToken)
+    {
+        var waiting = await _eventRepository.GetQueryable()
+            .Include(x => x.Organizer)
+            .Where(x => x.TenantId == tenantId && x.RecurrenceSeriesId == seriesId
+                        && x.RequiresApproval && x.ApprovalDate == null && !x.IsCancelled
+                        && x.Status != EventStatus.Cancelled && x.Status != EventStatus.Completed)
+            .OrderBy(x => x.StartDate).ThenBy(x => x.OccurrenceNumber)
+            .ToListAsync(cancellationToken);
+        if (waiting.Count == 0) return;
+        foreach (var x in waiting)
+            if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, x.Id)) return;
+
+        await StartApprovalAsync(waiting[0], cancellationToken);
+        _logger.LogInformation("The series' approval passed to {EventNumber}, the next date waiting", waiting[0].EventNumber);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     //  Lane 2b — approval on the workflow engine (D-10)
     // ═════════════════════════════════════════════════════════════════════════
 
@@ -1625,16 +2006,19 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <summary>Withdraws an approval still under way, when the event is cancelled or deleted.</summary>
-    private async Task CancelApprovalAsync(CompanyEvent e, string reason)
+    /// <returns>Whether one was under way — for a series, it may have been the series' approval (lane 2f-2b).</returns>
+    private async Task<bool> CancelApprovalAsync(CompanyEvent e, string reason)
     {
         try
         {
-            if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, e.Id))
-                await _workflow.CancelWorkflowAsync(WorkflowEntityType, e.Id, reason);
+            if (!await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, e.Id)) return false;
+            await _workflow.CancelWorkflowAsync(WorkflowEntityType, e.Id, reason);
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not withdraw the approval of event {EventNumber}.", e.EventNumber);
+            return false;
         }
     }
 
@@ -1847,11 +2231,17 @@ public class CompanyEventService : ICompanyEventService
         return created;
     }
 
-    public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
-    {
-        var tenantId = GetTenantId();
-        var entity = await GetOwnedEventAsync(updateDto.Id, cancellationToken);
+    /// <summary>What an edit did to one event — applied, not yet saved, nobody told (lane 2f-2b).</summary>
+    private sealed record EditOutcome(bool Moving, CompanyEventChangeDto? Moved, bool PostponedNow, (string What, string? SiteName)? Changed);
 
+    /// <summary>
+    /// Applies an edit to one event — its checks, a move when the window changes, and what its guests would hear of —
+    /// without saving or telling anyone: the edit saves and tells, and a series edit (lane 2f-2b) applies it to each of
+    /// its dates first, so one refused date refuses them all.
+    /// </summary>
+    private async Task<EditOutcome> ApplyEditAsync(
+        CompanyEvent entity, UpdateCompanyEventDto updateDto, Guid tenantId, CancellationToken cancellationToken)
+    {
         if (CompanyEventRules.IsClosed(entity))
             throw new InvalidOperationException(
                 $"{entity.EventName} is {ClosedState(entity)}, so it can no longer be edited.");
@@ -1898,33 +2288,54 @@ public class CompanyEventService : ICompanyEventService
         if (postponedNow || changed is not null) entity.CalendarSequence++;
 
         await _eventRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return new EditOutcome(moving, moved, postponedNow, changed);
+    }
 
-        _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
-
-        // Lane 2e-2: who the edit's notice reached, for the save's answer.
-        CompanyEventNoticeResultDto? told = null;
-        if (moving)
-            told = await NotifyRescheduledAsync(entity, cancellationToken);
-        else if (postponedNow)
+    /// <summary>Tells one event's guests what an edit did (lane 2e-1, 2e-2) — those <paramref name="filter"/> lets through.</summary>
+    private async Task<CompanyEventNoticeResultDto?> TellEditAsync(
+        CompanyEvent entity, EditOutcome outcome, CancellationToken cancellationToken, Func<EventParticipant, bool>? filter = null)
+    {
+        if (outcome.Moving)
+            return await NotifyRescheduledAsync(entity, cancellationToken, filter);
+        if (outcome.PostponedNow)
             // The user's ruling (2e-3): postponed has no date, so the calendar entry is taken away; the move to a
             // new date sends it again.
-            told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
-                "event postponed", CompanyScheduleNotices.Postponed,
+            return await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
+                "event postponed", CompanyScheduleNotices.Postponed, filter,
                 calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
-        else if (changed is { } what)
-            told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
+        if (outcome.Changed is { } what)
+            return await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
                 tokens =>
                 {
                     tokens["WhatChanged"] = what.What;
                     tokens["SiteName"] = what.SiteName;
                     return tokens;
                 },
-                "event changed", CompanyScheduleNotices.Changed,
+                "event changed", CompanyScheduleNotices.Changed, filter,
                 inAppData: new Dictionary<string, object> { ["What"] = what.What },
                 // A postponed event's entries were taken away; a new venue must not put them back at the old date.
                 calendar: entity.Status == EventStatus.Postponed ? null : HrCalendarMethod.Request,
                 cancellationToken: cancellationToken);
+        return null;
+    }
+
+    public async Task<CompanyEventDto> UpdateAsync(UpdateCompanyEventDto updateDto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entity = await GetOwnedEventAsync(updateDto.Id, cancellationToken);
+        // Lane 2f-2b (D-12): this and following dates, or every date — each still to come.
+        if (updateDto.SeriesScope != SeriesScope.ThisOccurrence && entity.RecurrenceSeriesId is not null)
+            return await UpdateSeriesAsync(entity, updateDto, tenantId, cancellationToken);
+
+        var outcome = await ApplyEditAsync(entity, updateDto, tenantId, cancellationToken);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        var moving = outcome.Moving;
+        var moved = outcome.Moved;
+
+        _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
+
+        // Lane 2e-2: who the edit's notice reached, for the save's answer.
+        var told = await TellEditAsync(entity, outcome, cancellationToken);
         // D-10: an approved event that moved is approved afresh — its approval was for the old time.
         if (moved?.ApprovalCleared == true) await StartApprovalAsync(entity, cancellationToken);
 
@@ -2062,6 +2473,9 @@ public class CompanyEventService : ICompanyEventService
     public async Task<CompanyEventChangeDto> CancelEventAsync(CancelEventDto cancelDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(cancelDto.EventId, cancellationToken);
+        // Lane 2f-2b (D-12): this and following dates — the series ends there — or every date still to come.
+        if (cancelDto.SeriesScope != SeriesScope.ThisOccurrence && entity.RecurrenceSeriesId is not null)
+            return await CancelSeriesAsync(entity, cancelDto, cancellationToken);
 
         // ⚠ A second cancel overwrote the reason and emailed everybody again.
         if (CompanyEventRules.IsClosed(entity))
@@ -2082,8 +2496,10 @@ public class CompanyEventService : ICompanyEventService
         _logger.LogInformation("Company event cancelled: {EventNumber}, {Bookings} room booking(s) with it",
             entity.EventNumber, bookings.Count);
 
-        // D-10: an approval still under way is withdrawn — there is nothing left to approve.
-        await CancelApprovalAsync(entity, $"The event was cancelled: {reason}");
+        // D-10: an approval still under way is withdrawn — there is nothing left to approve. Lane 2f-2b (finding 2): when
+        // it was the series' approval, it passes to the next date still waiting.
+        if (await CancelApprovalAsync(entity, $"The event was cancelled: {reason}") && entity.RecurrenceSeriesId is { } seriesId)
+            await PassSeriesApprovalOnAsync(entity.TenantId, seriesId, cancellationToken);
 
         var told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
             tokens =>
@@ -2105,6 +2521,9 @@ public class CompanyEventService : ICompanyEventService
     public async Task<CompanyEventChangeDto> RescheduleEventAsync(RescheduleEventDto rescheduleDto, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(rescheduleDto.EventId, cancellationToken);
+        // Lane 2f-2b (D-12): this and following dates, or every date still to come — each by the same number of days.
+        if (rescheduleDto.SeriesScope != SeriesScope.ThisOccurrence && entity.RecurrenceSeriesId is not null)
+            return await RescheduleSeriesAsync(entity, rescheduleDto, cancellationToken);
 
         if (CompanyEventRules.IsClosed(entity))
             throw new InvalidOperationException(
@@ -2182,7 +2601,9 @@ public class CompanyEventService : ICompanyEventService
 
         await _eventRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-        await CancelApprovalAsync(entity, "The event was deleted.");
+        // Lane 2f-2b (finding 2): when it carried the series' approval, the approval passes to the next date waiting.
+        if (await CancelApprovalAsync(entity, "The event was deleted.") && entity.RecurrenceSeriesId is { } seriesId)
+            await PassSeriesApprovalOnAsync(entity.TenantId, seriesId, cancellationToken);
 
         _logger.LogInformation("Company event deleted: {Id}, {Bookings} room booking(s) cancelled with it", id, bookings.Count);
 

@@ -203,8 +203,9 @@ class CompanyEventService {
   }
 
   /** Cancels the event and its live room bookings; answers the bookings cancelled (lane 2a). */
-  cancel(id: string, cancellationReason: string): Promise<CompanyEventChange> {
-    const body: CancelEvent = { eventId: id, cancellationReason };
+  /** Cancels an event — on a recurring one, `seriesScope` cancels this and following dates or every date (lane 2f-2b). */
+  cancel(id: string, cancellationReason: string, seriesScope?: SeriesScope): Promise<CompanyEventChange> {
+    const body: CancelEvent = { eventId: id, cancellationReason, ...(seriesScope ? { seriesScope } : {}) };
     return apiService.post<CompanyEventChange>(`${this.baseUrl}/events/${id}/cancel`, body);
   }
 
