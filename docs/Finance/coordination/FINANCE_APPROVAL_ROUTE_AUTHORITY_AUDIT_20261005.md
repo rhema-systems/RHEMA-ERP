@@ -211,3 +211,4 @@ Push/update of PR #352 is authorized. Deployment and restart are authorized only
 - The user authorized manually restarting the local API from the remediation worktree. Codex did not restart it.
 - Directly changing exchange-rate approval-status columns remains unsafe and unauthorized because it bypasses workflow history, approval evidence, and schedule lifecycle.
 - Exchange-rate dialog Cancel and in-flight submission defects are tracked separately in FINANCE_EXCHANGE_RATE_DEMO_BLOCKERS_20261005.md.
+- The corrective UI and AP/AR tax-persistence set is committed as 3f310872d.

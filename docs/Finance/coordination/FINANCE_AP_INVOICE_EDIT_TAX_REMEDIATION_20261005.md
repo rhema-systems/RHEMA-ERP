@@ -50,7 +50,11 @@ The Save Changes button could also be disabled without an explanatory state whil
 - ESLint for all changed Finance frontend files: passed with no findings.
 - Focused AP/AR backend persistence contracts: passed 2/2.
 - Full frontend type-check remains blocked by existing unrelated baseline errors. No new error identifies the shared tax-selection helper, its new fields, or the exchange-rate changes. The generated Next route type for the AR page continues to reject its pre-existing named InvoiceFormPage export.
-- Final git diff --check: pending after the ledger update.
+- Final git diff --check: passed.
+
+## Completed commit
+
+- 3f310872d - fix(finance): close invoice and exchange-rate edit gaps
 
 ## Authorization boundaries
 

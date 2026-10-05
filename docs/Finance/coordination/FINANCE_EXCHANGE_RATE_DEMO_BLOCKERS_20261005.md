@@ -40,7 +40,11 @@ Restore the exchange-rate maker/checker demo path: make pending submissions visi
 - Focused exchange-rate source contracts: passed 6/6.
 - ESLint for the changed exchange-rate page and contract test: passed.
 - Full frontend type-check remains blocked by unrelated repository baseline errors; no reported error identifies the exchange-rate page.
-- Final diff/build checks: pending.
+- Final git diff --check: passed.
+
+## Completed commit
+
+- 3f310872d - fix(finance): close invoice and exchange-rate edit gaps
 
 ## Migrations and application state
 
@@ -52,7 +56,7 @@ Restore the exchange-rate maker/checker demo path: make pending submissions visi
 
 ## Remaining work
 
-1. Complete final diff checks, commit, and push the corrective set to PR #352.
+1. Push the corrective set to PR #352.
 2. Rebuild and restart the frontend to load the UI changes.
 3. Restart the local API from the remediation worktree to load the already-built approval remediation.
 4. Re-test the Accounts Officer queue with the new request and verify its workflow instance/current stage.
