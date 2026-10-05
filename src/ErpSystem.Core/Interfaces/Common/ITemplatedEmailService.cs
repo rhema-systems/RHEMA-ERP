@@ -55,6 +55,20 @@ public interface ITemplatedEmailService
         string to,
         IReadOnlyDictionary<string, string?> tokens,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// <see cref="SendForTenantAsync(Guid, string, string, string, IReadOnlyDictionary{string, string?}, CancellationToken)"/>
+    /// with attachments — a calendar file (company-schedule final closure, lane 2e-3, D-14). The core always carried
+    /// them; only the tenant-named door lacked them.
+    /// </summary>
+    Task<bool> SendForTenantAsync(
+        Guid tenantId,
+        string module,
+        string eventKey,
+        string to,
+        IReadOnlyDictionary<string, string?> tokens,
+        IReadOnlyList<EmailAttachmentDto>? attachments,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -138,7 +138,8 @@ public class CompanyEventService : ICompanyEventService
     /// module used to ignore. False with no address, no mail server, a refusal or no answer in ten seconds.
     /// </returns>
     private async Task<bool> SendEventEmailAsync(
-        Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description)
+        Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description,
+        EmailAttachmentDto? calendarFile = null)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) return false;
 
@@ -150,7 +151,8 @@ public class CompanyEventService : ICompanyEventService
             // mail server is looked up by the signed-in user's tenant, so the hourly sweep's emails find none
             // (cross-module #40) and are counted as not taken.
             var send = _templatedEmail.SendForTenantAsync(
-                tenantId, CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens);
+                tenantId, CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens,
+                calendarFile is null ? null : new[] { calendarFile });
 
             if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) == send)
                 return await send;
@@ -167,6 +169,80 @@ public class CompanyEventService : ICompanyEventService
                 description, toEmail);
             return false;
         }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2e-3 — the calendar file (D-14)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Whom an event's calendar file names as organiser, so an outside guest's Accept or Decline reaches someone
+    /// (F-36: HR records it at the desk): the organiser's own address, or else the mail server's sending address.
+    /// </summary>
+    private async Task<HrCalendarPerson?> CalendarOrganizerAsync(CompanyEvent ev, CancellationToken cancellationToken)
+    {
+        var organiser = ev.Organizer is { } loaded
+            ? new { loaded.FirstName, loaded.LastName, loaded.EmailAddress }
+            : await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                .Where(x => x.Id == ev.OrganizerId && x.TenantId == ev.TenantId)
+                .Select(x => new { x.FirstName, x.LastName, x.EmailAddress })
+                .FirstOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(organiser?.EmailAddress))
+            return new HrCalendarPerson(organiser.EmailAddress, $"{organiser.FirstName} {organiser.LastName}".Trim());
+
+        var server = await _unitOfWork.Repository<ErpSystem.Core.Entities.EmailSettings>().GetQueryable().AsNoTracking()
+            .Where(s => s.TenantId == ev.TenantId && !s.IsDeleted && s.FromAddress != "")
+            .Select(s => new { s.FromAddress, s.FromName })
+            .FirstOrDefaultAsync(cancellationToken);
+        return server is null ? null : new HrCalendarPerson(server.FromAddress, server.FromName);
+    }
+
+    /// <summary>
+    /// The calendar file one recipient's email carries (lane 2e-3, D-14): the event as their calendar should hold it,
+    /// or its cancellation. The UID is the event's id, so every file replaces the last; the SEQUENCE is the event's,
+    /// raised by each change before it is told.
+    /// </summary>
+    /// <remarks>
+    /// Only the recipient is named as attendee — the guest list is nobody else's. An untimed event is an all-day one,
+    /// as the emails treat it. The meeting password is never in it, as it is not in the emails.
+    /// </remarks>
+    private static EmailAttachmentDto CalendarFileFor(
+        CompanyEvent ev, HrCalendarMethod method, HrCalendarPerson? organizer, string email, string? name, bool required)
+    {
+        var allDay = ev.IsAllDayEvent || ev.StartTime is null || ev.EndTime is null;
+        var online = ev.LocationType is EventLocation.Virtual or EventLocation.Hybrid
+                     && !string.IsNullOrWhiteSpace(ev.OnlineMeetingLink)
+            ? ev.OnlineMeetingLink!.Trim()
+            : null;
+        var place = string.Join(", ", new[] { ev.VenueName, ev.VenueAddress, ev.SiteLocation?.Name }
+            .Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s!.Trim()));
+        var location = ev.LocationType == EventLocation.Virtual ? online ?? "Online" : place.Length > 0 ? place : online;
+
+        var description = new System.Text.StringBuilder();
+        if (!string.IsNullOrWhiteSpace(ev.Description)) description.Append(ev.Description.Trim()).Append("\n\n");
+        if (online is not null) description.Append("Join online: ").Append(online).Append('\n');
+        if (ev.Organizer is { } organiser) description.Append("Organised by ").Append(organiser.FullName).Append('\n');
+        description.Append("Reference ").Append(ev.EventNumber);
+
+        return HrCalendarFile.Build(new HrCalendarEntry
+        {
+            Uid = $"company-event-{ev.Id:N}@rhema-erp",
+            Sequence = ev.CalendarSequence,
+            Method = method,
+            Summary = ev.EventName,
+            Description = description.ToString(),
+            Location = location,
+            Url = online,
+            AllDay = allDay,
+            FirstDay = DateOnly.FromDateTime(ev.StartDate),
+            LastDay = DateOnly.FromDateTime(ev.EndDate),
+            StartUtc = allDay ? ev.StartDate.Date : ev.StartDate.Date + ev.StartTime!.Value,
+            EndUtc = allDay ? ev.EndDate.Date : ev.EndDate.Date + ev.EndTime!.Value,
+            Organizer = organizer,
+            Attendee = new HrCalendarPerson(email, name),
+            AttendeeRequired = required,
+            RsvpRequested = ev.RequiresRsvp,
+        }, $"{ev.EventNumber}.ics");
     }
 
     /// <summary>Per tenant, per scope: the sweep walks every tenant in one.</summary>
@@ -205,10 +281,13 @@ public class CompanyEventService : ICompanyEventService
     /// <para><b>Counted (lane 2e-2, R4-6.3):</b> everyone it was for, and who it reached — by an email the mail
     /// server took, or a notice in the app. It used to count every guest with an address as sent.</para>
     /// </remarks>
+    /// <param name="calendar">Lane 2e-3 (D-14): the calendar file each guest's email carries — the updated entry or its
+    /// cancellation — or none (a reminder or a chase: the calendar already holds the event).</param>
     private async Task<CompanyEventNoticeResultDto> NotifyParticipantsAsync(
         CompanyEvent ev, string eventKey, Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich,
         string description, string inAppNotice, Func<EventParticipant, bool>? filter = null, bool change = true,
-        IReadOnlyDictionary<string, object>? inAppData = null, CancellationToken cancellationToken = default)
+        IReadOnlyDictionary<string, object>? inAppData = null, HrCalendarMethod? calendar = null,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = ev.TenantId;
         var actor = change ? await _notices.ActorEmployeeIdAsync(cancellationToken) : null;
@@ -229,6 +308,7 @@ public class CompanyEventService : ICompanyEventService
             MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken),
         };
         var emailed = new HashSet<Guid>();
+        var organizer = calendar is null ? null : await CalendarOrganizerAsync(ev, cancellationToken);
         foreach (var p in participants)
         {
             var name = p.Employee is not null
@@ -239,8 +319,9 @@ public class CompanyEventService : ICompanyEventService
 
             var tokens = EventTokens(ev, name);
             if (enrich is not null) tokens = enrich(tokens);
+            var file = calendar is { } method ? CalendarFileFor(ev, method, organizer, email, name, p.IsRequired) : null;
 
-            if (await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description))
+            if (await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description, file))
             {
                 emailed.Add(p.Id);
                 result.Emailed++;
@@ -430,8 +511,15 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <remarks>
-    /// Lane 2e-2: with the days the sweep sends the reminder and the chase, and whether a mail server is set up — so
-    /// the page can say what is due and has reached nobody yet, and why no email went.
+    /// <para>Lane 2e-2: with the days the sweep sends the reminder and the chase, and whether a mail server is set up —
+    /// so the page can say what is due and has reached nobody yet, and why no email went.</para>
+    ///
+    /// <para>⚠ <b>The event, then each collection on its own</b> (lane 2e-3). One query with all four collections had
+    /// SQL Server sort their joined rows — each carrying a whole <c>Employee</c> — and on every fresh compile it asked
+    /// for 387 MB of working memory, used none, and waited 29 s for the grant on UAT's 2 GB server: the event page
+    /// answered 500 after 2e-3's migration recompiled it, and kept doing so, since a run that never finishes never
+    /// teaches the server to ask for less. Each collection is now a seek on its event index, with no sort, and the
+    /// context attaches them to the event.</para>
     /// </remarks>
     public async Task<CompanyEventDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -442,14 +530,17 @@ public class CompanyEventService : ICompanyEventService
             .Include(e => e.OrganizationUnit)
             .Include(e => e.SiteLocation)
             .Include(e => e.ApprovedBy)
-            .Include(e => e.Participants).ThenInclude(p => p.Employee)
-            .Include(e => e.AttendanceRecords).ThenInclude(a => a.Employee)
-            .Include(e => e.Attachments)
-            .Include(e => e.Tasks).ThenInclude(t => t.AssignedTo)
             .FirstOrDefaultAsync(e => e.Id == id && e.TenantId == tenantId, cancellationToken);
 
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{id}' not found.");
+
+        await TenantGuests(tenantId).Where(p => p.EventId == id).LoadAsync(cancellationToken);
+        await TenantRegister(tenantId).Where(a => a.EventId == id).LoadAsync(cancellationToken);
+        await _attachmentRepository.GetQueryable()
+            .Where(a => a.EventId == id && a.TenantId == tenantId && !a.IsDeleted)
+            .LoadAsync(cancellationToken);
+        await TenantTasks(tenantId).Where(t => t.EventId == id).LoadAsync(cancellationToken);
 
         var detail = entity.ToDetailDto();
         var lead = (await _policySettings.GetForTenantAsync(tenantId, cancellationToken)).CompanyEventRsvpChaseLeadDays;
@@ -800,6 +891,8 @@ public class CompanyEventService : ICompanyEventService
         e.Status = EventStatus.Rescheduled;
         e.ReminderSentDate = null;
         e.RsvpReminderSentDate = null;
+        // Lane 2e-3 (D-14): the guests' calendar entries move with it.
+        e.CalendarSequence++;
 
         if (e.RequiresApproval && e.ApprovalDate != null)
         {
@@ -840,7 +933,8 @@ public class CompanyEventService : ICompanyEventService
                 tokens["RescheduleReason"] = entity.RescheduleReason;
                 return tokens;
             },
-            "event rescheduled", CompanyScheduleNotices.Rescheduled, cancellationToken: cancellationToken);
+            "event rescheduled", CompanyScheduleNotices.Rescheduled,
+            calendar: HrCalendarMethod.Request, cancellationToken: cancellationToken);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -1136,6 +1230,14 @@ public class CompanyEventService : ICompanyEventService
             // A new deadline is a new chase (round 4, lane N-b2).
             entity.RsvpReminderSentDate = null;
 
+        // What the guests hear of, worked out before the save so the calendar's sequence rises with it (lane 2e-3,
+        // D-14): a postponement takes the entry away, a new venue, site or link updates it. A move raises it in MoveAsync.
+        var postponedNow = !moving && entity.Status == EventStatus.Postponed && statusBefore != EventStatus.Postponed;
+        var changed = moving || postponedNow
+            ? null
+            : await WhatChangedAsync(entity, venueBefore, linkBefore, siteBefore, cancellationToken);
+        if (postponedNow || changed is not null) entity.CalendarSequence++;
+
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1145,19 +1247,24 @@ public class CompanyEventService : ICompanyEventService
         CompanyEventNoticeResultDto? told = null;
         if (moving)
             told = await NotifyRescheduledAsync(entity, cancellationToken);
-        else if (entity.Status == EventStatus.Postponed && statusBefore != EventStatus.Postponed)
+        else if (postponedNow)
+            // The user's ruling (2e-3): postponed has no date, so the calendar entry is taken away; the move to a
+            // new date sends it again.
             told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
-                "event postponed", CompanyScheduleNotices.Postponed, cancellationToken: cancellationToken);
-        else if (await WhatChangedAsync(entity, venueBefore, linkBefore, siteBefore, cancellationToken) is { } changed)
+                "event postponed", CompanyScheduleNotices.Postponed,
+                calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
+        else if (changed is { } what)
             told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
                 tokens =>
                 {
-                    tokens["WhatChanged"] = changed.What;
-                    tokens["SiteName"] = changed.SiteName;
+                    tokens["WhatChanged"] = what.What;
+                    tokens["SiteName"] = what.SiteName;
                     return tokens;
                 },
                 "event changed", CompanyScheduleNotices.Changed,
-                inAppData: new Dictionary<string, object> { ["What"] = changed.What },
+                inAppData: new Dictionary<string, object> { ["What"] = what.What },
+                // A postponed event's entries were taken away; a new venue must not put them back at the old date.
+                calendar: entity.Status == EventStatus.Postponed ? null : HrCalendarMethod.Request,
                 cancellationToken: cancellationToken);
         // D-10: an approved event that moved is approved afresh — its approval was for the old time.
         if (moved?.ApprovalCleared == true) await StartApprovalAsync(entity, cancellationToken);
@@ -1227,8 +1334,12 @@ public class CompanyEventService : ICompanyEventService
 
         var change = new CompanyEventChangeDto();
         if (outcome == WorkflowOutcome.Rejected)
+        {
             change.BookingsCancelled = await CancelLinkedBookingsAsync(
                 entity, $"{entity.EventNumber} was not approved: {reason.Trim()}", cancellationToken);
+            // Lane 2e-3 (D-14): a guest who held an entry (invited before a move sent it back for approval) loses it.
+            entity.CalendarSequence++;
+        }
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1245,7 +1356,8 @@ public class CompanyEventService : ICompanyEventService
             }
 
             change.Told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, WithReason,
-                "event not approved", CompanyScheduleNotices.Cancelled, cancellationToken: cancellationToken);
+                "event not approved", CompanyScheduleNotices.Cancelled,
+                calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
             // Lane 2e-1: the organiser hears why, unless their invitation already said it.
             change.Told.Add(await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, CompanyScheduleNotices.NotApproved,
                 WithReason, "event not approved (organiser)", cancellationToken,
@@ -1269,6 +1381,8 @@ public class CompanyEventService : ICompanyEventService
         entity.CancellationDate = DateTime.UtcNow;
         entity.CancellationReason = reason;
         entity.Status = EventStatus.Cancelled;
+        // Lane 2e-3 (D-14): the cancellation takes the guests' calendar entries away.
+        entity.CalendarSequence++;
         var bookings = await CancelLinkedBookingsAsync(entity, $"{entity.EventNumber} was cancelled: {reason}", cancellationToken);
 
         await _eventRepository.UpdateAsync(entity);
@@ -1286,7 +1400,8 @@ public class CompanyEventService : ICompanyEventService
                 tokens["CancellationReason"] = entity.CancellationReason;
                 return tokens;
             },
-            "event cancelled", CompanyScheduleNotices.Cancelled, cancellationToken: cancellationToken);
+            "event cancelled", CompanyScheduleNotices.Cancelled,
+            calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
 
         return new CompanyEventChangeDto
         {
@@ -1551,12 +1666,33 @@ public class CompanyEventService : ICompanyEventService
             }
         }
 
-        if (run.PeopleIssued > 0)
+        // Lane 2e-3 (F-34): each open task past its due date, its assignee chased once. The rule is IsOverdue's (due
+        // before today, not completed or cancelled), on an event still going ahead or already held — post-event
+        // tasks, the minutes say, come due after it. Not a cancelled event's, and not a leaver's: they would never be
+        // reached, and would be tried every hour.
+        var overdue = await TenantTasks(tenantId)
+            .Include(t => t.Event).ThenInclude(e => e.Organizer)
+            .Where(t => t.OverdueChasedAt == null && t.DueDate != null && t.DueDate < today
+                        && t.Status != EventTaskStatus.Completed && t.Status != EventTaskStatus.Cancelled
+                        && t.AssignedTo != null && t.AssignedTo.IsActive && !t.AssignedTo.IsDeleted
+                        && !t.Event.IsDeleted && !t.Event.IsCancelled && t.Event.Status != EventStatus.Cancelled)
+            .OrderBy(t => t.DueDate)
+            .ToListAsync(cancellationToken);
+        foreach (var task in overdue)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chased = await ChaseOverdueTaskAsync(task.Event, task, nowUtc, cancellationToken);
+            (chased.Stamped ? run.TasksChased : run.TasksLeftDue).Add(task.Id);
+        }
+
+        if (run.PeopleIssued > 0 || overdue.Count > 0)
             _logger.LogInformation(
                 "Company schedule reminders for tenant {TenantId}: reminded {Reminded}, chased {Chased}; reached {Reached} of {Issued} — "
-                + "{Emails} email(s) taken, {NotTaken} not, {InApp} told in the app. Left due, reaching nobody: {RemindersLeftDue} {ChasesLeftDue}",
+                + "{Emails} email(s) taken, {NotTaken} not, {InApp} told in the app. Left due, reaching nobody: {RemindersLeftDue} {ChasesLeftDue}. "
+                + "Overdue tasks chased {TasksChased}, left due {TasksLeftDue}",
                 tenantId, run.Reminded.Count, run.RsvpChased.Count, run.PeopleReached, run.PeopleIssued,
-                run.EmailsSent, run.EmailsNotTaken, run.ToldInApp, run.RemindersLeftDue, run.ChasesLeftDue);
+                run.EmailsSent, run.EmailsNotTaken, run.ToldInApp, run.RemindersLeftDue, run.ChasesLeftDue,
+                run.TasksChased.Count, run.TasksLeftDue.Count);
         return run;
     }
 
@@ -1717,8 +1853,14 @@ public class CompanyEventService : ICompanyEventService
         tokens["SpecialRequirements"] = guest.SpecialRequirements;
 
         var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
+        // Lane 2e-3 (D-14): the invitation carries the calendar entry, at the event's current sequence — not for a
+        // postponed event, which has no date to hold; the move to a new date sends it.
+        var file = string.IsNullOrWhiteSpace(address) || ev.Status == EventStatus.Postponed
+            ? null
+            : CalendarFileFor(ev, HrCalendarMethod.Request, await CalendarOrganizerAsync(ev, cancellationToken),
+                address, name, guest.IsRequired);
         var emailed = await SendEventEmailAsync(
-            ev.TenantId, CompanyScheduleEmailCatalog.Events.EventInvitation, address, tokens, "event invitation");
+            ev.TenantId, CompanyScheduleEmailCatalog.Events.EventInvitation, address, tokens, "event invitation", file);
         if (emailed) tally.Emailed++;
         else if (!string.IsNullOrWhiteSpace(address)) tally.EmailsNotTaken++;
 
@@ -1749,11 +1891,15 @@ public class CompanyEventService : ICompanyEventService
         var name = guest.Employee is not null
             ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
             : guest.ExternalParticipantName ?? "Colleague";
+        var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
+        // Lane 2e-3 (D-14): a cancellation of their entry alone — the event goes on for everyone else.
+        var file = string.IsNullOrWhiteSpace(address)
+            ? null
+            : CalendarFileFor(ev, HrCalendarMethod.Cancel, await CalendarOrganizerAsync(ev, cancellationToken),
+                address, name, guest.IsRequired);
         await SendEventEmailAsync(
-            ev.TenantId,
-            CompanyScheduleEmailCatalog.Events.EventGuestRemoved,
-            guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail,
-            EventTokens(ev, name), "guest removed");
+            ev.TenantId, CompanyScheduleEmailCatalog.Events.EventGuestRemoved, address, EventTokens(ev, name),
+            "guest removed", file);
 
         if (guest.EmployeeId is { } employeeId)
             await _notices.TellAsync(ev, CompanyScheduleNotices.Removed, CompanyScheduleNotices.ToGuest, [employeeId],
@@ -1883,6 +2029,9 @@ public class CompanyEventService : ICompanyEventService
         var ev = await GetOwnedEventAsync(guest.EventId, cancellationToken);
         if (CompanyEventRules.IsClosed(ev))
             throw new InvalidOperationException($"{ev.EventName} is {ClosedState(ev)}; its guest list is part of its record.");
+
+        // Lane 2e-3 (D-14): a guest who held an entry is sent its cancellation, which must outrank the entry they hold.
+        if (guest.InvitationStatus != InvitationStatus.NotSent) ev.CalendarSequence++;
 
         await _participantRepository.DeleteAsync(guest);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2063,6 +2212,54 @@ public class CompanyEventService : ICompanyEventService
             .Where(t => t.TenantId == tenantId && !t.IsDeleted);
 
     /// <summary>
+    /// Chases a task's assignee about it being overdue (lane 2e-3, F-34) — by email and in the app, and stamped only
+    /// when that reached them (lane 2e-2's rule), so the hourly sweep sends it once and never again; one that reached
+    /// nobody stays due for the next pass.
+    /// </summary>
+    /// <remarks>
+    /// The assignee only (the user's ruling): the organiser sees Overdue on the event page. Told even if they are the
+    /// one who ran the sweep — like a reminder, it is about the date, not an act.
+    /// </remarks>
+    private async Task<CompanyEventNoticeResultDto> ChaseOverdueTaskAsync(
+        CompanyEvent ev, EventTask task, DateTime nowUtc, CancellationToken cancellationToken)
+    {
+        var assignee = task.AssignedTo!;
+        var result = new CompanyEventNoticeResultDto
+        {
+            Issued = 1,
+            MailServerSetUp = await MailServerSetUpAsync(ev.TenantId, cancellationToken),
+        };
+
+        var tokens = EventTokens(ev, $"{assignee.FirstName} {assignee.LastName}".Trim());
+        tokens["TaskDescription"] = task.TaskDescription;
+        tokens["TaskDue"] = task.DueDate?.ToString("dddd, d MMMM yyyy");
+        tokens["TaskPriority"] = task.Priority.ToString();
+        var emailed = await SendEventEmailAsync(ev.TenantId, CompanyScheduleEmailCatalog.Events.EventTaskOverdue,
+            assignee.EmailAddress, tokens, "event task overdue");
+        if (emailed) result.Emailed = 1;
+        else if (!string.IsNullOrWhiteSpace(assignee.EmailAddress)) result.EmailsNotTaken = 1;
+
+        var inApp = (await _notices.TellAsync(ev, CompanyScheduleNotices.TaskOverdue, CompanyScheduleNotices.ToAssignee,
+            [assignee.Id],
+            new Dictionary<string, object>
+            {
+                ["Task"] = task.TaskDescription.Length <= 120 ? task.TaskDescription : task.TaskDescription[..117] + "…",
+                ["DueOn"] = task.DueDate is { } due ? due.ToString("d MMM yyyy") : string.Empty,
+            },
+            actorToo: true, cancellationToken: cancellationToken)).Contains(assignee.Id);
+        result.ToldInApp = inApp ? 1 : 0;
+        result.Reached = emailed || inApp ? 1 : 0;
+
+        if (result.Reached > 0)
+        {
+            task.OverdueChasedAt = nowUtc;
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            result.Stamped = true;
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Tells an employee a task is theirs (lane 2e-1, F-34) — by email and in the app; never of their own act,
     /// and not a leaver kept on a task already theirs.
     /// </summary>
@@ -2161,8 +2358,13 @@ public class CompanyEventService : ICompanyEventService
                 : "Choose where the task stands: not started, in progress, completed or cancelled.");
 
         var previousAssignee = entity.AssignedToId;
+        var previousDue = entity.DueDate;
         updateDto.UpdateEntity(entity);
         await CheckTaskAsync(entity, previousAssignee, cancellationToken);
+
+        // Lane 2e-3 (F-34): a new due date, or a new assignee, is a new overdue — the sweep may chase it once more.
+        if (entity.DueDate?.Date != previousDue?.Date || entity.AssignedToId != previousAssignee)
+            entity.OverdueChasedAt = null;
 
         if (entity.Status == EventTaskStatus.Completed)
         {

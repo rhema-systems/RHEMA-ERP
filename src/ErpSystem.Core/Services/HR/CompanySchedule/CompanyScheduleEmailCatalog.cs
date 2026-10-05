@@ -58,6 +58,9 @@ public static class CompanyScheduleEmailCatalog
 
         /// <summary>Sent to an employee when a task on an event is given to them (lane 2e-1, F-34).</summary>
         public const string EventTaskAssigned = "EventTaskAssigned";
+
+        /// <summary>Sent once, by the hourly sweep, to the assignee of a task past its due date (lane 2e-3, F-34).</summary>
+        public const string EventTaskOverdue = "EventTaskOverdue";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -347,6 +350,33 @@ public static class CompanyScheduleEmailCatalog
             {
                 T("TaskDescription", "What is to be done.", "Book the caterer and confirm numbers."),
                 T("TaskDue", "When it is due; the line is hidden when it has no due date.", "Friday, 10 October 2026"),
+                T("TaskPriority", "Its priority.", "High"),
+            }).ToList(),
+        });
+
+        // ── 11. A task overdue (lane 2e-3, F-34) ───────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventTaskOverdue,
+            Name = "Event Task Overdue",
+            Category = "Task",
+            Description =
+                "Sent once, by the hourly sweep, to the employee a task is given to, the first time it passes its due "
+                + "date unfinished. Sent again only if the due date moves or the task passes to someone else. The "
+                + "organiser sees the task marked Overdue on the event page.",
+            DefaultSubject = "Overdue: a task for {{EventName}}",
+            DefaultHtmlBody = Shell(BlueGradient, "A task is overdue",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>This task for <strong>{{EventName}}</strong> was due on <strong>{{TaskDue}}</strong> and is not yet done:</p>
+  <p style='background:#fff;border-left:3px solid #1a56db;padding:0.75rem'>{{TaskDescription}}</p>
+  {{#if TaskPriority}}<p>Priority: {{TaskPriority}}</p>{{/if}}
+  <p>Please finish it, or tell the organiser{{#if OrganizerName}}, {{OrganizerName}},{{/if}} if it cannot be done.</p>" +
+                WhenAndWhere),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                T("TaskDescription", "What is to be done.", "Book the caterer and confirm numbers."),
+                T("TaskDue", "The date it was due.", "Friday, 10 October 2026"),
                 T("TaskPriority", "Its priority.", "High"),
             }).ToList(),
         });

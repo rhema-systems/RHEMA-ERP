@@ -838,6 +838,9 @@ public class EventTaskDto : BaseDto
     /// <summary>Due before today and still open — worked out on every read, never stored (lane 2d, F-12).</summary>
     public bool IsOverdue { get; set; }
 
+    /// <summary>When the hourly sweep chased the assignee about it being overdue (lane 2e-3, F-34); null until then.</summary>
+    public DateTime? OverdueChasedAt { get; set; }
+
     public DateTime? CompletionDate { get; set; }
     public string? CompletionNotes { get; set; }
 }
@@ -1654,6 +1657,16 @@ public class CompanyScheduleReminderRunDto
 
     /// <summary>The event numbers whose chase was due and reached nobody, left due until the reply-by date.</summary>
     public List<string> ChasesLeftDue { get; set; } = new();
+
+    /// <summary>
+    /// The tasks whose assignee was chased this pass for being overdue (lane 2e-3, F-34) — once each, ever, unless
+    /// the due date moves or the task passes to someone new. Counted here, not in the people counts below, which
+    /// are the events' reminders and chases.
+    /// </summary>
+    public List<Guid> TasksChased { get; set; } = new();
+
+    /// <summary>The overdue tasks whose chase reached nobody, left due for the next pass.</summary>
+    public List<Guid> TasksLeftDue { get; set; } = new();
 
     /// <summary>The people this pass's reminders and chases were for, and how many it reached (lane 2e-2).</summary>
     public int PeopleIssued { get; set; }

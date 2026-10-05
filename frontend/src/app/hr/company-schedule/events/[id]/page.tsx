@@ -494,7 +494,8 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
             An invitation, a reminder or a chase counts as sent once it reaches somebody — by an email the mail
             server took, or in the app. The reminder and the chase are sent once; sending one here counts as that
             send, and one that reaches nobody stays due. Moving the event&apos;s date, or its RSVP deadline, lets them
-            go again for the new date.
+            go again for the new date. Each invitation email carries a calendar entry; a move, a new venue or link,
+            a postponement, a cancellation or being taken off the list sends guests the update.
           </p>
         </CardContent>
       </Card>

@@ -483,11 +483,17 @@ export function TasksPanel({ eventId }: { eventId: string }) {
         { header: 'Priority', cell: (t) => spaced(t.priority) },
         {
           header: 'Status',
-          // Overdue is the server's reading of the due date (lane 2d), shown beside where the task stands.
+          // Overdue is the server's reading of the due date (lane 2d), shown beside where the task stands; the hourly
+          // sweep chases the assignee once (lane 2e-3), and says when.
           cell: (t) => (
-            <span className="flex flex-wrap gap-1">
+            <span className="flex flex-wrap items-center gap-1">
               <StatusBadge status={spaced(t.status)} />
               {t.isOverdue && <StatusBadge status="Overdue" />}
+              {t.isOverdue && t.overdueChasedAt && (
+                <span className="text-xs text-muted-foreground">
+                  assignee chased {new Date(t.overdueChasedAt).toLocaleDateString()}
+                </span>
+              )}
             </span>
           ),
         },

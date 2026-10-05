@@ -157,6 +157,13 @@ public class CompanyEvent : TenantEntity
     public DateTime? ReminderSentDate { get; set; }
     public DateTime? RsvpReminderSentDate { get; set; }
 
+    /// <summary>
+    /// The calendar file's SEQUENCE (company-schedule final closure, lane 2e-3, D-14): raised each time the event's
+    /// calendar entry changes for its guests — moved, a new venue or link, postponed, cancelled, a guest taken off —
+    /// so a mail client replaces the entry it holds rather than keeping the old one. The UID is the event's id.
+    /// </summary>
+    public int CalendarSequence { get; set; }
+
     // Completion
     public DateTime? ActualStartTime { get; set; }
     public DateTime? ActualEndTime { get; set; }
@@ -358,6 +365,13 @@ public class EventTask : TenantEntity
 
     [MaxLength(1000)]
     public string? CompletionNotes { get; set; }
+
+    /// <summary>
+    /// When the hourly sweep chased the assignee about this task being overdue (lane 2e-3, F-34) — once, so the sweep
+    /// never repeats it. Stamped only when the chase reached them (lane 2e-2's rule); cleared when the due date moves
+    /// or the task passes to someone new, since that is a new overdue.
+    /// </summary>
+    public DateTime? OverdueChasedAt { get; set; }
 }
 
 /// <summary>

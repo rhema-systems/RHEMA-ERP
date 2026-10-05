@@ -35,9 +35,9 @@ has not started (the user: "don't start the actual development yet").
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
-   diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, and 2e-2, delivered vs
-   issued. **Next: 2e-3, calendar invites (D-14) and the overdue-task chase, with its one migration (the user
-   scaffolds).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
+   issued, and 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows).
+   **Next: 2f, recurrence as a light series (D-12).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -312,7 +312,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d, 2e-1 and 2e-2 built and proved (476/476 ×2; round-4 net 205/205); 2e-3 next (one migration) | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e built and proved (516/516 ×2; round-4 net 205/205); 2e-3's migration on UAT (144); 2f next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -966,7 +966,7 @@ change.
       is organiser work — and the person is told.
 - [x] *✅ 2d; the check-in must also fall on one of the event's days and not be still to come.* Attendance: the re-mark bug (F-1); no check-out before check-in or twice; none on a cancelled
       event or **before the event starts**.
-- [ ] *✅ 2d for the completion date, the guard and Overdue on read (`isOverdue`; Overdue refused as a status to set); ✅ 2e-1 tells the assignee (added, or passed to them); the overdue chase is 2e-3, with its stamp column.* Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
+- [x] *✅ 2d for the completion date, the guard and Overdue on read (`isOverdue`; Overdue refused as a status to set); ✅ 2e-1 tells the assignee (added, or passed to them); ✅ 2e-3 the overdue chase, once, stamped (`OverdueChasedAt`), to the assignee only.* Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
       on read; the assignee is told on assignment and chased by the hourly sweep when overdue (F-34).
 - [x] *✅ 2d.* (D-9, C-21) `DELETE events/{eventId}/attendance/{attendanceId}` on `Write`; (C-22)
       `PUT participants/{id}` on `Write` — role, required, special requirements, and the external
@@ -986,7 +986,7 @@ change.
 - [x] *✅ 2e-1, five new catalogue emails, with not-approved told to the organiser too; a new time is the existing rescheduled notice.* New notices: event approved (to the organiser), postponed, changed in time, venue or link,
       participant removed.
 - [x] *✅ 2d: the shared send loop and the invitation both skip a leaver, and a leaver cannot be invited.* Every send skips inactive employees (F-35).
-- [ ] Calendar invites and external replies per **D-14** (F-36).
+- [x] *✅ 2e-3: `HrCalendarFile`, one stable UID per event, SEQUENCE stored and raised with each change; REQUEST and CANCEL on every change (the user's ruling); the organiser on the file (or the mail server's address) for external replies, recorded at the desk; interviews on the same builder.* Calendar invites and external replies per **D-14** (F-36).
 
 **Reads and contracts**
 - [ ] *✅ 2a for events (the repository's nine reads removed; the service's own tenant-scoped query); ✅ 2d for guests, the register and tasks (their repositories' custom reads removed); rooms, bookings, milestones and fiscal are their lanes'.* Range endpoints: overlap semantics; UTC dates throughout the repository; **the tenant filter
@@ -1044,13 +1044,166 @@ built, proved twice and handed over on its own:
     (invitations wait for approval; the per-event buttons refuse what the sweep refuses).
   - **2e-2** ✅ delivered vs issued (R4-6.3). ⚠ Until Platform fixes **#40**, the hourly sweep's sends find no mail
     server on a server that has one (nobody is signed in), so 2e-2 counts them as not delivered — truthfully.
-  - **2e-3** calendar invites (D-14) and the overdue-task chase (F-34), with the one migration: the
+  - **2e-3** ✅ calendar invites (D-14) and the overdue-task chase (F-34), with the one migration: the
     event's invite sequence counter and the task's "chased at" stamp. **The chase is sent once**, on the
     first sweep after the due date, and stamped so the hourly sweep never repeats it (the user's choice
     over a repeating chase).
+    *Source check (2026-10-05):*
+    - **Sending a calendar file.** The production mailer sends attachments only; it has no inline calendar
+      part. The `.ics` therefore goes as an attachment, typed `text/calendar; method=…`, as the interview
+      invites already do. `SendForTenantAsync` gains the attachments its core already supports.
+    - **The interview builder** (`JobInterviewService.BuildInterviewIcs`) mints a random UID per email, so
+      every reschedule adds a second calendar entry. It uses floating local times and has no ORGANIZER,
+      no CANCEL and no stored sequence. No suite asserts on it.
+    - **UAT has one task the first sweep after 2e-3 would chase:** scenario 110's board-pack task,
+      `TDC/00001`, due 4 Oct.
+
+    *Rulings by the user (2026-10-05, all as recommended):*
+    - **Every change carries the calendar file:**
+      - invitation, moved, and venue or link changed: METHOD REQUEST;
+      - cancelled, not approved, and a guest taken off the list: CANCEL;
+      - postponed: CANCEL, and the move to a new date re-sends the entry as a REQUEST.
+
+      Reminders, chases and task emails carry none.
+    - **Interviews:** a stable UID per interview on the shared builder, with no counter. A moved interview
+      updates the entry by its newer DTSTAMP, as RFC 5546 allows, and recruitment needs no schema change.
+    - **The overdue chase goes to the assignee only**, by email and in the app. The organiser sees Overdue on
+      the event page.
+    - **Cross-module #43 is registered.**
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2e-3 — what was built (2026-10-05): calendar files (D-14) and the overdue chase (F-34).*
+- **The migration** `20261005143701_CompanyScheduleInvitesAndTaskChase`, scaffolded by the user and rewritten as
+  guarded SQL (the Designer and the six-line snapshot change kept):
+  - `CompanyEvents.CalendarSequence` (int, default 0, named constraint);
+  - `EventTasks.OverdueChasedAt` (datetime2 NULL).
+
+  There is no backfill: a task already overdue is chased once (the user's ruling). There is no THROW, so it needs no
+  preflight pin. Proved on a throwaway database (8/8: Up twice, the default on existing and new rows, Down twice, Up
+  again), then applied to UAT: a COPY_ONLY backup `ErpSystemDB_UAT_before_cs2e3.bak` first, then the built DLL's
+  `apply-migrations`. History 143 → 144; both columns are present; all 604 events read 0.
+- **One calendar builder, `HrCalendarFile`**, for company events and interviews:
+  - a stable UID: `company-event-<id>` / `interview-<id>` `@rhema-erp`;
+  - the caller's SEQUENCE, a DTSTAMP, METHOD REQUEST or CANCEL, and STATUS CONFIRMED or CANCELLED;
+  - times in UTC, or whole days with an exclusive end;
+  - ORGANIZER and ATTENDEE with a quoted CN; **the recipient alone as attendee**;
+  - text escaped, lines CRLF and folded at 75 octets (never inside a character).
+
+  It is sent as an attachment typed `text/calendar; method=…; charset=UTF-8`, the only way the platform's mailer
+  sends. `SendForTenantAsync` gains an overload with attachments; no caller changes.
+- **Which emails carry it** (the user's ruling):
+  - invitation (on add, on approval, on a corrected address, on a re-send): REQUEST;
+  - moved: REQUEST;
+  - a new venue, site or link: REQUEST;
+  - postponed: CANCEL;
+  - cancelled, and not approved: CANCEL;
+  - taken off the list: CANCEL to that guest alone.
+
+  The sequence rises before each change's save: a move, a new venue or link, a postponement, a cancellation, a
+  rejection, and the removal of a guest who was invited. **A postponed event holds no entry:** an invitation to it,
+  or a new venue for it, sends the email without a calendar file, and the move to a new date sends the entry again.
+  Reminders, chases, the approval email and task emails carry none.
+- **The organiser on the file** is the organiser's own address, or the mail server's sending address when they have
+  none, so an outside guest's Accept or Decline reaches someone (F-36: HR records it at the desk).
+- **Interviews** use the same builder, with one UID per interview: a reschedule now replaces the calendar entry
+  instead of adding a second. SEQUENCE stays 0 (no counter, the user's ruling), so the newer DTSTAMP wins. Times are
+  in UTC, where they used to be floating. There is still no ORGANIZER: an interview names none.
+- **The overdue chase (F-34):**
+  - The hourly sweep (and HR's run-now) chases each open task past its due date. The rule is `IsOverdue`'s: due
+    before today, not completed or cancelled.
+  - It skips a cancelled or deleted event's tasks and a leaver's, who would never be reached and would be tried
+    every hour.
+  - It goes to the assignee only (the user's ruling), by a new email, `EventTaskOverdue`, and in the app, on the
+    13th topic, `CompanySchedule.TaskOverdue.Assignee`.
+  - It is stamped only when it reached them (2e-2's rule), so it is sent once. One that reached nobody stays due.
+  - A new due date or a new assignee clears the stamp.
+  - The run reports `tasksChased` and `tasksLeftDue`, apart from the events' people counts.
+  - The Tasks tab shows "assignee chased" beside Overdue.
+- **The templates register** (§ 2.7) lists 50, with the new email's row; `run-lane-n` expects 50. The event page's
+  card says that invitations carry a calendar entry and which changes send the update.
+- **Not done here:** deleting an event (Admin) still tells nobody, so it sends no CANCEL. Interview cancellations send
+  no CANCEL either, as before; neither was in the rulings.
+- **Found by the proof, fixed — the event page's detail read (`GetDetailByIdAsync`):**
+  - **What failed:** the first two passes after the migration stopped in block 2a with a 500 on
+    `GET events/{id}/details`, after 30 s.
+  - **Measured:** a watcher (a DMV query every 2 s) caught the read waiting on `RESOURCE_SEMAPHORE`, a memory-grant
+    queue, with no blocker. The statement EF sent, re-run with `OPTION (RECOMPILE)` and an actual plan, asked for
+    **387 MB** of working memory for one Sort: the cap; its estimate was 61 PB, from the four collections' joined
+    rows, each carrying a whole `Employee`. It **waited 29.4 s** for the grant on an idle server, and used **0 KB**.
+  - **Why now:** UAT's SQL Server has 2 GB. Before the migration a cached plan, shrunk by memory-grant feedback, asked
+    1.5 MB. The migration changed `CompanyEvents`, the plan recompiled, and a first run that never finishes never
+    teaches the server to ask for less. So every detail read failed, and would after any deploy on a small server.
+  - **Fixed:** the event is read with its single-row references, then each collection (guests, the register,
+    attachments, tasks) as its own seek on its event index, with no sort; the context attaches them. The same
+    family as the memory note on single-query grants.
+  - **The suite's clean-up** died on pass two, when its notice withdrawal was a deadlock victim (1205) against the
+    notification dispatcher. It now retries and never throws. What that pass left was removed by a new tool,
+    `tools/cleanup-stamp.mjs` (stamp `VE32BU`).
+
+*Proof (UAT, API in Staging, the build with the detail-read fix):*
+- **The fix measured first:** on its first compile, each statement of the new detail read asks for **0 KB** of
+  working memory and runs in 1–2 ms. The demo board meeting's page read took 950 ms, the first call of a fresh API.
+- `run-final-review.mjs` blocks 1a–2e-3: **516/516 on two clean passes**, with the blocking watcher beside both: no
+  memory-grant wait. 2e-3 has 40 assertions:
+  - **The chase, with no mail server:**
+    - the sweep chases B's overdue task (a login) and stamps it;
+    - it leaves A's due (no login, no mail server);
+    - it never touches a task not yet due, a completed one, or one on a cancelled event;
+    - B is told in the app once, on the 13th topic, email off;
+    - a second sweep does not chase again;
+    - a new due date clears the stamp and the task is chased once more;
+    - a task passed to B is chased for B.
+  - **Through the sink, every email's calendar file read back:**
+    - an invitation: `text/calendar; method=REQUEST; charset=UTF-8`, the event's UID, SEQUENCE 0, CONFIRMED, UTC
+      times, the organiser by name and address, the recipient alone as attendee (asked to answer, required), the
+      description escaped and whole once unfolded (non-ASCII included), the venue as location;
+    - moved: REQUEST, the same UID, SEQUENCE 1. A new venue: SEQUENCE 2. Taken off the list: CANCEL to that guest
+      alone, SEQUENCE 3, not asked to answer, and nobody else sent one. Postponed: CANCEL, 4;
+    - a guest invited while postponed, and a new venue while postponed, get the email with no calendar file;
+    - moved to a new date: REQUEST at 6, to both guests;
+    - a reminder carries none;
+    - cancelled: CANCEL at 7, and the stored sequence is 7;
+    - an all-day event as whole dates, the end exclusive;
+    - an organiser with no address: the mail server's sending address stands in;
+    - every line within 75 octets, every line CRLF;
+    - an overdue task's assignee with no login is chased by email once a mail server takes it, the email carrying
+      no calendar file.
+- **Interviews** (`tools/probe-interview-ics.mjs`, **10/10**): the recruitment round4-d suite runs through the sink.
+  On its interview with a candidate, as its own HR officer, the probe then sends the invitation, moves it to a free
+  afternoon, and notifies the panel.
+  - Three interview calendar files are caught: REQUEST, SEQUENCE 0, UTC, the recipient alone as attendee.
+  - Each UID is `interview-<id>@rhema-erp` and names a real interview.
+  - **The candidate's invitation and the move carry one UID** (26 Oct 09:00Z → 11 Nov 14:00Z): one calendar entry,
+    updated, where a random UID made a second.
+  - round4-d alone sends no interview invitation; the probe's first cut, which relied on it, failed for that reason
+    and was extended.
+- Regression:
+  - the round-4 net **205/205** (29 · 32 · 61 · 44 · 39);
+  - `hr-recruitment/run-round4-d` **58/58** (and 58/58 twice more inside the probe);
+  - `tools/probe-new-templates.mjs` **24/24**: the six newer emails listed, described, shipped, previewed. 50 listed;
+  - `hr-templates/run-lane-n` **109/115**: section A checks the register against the screen both ways at 50; the six
+    failures are section J, cross-module #40, as at 2e-1. UAT has no SMS credentials, checked before the run (#41).
+- **On UAT's demo data, as the user ruled:** the first sweep chased scenario 110's board-pack task (TDC/00001) once.
+  `md.tdc` holds that one notice; the task is stamped.
+- API log (the session after the fix):
+  - no request answered 500;
+  - #23 (45 fixture hires), #39 twice;
+  - eleven F-45 race refusals, each answered 422;
+  - 316 notification-dispatcher emails refused (no SMTP);
+  - #41's SMS attempts, all refused (no provider enabled);
+  - the sinks' deliberate refusals, now including invitations carrying a calendar file;
+  - `run-lane-n`'s deliberate tarpit;
+  - no company-schedule notice failed to be raised.
+- **Clean-up:**
+  - nothing of the runs left: events, closures, employees, mail settings, template rows;
+  - 38 harness logins switched off, one by SQL (#42);
+  - every notice the runs raised is withdrawn and re-checked after the API stopped, including the recruitment
+    fixtures' requisition approvals to real staff (three runs, plus four rows of an older session's).
+  - The watcher's long waits were the suite's own notice withdrawal: a scan of `Notifications`, which holds back the
+    dispatcher's read for up to 20 s. That is the pairing behind pass two's deadlock; it retries now.
+- The screens type-check and lint clean. They are not yet walked in a browser (lane 5).
 
 *2e-2 — what was built (2026-10-05): delivered vs issued (R4-6.3, F-32).*
 - **Four rulings by the user before the build** (2026-10-05, all as recommended):
@@ -1152,7 +1305,8 @@ built, proved twice and handed over on its own:
   - `hr-templates/run-lane-nb2` **36/36**: the sweep through its own sink (reminded and chased once, the lead, a
     moved date, approval, the tenant's wording). It had not been run since round 4. Its D1 now reads issued, reached
     and emailed, 2/2/2, since 2e-1 reminds the organiser too.
-- **Found on the way, not ours — a security defect, proved, pending the user's word to register it (#43 proposed):**
+- **Found on the way, not ours — a security defect, proved, and registered as cross-module #43 on the user's word
+  (2026-10-05, at 2e-3's source check):**
   - **The SMTP password is written back to the database in plain text.**
     - `SettingsService.GetEmailSettingsAsync` loads the mail-settings row tracked and writes the decrypted
       password into it.
@@ -1832,6 +1986,11 @@ built DLL's `apply-migrations` after the user's go. Proof: `__EFMigrationsHistor
 every new column, index and table exists on UAT. *UAT holds 142 history rows at 1163bbc47, the repo's
 chain exactly, so this migration is the only one pending there (§ 3c).*
 
+**A second migration, lane 2e-3 (D-14, F-34), ✅ applied to UAT on 2026-10-05:**
+`20261005143701_CompanyScheduleInvitesAndTaskChase`. It adds `CompanyEvents.CalendarSequence` (int, default 0) and
+`EventTasks.OverdueChasedAt`. Guarded SQL, no THROW, so no preflight pin. Proved 8/8 on a throwaway database, then
+applied with the built DLL after a COPY_ONLY backup. History 143 → 144. Details in lane 2's 2e-3 section.
+
 **State (2026-10-04): ✅ applied to UAT.** *Written, proved, built — the user's build green and
 `has-pending-model-changes` clean — then applied, details at the end of this section.*
 `20261004224953_CompanyScheduleFinalReview`: 33 guarded batches up, 26 down; the Designer and the
@@ -2112,3 +2271,26 @@ built API, so no web host and no seeders).
 
   Next: 2e-3, calendar invites (D-14) and the overdue-task chase, with one migration (the event's invite sequence
   and the task's "chased at"), which the user scaffolds.
+- **2026-10-05, later** — **2e-2 committed** (`06176845a`). **2e-3 source-checked**, and four rulings taken, all as
+  recommended (lane 2 State):
+  - every change carries a calendar file;
+  - interviews get a stable UID, no counter;
+  - the overdue chase goes to the assignee only;
+  - #43 is logged in the cross-module register.
+
+  The model change (`CompanyEvent.CalendarSequence`, `EventTask.OverdueChasedAt`) is made; the user scaffolds.
+- **2026-10-05, later** — **Lane 2, slice 2e-3 built and proved**: calendar files (D-14) and the overdue chase
+  (F-34) (lane 2 State).
+  - **The migration:** scaffolded, rewritten guarded, proved on a throwaway database, applied to UAT after a backup
+    (history 144). Already-overdue tasks are chased once (the user's ruling, "as recommended").
+  - **The detail read:** the first two passes found the event page's detail read failing after the migration. It
+    asked for 387 MB of working memory on a fresh compile, waited 29 s, and used none. It is rebuilt as the event
+    plus four seeks, each asking 0 KB; that needed one more build.
+  - **The harness:** the suite's clean-up now survives a deadlock with the dispatcher.
+  - **Results:** `run-final-review.mjs` scored 516/516 on two clean passes, with 40 checks in 2e-3 and calendar files
+    read back from the sink. The interview probe scored 10/10: one UID across an invitation and its move. The round-4
+    net was 205/205, recruitment 58/58, the templates probe 24/24, and `run-lane-n` 109/115 (section J, #40). No
+    request answered 500.
+  - **Demo data:** the board-pack task was chased once, as ruled.
+
+  Next: 2f, recurrence as a light series (D-12).

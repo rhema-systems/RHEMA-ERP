@@ -22,6 +22,9 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// the topic path queues rows with no delivery result, would lose the catalogue's wording, and cannot carry an
 /// attachment (the calendar invite, D-14). So the topics are seeded with email off, and the caller sends the email.</para>
 ///
+/// <para><b>Thirteen topics since lane 2e-3</b> (the overdue task). A tenant seeded with twelve gets the thirteenth the
+/// next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds whatever key is missing.</para>
+///
 /// <para><b>Who.</b> The employees given, through the active logins linked to them; an employee with no login is told
 /// by email alone. <b>Nobody is told of their own act</b> — the signed-in user is left out — except of a reminder or a
 /// chase, which are about the date, not the act.</para>
@@ -57,6 +60,7 @@ public sealed class CompanyScheduleNotices
     public const string Approved = "Approved";
     public const string NotApproved = "NotApproved";
     public const string TaskAssigned = "TaskAssigned";
+    public const string TaskOverdue = "TaskOverdue";
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -230,6 +234,10 @@ public sealed class CompanyScheduleNotices
             "Sent in the app to an employee when a task on an event is given to them, with the task email.",
             "A task for {{EventName}}",
             "{{Task}}{{Due}}. For {{EventNumber}}, {{When}}."),
+        new(TaskOverdue, ToAssignee, "Company events: a task overdue (assignee)",
+            "Sent in the app, once, to the employee a task is given to when it passes its due date unfinished (lane 2e-3), with the overdue email. Again only if the due date moves or the task passes to someone new.",
+            "Overdue: a task for {{EventName}}",
+            "{{Task}} was due {{DueOn}} and is not yet done. For {{EventNumber}}, {{When}}."),
     };
 
     /// <summary>Seeds the topics a tenant does not have yet. Every notice calls it; once per tenant per scope.</summary>

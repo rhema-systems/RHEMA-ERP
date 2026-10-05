@@ -594,6 +594,8 @@ export interface EventTask extends AuditFields {
   statusName: string;
   /** Due before today and still open — worked out by the server on every read (lane 2d, F-12). */
   isOverdue: boolean;
+  /** When the hourly sweep chased the assignee about it — once (lane 2e-3, F-34). */
+  overdueChasedAt?: string | null;
   completionDate?: string | null;
   completionNotes?: string | null;
 }
@@ -1035,6 +1037,9 @@ export interface CompanyScheduleReminderRun {
   /** Event numbers whose reminder, or chase, was due and reached nobody — tried again next pass (lane 2e-2). */
   remindersLeftDue: string[];
   chasesLeftDue: string[];
+  /** Overdue tasks whose assignee was chased this pass, and those whose chase reached nobody (lane 2e-3). */
+  tasksChased: string[];
+  tasksLeftDue: string[];
   peopleIssued: number;
   peopleReached: number;
   /** Emails the mail server took (it counted every address tried until lane 2e-2). */

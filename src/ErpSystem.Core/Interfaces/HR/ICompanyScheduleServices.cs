@@ -90,7 +90,8 @@ public interface ICompanyEventService
     /// The company-schedule reminder sweep for one tenant (round 4, lane N-b2): each live event's
     /// reminder <c>ReminderDaysBefore</c> days ahead where <c>SendReminders</c> is on, and the chase of
     /// unanswered invitations <c>CompanyEventRsvpChaseLeadDays</c> ahead of the RSVP deadline — each
-    /// ONCE. Tenant-explicit: the hourly host has no signed-in user.
+    /// ONCE — and, since lane 2e-3 (F-34), each overdue task's assignee, once. Tenant-explicit: the hourly
+    /// host has no signed-in user.
     /// </summary>
     Task<CompanyScheduleReminderRunDto> SendDueRemindersAsync(Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default);
 

@@ -2428,6 +2428,64 @@ Editing or switching off, through the API or the users screen, any login with no
   import.
 - Answer Identity's validation failures with a 400 that names the field.
 
+## 43. Platform (email settings) — the SMTP password is written back to the database in plain text by any request that sends an email and then saves (2026-10-05)
+
+**Owner:** Platform, email settings (`src/ErpSystem.Core/Services/SettingsService.cs`, `GetEmailSettingsAsync` l.61–94;
+`src/ErpSystem.Api/Controllers/SettingsController.cs`, the email endpoints l.340–520). **Severity:** high — a
+credential stored at rest in plain text, and shown in plain text. **Found:** HR's company-schedule final closure, lane
+2e-2, reading the send path; then proved. Logged on the user's word (2026-10-05).
+
+### What is broken
+
+1. **Written back in plain text.** `GetEmailSettingsAsync` reads the tenant's `EmailSettings` row through the generic
+   repository, which tracks it, then sets `SmtpPassword` to the decrypted value on that tracked entity. Its comment
+   says "but don't modify the entity"; the code does. The mail sender (`ProductionEmailService`) calls it on every
+   send, in the request's own unit of work. **Any `SaveChanges` later in the same request writes the decrypted
+   password back to the table.** Nearly every module sends and then saves. For example, every company-schedule
+   notice saves its in-app rows after its emails, and so do workflow notices and HR's reminders.
+2. **Shown in plain text.** `GET /api/Settings/email` (TenantAdmin) answers `SmtpPassword` decrypted. Its own comment
+   says "In production, don't return the password".
+3. **Audited in plain text, permanently.** `POST` and `PUT /api/Settings/email` write an `AuditLogs` row:
+   - `NewValues` is the request serialized, password included;
+   - on an update, `OldValues` is the loaded entity, whose password is already decrypted.
+
+   `AuditLogs` is append-only (trigger `TR_AuditLogs_AppendOnly`), so such a row cannot be removed afterwards.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, with `dev-harness/hr-company-schedule/tools/probe-smtp-password-write.mjs`.
+It uses a dummy password and a mail server on a closed port (127.0.0.1:2526), so no email went anywhere:
+- The admin saved the settings through `POST /api/Settings/email`. The stored `SmtpPassword` was 64 characters of
+  ciphertext, not the password.
+- One `AuditLogs` row from that save carried the password in plain text.
+- `GET /api/Settings/email` answered the password in plain text. That read saves nothing, and the stored value was
+  unchanged after it.
+- An HR officer then pressed "Send reminder now" on an event they organise: one email tried and refused, then one
+  in-app notice saved.
+- **Read again, the stored `SmtpPassword` was the password in plain text.**
+- The settings row, the event, the notice, the login (switched off) and the employee were removed afterwards. The
+  audit row could not be removed (append-only) and stays on UAT. It holds only the dummy password, for a server that
+  does not exist.
+
+Under #40 the background senders find no mail settings at all, so today only signed-in sends write the password
+back. Fixing #40 without this would let every background sweep write it back too.
+
+### What it blocks
+
+Storing SMTP credentials safely. Anyone with read access to the database or a backup — or a TenantAdmin through the
+screen — reads the mail account's password, after the first ordinary send on any server with mail configured.
+Decryption keeps working, because the code falls back to "assume plain text" when decrypting fails, so nothing
+visibly breaks.
+
+### What a fix needs
+
+- Return a detached copy from `GetEmailSettingsAsync`: read `AsNoTracking`, or decrypt into a new object. ⚠
+  `UpdateEmailSettingsAsync` calls the same method and relies on the tracked row to save its update, so it needs its
+  own tracked read.
+- Re-encrypt any row already stored in plain text. One way: try to decrypt each row, and encrypt it if that fails.
+- Never answer the password from `GET /api/Settings/email`; answer whether one is set.
+- Leave the password out of the audit's `NewValues` and `OldValues`.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:
