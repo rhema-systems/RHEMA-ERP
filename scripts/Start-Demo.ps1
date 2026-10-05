@@ -17,7 +17,7 @@
          older than the frontend source. Production means every screen is compiled up front: no
          per-page compile on first visit, no dev overlay, no "8 Issues" badge in the corner.
          The build takes a few minutes, so run this (or -BuildWebOnly) the evening before.
-      6. signs in as all nine demo personas
+      6. signs in as every demo persona listed in the harness's personas.mjs
 
     Anything that fails stops the script with the one command that fixes it. Nothing is left
     half-up without you being told.
@@ -89,10 +89,16 @@ $dll = Join-Path $apiDir 'bin\Debug\net8.0\ErpSystem.Api.dll'
 if (-not $HarnessDir) { $HarnessDir = Join-Path (Split-Path -Parent $repoRoot) 'dev-harness\hr-demo-smoke' }
 
 # The production web build. next.config.js sets output: 'standalone', so "next build" emits a
-# self-contained server under .next\standalone that the Dockerfile already runs in containers;
-# this script runs the same thing on the laptop. BUILD_ID is written last, so its timestamp is
-# the build's timestamp.
-$webBuildDir = Join-Path $webDir '.next'
+# self-contained server under <build folder>\standalone that the Dockerfile already runs in
+# containers; this script runs the same thing on the laptop. BUILD_ID is written last, so its
+# timestamp is the build's timestamp.
+# The build folder is NOT .next: frontend\scripts\run-next-build.js (behind "npm run build") has
+# defaulted NEXT_DIST_DIR to .next-production since 21 Sep, and dev mode uses .next-dev. This script
+# reading .next while the build wrote elsewhere served a 23 Sep build against a current API, and the
+# dashboard crashed on the changed response. The name is pinned here and passed to the build, so the
+# two cannot drift apart again.
+$webDistName = '.next-production'
+$webBuildDir = Join-Path $webDir $webDistName
 $webBuildId = Join-Path $webBuildDir 'BUILD_ID'
 $webStandaloneDir = Join-Path $webBuildDir 'standalone'
 $webBuildLog = Join-Path $HarnessDir 'out\demo-web-build.log'
@@ -117,7 +123,7 @@ function Get-ApiProcesses {
 }
 function Get-WebProcesses {
     # Both shapes of the web app: dev mode (cmd running "npm run dev" and the node it spawns) and
-    # the production standalone server (node running .next\standalone\server.js).
+    # the production standalone server (node running <build folder>\standalone\server.js).
     Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
         Where-Object { ($_.Name -eq 'node.exe' -and ($_.CommandLine -like '*next*' -or $_.CommandLine -like '*standalone*server.js*')) -or
                        ($_.Name -eq 'cmd.exe'  -and ($_.CommandLine -like '*npm run dev*' -or $_.CommandLine -like '*npm run start*')) }
@@ -155,7 +161,7 @@ function Get-WebSourceStamp {
     return $newest
 }
 function Find-WebServer {
-    # next build puts server.js at .next\standalone\server.js, or one folder down if it decided the
+    # next build puts server.js at <build folder>\standalone\server.js, or one folder down if it decided the
     # workspace root is above frontend\. Look for it rather than assume.
     if (-not (Test-Path -LiteralPath $webStandaloneDir)) { return $null }
     $direct = Join-Path $webStandaloneDir 'server.js'
@@ -203,9 +209,11 @@ function Invoke-WebBuild {
     $savedNodeOptions = $env:NODE_OPTIONS
     $savedTelemetry = $env:NEXT_TELEMETRY_DISABLED
     $savedNextOutput = $env:NEXT_OUTPUT
+    $savedDistDir = $env:NEXT_DIST_DIR
     $env:NODE_OPTIONS = '--max-old-space-size=8192'
     $env:NEXT_TELEMETRY_DISABLED = '1'
     $env:NEXT_OUTPUT = 'standalone'
+    $env:NEXT_DIST_DIR = $webDistName
     # next build prints UTF-8 glyphs (the ▲ logo, ✓ ticks, the ○ ƒ ├ └ route markers). PowerShell
     # 5.1 decodes a native command's output with the console's legacy code page (850 here), which
     # turns ▲ into "Ôû▓" and ✓ into "Ô£ô" on screen and in the log. Decode as UTF-8 for the build
@@ -227,6 +235,7 @@ function Invoke-WebBuild {
         $env:NODE_OPTIONS = $savedNodeOptions
         $env:NEXT_TELEMETRY_DISABLED = $savedTelemetry
         $env:NEXT_OUTPUT = $savedNextOutput
+        $env:NEXT_DIST_DIR = $savedDistDir
     }
     if ($exit -ne 0) {
         $outOfMemory = [bool](Select-String -LiteralPath $webBuildLog -Pattern 'heap out of memory' -Quiet -ErrorAction SilentlyContinue)
@@ -244,19 +253,25 @@ function Invoke-WebBuild {
                "This build sets NEXT_OUTPUT=standalone; does frontend\next.config.js still turn that into output: 'standalone'? " +
                "Full output: $webBuildLog. Or bring the demo up with -DevWeb.")
     }
+    Copy-WebAssets $server
+    Write-Host ""
+    return ((Get-Date) - $started).TotalSeconds
+}
+function Copy-WebAssets([string]$Server) {
     # The standalone folder does not include the static chunks or public\, by design (the
     # Dockerfile copies them in the same way). Replace, not merge, so nothing from an older build
-    # lingers.
-    $serverRoot = Split-Path -Parent $server
+    # lingers. Done after every build AND before every start (about 80 MB, seconds), so a build
+    # made outside this script, by "npm run build" itself, is never served without its pages' code.
+    # The chunks go under the build folder's own name inside standalone\: server.js looks for them
+    # at its distDir.
+    $serverRoot = Split-Path -Parent $Server
     foreach ($pair in @(
-        @{ From = (Join-Path $webBuildDir 'static'); To = (Join-Path $serverRoot '.next\static') },
+        @{ From = (Join-Path $webBuildDir 'static'); To = (Join-Path $serverRoot "$webDistName\static") },
         @{ From = (Join-Path $webDir 'public');       To = (Join-Path $serverRoot 'public') })) {
         if (Test-Path -LiteralPath $pair.To) { Remove-Item -LiteralPath $pair.To -Recurse -Force }
         New-Item -ItemType Directory -Force (Split-Path -Parent $pair.To) | Out-Null
         Copy-Item -LiteralPath $pair.From -Destination $pair.To -Recurse -Force
     }
-    Write-Host ""
-    return ((Get-Date) - $started).TotalSeconds
 }
 
 # ── shutting down ───────────────────────────────────────────────────────────────────────────────
@@ -424,6 +439,18 @@ if ($DevWeb) { $webMode = 'dev' }
 if (-not $SkipWeb) {
     Write-Step "Web app (port $WebPort, $webMode)"
     $devRunning = @(Get-DevWebProcesses)
+    if (-not $DevWeb) {
+        # A production server started from any other build folder (the old .next\standalone) serves
+        # that folder's build however current this one is, and "already running" would leave it up.
+        $foreignProd = @(Get-WebProcesses | Where-Object { $_.CommandLine -like '*standalone*server.js*' -and
+            $_.CommandLine.IndexOf($webStandaloneDir, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 })
+        if ($foreignProd.Count) {
+            $foreignProd | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+            Start-Sleep -Seconds 3
+            Write-Note "stopped a web app serving another build folder"
+            Write-Host ("  " + "".PadRight(58, ' ')) -NoNewline
+        }
+    }
     if ((Test-Responding "http://localhost:$WebPort") -and ($DevWeb -or $devRunning.Count -eq 0)) {
         # Whatever is answering is the mode that was asked for (or dev was asked for, and anything
         # answering will do). Leave it.
@@ -450,6 +477,7 @@ if (-not $SkipWeb) {
                 Write-Host ("  " + "".PadRight(58, ' ')) -NoNewline
             }
             $server = Find-WebServer
+            Copy-WebAssets $server
             # server.js reads PORT and HOSTNAME, exactly as the Dockerfile sets them. 0.0.0.0 matches
             # what "npm run dev" binds, so a second laptop on the LAN can still reach it.
             $env:PORT = "$WebPort"
@@ -495,22 +523,25 @@ if (-not $SkipWeb) {
 # ── 6. the personas ─────────────────────────────────────────────────────────────────────────────
 $personaNote = ''
 if (-not $SkipPersonas) {
-    Write-Step "The nine demo logins"
+    Write-Step "The demo logins"
     if (-not (Test-Path (Join-Path $HarnessDir 'personas.mjs'))) {
         Write-Note "personas.mjs not found; skipped"
     } elseif (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Write-Note "node not on PATH; skipped"
     } else {
         Push-Location $HarnessDir
-        try { $out = & node personas.mjs 2>&1 } finally { Pop-Location }
+        try { $out = & node personas.mjs 2>&1; $personasExit = $LASTEXITCODE } finally { Pop-Location }
+        # personas.mjs owns the cast and prints one line per persona, OK or FAILED; a clean exit means
+        # every persona was reached, so the cast size is the lines counted, never a number kept here.
         $ok = @($out | Select-String 'login OK').Count
         $failed = @($out | Select-String 'LOGIN FAILED').Count
-        if ($ok -eq 9 -and $failed -eq 0) {
-            Write-Ok "all nine sign in"
+        $cast = $ok + $failed
+        if ($personasExit -eq 0 -and $ok -gt 0 -and $failed -eq 0) {
+            Write-Ok "all $cast sign in"
         } else {
-            Write-Bad "$ok of 9 signed in, $failed failed"
+            Write-Bad "$ok of $cast signed in, $failed failed$(if ($personasExit -ne 0) { " (personas.mjs exited $personasExit)" })"
             $out | Select-Object -Last 12 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkRed }
-            $personaNote = "  !! Only $ok of the nine personas can sign in. The permission demonstration will not work."
+            $personaNote = "  !! Only $ok of the $cast personas can sign in. The permission demonstration will not work."
         }
     }
 }
@@ -528,7 +559,7 @@ if ($personaNote) {
 Write-Host "  READY" -ForegroundColor Green
 Write-Host ""
 Write-Host "    Open        http://localhost:$WebPort"
-Write-Host "    Sign in as  hr.head  /  Demo123!        (Book 0 section 1 lists all nine)"
+Write-Host "    Sign in as  hr.head  /  Demo123!        (Book 0 section 1 lists the personas)"
 Write-Host "    Books       $HarnessDir\runbook\"
 Write-Host ""
 if ($ShowWindows) {
