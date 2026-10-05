@@ -12,6 +12,8 @@ describe('LoginAppearanceSettings', () => {
       <LoginAppearanceSettings
         value="LightCorporate"
         onValueChange={onValueChange}
+        onBackgroundUpload={vi.fn()}
+        onBackgroundReset={vi.fn()}
       />
     );
 
@@ -28,6 +30,8 @@ describe('LoginAppearanceSettings', () => {
       <LoginAppearanceSettings
         value="DarkPremium"
         onValueChange={vi.fn()}
+        onBackgroundUpload={vi.fn()}
+        onBackgroundReset={vi.fn()}
         disabled
       />
     );
@@ -41,6 +45,8 @@ describe('LoginAppearanceSettings', () => {
       <LoginAppearanceSettings
         value="LightCorporate"
         onValueChange={vi.fn()}
+        onBackgroundUpload={vi.fn()}
+        onBackgroundReset={vi.fn()}
         errorMessage="Login appearance settings could not be loaded."
       />
     );
@@ -49,5 +55,28 @@ describe('LoginAppearanceSettings', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Login appearance settings could not be loaded.'
     );
+  });
+
+  it('uploads and restores a tenant-specific background for each design', () => {
+    const onBackgroundUpload = vi.fn();
+    const onBackgroundReset = vi.fn();
+    const file = new File(['image'], 'campus.webp', { type: 'image/webp' });
+
+    render(
+      <LoginAppearanceSettings
+        value="LightCorporate"
+        onValueChange={vi.fn()}
+        lightBackgroundUrl="/api/public/config/login/background/light-id"
+        onBackgroundUpload={onBackgroundUpload}
+        onBackgroundReset={onBackgroundReset}
+      />
+    );
+
+    const input = document.getElementById('login-background-upload-LightCorporate') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+    expect(onBackgroundUpload).toHaveBeenCalledWith('LightCorporate', file);
+
+    fireEvent.click(screen.getByRole('button', { name: /restore default/i }));
+    expect(onBackgroundReset).toHaveBeenCalledWith('LightCorporate');
   });
 });

@@ -16,6 +16,7 @@ public class SettingsController : ControllerBase
     private readonly ISettingsService _settingsService;
     private readonly IAuditLogService _auditLogService;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IControlledFileUploadService _controlledFileUploadService;
     private readonly ITenantSmsSender _tenantSmsSender;
     private readonly ILogger<SettingsController> _logger;
 
@@ -23,12 +24,14 @@ public class SettingsController : ControllerBase
         ISettingsService settingsService,
         IAuditLogService auditLogService,
         ICurrentUserService currentUserService,
+        IControlledFileUploadService controlledFileUploadService,
         ITenantSmsSender tenantSmsSender,
         ILogger<SettingsController> logger)
     {
         _settingsService = settingsService;
         _auditLogService = auditLogService;
         _currentUserService = currentUserService;
+        _controlledFileUploadService = controlledFileUploadService;
         _tenantSmsSender = tenantSmsSender;
         _logger = logger;
     }
@@ -258,10 +261,7 @@ public class SettingsController : ControllerBase
     public async Task<ActionResult<LoginAppearanceSettingsDto>> GetLoginAppearance()
     {
         var settings = await _settingsService.GetSecuritySettingsAsync();
-        return Ok(new LoginAppearanceSettingsDto
-        {
-            LoginPageStyle = (settings?.LoginPageStyle ?? Core.Enums.LoginPageStyle.LightCorporate).ToString()
-        });
+        return Ok(CreateLoginAppearanceDto(settings));
     }
 
     /// <summary>
@@ -315,10 +315,306 @@ public class SettingsController : ControllerBase
             });
         }
 
-        return Ok(new LoginAppearanceSettingsDto
+        return Ok(CreateLoginAppearanceDto(updated));
+    }
+
+    /// <summary>
+    /// Uploads the tenant-owned background for one of the two public login presentations.
+    /// </summary>
+    [HttpPost("login-appearance/background/{style}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [RequestSizeLimit(MaxLoginBackgroundRequestBytes)]
+    public async Task<ActionResult<LoginAppearanceSettingsDto>> UploadLoginBackground(
+        string style,
+        [FromForm] IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseLoginPageStyle(style, out var loginPageStyle))
         {
-            LoginPageStyle = updated.LoginPageStyle.ToString()
+            return InvalidLoginPageStyle();
+        }
+
+        if (file == null || file.Length == 0)
+        {
+            return BadRequest(new ProblemDetails
+            {
+                Title = "Login background required",
+                Detail = "Choose a JPG, PNG, or WebP image to upload.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
+        if (file.Length > MaxLoginBackgroundBytes)
+        {
+            return StatusCode(StatusCodes.Status413PayloadTooLarge, new ProblemDetails
+            {
+                Title = "Login background is too large",
+                Detail = "The login background must be 10 MB or smaller.",
+                Status = StatusCodes.Status413PayloadTooLarge
+            });
+        }
+
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (!LoginBackgroundContentTypes.TryGetValue(extension, out var contentType) ||
+            !await HasValidLoginBackgroundSignatureAsync(file, extension, cancellationToken))
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Title = "Unsupported login background",
+                Detail = "Upload a valid JPG, PNG, or WebP image.",
+                Status = StatusCodes.Status422UnprocessableEntity
+            });
+        }
+
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue ||
+            !Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorUserId))
+        {
+            return Forbid();
+        }
+
+        var existing = await _settingsService.GetSecuritySettingsAsync();
+        var previousFileId = GetLoginBackgroundFileId(existing, loginPageStyle);
+        ControlledFileUploadResult? upload = null;
+        var settingsUpdated = false;
+
+        try
+        {
+            upload = await _controlledFileUploadService.UploadAsync(
+                new ControlledFileUploadRequest
+                {
+                    TenantId = tenantId.Value,
+                    ActorUserId = actorUserId,
+                    ActorName = _currentUserService.UserName,
+                    Category = ControlledFileUploadCategories.LoginAppearanceAssets,
+                    FileName = file.FileName,
+                    ContentType = contentType,
+                    FileSize = file.Length,
+                    OpenReadStream = file.OpenReadStream
+                },
+                cancellationToken);
+
+            var updated = await _settingsService.UpdateLoginBackgroundAsync(
+                loginPageStyle,
+                upload.Record.Id);
+            settingsUpdated = true;
+            await WriteLoginBackgroundAuditAsync(
+                updated,
+                loginPageStyle,
+                previousFileId,
+                upload.Record.Id,
+                actorUserId,
+                tenantId.Value);
+
+            if (previousFileId.HasValue && previousFileId.Value != upload.Record.Id)
+            {
+                await TryDeleteLoginBackgroundAsync(
+                    tenantId.Value, previousFileId.Value, actorUserId, cancellationToken);
+            }
+
+            return Ok(CreateLoginAppearanceDto(updated));
+        }
+        catch (ControlledFileUploadException exception)
+        {
+            return StatusCode(exception.StatusCode, new ProblemDetails
+            {
+                Title = "Login background upload failed",
+                Detail = exception.Message,
+                Status = exception.StatusCode,
+                Extensions = { ["code"] = exception.Code }
+            });
+        }
+        catch
+        {
+            if (upload != null && !settingsUpdated)
+            {
+                try
+                {
+                    await _controlledFileUploadService.DeleteAsync(
+                        tenantId.Value,
+                        upload.Record.Id,
+                        actorUserId,
+                        cancellationToken);
+                }
+                catch (Exception cleanupException)
+                {
+                    _logger.LogWarning(
+                        cleanupException,
+                        "Could not clean up failed login background upload {FileUploadRecordId}",
+                        upload.Record.Id);
+                }
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Restores the bundled background for one public login presentation.
+    /// </summary>
+    [HttpDelete("login-appearance/background/{style}")]
+    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<LoginAppearanceSettingsDto>> ResetLoginBackground(
+        string style,
+        CancellationToken cancellationToken)
+    {
+        if (!TryParseLoginPageStyle(style, out var loginPageStyle))
+        {
+            return InvalidLoginPageStyle();
+        }
+
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue ||
+            !Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var actorUserId))
+        {
+            return Forbid();
+        }
+
+        var existing = await _settingsService.GetSecuritySettingsAsync();
+        var previousFileId = GetLoginBackgroundFileId(existing, loginPageStyle);
+        var updated = await _settingsService.UpdateLoginBackgroundAsync(loginPageStyle, null);
+        await WriteLoginBackgroundAuditAsync(
+            updated,
+            loginPageStyle,
+            previousFileId,
+            null,
+            actorUserId,
+            tenantId.Value);
+
+        if (previousFileId.HasValue)
+        {
+            await TryDeleteLoginBackgroundAsync(
+                tenantId.Value, previousFileId.Value, actorUserId, cancellationToken);
+        }
+
+        return Ok(CreateLoginAppearanceDto(updated));
+    }
+
+    private const long MaxLoginBackgroundBytes = 10 * 1024 * 1024;
+    private const long MaxLoginBackgroundRequestBytes = 11 * 1024 * 1024;
+
+    private static readonly IReadOnlyDictionary<string, string> LoginBackgroundContentTypes =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".png"] = "image/png",
+            [".webp"] = "image/webp"
+        };
+
+    private static Guid? GetLoginBackgroundFileId(
+        Core.Entities.Security? settings,
+        Core.Enums.LoginPageStyle style) =>
+        style == Core.Enums.LoginPageStyle.DarkPremium
+            ? settings?.DarkLoginBackgroundFileUploadRecordId
+            : settings?.LightLoginBackgroundFileUploadRecordId;
+
+    private async Task TryDeleteLoginBackgroundAsync(
+        Guid tenantId,
+        Guid fileUploadRecordId,
+        Guid actorUserId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _controlledFileUploadService.DeleteAsync(
+                tenantId,
+                fileUploadRecordId,
+                actorUserId,
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(
+                exception,
+                "Login background {FileUploadRecordId} was detached but its storage cleanup could not be queued",
+                fileUploadRecordId);
+        }
+    }
+
+    private async Task WriteLoginBackgroundAuditAsync(
+        Core.Entities.Security settings,
+        Core.Enums.LoginPageStyle style,
+        Guid? previousFileId,
+        Guid? newFileId,
+        Guid actorUserId,
+        Guid tenantId)
+    {
+        var username = User.FindFirst(ClaimTypes.Name)?.Value ??
+            User.FindFirst(ClaimTypes.Email)?.Value ??
+            _currentUserService.UserName;
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            return;
+        }
+
+        await _auditLogService.CreateAuditLogAsync(new Core.Entities.AuditLog
+        {
+            UserId = actorUserId,
+            Username = username,
+            Action = "UPDATE",
+            Resource = "LoginPageAppearanceBackground",
+            ResourceId = settings.Id.ToString(),
+            OldValues = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                LoginPageStyle = style.ToString(),
+                FileUploadRecordId = previousFileId
+            }),
+            NewValues = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                LoginPageStyle = style.ToString(),
+                FileUploadRecordId = newFileId
+            }),
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+            UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
+            TenantId = tenantId
         });
+    }
+
+    private LoginAppearanceSettingsDto CreateLoginAppearanceDto(Core.Entities.Security? settings)
+    {
+        var effectiveSettings = settings ?? new Core.Entities.Security();
+        return new LoginAppearanceSettingsDto
+        {
+            LoginPageStyle = effectiveSettings.LoginPageStyle.ToString(),
+            LightBackgroundUrl = BuildLoginBackgroundUrl(effectiveSettings.LightLoginBackgroundFileUploadRecordId),
+            DarkBackgroundUrl = BuildLoginBackgroundUrl(effectiveSettings.DarkLoginBackgroundFileUploadRecordId)
+        };
+    }
+
+    private string? BuildLoginBackgroundUrl(Guid? fileUploadRecordId) =>
+        fileUploadRecordId.HasValue
+            ? $"{Request.Scheme}://{Request.Host}/api/public/config/login/background/{fileUploadRecordId.Value:D}"
+            : null;
+
+    private static BadRequestObjectResult InvalidLoginPageStyle() =>
+        new(new ProblemDetails
+        {
+            Title = "Invalid login page style",
+            Detail = "Login page style must be LightCorporate or DarkPremium.",
+            Status = StatusCodes.Status400BadRequest
+        });
+
+    private static async Task<bool> HasValidLoginBackgroundSignatureAsync(
+        IFormFile file,
+        string extension,
+        CancellationToken cancellationToken)
+    {
+        var header = new byte[12];
+        await using var stream = file.OpenReadStream();
+        var bytesRead = await stream.ReadAsync(header.AsMemory(0, header.Length), cancellationToken);
+
+        return extension switch
+        {
+            ".jpg" or ".jpeg" => bytesRead >= 3 &&
+                header[0] == 0xff && header[1] == 0xd8 && header[2] == 0xff,
+            ".png" => bytesRead >= 8 && header.AsSpan(0, 8).SequenceEqual(
+                new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }),
+            ".webp" => bytesRead >= 12 &&
+                header.AsSpan(0, 4).SequenceEqual("RIFF"u8) &&
+                header.AsSpan(8, 4).SequenceEqual("WEBP"u8),
+            _ => false
+        };
     }
 
     private static bool TryParseLoginPageStyle(
@@ -1169,6 +1465,8 @@ public class SecuritySettingsDto
 public sealed class LoginAppearanceSettingsDto
 {
     public string LoginPageStyle { get; set; } = Core.Enums.LoginPageStyle.LightCorporate.ToString();
+    public string? LightBackgroundUrl { get; set; }
+    public string? DarkBackgroundUrl { get; set; }
 }
 
 // Field Label DTOs

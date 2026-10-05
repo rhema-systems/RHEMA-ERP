@@ -24,6 +24,9 @@ public interface ISettingsService
     Task<Security?> GetPublicSecuritySettingsAsync();
     Task<Security> UpdateSecuritySettingsAsync(Security settings);
     Task<Security> UpdateLoginPageStyleAsync(Enums.LoginPageStyle loginPageStyle);
+    Task<Security> UpdateLoginBackgroundAsync(
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId);
 
     Task<SystemSettings?> GetSystemSettingAsync(string key);
     Task<SystemSettings> SetSystemSettingAsync(string key, string value, string? description = null);
@@ -458,6 +461,61 @@ public class SettingsService : ISettingsService
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Created security settings with login page style for tenant {TenantId}", tenantId);
         return createdSettings;
+    }
+
+    public async Task<Security> UpdateLoginBackgroundAsync(
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId)
+    {
+        if (!Enum.IsDefined(loginPageStyle))
+        {
+            throw new ArgumentOutOfRangeException(nameof(loginPageStyle), loginPageStyle, "Unsupported login page style.");
+        }
+
+        var tenantId = _currentUserService.TenantId ?? throw new InvalidOperationException("Tenant ID is required");
+        var existingSettings = await GetSecuritySettingsAsync();
+
+        if (existingSettings == null)
+        {
+            existingSettings = new Security
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUserService.UserName
+            };
+
+            SetLoginBackground(existingSettings, loginPageStyle, fileUploadRecordId);
+            var createdSettings = await _unitOfWork.Repository<Security>().AddAsync(existingSettings);
+            await _unitOfWork.SaveChangesAsync();
+            return createdSettings;
+        }
+
+        SetLoginBackground(existingSettings, loginPageStyle, fileUploadRecordId);
+        existingSettings.UpdatedAt = DateTime.UtcNow;
+        existingSettings.UpdatedBy = _currentUserService.UserName;
+        await _unitOfWork.Repository<Security>().UpdateAsync(existingSettings);
+        await _unitOfWork.SaveChangesAsync();
+
+        _logger.LogInformation(
+            "Updated {LoginPageStyle} login background for tenant {TenantId}",
+            loginPageStyle,
+            tenantId);
+        return existingSettings;
+    }
+
+    private static void SetLoginBackground(
+        Security settings,
+        Enums.LoginPageStyle loginPageStyle,
+        Guid? fileUploadRecordId)
+    {
+        if (loginPageStyle == Enums.LoginPageStyle.DarkPremium)
+        {
+            settings.DarkLoginBackgroundFileUploadRecordId = fileUploadRecordId;
+            return;
+        }
+
+        settings.LightLoginBackgroundFileUploadRecordId = fileUploadRecordId;
     }
 
     #endregion

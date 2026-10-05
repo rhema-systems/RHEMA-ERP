@@ -44,6 +44,8 @@ export type LoginPageStyle = 'LightCorporate' | 'DarkPremium';
 
 export interface LoginAppearanceSettings {
   loginPageStyle: LoginPageStyle;
+  lightBackgroundUrl: string | null;
+  darkBackgroundUrl: string | null;
 }
 
 // Admin API DTO interface to match backend SecuritySettingsDto (PascalCase)
@@ -153,6 +155,8 @@ const mapLoginAppearanceSettings = (
   return {
     loginPageStyle:
       configuredStyle === 'DarkPremium' ? 'DarkPremium' : 'LightCorporate',
+    lightBackgroundUrl: (data.lightBackgroundUrl ?? data.LightBackgroundUrl ?? null) as string | null,
+    darkBackgroundUrl: (data.darkBackgroundUrl ?? data.DarkBackgroundUrl ?? null) as string | null,
   };
 };
 
@@ -234,7 +238,7 @@ class SettingsService {
   }
 
   async updateLoginAppearance(
-    settings: LoginAppearanceSettings
+    settings: Pick<LoginAppearanceSettings, 'loginPageStyle'>
   ): Promise<LoginAppearanceSettings> {
     const response = await apiService.request<LoginAppearanceSettings>(
       '/settings/login-appearance',
@@ -242,6 +246,33 @@ class SettingsService {
         method: 'PUT',
         body: JSON.stringify(settings),
       }
+    );
+
+    return mapLoginAppearanceSettings(response);
+  }
+
+  async uploadLoginBackground(
+    style: LoginPageStyle,
+    file: File
+  ): Promise<LoginAppearanceSettings> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await apiService.request<LoginAppearanceSettings>(
+      `/settings/login-appearance/background/${style}`,
+      {
+        method: 'POST',
+        body: formData,
+      }
+    );
+
+    return mapLoginAppearanceSettings(response);
+  }
+
+  async resetLoginBackground(style: LoginPageStyle): Promise<LoginAppearanceSettings> {
+    const response = await apiService.request<LoginAppearanceSettings>(
+      `/settings/login-appearance/background/${style}`,
+      { method: 'DELETE' }
     );
 
     return mapLoginAppearanceSettings(response);

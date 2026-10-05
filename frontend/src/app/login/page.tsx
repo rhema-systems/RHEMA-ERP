@@ -86,6 +86,9 @@ function SharedAuthenticationForm() {
     refetchOnWindowFocus: false,
   });
   const loginPageStyle: LoginPageStyle = loginAppearance?.loginPageStyle ?? DEFAULT_LOGIN_PAGE_STYLE;
+  const loginBackgroundUrl = loginPageStyle === 'DarkPremium'
+    ? loginAppearance?.darkBackgroundUrl
+    : loginAppearance?.lightBackgroundUrl;
   const isDarkPremium = loginPageStyle === 'DarkPremium';
   const primaryActionClass = `h-10 w-full text-sm font-semibold ${isDarkPremium
     ? 'bg-blue-500 text-white hover:bg-blue-400 focus-visible:ring-sky-300'
@@ -473,7 +476,7 @@ function SharedAuthenticationForm() {
   }
 
   return (
-    <LoginPresentation style={loginPageStyle}>
+    <LoginPresentation style={loginPageStyle} backgroundUrl={loginBackgroundUrl}>
         <Card
           data-testid="shared-login-form"
           data-login-card

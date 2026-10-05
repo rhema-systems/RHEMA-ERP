@@ -80,7 +80,11 @@ describe('login entry points and redirects', () => {
   });
 
   it('uses the dark premium shell without changing the shared authentication controls', async () => {
-    mocks.getPublicLoginAppearance.mockResolvedValue({ loginPageStyle: 'DarkPremium' });
+    mocks.getPublicLoginAppearance.mockResolvedValue({
+      loginPageStyle: 'DarkPremium',
+      lightBackgroundUrl: null,
+      darkBackgroundUrl: 'https://erp.example/api/public/config/login/background/dark-image',
+    });
 
     renderPage();
 
@@ -88,6 +92,9 @@ describe('login entry points and redirects', () => {
       expect(screen.getByTestId('login-shell')).toHaveAttribute('data-login-style', 'DarkPremium');
     });
     expect(screen.getByTestId('shared-login-form')).toBeVisible();
+    expect(document.querySelector('[data-login-background]')).toHaveStyle({
+      backgroundImage: 'url(https://erp.example/api/public/config/login/background/dark-image)',
+    });
     expect(screen.getByLabelText('Username or Email Address')).toBeVisible();
     expect(screen.getByLabelText('Password')).toBeVisible();
     expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/forgot-password');

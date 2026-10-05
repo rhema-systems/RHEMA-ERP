@@ -178,6 +178,8 @@ export default function SecurityDashboardPage() {
   const [activeTab, setActiveTab] = useState('overview')
   const [settingsTab, setSettingsTab] = useState('password')
   const [selectedLoginPageStyle, setSelectedLoginPageStyle] = useState<LoginPageStyle>('LightCorporate')
+  const [uploadingLoginBackgroundStyle, setUploadingLoginBackgroundStyle] = useState<LoginPageStyle | null>(null)
+  const [resettingLoginBackgroundStyle, setResettingLoginBackgroundStyle] = useState<LoginPageStyle | null>(null)
   const [realTimeAlerts, setRealTimeAlerts] = useState<SecurityAlert[]>([])
   const [realTimeMetrics, setRealTimeMetrics] = useState<SecurityMetrics | null>(null)
   const { toast } = useToast()
@@ -337,6 +339,47 @@ export default function SecurityDashboardPage() {
         variant: 'destructive',
       })
     },
+  })
+
+  const uploadLoginBackgroundMutation = useMutation({
+    mutationFn: ({ style, file }: { style: LoginPageStyle; file: File }) =>
+      settingsService.uploadLoginBackground(style, file),
+    onMutate: ({ style }) => setUploadingLoginBackgroundStyle(style),
+    onSuccess: (appearance) => {
+      queryClient.setQueryData(['loginAppearanceSettings'], appearance)
+      toast({
+        title: 'Background uploaded',
+        description: 'The custom login background is now active for this tenant.',
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Background upload failed',
+        description: error.message || 'The login background could not be uploaded.',
+        variant: 'destructive',
+      })
+    },
+    onSettled: () => setUploadingLoginBackgroundStyle(null),
+  })
+
+  const resetLoginBackgroundMutation = useMutation({
+    mutationFn: (style: LoginPageStyle) => settingsService.resetLoginBackground(style),
+    onMutate: (style) => setResettingLoginBackgroundStyle(style),
+    onSuccess: (appearance) => {
+      queryClient.setQueryData(['loginAppearanceSettings'], appearance)
+      toast({
+        title: 'Default background restored',
+        description: 'The bundled login background is active again for this tenant.',
+      })
+    },
+    onError: (error: any) => {
+      toast({
+        title: 'Could not restore background',
+        description: error.message || 'The default login background could not be restored.',
+        variant: 'destructive',
+      })
+    },
+    onSettled: () => setResettingLoginBackgroundStyle(null),
   })
 
   const onSubmit = (data: SecuritySettingsFormValues) => {
@@ -1447,8 +1490,20 @@ export default function SecurityDashboardPage() {
                   <LoginAppearanceSettings
                     value={selectedLoginPageStyle}
                     onValueChange={setSelectedLoginPageStyle}
-                    disabled={updateMutation.isPending}
+                    disabled={
+                      updateMutation.isPending ||
+                      uploadLoginBackgroundMutation.isPending ||
+                      resetLoginBackgroundMutation.isPending
+                    }
                     isLoading={isLoginAppearanceLoading}
+                    lightBackgroundUrl={loginAppearance?.lightBackgroundUrl}
+                    darkBackgroundUrl={loginAppearance?.darkBackgroundUrl}
+                    onBackgroundUpload={(style, file) =>
+                      uploadLoginBackgroundMutation.mutate({ style, file })
+                    }
+                    onBackgroundReset={(style) => resetLoginBackgroundMutation.mutate(style)}
+                    uploadingStyle={uploadingLoginBackgroundStyle}
+                    resettingStyle={resettingLoginBackgroundStyle}
                     errorMessage={
                       isLoginAppearanceError
                         ? 'Login appearance settings could not be loaded. Refresh the page and try again.'

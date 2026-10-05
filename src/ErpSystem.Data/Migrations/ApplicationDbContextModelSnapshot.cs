@@ -185151,6 +185151,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("LoginPageStyle")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("DarkLoginBackgroundFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LightLoginBackgroundFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
