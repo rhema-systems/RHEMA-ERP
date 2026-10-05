@@ -59,7 +59,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
         public DepositPolicy BankDepositPolicy { get; set; } = DepositPolicy.DepositIntact;
         public bool RequireBankDepositPrimaryEvidence { get; set; } = true;
-        public bool AutoPostBankDepositAfterApproval { get; set; } = true;
+        public bool AutoPostBankDepositAfterConfirmation { get; set; } = true;
         public decimal? MaximumDepositDeductionAmount { get; set; }
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int BankStatementMatchDateToleranceDays { get; set; } = 3;
@@ -140,7 +140,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool? RequireSubledgerJournalApproval { get; set; }
         public DepositPolicy? BankDepositPolicy { get; set; }
         public bool? RequireBankDepositPrimaryEvidence { get; set; }
-        public bool? AutoPostBankDepositAfterApproval { get; set; }
+        public bool? AutoPostBankDepositAfterConfirmation { get; set; }
         public decimal? MaximumDepositDeductionAmount { get; set; }
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int? BankStatementMatchDateToleranceDays { get; set; }
