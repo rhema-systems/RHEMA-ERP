@@ -83,7 +83,7 @@ There is currently no dedicated till-closure workflow instance, shared Finance a
 ## Completed commit
 
 - `4ce834927a78b742ea264194ab6274b5338636e4` - `fix(finance): close receipt and cash approval gaps`
-- Pending - `feat(finance): govern unused till session corrections`
+- `b405b2c1285dc602502dfd7686d9114337e875c6` - `feat(finance): govern unused till session corrections`
 
 ## Authorization boundaries
 
