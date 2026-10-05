@@ -159,6 +159,21 @@ public interface IBusinessClosureService
     /// <paramref name="dryRun"/> answers what it would change, saving nothing and telling nobody.
     /// </summary>
     Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(bool dryRun = false, CancellationToken cancellationToken = default);
+
+    /// <summary>What announcing the closure would say, and how many active staff it would reach (lane 1d, L1-1).</summary>
+    Task<ClosureAnnouncementPreviewDto> PreviewAnnouncementAsync(Guid id, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Announces the closure to the staff it covers: an HR announcement addressed by the closure's scope,
+    /// worded from it, published as <paramref name="publisherEmployeeId"/> (lane 1d, L1-1). Refused when
+    /// it covers nobody.
+    /// </summary>
+    Task<HrAnnouncementDto> AnnounceAsync(Guid id, Guid publisherEmployeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>Each employee's closure days with the pay flag — payroll's read (lane 1d, D-15c).</summary>
+    Task<List<EmployeeClosureDaysDto>> GetEmployeeClosureDaysAsync(
+        IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to, bool includePartial,
+        CancellationToken cancellationToken = default);
 }
 
 #endregion Business Closure Service

@@ -61,7 +61,29 @@ public interface IHrClosureCalendar
     Task<IReadOnlyDictionary<Guid, IReadOnlySet<DateOnly>>> GetClosureDatesAsync(
         Guid tenantId, IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// For each employee, every closure day in <paramref name="from"/>..<paramref name="to"/> with the
+    /// closure behind it and whether staff are paid for it — the read payroll is pointed at
+    /// (company-schedule final closure, lane 1d: D-15c, F-51).
+    /// </summary>
+    /// <remarks>
+    /// <para>HR records <c>IsPaidClosure</c> ("Staff are paid") and applies none of it: what an unpaid
+    /// closure day takes off a payslip is payroll's, as an unpaid leave day is
+    /// (<c>docs/HR/integration/handoffs/HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md</c> § 2.1, § 3).
+    /// No payroll code calls this yet — it is the one place to read from, not a push.</para>
+    ///
+    /// <para>A partial closure is a working day; it is included only when
+    /// <paramref name="includePartial"/> asks for it, flagged as worked. Every employee asked about is a
+    /// key; a day covered by two closures appears once per closure.</para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<HrClosureDay>>> GetClosureDaysAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to,
+        bool includePartial = false, CancellationToken cancellationToken = default);
 }
+
+/// <summary>One closure day for one employee: the date, the closure, and whether it is paid and worked.</summary>
+public sealed record HrClosureDay(DateOnly Date, Guid ClosureId, string Title, bool IsPaid, bool IsWorkingDay);
 
 public sealed class HrClosureCalendar : IHrClosureCalendar
 {
@@ -181,5 +203,35 @@ public sealed class HrClosureCalendar : IHrClosureCalendar
             }
         }
         return sets.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<DateOnly>)kv.Value);
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<HrClosureDay>>> GetClosureDaysAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to,
+        bool includePartial = false, CancellationToken cancellationToken = default)
+    {
+        var days = employeeIds.Distinct().ToDictionary(id => id, _ => new List<HrClosureDay>());
+        if (days.Count > 0 && to >= from)
+        {
+            var closures = (await GetClosuresAsync(tenantId, from, to, cancellationToken))
+                .Where(c => includePartial || BusinessClosureRules.IsNonWorking(c))
+                .ToList();
+            if (closures.Count > 0)
+            {
+                var coverage = await CoverageAsync(tenantId, closures, days.Keys.ToList(), cancellationToken);
+                foreach (var closure in closures)
+                {
+                    var covered = coverage[closure.Id];
+                    if (covered.Count == 0) continue;
+                    var worked = !BusinessClosureRules.IsNonWorking(closure);
+                    var dates = BusinessClosureRules.DatesIn(closure, from, to).ToList();
+                    foreach (var employeeId in covered)
+                        days[employeeId].AddRange(dates.Select(d =>
+                            new HrClosureDay(d, closure.Id, closure.Title, closure.IsPaidClosure, worked)));
+                }
+            }
+        }
+        return days.ToDictionary(
+            kv => kv.Key,
+            kv => (IReadOnlyList<HrClosureDay>)kv.Value.OrderBy(d => d.Date).ToList());
     }
 }

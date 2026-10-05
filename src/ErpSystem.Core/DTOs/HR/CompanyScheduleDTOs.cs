@@ -1083,6 +1083,46 @@ public class BusinessClosureDto : BaseDto
 }
 
 /// <summary>
+/// What announcing a closure would say, and to how many (company-schedule final closure, lane 1d:
+/// L1-1) — the line behind "Announce to the N staff it covers".
+/// </summary>
+public class ClosureAnnouncementPreviewDto
+{
+    public Guid ClosureId { get; set; }
+
+    /// <summary>Active staff the closure covers — the announcement's reach.</summary>
+    public int StaffCovered { get; set; }
+
+    /// <summary>False when nobody is covered: the screen says "no staff to tell" instead of offering the button.</summary>
+    public bool CanAnnounce { get; set; }
+
+    public string Title { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public string Body { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// One employee's closure days with each closure and its pay flag — the read payroll is pointed at
+/// (lane 1d: D-15c). HR records whether staff are paid; payroll decides what an unpaid day is worth.
+/// </summary>
+public class EmployeeClosureDaysDto
+{
+    public Guid EmployeeId { get; set; }
+    public List<EmployeeClosureDayDto> Days { get; set; } = new();
+}
+
+public class EmployeeClosureDayDto
+{
+    public DateOnly Date { get; set; }
+    public Guid ClosureId { get; set; }
+    public string Title { get; set; } = string.Empty;
+    public bool IsPaid { get; set; }
+
+    /// <summary>True for a partial closure: the day is still worked.</summary>
+    public bool IsWorkingDay { get; set; }
+}
+
+/// <summary>
 /// DTO for creating a business closure
 /// </summary>
 public class CreateBusinessClosureDto : CreateDtoBase

@@ -718,6 +718,42 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<LeaveRechargeResultDto>> RechargeLeave([FromQuery] bool dryRun = false)
         => Ok(await _closureService.RechargeAllOpenLeaveAsync(dryRun));
 
+    /// <summary>
+    /// What announcing the closure would say and how many active staff it would reach — the line behind
+    /// "Announce to the N staff it covers" (lane 1d, L1-1).
+    /// </summary>
+    [HttpGet("closures/{id:guid}/announcement")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<ClosureAnnouncementPreviewDto>> PreviewClosureAnnouncement(Guid id)
+        => Ok(await _closureService.PreviewAnnouncementAsync(id));
+
+    /// <summary>
+    /// Announces the closure to the staff it covers, on HR's click (lane 1d, L1-1): an HR announcement
+    /// addressed by the closure's scope, published as the caller. 422 when it covers nobody or is over.
+    /// </summary>
+    [HttpPost("closures/{id:guid}/announce")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<HrAnnouncementDto>> AnnounceClosure(Guid id)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var publisherId, "Announcing a business closure");
+        if (ctx != null) return ctx;
+        return Ok(await _closureService.AnnounceAsync(id, publisherId));
+    }
+
+    /// <summary>
+    /// Each employee's closure days, each with its closure and whether staff are paid — the read payroll
+    /// is pointed at (lane 1d, D-15c). HR records the pay flag; what an unpaid day is worth is payroll's.
+    /// Up to 500 employees and a year at a time; a partial closure only with <c>includePartial</c>.
+    /// </summary>
+    [HttpGet("closures/employee-days")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<List<EmployeeClosureDaysDto>>> GetEmployeeClosureDays(
+        [FromQuery] List<Guid> employeeIds,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] bool includePartial = false)
+        => Ok(await _closureService.GetEmployeeClosureDaysAsync(employeeIds ?? [], from, to, includePartial));
+
     #endregion
 
     #region Fiscal Years

@@ -1634,6 +1634,7 @@ public class BusinessClosureService : IBusinessClosureService
     private readonly IHrWorkingDayCalculator _workingDays;
     private readonly IHrAudienceResolver _audience;
     private readonly ILeaveService _leaveService;
+    private readonly IHrAnnouncementService _announcements;
     private readonly ILogger<BusinessClosureService> _logger;
 
     public BusinessClosureService(
@@ -1644,6 +1645,7 @@ public class BusinessClosureService : IBusinessClosureService
         IHrWorkingDayCalculator workingDays,
         IHrAudienceResolver audience,
         ILeaveService leaveService,
+        IHrAnnouncementService announcements,
         ILogger<BusinessClosureService> logger)
     {
         _closureRepository = closureRepository;
@@ -1653,6 +1655,7 @@ public class BusinessClosureService : IBusinessClosureService
         _workingDays = workingDays;
         _audience = audience;
         _leaveService = leaveService;
+        _announcements = announcements;
         _logger = logger;
     }
 
@@ -1860,6 +1863,138 @@ public class BusinessClosureService : IBusinessClosureService
     /// </summary>
     public Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(bool dryRun = false, CancellationToken cancellationToken = default)
         => _leaveService.RechargeAllOpenLeaveAsync(GetTenantId(), dryRun, cancellationToken);
+
+    public async Task<ClosureAnnouncementPreviewDto> PreviewAnnouncementAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
+        var reach = (await _audience.ResolveForTenantAsync(
+            entity.TenantId, [BusinessClosureRules.AudienceRuleOf(BusinessClosureRules.ScopeOf(entity))],
+            cancellationToken)).Count;
+        var (title, summary, body) = WordAnnouncement(entity);
+
+        return new ClosureAnnouncementPreviewDto
+        {
+            ClosureId = entity.Id,
+            StaffCovered = reach,
+            CanAnnounce = reach > 0,
+            Title = title,
+            Summary = summary,
+            Body = body,
+        };
+    }
+
+    /// <remarks>
+    /// <para><b>On HR's click, never on save</b> (L1-1). An announcement reaches every covered person
+    /// at once and cannot be unsent, and a closure is often typed, corrected, then confirmed — publishing
+    /// on save would make each correction another broadcast.</para>
+    ///
+    /// <para>The audience is the closure's own scope as an audience rule, so the announcement reaches
+    /// exactly the people leave and the diaries treat as covered. Publishing raises the announcement's
+    /// in-app topic, and email where the topic has it on. The checks come first, so a refusal leaves no
+    /// draft behind.</para>
+    /// </remarks>
+    public async Task<HrAnnouncementDto> AnnounceAsync(Guid id, Guid publisherEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(id, cancellationToken);
+        var occurrence = NextOccurrence(entity);
+        if (occurrence.End < DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new InvalidOperationException("This closure is over, so there is nothing to announce.");
+
+        var preview = await PreviewAnnouncementAsync(id, cancellationToken);
+        if (!preview.CanAnnounce)
+            throw new InvalidOperationException(
+                "No active staff are covered by this closure, so there is nobody to tell. Check its site or unit.");
+
+        var rule = BusinessClosureRules.AudienceRuleOf(BusinessClosureRules.ScopeOf(entity));
+        var draft = await _announcements.CreateAsync(new CreateHrAnnouncementDto
+        {
+            Title = preview.Title,
+            Summary = preview.Summary,
+            Body = preview.Body,
+            Category = HrAnnouncementCategory.General,
+            EffectiveFrom = DateTime.UtcNow,
+            // Shown until the closure is over.
+            ExpiresOn = occurrence.End.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+            Audiences = [new HrAnnouncementAudienceDto { TargetType = rule.TargetType, TargetId = rule.TargetId }],
+        }, cancellationToken);
+
+        _logger.LogInformation("Business closure {Title} announced to {Reach} staff", entity.Title, preview.StaffCovered);
+        return await _announcements.PublishAsync(draft.Id, publisherEmployeeId, cancellationToken);
+    }
+
+    public async Task<List<EmployeeClosureDaysDto>> GetEmployeeClosureDaysAsync(
+        IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to, bool includePartial,
+        CancellationToken cancellationToken = default)
+    {
+        if (employeeIds.Count == 0)
+            throw new InvalidOperationException("Name at least one employee.");
+        if (employeeIds.Count > 500)
+            throw new InvalidOperationException("Ask for 500 employees or fewer at a time.");
+        if (to < from)
+            throw new InvalidOperationException("The range ends before it starts.");
+        if (to.DayNumber - from.DayNumber > 366)
+            throw new InvalidOperationException("Ask for a year or less at a time.");
+
+        // Coverage reads this tenant's employees only, so an id from elsewhere answers no days.
+        var days = await _closureCalendar.GetClosureDaysAsync(
+            GetTenantId(), employeeIds, from, to, includePartial, cancellationToken);
+        return days.Select(kv => new EmployeeClosureDaysDto
+        {
+            EmployeeId = kv.Key,
+            Days = kv.Value.Select(d => new EmployeeClosureDayDto
+            {
+                Date = d.Date, ClosureId = d.ClosureId, Title = d.Title,
+                IsPaid = d.IsPaid, IsWorkingDay = d.IsWorkingDay,
+            }).ToList(),
+        }).ToList();
+    }
+
+    /// <summary>The occurrence an announcement is about: the next one from today for a yearly closure.</summary>
+    private static ClosureOccurrence NextOccurrence(BusinessClosure closure)
+    {
+        if (!closure.RecursAnnually) return BusinessClosureRules.FirstOccurrence(closure);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return BusinessClosureRules.OccurrencesIn(closure, today, today.AddDays(366))
+            .Where(o => o.End >= today)
+            .DefaultIfEmpty(BusinessClosureRules.FirstOccurrence(closure))
+            .First();
+    }
+
+    /// <summary>
+    /// The announcement's words, from the closure: who, when, why, whether it is paid and worked. A
+    /// company fact — the reason is shared, nothing about any one person is.
+    /// </summary>
+    private static (string Title, string Summary, string Body) WordAnnouncement(BusinessClosure closure)
+    {
+        var when = BusinessClosureRules.Describe(NextOccurrence(closure));
+        var who = BusinessClosureRules.ScopeOf(closure).Kind switch
+        {
+            ClosureScopeKind.Site => closure.SiteLocation?.Name ?? "The site",
+            ClosureScopeKind.Unit => $"{closure.OrganizationUnit?.Name ?? "The unit"} and the units beneath it",
+            _ => "The company",
+        };
+        var nonWorking = BusinessClosureRules.IsNonWorking(closure);
+
+        var title = nonWorking ? $"Closure: {closure.Title}" : $"Reduced operations: {closure.Title}";
+        var summary = nonWorking
+            ? $"{who} will be closed on {when}."
+            : $"{who} will run reduced operations on {when}.";
+
+        var body = new System.Text.StringBuilder(summary);
+        if (closure.RecursAnnually) body.Append(" The closure repeats every year on the same dates.");
+        if (!string.IsNullOrWhiteSpace(closure.Reason)) body.Append($" Reason: {closure.Reason.Trim()}");
+        if (nonWorking)
+        {
+            body.Append(closure.IsPaidClosure ? " Staff are paid for these days." : " These days are unpaid.");
+            body.Append(" They are not working days, so any leave you have booked over them no longer counts them.");
+        }
+        else
+        {
+            body.Append(" They remain working days.");
+        }
+
+        return (title, summary, body.ToString());
+    }
 
     /// <summary>
     /// The days a closure covers, for the recount: the closure itself, or for a yearly one each
