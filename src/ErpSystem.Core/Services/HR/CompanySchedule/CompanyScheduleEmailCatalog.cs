@@ -43,6 +43,21 @@ public static class CompanyScheduleEmailCatalog
 
         /// <summary>Sent to every participant when the event is called off.</summary>
         public const string EventCancelled = "EventCancelled";
+
+        /// <summary>Sent to the organiser when the event is approved (lane 2e-1).</summary>
+        public const string EventApproved = "EventApproved";
+
+        /// <summary>Sent to every guest who was invited when the event is postponed (lane 2e-1).</summary>
+        public const string EventPostponed = "EventPostponed";
+
+        /// <summary>Sent to every guest who was invited when the venue, site or joining link changes (lane 2e-1).</summary>
+        public const string EventChanged = "EventChanged";
+
+        /// <summary>Sent to a guest who was invited when they are taken off the guest list (lane 2e-1).</summary>
+        public const string EventGuestRemoved = "EventGuestRemoved";
+
+        /// <summary>Sent to an employee when a task on an event is given to them (lane 2e-1, F-34).</summary>
+        public const string EventTaskAssigned = "EventTaskAssigned";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -225,6 +240,114 @@ public static class CompanyScheduleEmailCatalog
             Tokens = CommonTokens().Concat(new[]
             {
                 T("CancellationReason", "Why it was called off; hidden when none was given.", "Postponed pending the audit."),
+            }).ToList(),
+        });
+
+        // ── 6. Approved (lane 2e-1) ────────────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventApproved,
+            Name = "Event Approved",
+            Category = "Approval",
+            Description =
+                "Sent to the organiser when an event that needs approval is approved — after its last approval "
+                + "stage. Its waiting invitations go out at the same moment: an event awaiting approval invites "
+                + "nobody (lane 2e-1, F-33). Until then the organiser was told nothing either way.",
+            DefaultSubject = "Approved: {{EventName}} on {{EventDate}}",
+            DefaultHtmlBody = Shell(BlueGradient, "Approved",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p><strong>{{EventName}}</strong>, which you organise, has been approved{{#if ApprovedBy}} by {{ApprovedBy}}{{/if}}.</p>" +
+                WhenAndWhere + @"
+  {{#if InvitationsSent}}<p>The {{InvitationsSent}} invitation(s) that were waiting for the approval have now gone out.</p>{{/if}}"),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                T("ApprovedBy", "Who gave the final approval; hidden when it is not known.", "Efua Asante"),
+                T("InvitationsSent", "How many waiting invitations went out with the approval; hidden when none.", "6"),
+            }).ToList(),
+        });
+
+        // ── 7. Postponed (lane 2e-1) ───────────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventPostponed,
+            Name = "Event Postponed",
+            Category = "Change",
+            Description =
+                "Sent to every guest who was invited when the event is postponed: it has no new date yet. A guest "
+                + "still waiting for the event's approval was never invited and is not told.",
+            DefaultSubject = "Postponed: {{EventName}}",
+            DefaultHtmlBody = Shell(AmberGradient, "This has been postponed",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p><strong>{{EventName}}</strong>, which was to be held on {{EventDate}}, has been postponed.</p>
+  <p style='color:#6b7280;font-size:0.875rem'>A new date will follow. Nothing is required of you until then.</p>"),
+            Tokens = CommonTokens(),
+        });
+
+        // ── 8. Changed (lane 2e-1) ─────────────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventChanged,
+            Name = "Event Details Changed",
+            Category = "Change",
+            Description =
+                "Sent to every guest who was invited when the event's venue, site or joining link changes and its "
+                + "time does not (a new time is Event Rescheduled). Until lane 2e-1 a new venue reached nobody.",
+            DefaultSubject = "Changed: {{EventName}} on {{EventDate}}",
+            DefaultHtmlBody = Shell(AmberGradient, "Details have changed",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>{{WhatChanged}} for <strong>{{EventName}}</strong> has changed. The details now:</p>" +
+                WhenAndWhere + @"
+  {{#if SiteName}}<p><strong>Site:</strong> {{SiteName}}</p>{{/if}}"),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                T("WhatChanged", "What changed: the venue, the joining link, or both.", "The venue"),
+                T("SiteName", "The site the event is now at, when the site changed; hidden otherwise.", "Head Office"),
+            }).ToList(),
+        });
+
+        // ── 9. Taken off the guest list (lane 2e-1) ────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventGuestRemoved,
+            Name = "Event Guest Removed",
+            Category = "Invitation",
+            Description =
+                "Sent to a guest who was invited when they are taken off the guest list. Until lane 2e-1 an "
+                + "uninvited guest was never told, and still expected.",
+            DefaultSubject = "No longer needed: {{EventName}} on {{EventDate}}",
+            DefaultHtmlBody = Shell(GreyGradient, "Off the guest list",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>You have been taken off the guest list for <strong>{{EventName}}</strong> on {{EventDate}}.</p>
+  <p style='color:#6b7280;font-size:0.875rem'>Nothing is required of you; please remove it from your diary.</p>"),
+            Tokens = CommonTokens(),
+        });
+
+        // ── 10. A task (lane 2e-1, F-34) ───────────────────────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.EventTaskAssigned,
+            Name = "Event Task Assigned",
+            Category = "Task",
+            Description =
+                "Sent to an employee when a task on an event is given to them — when it is added, or passed to "
+                + "them. Until lane 2e-1 an assignee learnt of a task only by opening the event.",
+            DefaultSubject = "A task for {{EventName}}",
+            DefaultHtmlBody = Shell(BlueGradient, "A task for you",
+                @"  <p>Hi <strong>{{ParticipantName}}</strong>,</p>
+  <p>You have been given a task for <strong>{{EventName}}</strong>:</p>
+  <p style='background:#fff;border-left:3px solid #1a56db;padding:0.75rem'>{{TaskDescription}}</p>
+  {{#if TaskDue}}<p>Due: <strong>{{TaskDue}}</strong>{{#if TaskPriority}} — {{TaskPriority}} priority{{/if}}</p>{{/if}}" +
+                WhenAndWhere),
+            Tokens = CommonTokens().Concat(new[]
+            {
+                T("TaskDescription", "What is to be done.", "Book the caterer and confirm numbers."),
+                T("TaskDue", "When it is due; the line is hidden when it has no due date.", "Friday, 10 October 2026"),
+                T("TaskPriority", "Its priority.", "High"),
             }).ToList(),
         });
 

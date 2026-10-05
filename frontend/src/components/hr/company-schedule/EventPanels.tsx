@@ -84,7 +84,16 @@ const emptyParticipant: ParticipantForm = {
  * The guest list (lane 2d). Guests are corrected in place (C-22) and removed on Write. A cancelled or
  * completed event's list is its record: no adds, edits, removals or answers — the server refuses them too.
  */
-export function ParticipantsPanel({ eventId, open }: { eventId: string; open: boolean }) {
+export function ParticipantsPanel({
+  eventId,
+  open,
+  awaitingApproval = false,
+}: {
+  eventId: string;
+  open: boolean;
+  /** F-33 (lane 2e-1): guests added now are invited when the event is approved. */
+  awaitingApproval?: boolean;
+}) {
   const queryClient = useQueryClient();
   const key = ['hr', 'company-schedule', 'events', eventId, 'participants'];
 
@@ -96,7 +105,16 @@ export function ParticipantsPanel({ eventId, open }: { eventId: string; open: bo
       queryKey={key}
       invalidateKeys={[['hr', 'company-schedule', 'events', eventId, 'detail']]}
       readOnly={!open}
-      dialogHint="Invite an employee, or a guest from outside with their email address — the invitation goes there."
+      dialogHint={
+        awaitingApproval
+          ? 'The event awaits approval: the invitation goes when it is approved, not now.'
+          : 'Invite an employee, or a guest from outside with their email address — the invitation goes there.'
+      }
+      savedDescription={(saved, editing) =>
+        !editing && (saved as EventParticipant | undefined)?.invitationStatus === 'NotSent'
+          ? 'Added. The invitation goes when the event is approved.'
+          : null
+      }
       emptyDescription={open ? 'Nobody has been invited to this event yet.' : 'Nobody was invited to this event.'}
       list={(id) => companyEventService.getParticipants(id)}
       create={(id, v) =>
@@ -130,7 +148,11 @@ export function ParticipantsPanel({ eventId, open }: { eventId: string; open: bo
         },
         { header: 'Role', cell: (p) => spaced(p.role) },
         { header: 'Required', cell: (p) => (p.isRequired ? 'Yes' : 'Optional') },
-        { header: 'Invitation', cell: (p) => <StatusBadge status={spaced(p.invitationStatus)} /> },
+        {
+          header: 'Invitation',
+          // An invitation not sent waits for the event's approval (F-33).
+          cell: (p) => <StatusBadge status={p.invitationStatus === 'NotSent' ? 'Waits for approval' : spaced(p.invitationStatus)} />,
+        },
         { header: 'Responded', cell: (p) => p.responseDate?.slice(0, 10) ?? '—' },
       ]}
       actions={INVITATION_ANSWERS.map((response) => ({

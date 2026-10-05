@@ -578,6 +578,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService,
             ErpSystem.Core.Services.HR.CompanySchedule.PersonalScheduleService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
+        // Who hears what about a company event in the app — one topic per notice and audience
+        // (company-schedule final closure, lane 2e-1). The event service needs it.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.CompanyScheduleNotices>();
         // ⚠ Round 4, D6. NOT optional: without the catalogue registration TemplatedEmailService has
         // no fallback for the CompanySchedule module, and every invitation, reschedule notice and
         // cancellation throws instead of rendering its shipped default. The same trap lane F

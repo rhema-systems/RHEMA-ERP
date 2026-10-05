@@ -227,6 +227,45 @@ public static class CompanyEventRules
             : $"all day {days}";
     }
 
+    // ── Reminders and chases (lane 2e-1, F-33) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether the event's reminder can go now — one rule for the "Send reminder now" button and the hourly sweep.
+    /// It must be live (scheduled, confirmed or rescheduled), approved where approval is needed, and not yet begun.
+    /// Answers the sentence to refuse with, or null.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ F-33: the buttons refused only a cancelled event, so they reminded people of completed, postponed and past
+    /// events — and invited them to one still awaiting approval. The sweep already refused those.
+    /// </remarks>
+    public static string? RefuseReminding(CompanyEvent e, DateTime nowUtc) => RefuseSending(e, nowUtc, "remind");
+
+    /// <summary>
+    /// Whether the RSVP chase can go now — the reminder's rule, and the event asks for replies by a date still ahead.
+    /// </summary>
+    public static string? RefuseChasing(CompanyEvent e, DateTime nowUtc)
+    {
+        if (RefuseSending(e, nowUtc, "chase") is { } refusal) return refusal;
+        if (!e.RequiresRsvp || e.RsvpDeadline is not { } deadline)
+            return $"{e.EventName} does not ask for replies, so there is nobody to chase.";
+        return deadline <= nowUtc
+            ? $"The reply-by date for {e.EventName} ({Describe(deadline)}) has passed, so it is too late to chase."
+            : null;
+    }
+
+    private static string? RefuseSending(CompanyEvent e, DateTime nowUtc, string verb)
+    {
+        if (IsClosed(e))
+            return $"{e.EventName} is {(e.IsCancelled || e.Status == EventStatus.Cancelled ? "cancelled" : "completed")}, so there is nobody to {verb}.";
+        if (e.Status == EventStatus.Postponed)
+            return $"{e.EventName} is postponed and has no date yet. Reschedule it before you {verb} anybody.";
+        if (IsAwaitingApproval(e))
+            return $"{e.EventName} is still awaiting approval, so nobody has been invited yet.";
+        return e.Status == EventStatus.InProgress || e.StartDate.Date < nowUtc.Date
+            ? $"{e.EventName} has already begun, so it is too late to {verb} anybody."
+            : null;
+    }
+
     // ── Guests, attendance and tasks (lane 2d) ───────────────────────────────────────────────────
 
     /// <summary>An answer an invitation can be given: accepted, declined or tentative (F-11).</summary>

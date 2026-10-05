@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   Building2,
@@ -48,11 +49,13 @@ const KIND_ICON: Record<ScheduleEntryKind, typeof CalendarCheck> = {
 
 const dayKey = (iso: string) => iso.slice(0, 10);
 
-const addDays = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
+const addDays = (days: number, from?: string) => {
+  const d = from ? new Date(`${from}T00:00:00Z`) : new Date();
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+const isDay = (s: string | null): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
 
 /**
  * ⚠ A day-granular entry is never printed with times. Leave, travel, closures and all-day events
@@ -85,8 +88,12 @@ function EntryRow({ entry }: { entry: PersonalScheduleEntry }) {
 }
 
 export default function MySchedulePage() {
-  const [from, setFrom] = useState(addDays(0));
-  const [to, setTo] = useState(addDays(13));
+  // Lane 2e-1: an event's notice links here at the event's first day (`?from=`), so a notice about an event
+  // months away opens on it rather than on this fortnight.
+  const params = useSearchParams();
+  const linkedFrom = params.get('from');
+  const [from, setFrom] = useState(isDay(linkedFrom) ? linkedFrom : addDays(0));
+  const [to, setTo] = useState(isDay(linkedFrom) ? addDays(13, linkedFrom) : addDays(13));
 
   const schedule = useQuery({
     queryKey: ['hr', 'my-schedule', from, to],

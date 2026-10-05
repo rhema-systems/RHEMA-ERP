@@ -254,6 +254,15 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     `${event.startDate.slice(0, 10)}T${event.isAllDayEvent || !event.startTime ? '00:00:00' : event.startTime}Z`,
   );
   const started = startsAt.getTime() <= Date.now();
+  // Lane 2e-1 (F-33): the buttons follow the sweep's rule, which the server applies to them too — live,
+  // approved where approval is needed, not postponed, and not yet begun; a chase also needs a reply-by
+  // date still ahead.
+  const today = new Date().toISOString().slice(0, 10);
+  const canRemind =
+    open && !awaitingApproval && event.status !== 'Postponed' && event.status !== 'InProgress'
+    && event.startDate.slice(0, 10) >= today;
+  const canChase =
+    canRemind && event.requiresRsvp && !!event.rsvpDeadline && new Date(event.rsvpDeadline).getTime() > Date.now();
 
   return (
     <div className="space-y-6 p-6">
@@ -392,12 +401,17 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
                   : 'Goes automatically ahead of the RSVP deadline, to everybody who has not answered'}
             </Detail>
           </div>
-          {open && (
+          {awaitingApproval && open && (
+            <p className="text-muted-foreground">
+              Nobody is invited while the event awaits approval: its invitations go out when it is approved.
+            </p>
+          )}
+          {canRemind && (
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
                 <BellRing className="mr-2 h-4 w-4" /> Send reminder now
               </Button>
-              {event.requiresRsvp && (
+              {canChase && (
                 <Button variant="outline" onClick={() => chaseNow.mutate()} disabled={chaseNow.isPending}>
                   <MailQuestion className="mr-2 h-4 w-4" /> Chase unanswered now
                 </Button>
@@ -435,7 +449,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="attachments">Attachments ({event.attachments?.length ?? 0})</TabsTrigger>
           {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
-        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} open={open} /></TabsContent>
+        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} open={open} awaitingApproval={awaitingApproval} /></TabsContent>
         <TabsContent value="attendance" className="pt-4">
           {/* Lane 2d: a register once the event has started, never for a cancelled one — as the server rules. */}
           <AttendancePanel

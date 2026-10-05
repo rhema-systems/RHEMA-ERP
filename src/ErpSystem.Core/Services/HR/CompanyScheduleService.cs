@@ -50,6 +50,9 @@ public class CompanyEventService : ICompanyEventService
     private readonly IHrAudienceResolver _audience;
     private readonly IHrAnnouncementService _announcements;
 
+    /// <summary>The in-app half of every notice (lane 2e-1); email stays on the catalogue.</summary>
+    private readonly CompanyScheduleNotices _notices;
+
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
         IEventParticipantRepository participantRepository,
@@ -64,8 +67,10 @@ public class CompanyEventService : ICompanyEventService
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IHrAudienceResolver audience,
-        IHrAnnouncementService announcements)
+        IHrAnnouncementService announcements,
+        CompanyScheduleNotices notices)
     {
+        _notices = notices;
         _audience = audience;
         _announcements = announcements;
         _workflow = workflow;
@@ -157,18 +162,26 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <summary>
-    /// Tells every participant of an event something — a reschedule, a cancellation, a reminder.
+    /// Tells the event's guests something — a reschedule, a cancellation, a reminder — by email, and in the
+    /// app those with a login (lane 2e-1).
     /// </summary>
     /// <remarks>
-    /// ⚠ Reads the participants fresh rather than through the event's navigation, which callers may
+    /// <para>⚠ Reads the participants fresh rather than through the event's navigation, which callers may
     /// not have loaded. A notification loop over an empty unloaded collection tells nobody and looks
-    /// like success.
+    /// like success.</para>
+    ///
+    /// <para><b>A change</b> (<paramref name="change"/>, the default) goes to the guests who were invited —
+    /// not to one still waiting for the event's approval, who has never heard of it (F-33) — and never to
+    /// whoever made it. <b>A reminder or a chase</b> goes to everyone it is for, the sender included: it is
+    /// about the date, not an act.</para>
     /// </remarks>
     private async Task<int> NotifyParticipantsAsync(
         CompanyEvent ev, string eventKey, Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich,
-        string description, Func<EventParticipant, bool>? filter = null, CancellationToken cancellationToken = default)
+        string description, string inAppNotice, Func<EventParticipant, bool>? filter = null, bool change = true,
+        IReadOnlyDictionary<string, object>? inAppData = null, CancellationToken cancellationToken = default)
     {
         var tenantId = ev.TenantId;
+        var actor = change ? await _notices.ActorEmployeeIdAsync(cancellationToken) : null;
         var participants = (await _participantRepository.GetQueryable()
                 .Include(p => p.Employee)
                 .Where(p => p.EventId == ev.Id && p.TenantId == tenantId && !p.IsDeleted)
@@ -176,6 +189,8 @@ public class CompanyEventService : ICompanyEventService
                 .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
                 .ToListAsync(cancellationToken))
             .Where(p => filter is null || filter(p))
+            .Where(p => !change || p.InvitationStatus != InvitationStatus.NotSent)
+            .Where(p => actor is null || p.EmployeeId != actor)
             .ToList();
 
         var sent = 0;
@@ -193,6 +208,10 @@ public class CompanyEventService : ICompanyEventService
             await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description);
             sent++;
         }
+
+        await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToGuest,
+            participants.Where(p => p.EmployeeId != null).Select(p => p.EmployeeId!.Value),
+            inAppData, actorToo: !change, cancellationToken);
 
         _logger.LogInformation(
             "Company schedule: {Description} sent to {Count} participant(s) of {EventNumber}.",
@@ -217,6 +236,94 @@ public class CompanyEventService : ICompanyEventService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
         return current;
+    }
+
+    /// <summary>
+    /// Tells the organiser (lane 2e-1, D-11) by email and in the app — unless the signed-in user is the organiser
+    /// (bar <paramref name="actorToo"/>), the organiser has left, or <paramref name="alreadyTold"/> says their row on
+    /// the guest list was told the same thing already.
+    /// </summary>
+    /// <returns>1 when an email went, else 0.</returns>
+    private async Task<int> TellOrganiserAsync(
+        CompanyEvent ev, string eventKey, string inAppNotice,
+        Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich, string description,
+        CancellationToken cancellationToken, bool actorToo = false, Func<InvitationStatus, bool>? alreadyTold = null)
+    {
+        var organiser = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .Where(x => x.Id == ev.OrganizerId && x.TenantId == ev.TenantId && !x.IsDeleted && x.IsActive)
+            .Select(x => new { x.FirstName, x.LastName, x.EmailAddress })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (organiser is null) return 0;
+        if (!actorToo && await _notices.ActorEmployeeIdAsync(cancellationToken) == ev.OrganizerId) return 0;
+
+        if (alreadyTold is not null)
+        {
+            var asGuest = await _participantRepository.GetQueryable()
+                .Where(p => p.EventId == ev.Id && p.TenantId == ev.TenantId && !p.IsDeleted && p.EmployeeId == ev.OrganizerId)
+                .Select(p => (InvitationStatus?)p.InvitationStatus)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (asGuest is { } status && alreadyTold(status)) return 0;
+        }
+
+        var sent = 0;
+        if (!string.IsNullOrWhiteSpace(organiser.EmailAddress))
+        {
+            var tokens = EventTokens(ev, $"{organiser.FirstName} {organiser.LastName}".Trim());
+            if (enrich is not null) tokens = enrich(tokens);
+            await SendEventEmailAsync(ev.TenantId, eventKey, organiser.EmailAddress, tokens, description);
+            sent = 1;
+        }
+
+        await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToOrganiser, [ev.OrganizerId],
+            actorToo: actorToo, cancellationToken: cancellationToken);
+        return sent;
+    }
+
+    /// <summary>
+    /// What a guest must hear of in an edit that keeps the time (lane 2e-1): the venue or the site, the joining
+    /// link, or both — or null. A new time is a reschedule, told by its own notice.
+    /// </summary>
+    private async Task<(string What, string? SiteName)?> WhatChangedAsync(
+        CompanyEvent e, string? venueBefore, string? linkBefore, Guid? siteBefore, CancellationToken cancellationToken)
+    {
+        var siteChanged = e.LocationId != siteBefore;
+        var venue = siteChanged || !string.Equals(
+            CompanyEventRules.Clean(venueBefore), CompanyEventRules.Clean(e.VenueName), StringComparison.Ordinal);
+        var link = !string.Equals(
+            CompanyEventRules.Clean(linkBefore), CompanyEventRules.Clean(e.OnlineMeetingLink), StringComparison.Ordinal);
+        if (!venue && !link) return null;
+
+        string? siteName = null;
+        if (siteChanged && e.LocationId is { } site)
+            siteName = await _unitOfWork.Repository<Location>().GetQueryable()
+                .Where(l => l.Id == site && l.TenantId == e.TenantId)
+                .Select(l => l.Name)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        return (venue && link ? "The venue and the joining link" : venue ? "The venue" : "The joining link", siteName);
+    }
+
+    /// <summary>
+    /// Sends the invitations that waited for the event's approval (F-33): marked sent, saved, then sent.
+    /// </summary>
+    /// <returns>How many went.</returns>
+    private async Task<int> InviteWaitingGuestsAsync(CompanyEvent ev, CancellationToken cancellationToken)
+    {
+        var waiting = await TenantGuests(ev.TenantId)
+            .Where(p => p.EventId == ev.Id && p.InvitationStatus == InvitationStatus.NotSent)
+            .ToListAsync(cancellationToken);
+        if (waiting.Count == 0) return 0;
+
+        var now = DateTime.UtcNow;
+        foreach (var guest in waiting)
+        {
+            guest.InvitationStatus = InvitationStatus.Sent;
+            guest.InvitationSentDate = now;
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        foreach (var guest in waiting) await SendInvitationAsync(ev, guest);
+        return waiting.Count;
     }
 
     private async Task<CompanyEvent> GetOwnedEventAsync(Guid id, CancellationToken cancellationToken = default)
@@ -659,7 +766,7 @@ public class CompanyEventService : ICompanyEventService
                 tokens["RescheduleReason"] = entity.RescheduleReason;
                 return tokens;
             },
-            "event rescheduled", cancellationToken: cancellationToken);
+            "event rescheduled", CompanyScheduleNotices.Rescheduled, cancellationToken: cancellationToken);
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -930,6 +1037,11 @@ public class CompanyEventService : ICompanyEventService
         var moving = !requested.SameAs(before);
         var rsvpDeadlineBefore = entity.RsvpDeadline;
         var organiserChanged = updateDto.OrganizerId is { } chosen && chosen != Guid.Empty && chosen != entity.OrganizerId;
+        // Lane 2e-1: what the guests hear of — a postponement, or a new venue, site or joining link.
+        var statusBefore = entity.Status;
+        var venueBefore = entity.VenueName;
+        var linkBefore = entity.OnlineMeetingLink;
+        var siteBefore = entity.LocationId;
 
         if (moving && string.IsNullOrWhiteSpace(updateDto.RescheduleReason))
             throw new InvalidOperationException(
@@ -955,7 +1067,22 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
 
-        if (moving) await NotifyRescheduledAsync(entity, cancellationToken);
+        if (moving)
+            await NotifyRescheduledAsync(entity, cancellationToken);
+        else if (entity.Status == EventStatus.Postponed && statusBefore != EventStatus.Postponed)
+            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
+                "event postponed", CompanyScheduleNotices.Postponed, cancellationToken: cancellationToken);
+        else if (await WhatChangedAsync(entity, venueBefore, linkBefore, siteBefore, cancellationToken) is { } changed)
+            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
+                tokens =>
+                {
+                    tokens["WhatChanged"] = changed.What;
+                    tokens["SiteName"] = changed.SiteName;
+                    return tokens;
+                },
+                "event changed", CompanyScheduleNotices.Changed,
+                inAppData: new Dictionary<string, object> { ["What"] = changed.What },
+                cancellationToken: cancellationToken);
         // D-10: an approved event that moved is approved afresh — its approval was for the old time.
         if (moved?.ApprovalCleared == true) await StartApprovalAsync(entity, cancellationToken);
 
@@ -988,6 +1115,20 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event approval for {EventNumber}: {Outcome}", entity.EventNumber, outcome);
 
+        // Lane 2e-1: approved at last — the invitations that waited go (F-33), and the organiser is told.
+        if (outcome == WorkflowOutcome.Approved && entity.ApprovalDate != null)
+        {
+            var invited = await InviteWaitingGuestsAsync(entity, cancellationToken);
+            await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventApproved, CompanyScheduleNotices.Approved,
+                tokens =>
+                {
+                    tokens["ApprovedBy"] = string.IsNullOrWhiteSpace(_currentUserProvider.FullName) ? null : _currentUserProvider.FullName;
+                    tokens["InvitationsSent"] = invited > 0 ? invited.ToString() : null;
+                    return tokens;
+                },
+                "event approved", cancellationToken);
+        }
+
         return true;
     }
 
@@ -1018,13 +1159,20 @@ public class CompanyEventService : ICompanyEventService
             entity.EventNumber, outcome, change.BookingsCancelled.Count);
 
         if (outcome == WorkflowOutcome.Rejected)
-            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
-                tokens =>
-                {
-                    tokens["CancellationReason"] = entity.CancellationReason;
-                    return tokens;
-                },
-                "event not approved", cancellationToken: cancellationToken);
+        {
+            Dictionary<string, string?> WithReason(Dictionary<string, string?> tokens)
+            {
+                tokens["CancellationReason"] = entity.CancellationReason;
+                return tokens;
+            }
+
+            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, WithReason,
+                "event not approved", CompanyScheduleNotices.Cancelled, cancellationToken: cancellationToken);
+            // Lane 2e-1: the organiser hears why, unless their invitation already said it.
+            await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, CompanyScheduleNotices.NotApproved,
+                WithReason, "event not approved (organiser)", cancellationToken,
+                alreadyTold: status => status != InvitationStatus.NotSent);
+        }
 
         change.Event = await GetByIdAsync(entity.Id, cancellationToken);
         return change;
@@ -1060,7 +1208,7 @@ public class CompanyEventService : ICompanyEventService
                 tokens["CancellationReason"] = entity.CancellationReason;
                 return tokens;
             },
-            "event cancelled", cancellationToken: cancellationToken);
+            "event cancelled", CompanyScheduleNotices.Cancelled, cancellationToken: cancellationToken);
 
         return new CompanyEventChangeDto
         {
@@ -1162,9 +1310,8 @@ public class CompanyEventService : ICompanyEventService
     public async Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var ev = await GetOwnedEventAsync(eventId, cancellationToken);
-        if (ev.IsCancelled || ev.Status == EventStatus.Cancelled)
-            throw new InvalidOperationException(
-                $"{ev.EventName} has been cancelled, so there is nothing left to RSVP to.");
+        // F-33 (lane 2e-1): the sweep's rule — it refused only a cancelled event.
+        Refuse(CompanyEventRules.RefuseChasing(ev, DateTime.UtcNow));
 
         return await ChaseRsvpsAsync(ev, DateTime.UtcNow, cancellationToken);
     }
@@ -1173,10 +1320,8 @@ public class CompanyEventService : ICompanyEventService
     public async Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var ev = await GetOwnedEventAsync(eventId, cancellationToken);
-        if (ev.IsCancelled || ev.Status == EventStatus.Cancelled)
-            throw new InvalidOperationException(
-                $"{ev.EventName} has been cancelled, so a reminder would be telling people to attend "
-              + "something that is not happening.");
+        // F-33 (lane 2e-1): the sweep's rule — it refused only a cancelled event.
+        Refuse(CompanyEventRules.RefuseReminding(ev, DateTime.UtcNow));
 
         return await RemindAsync(ev, DateTime.UtcNow, cancellationToken);
     }
@@ -1188,12 +1333,12 @@ public class CompanyEventService : ICompanyEventService
     private async Task<int> ChaseRsvpsAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
     {
         var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
-            enrich: null, "RSVP reminder",
+            enrich: null, "RSVP reminder", CompanyScheduleNotices.RsvpChase,
             // ⚠ NotSent as well as Sent. A participant added before the invitation send existed
             // carries NotSent and has genuinely never been asked — chasing them is the first time
             // anybody has told them, which is exactly who this is for.
             filter: p => p.InvitationStatus is InvitationStatus.Sent or InvitationStatus.NotSent,
-            cancellationToken);
+            change: false, cancellationToken: cancellationToken);
 
         ev.RsvpReminderSentDate = nowUtc;
         await _eventRepository.UpdateAsync(ev);
@@ -1210,15 +1355,20 @@ public class CompanyEventService : ICompanyEventService
         // ⚠ Declined participants are NOT reminded. They have said they are not coming; a reminder
         // is the system ignoring the answer it asked for.
         var daysUntil = (ev.StartDate.Date - nowUtc.Date).TotalDays;
-        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder,
-            tokens =>
-            {
-                tokens["DaysUntil"] = daysUntil >= 1 ? ((int)daysUntil).ToString() : null;
-                return tokens;
-            },
-            "event reminder",
+        Dictionary<string, string?> WithDays(Dictionary<string, string?> tokens)
+        {
+            tokens["DaysUntil"] = daysUntil >= 1 ? ((int)daysUntil).ToString() : null;
+            return tokens;
+        }
+
+        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, WithDays,
+            "event reminder", CompanyScheduleNotices.Reminder,
             filter: p => p.InvitationStatus != InvitationStatus.Declined,
-            cancellationToken);
+            change: false, cancellationToken: cancellationToken);
+        // D-11 (lane 2e-1): the organiser is reminded too, on the guest list or not — once.
+        sent += await TellOrganiserAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, CompanyScheduleNotices.Reminder,
+            WithDays, "event reminder (organiser)", cancellationToken,
+            actorToo: true, alreadyTold: status => status != InvitationStatus.Declined);
 
         ev.ReminderSentDate = nowUtc;
         await _eventRepository.UpdateAsync(ev);
@@ -1267,6 +1417,8 @@ public class CompanyEventService : ICompanyEventService
         foreach (var ev in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // F-33 (lane 2e-1): the buttons' rule. The query above already narrows to it; this keeps them one rule.
+            if (CompanyEventRules.RefuseReminding(ev, nowUtc) is not null) continue;
 
             if (ev.SendReminders && ev.ReminderDaysBefore is { } daysBefore && ev.ReminderSentDate is null
                 && ev.StartDate.Date.AddDays(-Math.Max(0, daysBefore)) <= today)
@@ -1276,7 +1428,7 @@ public class CompanyEventService : ICompanyEventService
             }
 
             if (ev.RequiresRsvp && ev.RsvpDeadline is { } deadline && ev.RsvpReminderSentDate is null
-                && deadline > nowUtc && deadline.Date.AddDays(-lead) <= today)
+                && CompanyEventRules.RefuseChasing(ev, nowUtc) is null && deadline.Date.AddDays(-lead) <= today)
             {
                 run.EmailsSent += await ChaseRsvpsAsync(ev, nowUtc, cancellationToken);
                 run.RsvpChased.Add(ev.EventNumber);
@@ -1406,6 +1558,8 @@ public class CompanyEventService : ICompanyEventService
     {
         // ⚠ F-35: a leaver is never invited.
         if (guest.Employee is { IsActive: false }) return;
+        // Lane 2e-1: nobody is told of their own act — inviting oneself.
+        if (guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync()) return;
 
         var name = guest.Employee is not null
             ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
@@ -1419,6 +1573,32 @@ public class CompanyEventService : ICompanyEventService
             CompanyScheduleEmailCatalog.Events.EventInvitation,
             guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail,
             tokens, "event invitation");
+
+        if (guest.EmployeeId is { } employeeId)
+            await _notices.TellAsync(ev, CompanyScheduleNotices.Invited, CompanyScheduleNotices.ToGuest, [employeeId]);
+    }
+
+    /// <summary>
+    /// Tells a guest who was invited that they are no longer (lane 2e-1) — by email and in the app; never of
+    /// their own act, and not a leaver.
+    /// </summary>
+    private async Task TellRemovedGuestAsync(CompanyEvent ev, EventParticipant guest, CancellationToken cancellationToken)
+    {
+        if (guest.Employee is { IsActive: false }) return;
+        if (guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync(cancellationToken)) return;
+
+        var name = guest.Employee is not null
+            ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
+            : guest.ExternalParticipantName ?? "Colleague";
+        await SendEventEmailAsync(
+            ev.TenantId,
+            CompanyScheduleEmailCatalog.Events.EventGuestRemoved,
+            guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail,
+            EventTokens(ev, name), "guest removed");
+
+        if (guest.EmployeeId is { } employeeId)
+            await _notices.TellAsync(ev, CompanyScheduleNotices.Removed, CompanyScheduleNotices.ToGuest, [employeeId],
+                cancellationToken: cancellationToken);
     }
 
     /// <remarks>
@@ -1437,8 +1617,10 @@ public class CompanyEventService : ICompanyEventService
         entity.TenantId = tenantId;
         await CheckGuestAsync(ev, entity, isNew: true, cancellationToken);
 
-        entity.InvitationStatus = InvitationStatus.Sent;
-        entity.InvitationSentDate = DateTime.UtcNow;
+        // F-33 (lane 2e-1): an event awaiting approval invites nobody yet — the invitation goes with the approval.
+        var waits = CompanyEventRules.IsAwaitingApproval(ev);
+        entity.InvitationStatus = waits ? InvitationStatus.NotSent : InvitationStatus.Sent;
+        entity.InvitationSentDate = waits ? null : DateTime.UtcNow;
 
         await _participantRepository.AddAsync(entity);
         await SaveRefusingDuplicateAsync(GuestIndex, $"That employee is already invited to {ev.EventName}.", cancellationToken);
@@ -1447,7 +1629,7 @@ public class CompanyEventService : ICompanyEventService
         _logger.LogInformation("Guest {Guest} invited to {EventNumber}", GuestName(saved), ev.EventNumber);
 
         // ⚠ Round 4, D6: InvitationSentDate was stamped long before anything was sent. Now it is true.
-        await SendInvitationAsync(ev, saved);
+        if (!waits) await SendInvitationAsync(ev, saved);
         return saved.ToDto();
     }
 
@@ -1549,6 +1731,9 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Guest {Guest} removed from {EventNumber}", GuestName(guest), ev.EventNumber);
+
+        // Lane 2e-1: a guest who was invited hears they no longer are (one still waiting for approval never heard).
+        if (guest.InvitationStatus != InvitationStatus.NotSent) await TellRemovedGuestAsync(ev, guest, cancellationToken);
         return true;
     }
 
@@ -1720,6 +1905,31 @@ public class CompanyEventService : ICompanyEventService
             .Include(t => t.AssignedTo)
             .Where(t => t.TenantId == tenantId && !t.IsDeleted);
 
+    /// <summary>
+    /// Tells an employee a task is theirs (lane 2e-1, F-34) — by email and in the app; never of their own act,
+    /// and not a leaver kept on a task already theirs.
+    /// </summary>
+    private async Task TellAssigneeAsync(CompanyEvent ev, EventTask task, CancellationToken cancellationToken)
+    {
+        if (task.AssignedTo is not { IsActive: true } assignee) return;
+        if (assignee.Id == await _notices.ActorEmployeeIdAsync(cancellationToken)) return;
+
+        var tokens = EventTokens(ev, $"{assignee.FirstName} {assignee.LastName}".Trim());
+        tokens["TaskDescription"] = task.TaskDescription;
+        tokens["TaskDue"] = task.DueDate?.ToString("dddd, d MMMM yyyy");
+        tokens["TaskPriority"] = task.Priority.ToString();
+        await SendEventEmailAsync(ev.TenantId, CompanyScheduleEmailCatalog.Events.EventTaskAssigned,
+            assignee.EmailAddress, tokens, "event task assigned");
+
+        await _notices.TellAsync(ev, CompanyScheduleNotices.TaskAssigned, CompanyScheduleNotices.ToAssignee, [assignee.Id],
+            new Dictionary<string, object>
+            {
+                ["Task"] = task.TaskDescription.Length <= 120 ? task.TaskDescription : task.TaskDescription[..117] + "…",
+                ["Due"] = task.DueDate is { } due ? $" — due {due:d MMM yyyy}" : string.Empty,
+            },
+            cancellationToken: cancellationToken);
+    }
+
     /// <summary>"Book the caterer", cut to a phrase a refusal can quote.</summary>
     private static string Quote(EventTask t) =>
         t.TaskDescription.Length <= 60 ? $"\"{t.TaskDescription}\"" : $"\"{t.TaskDescription[..57]}…\"";
@@ -1757,7 +1967,9 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Task added to {EventNumber}: {TaskId}", ev.EventNumber, entity.Id);
-        return (await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken)).ToDto();
+        var saved = await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken);
+        if (saved.AssignedToId is not null) await TellAssigneeAsync(ev, saved, cancellationToken);
+        return saved.ToDto();
     }
 
     public async Task<IEnumerable<EventTaskDto>> GetTasksAsync(Guid eventId, CancellationToken cancellationToken = default)
@@ -1809,7 +2021,11 @@ public class CompanyEventService : ICompanyEventService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Event task updated: {TaskId}", updateDto.Id);
-        return (await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken)).ToDto();
+        var saved = await TenantTasks(tenantId).FirstAsync(t => t.Id == entity.Id, cancellationToken);
+        // Lane 2e-1 (F-34): a task passed to somebody new tells them.
+        if (saved.AssignedToId is { } assignee && assignee != previousAssignee)
+            await TellAssigneeAsync(await GetOwnedEventAsync(saved.EventId, cancellationToken), saved, cancellationToken);
+        return saved.ToDto();
     }
 
     /// <remarks>Lane 2d: not twice, and not a cancelled task — reopen it first.</remarks>

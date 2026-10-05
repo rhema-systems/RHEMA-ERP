@@ -2303,6 +2303,131 @@ each harness session.
 - **Item 3:** on start, mark runs left *Running* by an earlier process as *Interrupted*, or give each run a lease
   that expires.
 
+## 40. Platform (email) — since 2026-10-03 an email sent with nobody signed in finds no mail server: the careers activation email, the password reset and every background send (2026-10-05)
+
+**Owner:** Platform, email settings (`src/ErpSystem.Core/Services/SettingsService.cs`, `GetEmailSettingsAsync`, as
+changed by master `de8ad4fb2` "Fix public verification delivery and dashboard health routing", 2026-10-03; read by
+`ProductionEmailService`). **Severity:** high.
+- A candidate who registers on the careers site, on a server with no working SMS provider, can no longer activate the
+  account: the lock-out round 4 closed is back.
+- On a server with SMTP configured, every email HR sends from a background service fails.
+
+**Found:** HR's company-schedule final closure, lane 2e-1, running `hr-templates/run-lane-n.mjs` (section J).
+
+### What is broken
+
+`GetEmailSettingsAsync` now takes the tenant from the signed-in user (`ICurrentUserService.TenantId`) and returns
+nothing when there is none. Before `de8ad4fb2` it took the first settings row, "even for anonymous requests". With no
+HTTP context, or no signed-in user, `CurrentUserService.TenantId` is null, so the lookup finds no mail server.
+
+HR's senders name the tenant (`TemplatedEmailService.SendForTenantAsync(tenantId, …)`), but the tenant is used only to
+choose the wording. The send goes through `IEmailService` → `ProductionEmailService.SendEmailAsync` → the lookup above.
+So these sends fail:
+- **the careers registration's activation email** (`AuthController.SendCandidateActivationEmailAsync`, anonymous) —
+  proven below;
+- **every send from a background service**: HR's hourly company-schedule reminders and RSVP chases, the other HR
+  sweeps, and the notification dispatcher's emails — read from the code, not run;
+- **the forgotten-password email** (`AuthController.ForgotPassword`, anonymous, through `IEmailService`) — read from
+  the code, not run.
+
+The same commit added `ITenantEmailSender` / `TenantEmailSender`, which takes the tenant explicitly. Only its own
+public path (`EstateExternalDocumentsController`) uses it.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, 11:00–11:01:
+- `run-lane-n` configured a mail sink as the DEFAULT tenant's `EmailSettings` row and registered four careers
+  candidates.
+- Each registration logged "No email settings configured in database", then "Activation email could not be sent to
+  candidate {id}".
+- J2–J8 failed: 6 of the suite's 115. The suite scored 115/115 at round 4 (2026-09-23).
+- Signed-in sends in the same window reached the sink: sections D–I, K and L passed.
+
+### What it blocks
+
+- **Careers self-registration** wherever SMS does not deliver. The activation email is the only other way to
+  activate, as `AuthController`'s own comment on it explains.
+- **Password reset** by email.
+- **Every HR background email** on a server with SMTP: company-schedule reminders and chases, leave, travel and
+  orientation sweeps. They report a failure and send nothing.
+
+UAT shows no change, because it has no mail server at all.
+
+### What a fix needs
+
+- Send with the tenant the caller gives. For example, `TemplatedEmailService` could use `ITenantEmailSender` when a
+  tenant is named, or `SendForTenantAsync` could set an ambient tenant that the settings lookup reads.
+- An anonymous send that knows no tenant, such as the password reset, needs a stated rule: the seeded DEFAULT tenant,
+  as `5d7e57f64` chose for the login page's public settings.
+- HR's senders already name the tenant, so HR needs no change.
+
+## 41. Platform (identity) — the careers sign-up texts a code to whatever number it is given, with no switch for test servers (2026-10-05)
+
+**Owner:** Platform, identity (`AuthController.RegisterCandidate`, l.1912–1934; `TenantSmsSender`), with HR's own
+harness. **Severity:** medium. This is a privacy and cost risk, not a broken function. **Found:** HR's
+company-schedule final closure, lane 2e-1, reading the API log after `hr-templates/run-lane-n.mjs`.
+
+### What is broken
+
+Every careers registration sends a verification code by SMS to the request's phone number, which is required
+(`RegisterRequest.PhoneNumber`). Nothing stops this on a test or staging server: there is no sandbox, no list of
+allowed numbers, and no "log the code instead". So any automated registration texts the numbers it uses: a test
+suite, a load test, or a demo script.
+
+HR's `run-lane-n.mjs` registers with random real-format Ghana numbers: `+23320` and seven random digits (l.262).
+
+### What was proven
+
+On UAT, 2026-10-05, 11:00–11:01, the suite registered four candidates. For each, the log reads:
+- "OTP created … channel=Sms";
+- the Twilio fallback failed;
+- "[SMS:mNotify] Sending to ***6527" (then ***6308, ***7832 and ***8225), and that attempt failed;
+- "Failed to send phone verification OTP".
+
+No phone was reached, only because UAT has no SMS credentials, either the tenant's own or the fallback's.
+
+### What it blocks
+
+Running any suite that registers candidates on a server where SMS credentials are configured.
+
+### What a fix needs
+
+- **Platform:** a guard for non-production servers. Either a sandbox mode that logs the code and sends nothing, or an
+  allowlist of numbers outside production.
+- **HR (owed):** until that guard exists, `run-lane-n.mjs` must not run where SMS credentials are configured. It
+  should refuse to start there. The number cannot simply be left out, because the sign-up requires one.
+
+## 42. Platform (identity) — `PUT /api/User` answers 500 for a login with no email, so such a login cannot be edited or switched off through the API (2026-10-05)
+
+**Owner:** Platform, identity (`UserService.UpdateUserAsync` l.121, `UserController.UpdateUser`). **Severity:** low.
+**Found:** HR's company-schedule final closure, lane 2e-1, switching off `run-lane-n`'s officer with no email after
+the run.
+
+### What is broken
+
+Updating a login whose email is empty sends the empty email back, as the screen and the API echo what they read.
+Identity's validation then refuses it ("Email '' is invalid"). The refusal is thrown as an exception and answered
+**500**, not as a 400 or 422 that says why. Any change to such a login fails, including only switching it off.
+
+### What was proven
+
+On UAT, 2026-10-05, 11:05:28–11:05:40, three `PUT /api/User/5B3768C6-…` calls (login `r4n_hrn_028928`) answered 500.
+The suite's own teardown made one call and HR's switch-off tool made two. Each logged "Failed to update user: Email ''
+is invalid" at `UserService.UpdateUserAsync` l.121. The login was switched off by SQL instead.
+
+The suite removes that login's email itself, by SQL, so it can test an officer with no address. A login can have no
+email by other routes too, such as an import.
+
+### What it blocks
+
+Editing or switching off, through the API or the users screen, any login with no email.
+
+### What a fix needs
+
+- Treat an empty email as no email on update, if a login may have none; or require one everywhere, at creation and on
+  import.
+- Answer Identity's validation failures with a 400 that names the field.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:

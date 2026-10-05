@@ -2,7 +2,7 @@
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
-lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders;
+lane N — § 2.7, the letter and email templates (44 then, 49 since company-schedule lane 2e-1); lane N-b2 — § 2.8, company-schedule reminders;
 lane O — § 2.9, the technician-role flag and the person's exception).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2, and `AllowOffsetAgainstAnnual` added 2026-09-26), and
@@ -301,7 +301,7 @@ was off.
 
 Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
 template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
-**44 templates**. Since this lane a tenant can reword any of them at **Administration → HR Settings →
+**49 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five). Since this lane a tenant can reword any of them at **Administration → HR Settings →
 Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
 and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
 is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
@@ -374,7 +374,12 @@ every render, and the escaped form would have printed their markup as text.
 | `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | the hourly sweep chases unanswered invitations `CompanyEventRsvpChaseLeadDays` before the RSVP deadline, **once**; or HR presses **Chase unanswered now**, which counts as the chase. Until lane N-b2 the chase was an API endpoint that no screen called | signed in, or background (sweep) | **Enforced** (§ 2.8) |
 | `CompanySchedule/EventReminder` | Event Reminder | email | the hourly sweep sends it `ReminderDaysBefore` before a live event whose **Send reminders** is on, **once**, and again if the date moves; or HR presses **Send reminder now**, which counts as the send. Until lane N-b2 the form's switch and its days were read by nothing | signed in, or background (sweep) | **Enforced** (§ 2.8) |
 | `CompanySchedule/EventRescheduled` | Event Rescheduled | email | an event is moved | signed in | **Enforced** |
-| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled | signed in | **Enforced** |
+| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled — or not approved, when it also goes to the organiser (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventApproved` | Event Approved | email | an event that needs approval is approved at its last stage; to the organiser, as its waiting invitations go out (company-schedule lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventPostponed` | Event Postponed | email | an event's edit sets it Postponed; to the guests who were invited (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventChanged` | Event Details Changed | email | an edit changes the venue, site or joining link but not the time; to the guests who were invited (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventGuestRemoved` | Event Guest Removed | email | a guest who was invited is taken off the guest list (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventTaskAssigned` | Event Task Assigned | email | a task on an event is added for somebody, or passed to somebody new (lane 2e-1, F-34) | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
 | `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
 | `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |

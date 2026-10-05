@@ -35,7 +35,7 @@ has not started (the user: "don't start the actual development yet").
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
-   diaries and the intranet, and 2d, guests, the register and tasks. **Next: 2e, the notices.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   diaries and the intranet, 2d, guests, the register and tasks, and 2e-1, who is told. **Next: 2e-2, delivered vs issued (R4-6.3).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -310,7 +310,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d built and proved (387/387 ×2; round-4 net 205/205); 2e next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d and 2e-1 built and proved (429/429 ×2; round-4 net 205/205); 2e-2 next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -944,7 +944,7 @@ change.
       "Occurrence 3 of 10" and links the series; the register filters by series.
 
 **Audience and organiser** (*review: reuse the audience resolver; no new `EventAudience` helper*)
-- [ ] *✅ 2a for the picker, the creator stamp, the diaries and the clash check; reminding the organiser is 2e.* The organiser per **D-11**; the organiser and the participants always see and are committed to
+- [x] *✅ 2a for the picker, the creator stamp, the diaries and the clash check; ✅ 2e-1: the organiser is reminded, on the guest list or not, and told of an approval or a rejection.* The organiser per **D-11**; the organiser and the participants always see and are committed to
       the event.
 - [x] *✅ 2c (`CompanyEventRules.AudienceRuleOf` / `CalendarAudienceOf`, the resolver's new Management rule); lane 7 reads the same rule.* When `ShowOnCompanyCalendar` is on, the event's audience is an audience rule: `Scope = AllStaff`
       → `AllEmployees`; `Scope = Department` → the event's `OrganizationUnit` (its subtree);
@@ -958,20 +958,20 @@ change.
       onward reach the clash check and the diaries.
 
 **Participants, attendance, tasks**
-- [ ] *✅ 2d for every rule here but telling the removed person, which is 2e's new notices.* Participants: an external guest needs a name AND an email; duplicate external email refused; no
+- [x] *✅ 2d; ✅ 2e-1 tells the removed person (by email and in the app — not one never invited).* Participants: an external guest needs a name AND an email; duplicate external email refused; no
       adds to a cancelled or completed event; no inactive employee (F-35); replies limited to Accepted /
       Declined / Tentative, on the event in the route (F-11). **Removal moves to `Write`** — uninviting
       is organiser work — and the person is told.
 - [x] *✅ 2d; the check-in must also fall on one of the event's days and not be still to come.* Attendance: the re-mark bug (F-1); no check-out before check-in or twice; none on a cancelled
       event or **before the event starts**.
-- [ ] *✅ 2d for the completion date, the guard and Overdue on read (`isOverdue`; Overdue refused as a status to set); telling and chasing the assignee is 2e (F-34).* Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
+- [ ] *✅ 2d for the completion date, the guard and Overdue on read (`isOverdue`; Overdue refused as a status to set); ✅ 2e-1 tells the assignee (added, or passed to them); the overdue chase is 2e-3, with its stamp column.* Tasks: `Completed` through update sets `CompletionDate`; complete-task guard; `Overdue` computed
       on read; the assignee is told on assignment and chased by the hourly sweep when overdue (F-34).
 - [x] *✅ 2d.* (D-9, C-21) `DELETE events/{eventId}/attendance/{attendanceId}` on `Write`; (C-22)
       `PUT participants/{id}` on `Write` — role, required, special requirements, and the external
       guest's name, email and organisation.
 
 **Notifications** (F-31…F-36; *review: the first draft only reworded the Reminders card*)
-- [ ] Every company-schedule notice also goes **in-app** to internal recipients: an
+- [x] *✅ 2e-1: `CompanyScheduleNotices`, travel's model — 12 topics, in the app only, seeded on first use; email stays on the catalogue; nobody told of their own act but a reminder or a chase.* Every company-schedule notice also goes **in-app** to internal recipients: an
       `EntityActivityEvent` with the recipients in `Data["RecipientUserIds"]`, on topics seeded with
       in-app on — the pattern in `HrAnnouncementService.NotifyAudienceAsync`. *At 1163bbc47 a closer
       model exists, travel's `StaffTravelNotices` (§ 3c): one notices class owning every topic, login /
@@ -979,9 +979,9 @@ change.
       two at the source check.*
 - [ ] Deliveries are counted from the email result; the Reminders card and the toasts show issued and
       delivered (R4-6.3).
-- [ ] Invitations wait while an event awaits approval and go on approval; "Send reminder now" and
+- [x] *✅ 2e-1, the wider F-33 too: the buttons refuse what the sweep refuses (closed, postponed, awaiting approval, begun; a chase with no replies asked or after the reply-by date), by one rule both read.* Invitations wait while an event awaits approval and go on approval; "Send reminder now" and
       "Chase unanswered now" refuse such an event, as the sweep does (F-33).
-- [ ] New notices: event approved (to the organiser), postponed, changed in time, venue or link,
+- [x] *✅ 2e-1, five new catalogue emails, with not-approved told to the organiser too; a new time is the existing rescheduled notice.* New notices: event approved (to the organiser), postponed, changed in time, venue or link,
       participant removed.
 - [x] *✅ 2d: the shared send loop and the invitation both skip a leaver, and a leaver cannot be invited.* Every send skips inactive employees (F-35).
 - [ ] Calendar invites and external replies per **D-14** (F-36).
@@ -1035,15 +1035,122 @@ built, proved twice and handed over on its own:
 - **2b** approval (D-10).
 - **2c** the audience (D-16), the calendar commitment source and `ShowOnIntranet`.
 - **2d** participants, attendance, tasks: F-1, F-11, F-35, C-21, C-22, removal on Write.
-- **2e** notices:
-  - the in-app notices class;
-  - delivered vs issued (R4-6.3), F-33;
-  - the new notices, among them a guest removed and a task's assignee told and chased (F-34), both
-    handed on by 2d;
-  - calendar invites (D-14, with its migration).
+- **2e** notices, in three parts (the user, 2026-10-05: "go with both" — the split, and the overdue
+  chase below):
+  - **2e-1** the in-app notices class; the new notices (an event approved, postponed, or changed in
+    time, venue or link; a guest removed; a task assigned); the organiser reminded (D-11); F-33
+    (invitations wait for approval; the per-event buttons refuse what the sweep refuses).
+  - **2e-2** delivered vs issued (R4-6.3). ⚠ Until Platform fixes **#40**, the hourly sweep's sends find no mail
+    server on a server that has one (nobody is signed in), so 2e-2 will count them as not delivered — truthfully.
+  - **2e-3** calendar invites (D-14) and the overdue-task chase (F-34), with the one migration: the
+    event's invite sequence counter and the task's "chased at" stamp. **The chase is sent once**, on the
+    first sweep after the due date, and stamped so the hourly sweep never repeats it (the user's choice
+    over a repeating chase).
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2e-1 — what was built (2026-10-05): who is told.*
+- **`CompanyScheduleNotices`, travel's model (§ 1c):**
+  - One topic per notice and audience, `CompanySchedule.{Notice}.{Guest|Organiser|Assignee}`: 12 in all.
+  - The topics are seeded the first time a notice is raised, so a tenant needs no seed run. UAT has
+    them now.
+  - **In the app only.** Email stays on the templated catalogue, which has a delivery result, the
+    tenant's own wording, and (2e-3) room for the calendar invite.
+  - Recipients are the active logins linked to the employees told. An employee with no login is told by
+    email alone.
+  - **Nobody is told of their own act**, in the app or by email. A reminder and a chase are the
+    exceptions: they are about the date, so the sender is reminded too.
+  - **Links:** a guest's opens My Schedule at the event's first day (`?from=`, which the page now
+    reads), since every employee can open it. An organiser's or an assignee's opens the event page.
+  - It never fails the act: it is raised after the save, and logged if it cannot be.
+- **What is told, by email and in the app:**
+  - an invitation; the RSVP chase; the reminder;
+  - moved, cancelled;
+  - **new:** postponed; a new venue, site or joining link without a new time; taken off the guest list;
+    a task given (added, or passed to someone new);
+  - **new, to the organiser:** approved; not approved, with why. The organiser is also **reminded**
+    (D-11), on the guest list or not, and only once.
+  - A change goes only to guests who were invited. Someone still waiting for the approval never heard
+    of the event and is not told.
+- **Five new catalogue emails:** `EventApproved`, `EventPostponed`, `EventChanged`,
+  `EventGuestRemoved`, `EventTaskAssigned`. Each has its § 2.7 row in the configuration register, which
+  now counts 49 templates. `hr-templates/run-lane-n.mjs` expects 49.
+- **F-33:**
+  - An event awaiting approval invites nobody; its guests wait as "Waits for approval".
+  - The final approval sends every waiting invitation and tells the organiser.
+  - **The buttons refuse what the hourly sweep refuses**, by one rule both read
+    (`CompanyEventRules.RefuseReminding` / `RefuseChasing`):
+    - cancelled or completed;
+    - postponed;
+    - awaiting approval;
+    - begun;
+    - for a chase, also an event that asks for no replies, or whose reply-by date has passed.
+
+    The buttons used to refuse only a cancelled event. The page shows the buttons only where they
+    apply.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2e-1: **429/429 on two clean passes** (passes one and three). 2e-1
+  has 42 assertions, each an exact count of rows in `Notifications` for the recipient's login:
+  - invited, with My Schedule's link at the event's day;
+  - whoever invites themselves is not told;
+  - the 12 topics, in the app only;
+  - reminded and chased (the sender included), the organiser reminded as organiser, with the event
+    page's link;
+  - each F-33 refusal;
+  - an approval sending the waiting invitations and telling the organiser;
+  - a rejection telling the organiser, and not a guest never invited;
+  - a venue and a link changed, an edit that changes neither telling nobody, postponed, moved,
+    cancelled, uninvited (and not one never invited);
+  - a task told, one given to oneself not told, a reassignment told again, an edit keeping the
+    assignee not told.
+- **Pass two** passed every block assertion. Its clean-up left 7 notices live, for 2e-1's
+  approval-gated event, `hr.head` and `hr.officer` among them. They were soft-deleted, then saved
+  back live at 10:54:49 by the dispatcher, which was retrying their emails at that moment (#36).
+  - Withdrawn by hand, with 36 more left by earlier sessions on the run's deleted events, which the
+    old link-only clean-up had never matched: 43 in all.
+  - The clean-up now withdraws twice, 10 s apart, by the event's id as well as the link (in
+    `run-slice0` too).
+  - After the runs: 0 live on any run event; `hr.head` and `hr.officer` 0 live (38 withdrawn each).
+- Regression:
+  - the round-4 net **205/205**. `run-round4-d`'s two reminder counts each rose by one (its organiser
+    is now reminded). Its chase ran on an event that asked for no replies, which F-33 now refuses, so
+    that event now asks for replies;
+  - `hr-recruitment/run-round4-d` **58/58**.
+- **The Letter & Email Templates screen** (Administration → HR Settings), asked by the user:
+  - `hr-templates/run-lane-n.mjs` **109/115**. A1 (49 listed), A6–A8 (the register against the screen,
+    both ways), B (every template's tokens), C (every shipped default passes the save checks) and D–I,
+    K, L passed.
+  - **The 6 failures are all section J,** the anonymous careers registration's activation email: "No
+    email settings configured" while the suite's mail sink was configured. 2e-1 does not touch that
+    road. The suite scored 115/115 at round 4, and master has changed the sign-up since (three
+    `AuthController` commits). Not fixed here.
+  - **`tools/probe-new-templates.mjs` 21/21** on the five new templates by name: listed, named and
+    described, shipped wording, described tokens, a preview with every token filled; one saved as the
+    tenant's own, shown so in the list, test-sent ("no mail server"), reset to the shipped wording;
+    its row then deleted outright.
+- **Found on the way, not ours** — logged in the cross-module register as **#40–#42** (the user's word, 2026-10-05):
+  - **#40, section J's cause:** since master `de8ad4fb2` (2026-10-03) the mail-settings lookup takes the tenant from the
+    signed-in user, so an email sent with nobody signed in finds no mail server. The tenant `SendForTenantAsync` names
+    chooses the wording only. ⚠ This includes **every HR background send, the hourly company-schedule reminders and
+    chases among them**, on a server that has SMTP (read from the code; UAT has none).
+  - **#41, the new sign-up texts a phone code.** `run-lane-n` registers candidates with random real-format
+    Ghana numbers, and the API tried mNotify for each; all four failed (no credentials on UAT), so
+    nothing was sent. With working credentials it would text strangers.
+  - **#42, `PUT /api/User` answers 500 for a login with no email** ("Email '' is invalid"), so such a
+    login cannot be switched off through the API. `run-lane-n`'s own no-email officer was switched off
+    by SQL.
+- API log:
+  - three 500s, all that user update;
+  - #23, #39;
+  - the F-45 race refusals;
+  - the mail sink's deliberate refusals;
+  - UAT's missing SMTP settings.
+  - No company-schedule notice failed to be raised.
+- Clean-up: 31 harness logins switched off (one by SQL, above). UAT's `EmailSettings` is back to none,
+  and no `EmailTemplates` row is left for CompanySchedule.
+- The screens type-check and lint clean. They are not yet walked in a browser (lane 5).
 
 *2d — what was built (2026-10-05): guests, the register and tasks.*
 - **Guests:**
@@ -1822,3 +1929,21 @@ built API, so no web host and no seeders).
   - **Handed to 2e:** telling a removed guest, and an assignee told and chased (F-34).
 
   Next: 2e, the notices.
+- **2026-10-05, later** — **2e split in three, and the overdue chase sent once**, both by the user
+  ("go with both"). The chase's stamp column joins the 2e-3 migration, so the chase moves to 2e-3.
+- **2026-10-05, later** — **Lane 2, slice 2e-1 built and proved**: who is told (lane 2 State).
+  `run-final-review.mjs` scored 429/429 on two clean passes, with 42 checks in 2e-1. The round-4 net
+  was 205/205 and the recruitment clash suite 58/58.
+  - **In the app, through `CompanyScheduleNotices`;** five new catalogue emails; F-33 in full; the
+    organiser reminded and told of the decision.
+  - **The user asked whether the new emails are on the templates screen:** yes. They are listed,
+    described, previewed, saved, test-sent and reset, proved on UAT (probe 21/21). `run-lane-n` scored
+    109/115: section J's careers activation email, untouched by this slice.
+  - **#36 again:** pass two's clean-up was written back by the dispatcher. The clean-up now
+    withdraws twice.
+  - **Found, not ours, logged as #40–#42:** since master `de8ad4fb2` an email sent with nobody
+    signed in finds no mail server (section J's cause, and every background send — our hourly sweep
+    too); the new sign-up's SMS code, sent to the templates suite's random numbers (all failed on
+    UAT); `PUT /api/User` 500s on a login with no email.
+
+  Next: 2e-2, delivered vs issued (R4-6.3).
