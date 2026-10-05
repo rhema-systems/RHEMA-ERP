@@ -133,32 +133,59 @@ public class CompanyEventService : ICompanyEventService
     /// meeting. Latency — not an exception — is the failure mode that matters, because
     /// TemplatedEmailService already swallows delivery failures and returns false.
     /// </remarks>
-    private async Task SendEventEmailAsync(
+    /// <returns>
+    /// Whether the mail server took the email within the wait (lane 2e-2, R4-6.3) — the email's own result, which the
+    /// module used to ignore. False with no address, no mail server, a refusal or no answer in ten seconds.
+    /// </returns>
+    private async Task<bool> SendEventEmailAsync(
         Guid tenantId, string eventKey, string? toEmail, Dictionary<string, string?> tokens, string description)
     {
-        if (string.IsNullOrWhiteSpace(toEmail)) return;
+        if (string.IsNullOrWhiteSpace(toEmail)) return false;
 
         try
         {
             // ⚠ By the EVENT'S tenant (round 4, lane N-b2): the reminder sweep sends with nobody signed
             // in, and without naming the tenant it would skip the tenant's own wording and print the
-            // configuration's company name.
+            // configuration's company name. ⚠ The tenant chooses the wording only: since master de8ad4fb2 the
+            // mail server is looked up by the signed-in user's tenant, so the hourly sweep's emails find none
+            // (cross-module #40) and are counted as not taken.
             var send = _templatedEmail.SendForTenantAsync(
                 tenantId, CompanyScheduleEmailCatalog.Module, eventKey, toEmail, tokens);
 
             if (await Task.WhenAny(send, Task.Delay(TimeSpan.FromSeconds(10))) == send)
-                await send;
-            else
-                _logger.LogWarning(
-                    "{Description} email timed out after 10 s for {Email} — the operation itself succeeded.",
-                    description, toEmail);
+                return await send;
+
+            _logger.LogWarning(
+                "{Description} email timed out after 10 s for {Email} — counted as not taken; the operation itself succeeded.",
+                description, toEmail);
+            return false;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
                 "Failed to send the {Description} email to {Email} — the operation itself succeeded.",
                 description, toEmail);
+            return false;
         }
+    }
+
+    /// <summary>Per tenant, per scope: the sweep walks every tenant in one.</summary>
+    private readonly Dictionary<Guid, bool> _mailServerSetUp = new();
+
+    /// <summary>
+    /// Whether the tenant has a mail server set up — what explains a notice that emailed nobody (lane 2e-2).
+    /// </summary>
+    /// <remarks>
+    /// Read untracked, by the tenant named — not through the sender's own lookup, which reads the signed-in user's
+    /// tenant (#40) and loads the row it sends with.
+    /// </remarks>
+    private async Task<bool> MailServerSetUpAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (_mailServerSetUp.TryGetValue(tenantId, out var known)) return known;
+        var setUp = await _unitOfWork.Repository<ErpSystem.Core.Entities.EmailSettings>().GetQueryable().AsNoTracking()
+            .AnyAsync(s => s.TenantId == tenantId && !s.IsDeleted && s.SmtpHost != "" && s.FromAddress != "", cancellationToken);
+        _mailServerSetUp[tenantId] = setUp;
+        return setUp;
     }
 
     /// <summary>
@@ -174,8 +201,11 @@ public class CompanyEventService : ICompanyEventService
     /// not to one still waiting for the event's approval, who has never heard of it (F-33) — and never to
     /// whoever made it. <b>A reminder or a chase</b> goes to everyone it is for, the sender included: it is
     /// about the date, not an act.</para>
+    ///
+    /// <para><b>Counted (lane 2e-2, R4-6.3):</b> everyone it was for, and who it reached — by an email the mail
+    /// server took, or a notice in the app. It used to count every guest with an address as sent.</para>
     /// </remarks>
-    private async Task<int> NotifyParticipantsAsync(
+    private async Task<CompanyEventNoticeResultDto> NotifyParticipantsAsync(
         CompanyEvent ev, string eventKey, Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich,
         string description, string inAppNotice, Func<EventParticipant, bool>? filter = null, bool change = true,
         IReadOnlyDictionary<string, object>? inAppData = null, CancellationToken cancellationToken = default)
@@ -193,7 +223,12 @@ public class CompanyEventService : ICompanyEventService
             .Where(p => actor is null || p.EmployeeId != actor)
             .ToList();
 
-        var sent = 0;
+        var result = new CompanyEventNoticeResultDto
+        {
+            Issued = participants.Count,
+            MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken),
+        };
+        var emailed = new HashSet<Guid>();
         foreach (var p in participants)
         {
             var name = p.Employee is not null
@@ -205,18 +240,26 @@ public class CompanyEventService : ICompanyEventService
             var tokens = EventTokens(ev, name);
             if (enrich is not null) tokens = enrich(tokens);
 
-            await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description);
-            sent++;
+            if (await SendEventEmailAsync(ev.TenantId, eventKey, email, tokens, description))
+            {
+                emailed.Add(p.Id);
+                result.Emailed++;
+            }
+            else result.EmailsNotTaken++;
         }
 
-        await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToGuest,
+        var inApp = await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToGuest,
             participants.Where(p => p.EmployeeId != null).Select(p => p.EmployeeId!.Value),
             inAppData, actorToo: !change, cancellationToken);
 
+        bool InApp(EventParticipant p) => p.EmployeeId is { } id && inApp.Contains(id);
+        result.ToldInApp = participants.Count(InApp);
+        result.Reached = participants.Count(p => emailed.Contains(p.Id) || InApp(p));
+
         _logger.LogInformation(
-            "Company schedule: {Description} sent to {Count} participant(s) of {EventNumber}.",
-            description, sent, ev.EventNumber);
-        return sent;
+            "Company schedule: {Description} for {Issued} participant(s) of {EventNumber} reached {Reached} — {Emailed} email(s) taken, {NotTaken} not, {InApp} told in the app.",
+            description, result.Issued, ev.EventNumber, result.Reached, result.Emailed, result.EmailsNotTaken, result.ToldInApp);
+        return result;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -243,18 +286,19 @@ public class CompanyEventService : ICompanyEventService
     /// (bar <paramref name="actorToo"/>), the organiser has left, or <paramref name="alreadyTold"/> says their row on
     /// the guest list was told the same thing already.
     /// </summary>
-    /// <returns>1 when an email went, else 0.</returns>
-    private async Task<int> TellOrganiserAsync(
+    /// <returns>Whether it was for the organiser (issued 0 or 1), and whether it reached them (lane 2e-2).</returns>
+    private async Task<CompanyEventNoticeResultDto> TellOrganiserAsync(
         CompanyEvent ev, string eventKey, string inAppNotice,
         Func<Dictionary<string, string?>, Dictionary<string, string?>>? enrich, string description,
         CancellationToken cancellationToken, bool actorToo = false, Func<InvitationStatus, bool>? alreadyTold = null)
     {
+        var none = new CompanyEventNoticeResultDto();
         var organiser = await _unitOfWork.Repository<Employee>().GetQueryable()
             .Where(x => x.Id == ev.OrganizerId && x.TenantId == ev.TenantId && !x.IsDeleted && x.IsActive)
             .Select(x => new { x.FirstName, x.LastName, x.EmailAddress })
             .FirstOrDefaultAsync(cancellationToken);
-        if (organiser is null) return 0;
-        if (!actorToo && await _notices.ActorEmployeeIdAsync(cancellationToken) == ev.OrganizerId) return 0;
+        if (organiser is null) return none;
+        if (!actorToo && await _notices.ActorEmployeeIdAsync(cancellationToken) == ev.OrganizerId) return none;
 
         if (alreadyTold is not null)
         {
@@ -262,21 +306,28 @@ public class CompanyEventService : ICompanyEventService
                 .Where(p => p.EventId == ev.Id && p.TenantId == ev.TenantId && !p.IsDeleted && p.EmployeeId == ev.OrganizerId)
                 .Select(p => (InvitationStatus?)p.InvitationStatus)
                 .FirstOrDefaultAsync(cancellationToken);
-            if (asGuest is { } status && alreadyTold(status)) return 0;
+            if (asGuest is { } status && alreadyTold(status)) return none;
         }
 
-        var sent = 0;
+        var result = new CompanyEventNoticeResultDto
+        {
+            Issued = 1,
+            MailServerSetUp = await MailServerSetUpAsync(ev.TenantId, cancellationToken),
+        };
+        var emailed = false;
         if (!string.IsNullOrWhiteSpace(organiser.EmailAddress))
         {
             var tokens = EventTokens(ev, $"{organiser.FirstName} {organiser.LastName}".Trim());
             if (enrich is not null) tokens = enrich(tokens);
-            await SendEventEmailAsync(ev.TenantId, eventKey, organiser.EmailAddress, tokens, description);
-            sent = 1;
+            emailed = await SendEventEmailAsync(ev.TenantId, eventKey, organiser.EmailAddress, tokens, description);
+            if (emailed) result.Emailed = 1; else result.EmailsNotTaken = 1;
         }
 
-        await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToOrganiser, [ev.OrganizerId],
-            actorToo: actorToo, cancellationToken: cancellationToken);
-        return sent;
+        var inApp = (await _notices.TellAsync(ev, inAppNotice, CompanyScheduleNotices.ToOrganiser, [ev.OrganizerId],
+            actorToo: actorToo, cancellationToken: cancellationToken)).Contains(ev.OrganizerId);
+        result.ToldInApp = inApp ? 1 : 0;
+        result.Reached = emailed || inApp ? 1 : 0;
+        return result;
     }
 
     /// <summary>
@@ -304,26 +355,40 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <summary>
-    /// Sends the invitations that waited for the event's approval (F-33): marked sent, saved, then sent.
+    /// Sends the invitations not yet delivered: those that waited for the event's approval (F-33), and any that
+    /// reached nobody (lane 2e-2) — each marked sent once it reached its guest.
     /// </summary>
-    /// <returns>How many went.</returns>
-    private async Task<int> InviteWaitingGuestsAsync(CompanyEvent ev, CancellationToken cancellationToken)
+    /// <remarks>
+    /// ⚠ They were marked sent and saved BEFORE anything was sent, so an invitation no mail server took read "Sent"
+    /// (R4-6.3). A guest who has since left is not invited (F-35) and is not counted.
+    /// </remarks>
+    private async Task<CompanyEventNoticeResultDto> InviteWaitingGuestsAsync(CompanyEvent ev, CancellationToken cancellationToken)
     {
         var waiting = await TenantGuests(ev.TenantId)
             .Where(p => p.EventId == ev.Id && p.InvitationStatus == InvitationStatus.NotSent)
+            .Where(p => p.EmployeeId == null || (p.Employee!.IsActive && !p.Employee!.IsDeleted))
             .ToListAsync(cancellationToken);
-        if (waiting.Count == 0) return 0;
 
-        var now = DateTime.UtcNow;
-        foreach (var guest in waiting)
-        {
-            guest.InvitationStatus = InvitationStatus.Sent;
-            guest.InvitationSentDate = now;
-        }
+        var result = new CompanyEventNoticeResultDto { MailServerSetUp = await MailServerSetUpAsync(ev.TenantId, cancellationToken) };
+        foreach (var guest in waiting) await InviteAsync(ev, guest, result, cancellationToken);
+        return result;
+    }
+
+    /// <summary>
+    /// Sends one guest the invitation and marks it sent — only once it reached them (lane 2e-2, R4-6.3). Saved guest
+    /// by guest, so a pass that dies half way leaves the rest to send again.
+    /// </summary>
+    /// <returns>Whether it reached them.</returns>
+    private async Task<bool> InviteAsync(
+        CompanyEvent ev, EventParticipant guest, CompanyEventNoticeResultDto tally, CancellationToken cancellationToken)
+    {
+        if (!await SendInvitationAsync(ev, guest, tally, cancellationToken)) return false;
+
+        // An answer already given stands: a corrected address re-sends the invitation to someone who may have answered.
+        if (guest.InvitationStatus == InvitationStatus.NotSent) guest.InvitationStatus = InvitationStatus.Sent;
+        guest.InvitationSentDate = DateTime.UtcNow;
         await _unitOfWork.SaveChangesAsync(cancellationToken);
-
-        foreach (var guest in waiting) await SendInvitationAsync(ev, guest);
-        return waiting.Count;
+        return true;
     }
 
     private async Task<CompanyEvent> GetOwnedEventAsync(Guid id, CancellationToken cancellationToken = default)
@@ -364,6 +429,10 @@ public class CompanyEventService : ICompanyEventService
         return entity.ToDto();
     }
 
+    /// <remarks>
+    /// Lane 2e-2: with the days the sweep sends the reminder and the chase, and whether a mail server is set up — so
+    /// the page can say what is due and has reached nobody yet, and why no email went.
+    /// </remarks>
     public async Task<CompanyEventDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -382,7 +451,12 @@ public class CompanyEventService : ICompanyEventService
         if (entity == null)
             throw new ArgumentException($"Company event with ID '{id}' not found.");
 
-        return entity.ToDetailDto();
+        var detail = entity.ToDetailDto();
+        var lead = (await _policySettings.GetForTenantAsync(tenantId, cancellationToken)).CompanyEventRsvpChaseLeadDays;
+        detail.ReminderDueOn = ReminderDueOn(entity);
+        detail.RsvpChaseDueOn = RsvpChaseDueOn(entity, lead);
+        detail.MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken);
+        return detail;
     }
 
     public async Task<IEnumerable<CompanyEventDto>> GetAllAsync(CancellationToken cancellationToken = default)
@@ -750,7 +824,7 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <summary>Tells everybody invited that the event moved, and from when (round 4, D6).</summary>
-    private Task NotifyRescheduledAsync(CompanyEvent entity, CancellationToken cancellationToken)
+    private Task<CompanyEventNoticeResultDto> NotifyRescheduledAsync(CompanyEvent entity, CancellationToken cancellationToken)
     {
         var original = entity.OriginalStartDate is { } os
             ? os.ToString("dddd, d MMMM yyyy")
@@ -1067,13 +1141,15 @@ public class CompanyEventService : ICompanyEventService
 
         _logger.LogInformation("Company event updated: {EventNumber}{Moved}", entity.EventNumber, moving ? " (rescheduled)" : string.Empty);
 
+        // Lane 2e-2: who the edit's notice reached, for the save's answer.
+        CompanyEventNoticeResultDto? told = null;
         if (moving)
-            await NotifyRescheduledAsync(entity, cancellationToken);
+            told = await NotifyRescheduledAsync(entity, cancellationToken);
         else if (entity.Status == EventStatus.Postponed && statusBefore != EventStatus.Postponed)
-            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
+            told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventPostponed, null,
                 "event postponed", CompanyScheduleNotices.Postponed, cancellationToken: cancellationToken);
         else if (await WhatChangedAsync(entity, venueBefore, linkBefore, siteBefore, cancellationToken) is { } changed)
-            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
+            told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventChanged,
                 tokens =>
                 {
                     tokens["WhatChanged"] = changed.What;
@@ -1089,6 +1165,7 @@ public class CompanyEventService : ICompanyEventService
         // ⚠ Re-read (F-46): the entity's navigations were loaded before the change, so a new organiser,
         // site or unit would answer with the old name.
         var updated = await GetByIdAsync(entity.Id, cancellationToken);
+        updated.Told = told;
         if (await AudienceWarningAsync(entity, cancellationToken) is { } warning) updated.Warnings.Add(warning);
         return updated;
     }
@@ -1123,7 +1200,8 @@ public class CompanyEventService : ICompanyEventService
                 tokens =>
                 {
                     tokens["ApprovedBy"] = string.IsNullOrWhiteSpace(_currentUserProvider.FullName) ? null : _currentUserProvider.FullName;
-                    tokens["InvitationsSent"] = invited > 0 ? invited.ToString() : null;
+                    // Lane 2e-2: the invitations that reached their guests, not the ones tried.
+                    tokens["InvitationsSent"] = invited.Reached > 0 ? invited.Reached.ToString() : null;
                     return tokens;
                 },
                 "event approved", cancellationToken);
@@ -1166,12 +1244,12 @@ public class CompanyEventService : ICompanyEventService
                 return tokens;
             }
 
-            await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, WithReason,
+            change.Told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, WithReason,
                 "event not approved", CompanyScheduleNotices.Cancelled, cancellationToken: cancellationToken);
             // Lane 2e-1: the organiser hears why, unless their invitation already said it.
-            await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, CompanyScheduleNotices.NotApproved,
+            change.Told.Add(await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, CompanyScheduleNotices.NotApproved,
                 WithReason, "event not approved (organiser)", cancellationToken,
-                alreadyTold: status => status != InvitationStatus.NotSent);
+                alreadyTold: status => status != InvitationStatus.NotSent));
         }
 
         change.Event = await GetByIdAsync(entity.Id, cancellationToken);
@@ -1202,7 +1280,7 @@ public class CompanyEventService : ICompanyEventService
         // D-10: an approval still under way is withdrawn — there is nothing left to approve.
         await CancelApprovalAsync(entity, $"The event was cancelled: {reason}");
 
-        await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
+        var told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled,
             tokens =>
             {
                 tokens["CancellationReason"] = entity.CancellationReason;
@@ -1214,6 +1292,7 @@ public class CompanyEventService : ICompanyEventService
         {
             Event = await GetByIdAsync(entity.Id, cancellationToken),
             BookingsCancelled = bookings,
+            Told = told,
         };
     }
 
@@ -1254,7 +1333,7 @@ public class CompanyEventService : ICompanyEventService
 
         // ⚠ Round 4, D6. Everybody invited is told, and told what it moved FROM — which is only
         // possible because C-2 keeps the original window.
-        await NotifyRescheduledAsync(entity, cancellationToken);
+        change.Told = await NotifyRescheduledAsync(entity, cancellationToken);
         // D-10: an approved event that moved is approved afresh — its approval was for the old time.
         if (change.ApprovalCleared) await StartApprovalAsync(entity, cancellationToken);
 
@@ -1307,7 +1386,7 @@ public class CompanyEventService : ICompanyEventService
     #region Participant Operations
 
     /// <inheritdoc />
-    public async Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
+    public async Task<CompanyEventNoticeResultDto> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var ev = await GetOwnedEventAsync(eventId, cancellationToken);
         // F-33 (lane 2e-1): the sweep's rule — it refused only a cancelled event.
@@ -1317,7 +1396,7 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <inheritdoc />
-    public async Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
+    public async Task<CompanyEventNoticeResultDto> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default)
     {
         var ev = await GetOwnedEventAsync(eventId, cancellationToken);
         // F-33 (lane 2e-1): the sweep's rule — it refused only a cancelled event.
@@ -1326,31 +1405,66 @@ public class CompanyEventService : ICompanyEventService
         return await RemindAsync(ev, DateTime.UtcNow, cancellationToken);
     }
 
+    /// <inheritdoc />
+    public async Task<CompanyEventNoticeResultDto> SendUndeliveredInvitationsAsync(Guid eventId, CancellationToken cancellationToken = default)
+    {
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        Refuse(CompanyEventRules.RefuseInviting(ev, DateTime.UtcNow));
+
+        var result = await InviteWaitingGuestsAsync(ev, cancellationToken);
+        if (result.Issued == 0)
+            throw new InvalidOperationException($"Every invitation to {ev.EventName} has reached its guest, so there is nothing to send.");
+
+        _logger.LogInformation("Undelivered invitations to {EventNumber} sent again: {Reached} of {Issued} reached",
+            ev.EventNumber, result.Reached, result.Issued);
+        return result;
+    }
+
+    /// <summary>
+    /// Stamps a reminder or a chase as sent — only when it reached somebody (lane 2e-2, R4-6.3). One that reached
+    /// nobody stays due, so the next pass of the sweep, or the button, tries again.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The stamp used to be written on a run that delivered nothing — no mail server took an email — so the sweep
+    /// never tried again. A run that reached only some is stamped (the user's ruling, 2026-10-05): those not reached
+    /// are in its counts, not retried.
+    /// </remarks>
+    private async Task<CompanyEventNoticeResultDto> StampIfReachedAsync(
+        CompanyEvent ev, CompanyEventNoticeResultDto result, Action<CompanyEvent> stamp, CancellationToken cancellationToken)
+    {
+        if (result.Reached == 0) return result;
+
+        stamp(ev);
+        await _eventRepository.UpdateAsync(ev);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        result.Stamped = true;
+        return result;
+    }
+
     /// <summary>
     /// Chases everybody who has not answered, and stamps the event so it is not chased again — by the
-    /// button or the sweep, whichever comes second (round 4, lane N-b2).
+    /// button or the sweep, whichever comes second (round 4, lane N-b2) — once it reached somebody (lane 2e-2).
     /// </summary>
-    private async Task<int> ChaseRsvpsAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
+    private async Task<CompanyEventNoticeResultDto> ChaseRsvpsAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
     {
-        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
+        var result = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventRsvpReminder,
             enrich: null, "RSVP reminder", CompanyScheduleNotices.RsvpChase,
             // ⚠ NotSent as well as Sent. A participant added before the invitation send existed
             // carries NotSent and has genuinely never been asked — chasing them is the first time
-            // anybody has told them, which is exactly who this is for.
+            // anybody has told them, which is exactly who this is for. Since lane 2e-2 that includes
+            // a guest whose invitation reached nobody.
             filter: p => p.InvitationStatus is InvitationStatus.Sent or InvitationStatus.NotSent,
             change: false, cancellationToken: cancellationToken);
 
-        ev.RsvpReminderSentDate = nowUtc;
-        await _eventRepository.UpdateAsync(ev);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return sent;
+        return await StampIfReachedAsync(ev, result, e => e.RsvpReminderSentDate = nowUtc, cancellationToken);
     }
 
     /// <summary>
     /// Reminds every participant who has not declined, and stamps the event so it is not reminded
-    /// again for this date — by the button or the sweep, whichever comes second (lane N-b2).
+    /// again for this date — by the button or the sweep, whichever comes second (lane N-b2) — once it
+    /// reached somebody (lane 2e-2).
     /// </summary>
-    private async Task<int> RemindAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
+    private async Task<CompanyEventNoticeResultDto> RemindAsync(CompanyEvent ev, DateTime nowUtc, CancellationToken cancellationToken)
     {
         // ⚠ Declined participants are NOT reminded. They have said they are not coming; a reminder
         // is the system ignoring the answer it asked for.
@@ -1361,19 +1475,16 @@ public class CompanyEventService : ICompanyEventService
             return tokens;
         }
 
-        var sent = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, WithDays,
+        var result = await NotifyParticipantsAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, WithDays,
             "event reminder", CompanyScheduleNotices.Reminder,
             filter: p => p.InvitationStatus != InvitationStatus.Declined,
             change: false, cancellationToken: cancellationToken);
         // D-11 (lane 2e-1): the organiser is reminded too, on the guest list or not — once.
-        sent += await TellOrganiserAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, CompanyScheduleNotices.Reminder,
+        result.Add(await TellOrganiserAsync(ev, CompanyScheduleEmailCatalog.Events.EventReminder, CompanyScheduleNotices.Reminder,
             WithDays, "event reminder (organiser)", cancellationToken,
-            actorToo: true, alreadyTold: status => status != InvitationStatus.Declined);
+            actorToo: true, alreadyTold: status => status != InvitationStatus.Declined));
 
-        ev.ReminderSentDate = nowUtc;
-        await _eventRepository.UpdateAsync(ev);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
-        return sent;
+        return await StampIfReachedAsync(ev, result, e => e.ReminderSentDate = nowUtc, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -1395,6 +1506,11 @@ public class CompanyEventService : ICompanyEventService
     ///
     /// <para><b>One event at a time.</b> Each is stamped and saved as it is sent, so a failure halfway
     /// through a pass costs only what was not yet sent, and the next pass sends exactly that.</para>
+    ///
+    /// <para><b>Only what reached somebody is stamped (lane 2e-2).</b> A reminder or chase that reached nobody — no
+    /// mail server took an email and nobody it was for has a login — stays due, and every pass tries it again until
+    /// the event begins or the reply-by date passes. ⚠ Under cross-module #40 this host's emails find no mail server
+    /// even where one is set up, so only the in-app notices reach anybody until Platform fixes it.</para>
     /// </remarks>
     public async Task<CompanyScheduleReminderRunDto> SendDueRemindersAsync(
         Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default)
@@ -1420,27 +1536,49 @@ public class CompanyEventService : ICompanyEventService
             // F-33 (lane 2e-1): the buttons' rule. The query above already narrows to it; this keeps them one rule.
             if (CompanyEventRules.RefuseReminding(ev, nowUtc) is not null) continue;
 
-            if (ev.SendReminders && ev.ReminderDaysBefore is { } daysBefore && ev.ReminderSentDate is null
-                && ev.StartDate.Date.AddDays(-Math.Max(0, daysBefore)) <= today)
+            if (ev.ReminderSentDate is null && ReminderDueOn(ev) is { } remindOn && remindOn <= today)
             {
-                run.EmailsSent += await RemindAsync(ev, nowUtc, cancellationToken);
-                run.Reminded.Add(ev.EventNumber);
+                var reminded = Tally(run, await RemindAsync(ev, nowUtc, cancellationToken));
+                // Lane 2e-2: an event with nobody to remind yet is neither — a guest added later is reminded.
+                if (reminded.Issued > 0) (reminded.Stamped ? run.Reminded : run.RemindersLeftDue).Add(ev.EventNumber);
             }
 
-            if (ev.RequiresRsvp && ev.RsvpDeadline is { } deadline && ev.RsvpReminderSentDate is null
-                && CompanyEventRules.RefuseChasing(ev, nowUtc) is null && deadline.Date.AddDays(-lead) <= today)
+            if (ev.RsvpReminderSentDate is null && CompanyEventRules.RefuseChasing(ev, nowUtc) is null
+                && RsvpChaseDueOn(ev, lead) is { } chaseOn && chaseOn <= today)
             {
-                run.EmailsSent += await ChaseRsvpsAsync(ev, nowUtc, cancellationToken);
-                run.RsvpChased.Add(ev.EventNumber);
+                var chased = Tally(run, await ChaseRsvpsAsync(ev, nowUtc, cancellationToken));
+                if (chased.Issued > 0) (chased.Stamped ? run.RsvpChased : run.ChasesLeftDue).Add(ev.EventNumber);
             }
         }
 
-        if (run.Reminded.Count > 0 || run.RsvpChased.Count > 0)
+        if (run.PeopleIssued > 0)
             _logger.LogInformation(
-                "Company schedule reminders for tenant {TenantId}: reminded {Reminded}, chased {Chased}, {Emails} email(s).",
-                tenantId, run.Reminded.Count, run.RsvpChased.Count, run.EmailsSent);
+                "Company schedule reminders for tenant {TenantId}: reminded {Reminded}, chased {Chased}; reached {Reached} of {Issued} — "
+                + "{Emails} email(s) taken, {NotTaken} not, {InApp} told in the app. Left due, reaching nobody: {RemindersLeftDue} {ChasesLeftDue}",
+                tenantId, run.Reminded.Count, run.RsvpChased.Count, run.PeopleReached, run.PeopleIssued,
+                run.EmailsSent, run.EmailsNotTaken, run.ToldInApp, run.RemindersLeftDue, run.ChasesLeftDue);
         return run;
     }
+
+    private static CompanyEventNoticeResultDto Tally(CompanyScheduleReminderRunDto run, CompanyEventNoticeResultDto result)
+    {
+        run.PeopleIssued += result.Issued;
+        run.PeopleReached += result.Reached;
+        run.EmailsSent += result.Emailed;
+        run.EmailsNotTaken += result.EmailsNotTaken;
+        run.ToldInApp += result.ToldInApp;
+        return result;
+    }
+
+    /// <summary>The day the sweep sends the reminder: <c>ReminderDaysBefore</c> before the start; null when off.</summary>
+    private static DateTime? ReminderDueOn(CompanyEvent ev) =>
+        ev.SendReminders && ev.ReminderDaysBefore is { } daysBefore
+            ? ev.StartDate.Date.AddDays(-Math.Max(0, daysBefore))
+            : null;
+
+    /// <summary>The day the sweep chases unanswered invitations: the tenant's lead before the reply-by date.</summary>
+    private static DateTime? RsvpChaseDueOn(CompanyEvent ev, int lead) =>
+        ev.RequiresRsvp && ev.RsvpDeadline is { } deadline ? deadline.Date.AddDays(-Math.Max(0, lead)) : null;
 
     // ═════════════════════════════════════════════════════════════════════════
     //  Guests and the register (company-schedule final closure, lane 2d)
@@ -1551,15 +1689,25 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <summary>
-    /// Sends one guest the invitation (round 4, D6). Best-effort: the guest's place on the list is already
-    /// saved, and an unreachable mail server must not undo it.
+    /// Sends one guest the invitation (round 4, D6) — by email and in the app (lane 2e-1). Best-effort: the guest's
+    /// place on the list is already saved, and an unreachable mail server must not undo it.
     /// </summary>
-    private async Task SendInvitationAsync(CompanyEvent ev, EventParticipant guest)
+    /// <returns>
+    /// Whether it reached them: an email the mail server took, or a notice in the app (lane 2e-2). Inviting oneself
+    /// counts — they know — though nobody is told of their own act.
+    /// </returns>
+    private async Task<bool> SendInvitationAsync(
+        CompanyEvent ev, EventParticipant guest, CompanyEventNoticeResultDto tally, CancellationToken cancellationToken)
     {
         // ⚠ F-35: a leaver is never invited.
-        if (guest.Employee is { IsActive: false }) return;
+        if (guest.Employee is { IsActive: false }) return false;
+        tally.Issued++;
         // Lane 2e-1: nobody is told of their own act — inviting oneself.
-        if (guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync()) return;
+        if (guest.EmployeeId is { } self && self == await _notices.ActorEmployeeIdAsync(cancellationToken))
+        {
+            tally.Reached++;
+            return true;
+        }
 
         var name = guest.Employee is not null
             ? $"{guest.Employee.FirstName} {guest.Employee.LastName}".Trim()
@@ -1568,14 +1716,25 @@ public class CompanyEventService : ICompanyEventService
         tokens["IsRequired"] = guest.IsRequired ? "true" : null;
         tokens["SpecialRequirements"] = guest.SpecialRequirements;
 
-        await SendEventEmailAsync(
-            ev.TenantId,
-            CompanyScheduleEmailCatalog.Events.EventInvitation,
-            guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail,
-            tokens, "event invitation");
+        var address = guest.Employee?.EmailAddress ?? guest.ExternalParticipantEmail;
+        var emailed = await SendEventEmailAsync(
+            ev.TenantId, CompanyScheduleEmailCatalog.Events.EventInvitation, address, tokens, "event invitation");
+        if (emailed) tally.Emailed++;
+        else if (!string.IsNullOrWhiteSpace(address)) tally.EmailsNotTaken++;
 
-        if (guest.EmployeeId is { } employeeId)
-            await _notices.TellAsync(ev, CompanyScheduleNotices.Invited, CompanyScheduleNotices.ToGuest, [employeeId]);
+        var inApp = guest.EmployeeId is { } employeeId
+            && (await _notices.TellAsync(ev, CompanyScheduleNotices.Invited, CompanyScheduleNotices.ToGuest, [employeeId],
+                cancellationToken: cancellationToken)).Contains(employeeId);
+        if (inApp) tally.ToldInApp++;
+
+        if (!emailed && !inApp)
+        {
+            _logger.LogInformation("The invitation to {EventNumber} reached nobody for {Guest}: left not delivered.",
+                ev.EventNumber, GuestName(guest));
+            return false;
+        }
+        tally.Reached++;
+        return true;
     }
 
     /// <summary>
@@ -1618,9 +1777,10 @@ public class CompanyEventService : ICompanyEventService
         await CheckGuestAsync(ev, entity, isNew: true, cancellationToken);
 
         // F-33 (lane 2e-1): an event awaiting approval invites nobody yet — the invitation goes with the approval.
+        // Lane 2e-2 (R4-6.3): Not sent until it reaches them; it was Sent on insert, before anything was sent.
         var waits = CompanyEventRules.IsAwaitingApproval(ev);
-        entity.InvitationStatus = waits ? InvitationStatus.NotSent : InvitationStatus.Sent;
-        entity.InvitationSentDate = waits ? null : DateTime.UtcNow;
+        entity.InvitationStatus = InvitationStatus.NotSent;
+        entity.InvitationSentDate = null;
 
         await _participantRepository.AddAsync(entity);
         await SaveRefusingDuplicateAsync(GuestIndex, $"That employee is already invited to {ev.EventName}.", cancellationToken);
@@ -1628,8 +1788,7 @@ public class CompanyEventService : ICompanyEventService
         var saved = await TenantGuests(tenantId).FirstAsync(p => p.Id == entity.Id, cancellationToken);
         _logger.LogInformation("Guest {Guest} invited to {EventNumber}", GuestName(saved), ev.EventNumber);
 
-        // ⚠ Round 4, D6: InvitationSentDate was stamped long before anything was sent. Now it is true.
-        if (!waits) await SendInvitationAsync(ev, saved);
+        if (!waits) await InviteAsync(ev, saved, new CompanyEventNoticeResultDto(), cancellationToken);
         return saved.ToDto();
     }
 
@@ -1671,17 +1830,15 @@ public class CompanyEventService : ICompanyEventService
 
         var readdressed = guest.EmployeeId is null
             && !string.Equals(previousAddress, guest.ExternalParticipantEmail, StringComparison.OrdinalIgnoreCase);
-        if (readdressed)
-        {
-            guest.InvitationSentDate = DateTime.UtcNow;
-            if (guest.InvitationStatus == InvitationStatus.NotSent) guest.InvitationStatus = InvitationStatus.Sent;
-        }
 
         await _participantRepository.UpdateAsync(guest);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Guest {Guest} of {EventNumber} updated", GuestName(guest), ev.EventNumber);
 
-        if (readdressed) await SendInvitationAsync(ev, guest);
+        // Lane 2e-2: marked sent (and dated) only once the new address took it — not while the event awaits approval,
+        // whose approval sends it.
+        if (readdressed && !CompanyEventRules.IsAwaitingApproval(ev))
+            await InviteAsync(ev, guest, new CompanyEventNoticeResultDto(), cancellationToken);
         return (await TenantGuests(tenantId).FirstAsync(p => p.Id == guest.Id, cancellationToken)).ToDto();
     }
 

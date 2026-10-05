@@ -13,6 +13,7 @@ import type {
   CompanyEvent,
   CompanyEventChange,
   CompanyEventDetail,
+  CompanyEventNoticeResult,
   EventAnnouncementPreview,
   EventAudiencePreview,
   EventVisibility,
@@ -81,19 +82,25 @@ class CompanyEventService {
   private readonly baseUrl = '/CompanySchedule';
 
   /**
-   * Chases everybody who has not answered their invitation. Returns how many were reached. Counts as
-   * the event's RSVP chase: the hourly sweep will not send it again (round 4, lane N-b2).
+   * Chases everybody who has not answered their invitation, answering who it was for and who it reached
+   * (lane 2e-2). Once it reached somebody it counts as the event's RSVP chase, and the hourly sweep will
+   * not send it again (round 4, lane N-b2); one that reached nobody stays due.
    */
-  sendRsvpReminders(eventId: string): Promise<{ sent: number }> {
-    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/rsvp-reminders`, {});
+  sendRsvpReminders(eventId: string): Promise<CompanyEventNoticeResult> {
+    return apiService.post<CompanyEventNoticeResult>(`${this.baseUrl}/events/${eventId}/rsvp-reminders`, {});
   }
 
   /**
-   * Reminds every participant who has not declined. Returns how many were reached. Counts as the
-   * event's reminder for its current date: the hourly sweep will not send it again.
+   * Reminds every participant who has not declined, and the organiser. Once it reached somebody it counts
+   * as the event's reminder for its current date; one that reached nobody stays due (lane 2e-2).
    */
-  sendEventReminders(eventId: string): Promise<{ sent: number }> {
-    return apiService.post<{ sent: number }>(`${this.baseUrl}/events/${eventId}/reminders`, {});
+  sendEventReminders(eventId: string): Promise<CompanyEventNoticeResult> {
+    return apiService.post<CompanyEventNoticeResult>(`${this.baseUrl}/events/${eventId}/reminders`, {});
+  }
+
+  /** Sends again the invitations that reached nobody (lane 2e-2). */
+  sendUndeliveredInvitations(eventId: string): Promise<CompanyEventNoticeResult> {
+    return apiService.post<CompanyEventNoticeResult>(`${this.baseUrl}/events/${eventId}/invitations/send`, {});
   }
 
   /** Runs the reminder sweep now for the tenant — what the hourly host runs (lane N-b2). */

@@ -78,6 +78,12 @@ public class CompanyEventDto : BaseDto
     /// <summary>What the person saving should know that did not stop the save — an audience that reaches nobody. Create and update only.</summary>
     public List<string> Warnings { get; set; } = new();
 
+    /// <summary>
+    /// Who an edit's notice reached — a move, a postponement, a new venue or link (lane 2e-2, R4-6.3). Update only;
+    /// null when the edit told nobody.
+    /// </summary>
+    public CompanyEventNoticeResultDto? Told { get; set; }
+
     // Visibility
     public EventVisibility Visibility { get; set; }
     public string VisibilityName => Visibility.ToString();
@@ -179,6 +185,21 @@ public class CompanyEventDetailDto : CompanyEventDto
     public List<EventAttendanceDto> AttendanceRecords { get; set; } = new();
     public List<EventAttachmentDto> Attachments { get; set; } = new();
     public List<EventTaskDto> Tasks { get; set; } = new();
+
+    /// <summary>
+    /// The day the hourly sweep sends the reminder (lane 2e-2): <see cref="CompanyEventDto.ReminderDaysBefore"/>
+    /// before the start. Null when reminders are off. Due and unsent means nobody has been reached yet.
+    /// </summary>
+    public DateTime? ReminderDueOn { get; set; }
+
+    /// <summary>The day the hourly sweep chases unanswered invitations: the tenant's lead before the reply-by date.</summary>
+    public DateTime? RsvpChaseDueOn { get; set; }
+
+    /// <summary>
+    /// Whether the tenant has a mail server set up (lane 2e-2) — without one no email goes, and only the people with
+    /// a login are told, in the app.
+    /// </summary>
+    public bool MailServerSetUp { get; set; }
 }
 
 /// <summary>
@@ -540,6 +561,59 @@ public class CompanyEventChangeDto
 
     /// <summary>The event had been approved, moved, and now waits for approval again.</summary>
     public bool ApprovalCleared { get; set; }
+
+    /// <summary>Who was told of it, and how (lane 2e-2, R4-6.3); null after a delete, which tells nobody.</summary>
+    public CompanyEventNoticeResultDto? Told { get; set; }
+}
+
+/// <summary>
+/// What one notice did (company-schedule final closure, lane 2e-2; R4-6.3): how many people it was for, and how
+/// many it reached — by an email the mail server took, or a notice in the app.
+/// </summary>
+/// <remarks>
+/// ⚠ "Sent", "reminded" and "chased" used to count attempts: every guest with an address, whether or not any mail
+/// server took the email, so a database with none (UAT) reported every send a success. A person counts as reached
+/// once either way reached them; the counts are of people, not of emails or logins.
+/// </remarks>
+public class CompanyEventNoticeResultDto
+{
+    /// <summary>The people it was for.</summary>
+    public int Issued { get; set; }
+
+    /// <summary>The people it reached: an email taken, or a notice in the app.</summary>
+    public int Reached { get; set; }
+
+    public int NotReached => Issued - Reached;
+
+    /// <summary>Emails the mail server took.</summary>
+    public int Emailed { get; set; }
+
+    /// <summary>Emails tried that no mail server took — none set up, refused, or no answer within ten seconds.</summary>
+    public int EmailsNotTaken { get; set; }
+
+    /// <summary>People told in the app, through at least one active login.</summary>
+    public int ToldInApp { get; set; }
+
+    /// <summary>Whether the tenant has a mail server set up — why no email went, when none did.</summary>
+    public bool MailServerSetUp { get; set; }
+
+    /// <summary>
+    /// A reminder or a chase only: it reached somebody, so it counts as sent and is not sent again. One that reached
+    /// nobody stays due, and the hourly sweep tries it again.
+    /// </summary>
+    public bool Stamped { get; set; }
+
+    /// <summary>Adds another notice's counts to these — a reminder's guests and its organiser.</summary>
+    public CompanyEventNoticeResultDto Add(CompanyEventNoticeResultDto other)
+    {
+        Issued += other.Issued;
+        Reached += other.Reached;
+        Emailed += other.Emailed;
+        EmailsNotTaken += other.EmailsNotTaken;
+        ToldInApp += other.ToldInApp;
+        MailServerSetUp |= other.MailServerSetUp;
+        return this;
+    }
 }
 
 #endregion
@@ -1572,7 +1646,28 @@ public class CompanyScheduleReminderRunDto
     /// <summary>The event numbers whose unanswered invitations were chased this pass.</summary>
     public List<string> RsvpChased { get; set; } = new();
 
+    /// <summary>
+    /// The event numbers whose reminder was due and reached nobody (lane 2e-2): left due, so the next pass tries
+    /// again until the event begins.
+    /// </summary>
+    public List<string> RemindersLeftDue { get; set; } = new();
+
+    /// <summary>The event numbers whose chase was due and reached nobody, left due until the reply-by date.</summary>
+    public List<string> ChasesLeftDue { get; set; } = new();
+
+    /// <summary>The people this pass's reminders and chases were for, and how many it reached (lane 2e-2).</summary>
+    public int PeopleIssued { get; set; }
+    public int PeopleReached { get; set; }
+
+    /// <summary>
+    /// Emails the mail server took. ⚠ Until lane 2e-2 this counted every address tried. Under cross-module #40 the
+    /// hourly host's emails find no mail server even where one is set up, so it counts them as not taken — truthfully.
+    /// </summary>
     public int EmailsSent { get; set; }
+
+    public int EmailsNotTaken { get; set; }
+
+    public int ToldInApp { get; set; }
 
     /// <summary>The tenant's RSVP-chase lead, in days, as this pass read it.</summary>
     public int RsvpChaseLeadDays { get; set; }

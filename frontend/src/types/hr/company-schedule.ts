@@ -208,6 +208,8 @@ export interface CompanyEvent extends AuditFields {
   audienceDescription: string;
   /** An audience that reaches nobody, said on save (create and update answers only). */
   warnings?: string[];
+  /** Who an edit's notice reached — a move, a postponement, a new venue or link (update only, lane 2e-2). */
+  told?: CompanyEventNoticeResult | null;
 
   visibility: EventVisibility;
   visibilityName: string;
@@ -290,6 +292,30 @@ export interface CompanyEventDetail extends CompanyEvent {
   attendanceRecords: EventAttendance[];
   attachments: EventAttachment[];
   tasks: EventTask[];
+  /** The day the hourly sweep sends the reminder; null when reminders are off (lane 2e-2). */
+  reminderDueOn?: string | null;
+  /** The day the hourly sweep chases unanswered invitations; null without a reply-by date. */
+  rsvpChaseDueOn?: string | null;
+  /** Whether the tenant has a mail server set up — without one, only people with a login are told, in the app. */
+  mailServerSetUp: boolean;
+}
+
+/**
+ * What one notice did (lane 2e-2, R4-6.3): how many people it was for and how many it reached — by an email
+ * the mail server took, or in the app. Counts are of people.
+ */
+export interface CompanyEventNoticeResult {
+  issued: number;
+  reached: number;
+  notReached: number;
+  /** Emails the mail server took. */
+  emailed: number;
+  /** Emails tried that no mail server took. */
+  emailsNotTaken: number;
+  toldInApp: number;
+  mailServerSetUp: boolean;
+  /** A reminder or a chase: it reached somebody, so it counts as sent. */
+  stamped: boolean;
 }
 
 /**
@@ -434,6 +460,8 @@ export interface CompanyEventChange {
   answersReset: number;
   /** It had been approved, moved, and now waits for approval again. */
   approvalCleared: boolean;
+  /** Who was told of it (lane 2e-2); null after a delete. */
+  told?: CompanyEventNoticeResult | null;
 }
 
 export interface CompleteEvent {
@@ -1004,6 +1032,14 @@ export interface CompanyScheduleReminderRun {
   reminded: string[];
   /** Event numbers whose unanswered invitations were chased this pass. */
   rsvpChased: string[];
+  /** Event numbers whose reminder, or chase, was due and reached nobody — tried again next pass (lane 2e-2). */
+  remindersLeftDue: string[];
+  chasesLeftDue: string[];
+  peopleIssued: number;
+  peopleReached: number;
+  /** Emails the mail server took (it counted every address tried until lane 2e-2). */
   emailsSent: number;
+  emailsNotTaken: number;
+  toldInApp: number;
   rsvpChaseLeadDays: number;
 }

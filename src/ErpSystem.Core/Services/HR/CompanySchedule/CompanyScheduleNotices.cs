@@ -32,6 +32,10 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// <para><b>Never fails the act.</b> Every caller has already saved; a notice that cannot be raised is logged, not
 /// thrown, and the publisher saves its rows on the caller's unit of work, so callers raise notices only after their own
 /// save. Tenant-explicit: the hourly reminder sweep uses it with nobody signed in.</para>
+///
+/// <para><b>Delivered (lane 2e-2).</b> <see cref="TellAsync"/> answers whom it reached: a notice in the app counts as
+/// delivered, beside an email the mail server took, so an invitation is Sent and a reminder stamped once either reached
+/// somebody (the user's ruling, 2026-10-05).</para>
 /// </remarks>
 public sealed class CompanyScheduleNotices
 {
@@ -106,25 +110,31 @@ public sealed class CompanyScheduleNotices
     /// <paramref name="actorToo"/> (a reminder or a chase).
     /// </summary>
     /// <param name="data">The notice's own tokens (what changed, a task), added to the event's.</param>
-    public async Task TellAsync(
+    /// <returns>
+    /// The employees it reached — those with an active login it was raised to (lane 2e-2: a notice in the app counts as
+    /// delivered). Empty when it could not be raised. The handlers write the rows in this scope and log their own
+    /// failures, so this is who it was raised to, not a read-back of the rows.
+    /// </returns>
+    public async Task<IReadOnlySet<Guid>> TellAsync(
         CompanyEvent e, string notice, string audience, IEnumerable<Guid> employeeIds,
         IReadOnlyDictionary<string, object>? data = null, bool actorToo = false,
         CancellationToken cancellationToken = default)
     {
+        var none = new HashSet<Guid>();
         try
         {
             var ids = employeeIds.Where(id => id != Guid.Empty).Distinct().ToList();
-            if (ids.Count == 0) return;
+            if (ids.Count == 0) return none;
 
             var actor = ActorUserId;
-            var users = (await _userManager.Users
+            var logins = (await _userManager.Users
                     .Where(u => u.TenantId == e.TenantId && u.IsActive && u.EmployeeId != null && ids.Contains(u.EmployeeId.Value))
-                    .Select(u => u.Id)
+                    .Select(u => new { u.Id, EmployeeId = u.EmployeeId!.Value })
                     .ToListAsync(cancellationToken))
-                .Where(u => actorToo || u != actor)
-                .Distinct()
+                .Where(u => actorToo || u.Id != actor)
                 .ToList();
-            if (users.Count == 0) return;
+            var users = logins.Select(u => u.Id).Distinct().ToList();
+            if (users.Count == 0) return none;
 
             await EnsureTopicsAsync(e.TenantId, cancellationToken);
 
@@ -151,11 +161,13 @@ public sealed class CompanyScheduleNotices
                 TriggeredByUserId = actor,
                 Data = tokens,
             }, cancellationToken);
+            return logins.Select(u => u.EmployeeId).ToHashSet();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Company schedule notice {Notice} to the {Audience} of {EventNumber} could not be raised",
                 notice, audience, e.EventNumber);
+            return none;
         }
     }
 

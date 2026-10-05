@@ -35,7 +35,9 @@ has not started (the user: "don't start the actual development yet").
    slices 1a–1e (lane 1 State); its screen awaits lane 5's browser walk. **Lane 2 (events) is under
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
-   diaries and the intranet, 2d, guests, the register and tasks, and 2e-1, who is told. **Next: 2e-2, delivered vs issued (R4-6.3).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, and 2e-2, delivered vs
+   issued. **Next: 2e-3, calendar invites (D-14) and the overdue-task chase, with its one migration (the user
+   scaffolds).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -310,7 +312,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d and 2e-1 built and proved (429/429 ×2; round-4 net 205/205); 2e-2 next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2d, 2e-1 and 2e-2 built and proved (476/476 ×2; round-4 net 205/205); 2e-3 next (one migration) | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -977,7 +979,7 @@ change.
       model exists, travel's `StaffTravelNotices` (§ 3c): one notices class owning every topic, login /
       email-only / unreachable handled, the actor left out, never failing the act. Choose between the
       two at the source check.*
-- [ ] Deliveries are counted from the email result; the Reminders card and the toasts show issued and
+- [x] *✅ 2e-2: counted from the email result and the in-app notice; an invitation Sent, and a reminder or chase stamped, only once it reached somebody; undelivered invitations sent again by a button; the card (now "Invitations and reminders") and every toast show issued and reached.* Deliveries are counted from the email result; the Reminders card and the toasts show issued and
       delivered (R4-6.3).
 - [x] *✅ 2e-1, the wider F-33 too: the buttons refuse what the sweep refuses (closed, postponed, awaiting approval, begun; a chase with no replies asked or after the reply-by date), by one rule both read.* Invitations wait while an event awaits approval and go on approval; "Send reminder now" and
       "Chase unanswered now" refuse such an event, as the sweep does (F-33).
@@ -1040,8 +1042,8 @@ built, proved twice and handed over on its own:
   - **2e-1** the in-app notices class; the new notices (an event approved, postponed, or changed in
     time, venue or link; a guest removed; a task assigned); the organiser reminded (D-11); F-33
     (invitations wait for approval; the per-event buttons refuse what the sweep refuses).
-  - **2e-2** delivered vs issued (R4-6.3). ⚠ Until Platform fixes **#40**, the hourly sweep's sends find no mail
-    server on a server that has one (nobody is signed in), so 2e-2 will count them as not delivered — truthfully.
+  - **2e-2** ✅ delivered vs issued (R4-6.3). ⚠ Until Platform fixes **#40**, the hourly sweep's sends find no mail
+    server on a server that has one (nobody is signed in), so 2e-2 counts them as not delivered — truthfully.
   - **2e-3** calendar invites (D-14) and the overdue-task chase (F-34), with the one migration: the
     event's invite sequence counter and the task's "chased at" stamp. **The chase is sent once**, on the
     first sweep after the due date, and stamped so the hourly sweep never repeats it (the user's choice
@@ -1049,6 +1051,145 @@ built, proved twice and handed over on its own:
 - **2f** recurrence as a light series (D-12).
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2e-2 — what was built (2026-10-05): delivered vs issued (R4-6.3, F-32).*
+- **Four rulings by the user before the build** (2026-10-05, all as recommended):
+  - a notice in the app counts as delivered, beside an email the mail server took;
+  - an invitation that reached nobody is sent again by a button, not by the sweep;
+  - a reminder or chase that reached some is stamped, and those not reached are not retried;
+  - no stored counts: the toasts carry the numbers, so there is no migration in 2e-2.
+- **Counted from the result.** The email's own result (`SendForTenantAsync`'s bool, within the 10 s wait) is read at
+  last. `CompanyScheduleNotices.TellAsync` answers whom it reached: the employees with an active login it was raised
+  to. Every notice now answers `CompanyEventNoticeResultDto`:
+  - `issued` (the people it was for) and `reached` (email taken, or in the app), with `notReached`;
+  - `emailed`, `emailsNotTaken` and `toldInApp`;
+  - `mailServerSetUp` (read untracked by the tenant named, never through the sender's lookup, #40), and `stamped`.
+  The counts are of people: a person reached both ways counts once.
+- **Where it answers:**
+  - "Send reminder now" and "Chase unanswered now" answer it in place of `{ sent }`, which counted every address
+    tried;
+  - cancel, reschedule and reject carry it as `told`;
+  - an edit carries it as `told` when its notice (a move, a postponement, a new venue or link) went out;
+  - the sweep's run gains `peopleIssued`, `peopleReached`, `emailsNotTaken`, `toldInApp`, `remindersLeftDue` and
+    `chasesLeftDue`. `emailsSent` now counts emails taken.
+- **An invitation is Sent only once it reached its guest.** It was Sent on insert, before anything was sent, and
+  the approval marked the waiting ones Sent before sending. Now it is not sent, and undated, until the email is
+  taken or the in-app notice is raised. It is saved guest by guest.
+  - Whoever invites themselves counts as reached: they know, though nobody is told of their own act.
+  - A guest who reached nobody reads **Not delivered** on the guest list. "Waits for approval" is kept for an
+    event that still awaits approval.
+  - A change (moved, postponed, changed, cancelled, uninvited) still goes only to the guests who were invited. A
+    guest the invitation never reached never heard of the event.
+- **Sending them again:** `POST events/{id}/invitations/send` (Write), the page's "Send the undelivered
+  invitations (n)". It is refused for:
+  - a closed event;
+  - one awaiting approval (its approval sends them);
+  - one that has begun (`CompanyEventRules.RefuseInviting`);
+  - one whose invitations all reached their guests ("nothing to send").
+
+  A guest who has since left is skipped (F-35).
+- **A small F-33 gap closed on the way:** correcting an outside guest's address re-sent the invitation even while
+  the event awaited approval. It now waits for the approval like every other.
+- **A reminder or chase is stamped only once it reached somebody** (`StampIfReachedAsync`). One that reached
+  nobody stays due: the button may be pressed again, and every pass of the hourly sweep tries it until the event
+  begins or the reply-by date passes. It never repeats an in-app notice, since one that reached nobody raised none.
+  An event with nobody to tell is neither stamped nor reported, so a guest added later is still reminded.
+  ⚠ Under **#40** the hourly host's emails find no mail server even where one is set up, so on such a server only
+  the in-app notices reach anybody until Platform fixes it. The sweep says so in its counts.
+- **The event page** ("Invitations and reminders", lane 5's R4-6.3 card, built here since it reads these fields):
+  - invitations: "n of m delivered — k not delivered", or "k wait for the approval";
+  - the reminder and the chase: Sent / Chased on a date, **"Due since … — it has reached nobody yet. The hourly
+    sweep tries again."**, or "Goes on …". The detail read carries the sweep's two days (`reminderDueOn`,
+    `rsvpChaseDueOn`) so the page uses the sweep's rule, not its own;
+  - an amber line when no mail server is set up, saying who is still reached (employees with a login, in the app);
+  - the re-send button beside the reminder and chase buttons.
+- **The toasts** say "3 of 4 reached — 0 by email, 3 in the app. 1 not reached: no mail server is set up, and they
+  have no login to be told in the app." (`noticeReach.ts`). A reminder or chase that reached nobody toasts **not
+  delivered**, and says it stays due.
+  - The edit page's "Everybody invited is told", and the reschedule toast's, are replaced by the count.
+  - Adding or correcting a guest the invitation did not reach says why.
+- **The approval email to the organiser** says how many waiting invitations reached their guests, not how many
+  were tried.
+- Not counted, since no screen shows them: telling a removed guest and a task's assignee. Their sends return the
+  email's result like every other; nothing reads it.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2e-2: **476/476 on two clean passes**. 2e-2 has 46 assertions. Its first half
+  runs on UAT as it is (no mail server); its second through the run's own SMTP sink (`tools/mail-sink.mjs`, which
+  refuses any "bounce" address), an `EmailSettings` row for a few minutes, deleted in a `finally`:
+  - **With no mail server:**
+    - a guest with a login is Sent and dated (the app reached them); one without a login, and an outside guest,
+      are not sent and undated (both read Sent before);
+    - the page is told there is no mail server, and the sweep's two days;
+    - a reminder counts people: 4 issued, 1 reached, 4 emails not taken, stamped. A chase: 3 issued, 1 reached;
+    - a reminder and a chase that reached nobody are **not stamped**, so both stay due;
+    - the undelivered invitations sent again reach nobody, and stay not sent;
+    - the re-send is refused with nothing to send, while awaiting approval, once begun, and when cancelled;
+    - a move, an edit (a new venue) and a cancellation each answer `told`: 1 issued, 1 reached. That is the guest
+      the invitation reached, not the two it never did; an edit that told nobody carries none;
+    - **the sweep** (run-now, after checking that nothing else on UAT was due) stamps the reminder that reached B
+      and leaves the one that reached nobody due: 5 issued, 1 reached, 0 emails taken, 5 not, 1 in the app.
+  - **Through the sink:**
+    - the page sees the mail server;
+    - the undelivered invitations sent again are both taken, Sent and dated; the sink holds one for each;
+    - an address the sink refuses stays not sent. Corrected, it is sent again, Sent and dated, to the new address;
+    - the reminder left due now goes to all four by email, and is stamped;
+    - a reminder that reached some (B by email and in the app, C by email, not the refused address) is stamped:
+      3 issued, 2 reached.
+  - UAT is back to no mail server after each pass; the orientation outbox was checked empty before the sink opened,
+    and no orientation row changed in the window.
+- **Suites changed for 2e-2:**
+  - 2d: the reminder's counts read `issued`. A corrected outside address is still not delivered with no mail server
+    (2e-2 proves the delivery through the sink);
+  - 2e-1: the reminder and chase read issued and reached. Whoever invites themselves is Sent. The approval sends
+    the waiting invitations: H, who has a login, is reached; A, who has none, is not delivered (both read Sent);
+  - `run-round4-d` reads issued and reached in place of `sent`;
+  - `run-slice2`: a comment only.
+- Regression:
+  - the round-4 net **205/205** (`run-slice0` 29, `run-slice1` 32, `run-slice2` 61, `run-slice3` 44,
+    `run-round4-d` 39);
+  - `hr-recruitment/run-round4-d` **58/58**;
+  - `hr-templates/run-lane-nb2` **36/36**: the sweep through its own sink (reminded and chased once, the lead, a
+    moved date, approval, the tenant's wording). It had not been run since round 4. Its D1 now reads issued, reached
+    and emailed, 2/2/2, since 2e-1 reminds the organiser too.
+- **Found on the way, not ours — a security defect, proved, pending the user's word to register it (#43 proposed):**
+  - **The SMTP password is written back to the database in plain text.**
+    - `SettingsService.GetEmailSettingsAsync` loads the mail-settings row tracked and writes the decrypted
+      password into it.
+    - The mail sender calls it on every send, in the request's own unit of work, so any save later in that
+      request stores the password in plain text.
+    - Every company-schedule notice saves after its emails, and so does almost every other sender.
+    - `tools/probe-smtp-password-write.mjs` saved a dummy password through the settings endpoint (stored
+      encrypted, 64 characters). It then pressed "Send reminder now" as an HR officer (a server on a closed port,
+      so no email). Read again, the stored value was **the password in plain text**.
+  - **The same probe found two related facets:**
+    - the settings read (`GET /api/Settings/email`, TenantAdmin) answers the password in plain text;
+    - saving mail settings writes the password in plain text into `AuditLogs` (`NewValues`, and `OldValues` on an
+      update).
+  - `AuditLogs` is append-only (trigger `TR_AuditLogs_AppendOnly`), so the probe's one audit row, with its dummy
+    password for a server that does not exist, **stays on UAT**. Everything else the probe made is removed: the
+    settings row, the event, its notice, the login (switched off) and the employee.
+  - Under #40 the hourly sweeps load no settings, so today only signed-in sends write it back.
+- API log:
+  - no request answered 500;
+  - #23 (payroll profile at each fixture hire), #39 once;
+  - nine F-45 race refusals, each answered 422;
+  - the sink's seven deliberate refusals (six bounce addresses, the probe's closed port);
+  - 113 notification-dispatcher emails refused (UAT has no SMTP);
+  - the shared notification service's bulk clean-up of old notices failed twice, as at 2d.
+  - No company-schedule notice failed to be raised.
+- **Clean-up:**
+  - nothing of the runs left: events, bookings, rooms, mail settings, template rows;
+  - 24 harness logins switched off (the slice suites', recruitment's and N-b2's);
+  - every notice the runs raised is withdrawn, re-checked after the API stopped. That includes N-b2's approval
+    request, which went to every HR-role login.
+  - **Also withdrawn, from earlier sessions today:** the recruitment suites' "R4D Clash" requisition approvals
+    and an "E2E RecD" offer approval, live on `md.tdc`, `managing.director`, `hr.head` and `hr.officer`
+    (86 + 43 + 32 + 7 rows across all recipients).
+  - What real staff still have live from today is not harness: the demo fire drill's reminder, the leave-planning
+    reminder, and the overdue demo staff movements.
+- The screens type-check (scoped `tsconfig.company-schedule.json`) and lint clean. They are not yet walked in a
+  browser (lane 5).
 
 *2e-1 — what was built (2026-10-05): who is told.*
 - **`CompanyScheduleNotices`, travel's model (§ 1c):**
@@ -1553,7 +1694,7 @@ built, proved twice and handed over on its own:
 - [ ] `allowRemove={canDelete}` on the attachments and tasks panels and the closures / milestones tabs;
       the participants and attendance panels offer remove on `Write` (lane 2); room Delete hidden
       without `HR.Company.Admin`.
-- [ ] Event detail: "Originally …" from the four original fields; "Moved on (timestamp) — reason"; the
+- [ ] *✅ the card part in lane 2's 2e-2 ("Invitations and reminders": due-and-unreached, the sweep's days, the mail-server line, issued and reached in the toasts); the original window and "Moved on" remain.* Event detail: "Originally …" from the four original fields; "Moved on (timestamp) — reason"; the
       Reminders card states the sweep's own conditions (awaiting approval, Days before unset, the event
       past) and shows issued and delivered (lane 2).
 - [ ] Event edit: the status select limited to what Update accepts.
@@ -1670,7 +1811,7 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1: the D suites get a tidy step; R4-2.3: scenario 110's booking by `hr.head`) | R4-2.4 is the demo database, not the code |
 | R4-3.1 | Lane 5 | **live** — the first draft had it as kept |
 | R4-5.1, R4-6.1, R4-6.2, R4-6.4…R4-6.7, R4-7.1 | Lanes 2 and 5 | |
-| R4-6.3 | Lane 2 (deliveries counted) + Lane 5 (the card) | |
+| R4-6.3 | ✅ Lane 2, slice 2e-2 (deliveries counted, and the card built with them); lane 5 walks it | the card is "Invitations and reminders" |
 | R4-9.1 | Lane 3 | |
 | R4-10A.1, R4-10B.1…R4-10B.4, R4-10A.3 | Lane 5 | |
 | R4-10A.2 | **Lane 2** (backend) + Lane 5 (screens) | the first draft had it in lane 5 only |
@@ -1947,3 +2088,27 @@ built API, so no web host and no seeders).
     UAT); `PUT /api/User` 500s on a login with no email.
 
   Next: 2e-2, delivered vs issued (R4-6.3).
+- **2026-10-05, later** — **2e-2's four rulings, by the user before the build, all as recommended:**
+  - a notice in the app counts as delivered;
+  - an undelivered invitation is sent again by a button;
+  - a reminder that reached some is stamped;
+  - no stored counts (no migration in 2e-2).
+- **2026-10-05, later** — **Lane 2, slice 2e-2 built and proved**: delivered vs issued (lane 2 State).
+  `run-final-review.mjs` scored 476/476 on two clean passes, with 46 checks in 2e-2: half with no mail server,
+  half through the run's own SMTP sink. The round-4 net was 205/205, the recruitment clash suite 58/58, and
+  `run-lane-nb2` (the sweep through a sink, not run since round 4) 36/36. No request answered 500.
+  - **R4-6.3 and F-32 closed:**
+    - every answer counts the people reached, not the addresses tried;
+    - an invitation is Sent, and a reminder or chase stamped, only once it reached somebody;
+    - the event page's card (now "Invitations and reminders") says what is due and has reached nobody, and when
+      there is no mail server.
+  - **A small F-33 gap closed:** a corrected outside address no longer invites anyone while the event awaits
+    approval.
+  - **Found, not ours, proved, awaiting the user's word to register (#43):** a send followed by a save in one
+    request writes the SMTP password back in plain text; the settings read answers it in plain text; and saving
+    the settings writes it into the append-only audit log. One audit row with the probe's dummy password stays on
+    UAT.
+  - **Withdrawn while cleaning up:** earlier sessions' recruitment fixture approvals, live on real staff.
+
+  Next: 2e-3, calendar invites (D-14) and the overdue-task chase, with one migration (the event's invite sequence
+  and the task's "chased at"), which the user scaffolds.

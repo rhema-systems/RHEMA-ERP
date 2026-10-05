@@ -15,6 +15,7 @@ import {
   useEventForm,
   windowChanged,
 } from '@/components/hr/company-schedule/EventForm';
+import { describeReach } from '@/components/hr/company-schedule/noticeReach';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 
 export default function EditCompanyEventPage({ params }: { params: Promise<{ id: string }> }) {
@@ -47,15 +48,20 @@ export default function EditCompanyEventPage({ params }: { params: Promise<{ id:
     try {
       const saved = await companyEventService.update(id, toUpdatePayload(id, values));
       const warnings = (saved.warnings ?? []).map((w) => `⚠ ${w}`).join(' ');
+      // Lane 2e-2 (R4-6.3): who the move, postponement or new venue/link reached — counted, not assumed.
+      const told = saved.told?.issued ? describeReach(saved.told, 'Guests told') : undefined;
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
       toast(
         moved
           ? {
               title: 'Event moved',
-              description:
-                'Everybody invited is told. Accepted replies are asked again, and its room bookings moved with it.',
+              description: [
+                'Accepted replies are asked again, and its room bookings moved with it.',
+                told,
+                warnings,
+              ].filter(Boolean).join(' '),
             }
-          : { title: 'Event updated', description: warnings || undefined },
+          : { title: 'Event updated', description: [told, warnings].filter(Boolean).join(' ') || undefined },
       );
       router.push(`/hr/company-schedule/events/${id}`);
     } catch (error: any) {

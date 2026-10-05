@@ -253,6 +253,22 @@ public static class CompanyEventRules
             : null;
     }
 
+    /// <summary>
+    /// Whether the invitations not yet delivered can be sent again now (lane 2e-2): not to a closed event, not while it
+    /// awaits approval (its approval sends them), and not once it has begun. A postponed event may still invite, as its
+    /// guest list may still grow.
+    /// </summary>
+    public static string? RefuseInviting(CompanyEvent e, DateTime nowUtc)
+    {
+        if (IsClosed(e))
+            return $"{e.EventName} is {(e.IsCancelled || e.Status == EventStatus.Cancelled ? "cancelled" : "completed")}, so nobody more can be invited.";
+        if (IsAwaitingApproval(e))
+            return $"{e.EventName} is still awaiting approval. Its invitations go when it is approved.";
+        return e.Status == EventStatus.InProgress || e.StartDate.Date < nowUtc.Date
+            ? $"{e.EventName} has already begun, so it is too late to invite anybody."
+            : null;
+    }
+
     private static string? RefuseSending(CompanyEvent e, DateTime nowUtc, string verb)
     {
         if (IsClosed(e))

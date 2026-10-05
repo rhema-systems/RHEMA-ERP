@@ -11,6 +11,7 @@ import {
   MailQuestion,
   Megaphone,
   Pencil,
+  Send,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -45,9 +46,13 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
-import type { CompanyEventChange } from '@/types/hr/company-schedule';
+import { describeReach } from '@/components/hr/company-schedule/noticeReach';
+import type { CompanyEventChange, CompanyEventNoticeResult } from '@/types/hr/company-schedule';
 
-/** What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a). */
+/**
+ * What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a) — and who was
+ * told, counted from the email result and the in-app notice (lane 2e-2).
+ */
 function describeChange(change?: CompanyEventChange | null): string | undefined {
   if (!change) return undefined;
   const parts: string[] = [];
@@ -56,8 +61,13 @@ function describeChange(change?: CompanyEventChange | null): string | undefined 
   if (change.bookingsCancelled?.length) parts.push(`${list(change.bookingsCancelled)} cancelled with it`);
   if (change.answersReset) parts.push(`${change.answersReset} accepted or tentative repl${change.answersReset === 1 ? 'y' : 'ies'} asked again`);
   if (change.approvalCleared) parts.push('it waits for approval again');
-  return parts.length ? `${parts.join('; ')}.` : undefined;
+  const told = change.told?.issued ? describeReach(change.told, 'Guests told') : undefined;
+  return [parts.length ? `${parts.join('; ')}.` : undefined, told].filter(Boolean).join(' ') || undefined;
 }
+
+/** A day as the card reads it: "Tue 14 Oct 2026". */
+const day = (s?: string | null) =>
+  s ? new Date(`${s.slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const hhmm = (t?: string | null) => (t ? t.slice(0, 5) : null);
@@ -133,22 +143,46 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     });
 
   // Round 4, lane N-b2: the reminder and the RSVP chase, sent now. The hourly sweep sends each once
-  // when it falls due; sending it here counts as that send, so nobody is told twice.
+  // when it falls due; sending it here counts as that send, so nobody is told twice. Lane 2e-2 (R4-6.3):
+  // only once it reached somebody — by an email the mail server took, or in the app. One that reached
+  // nobody stays due, and says so rather than "sent".
+  const sentOrDue = (what: string, sent: string) => async (r: CompanyEventNoticeResult) => {
+    await refresh();
+    toast(
+      r.stamped
+        ? { title: sent, description: describeReach(r) }
+        : {
+            title: `${what} not delivered`,
+            description: `${describeReach(r) ?? ''} It stays due: the hourly sweep tries again, or send it here once that is fixed.`,
+            variant: 'destructive',
+          },
+    );
+  };
   const remindNow = useMutation({
     mutationFn: () => companyEventService.sendEventReminders(id),
-    onSuccess: async ({ sent }) => {
-      await refresh();
-      toast({ title: 'Reminder sent', description: `${sent} participant${sent === 1 ? '' : 's'} reminded.` });
-    },
+    onSuccess: sentOrDue('Reminder', 'Reminder sent'),
     onError: fail('Could not send the reminder'),
   });
   const chaseNow = useMutation({
     mutationFn: () => companyEventService.sendRsvpReminders(id),
-    onSuccess: async ({ sent }) => {
-      await refresh();
-      toast({ title: 'Invitations chased', description: `${sent} unanswered invitation${sent === 1 ? '' : 's'} chased.` });
-    },
+    onSuccess: sentOrDue('Chase', 'Invitations chased'),
     onError: fail('Could not chase the invitations'),
+  });
+  // Lane 2e-2: an invitation that reached nobody is left "Not delivered"; this sends those again.
+  const resendInvitations = useMutation({
+    mutationFn: () => companyEventService.sendUndeliveredInvitations(id),
+    onSuccess: async (r) => {
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events', id, 'participants'] }),
+      ]);
+      toast({
+        title: r.reached ? 'Invitations sent' : 'Invitations still not delivered',
+        description: describeReach(r),
+        variant: r.reached ? undefined : 'destructive',
+      });
+    },
+    onError: fail('Could not send the invitations'),
   });
 
   // Lane 2b (D-10): approval runs on the workflow engine. The shared actions show who it waits for and
@@ -205,7 +239,7 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     onSuccess: async (change) => {
       await refresh();
       setRescheduleOpen(false);
-      toast({ title: 'Event rescheduled — everybody invited is told', description: describeChange(change) });
+      toast({ title: 'Event rescheduled', description: describeChange(change) });
     },
     onError: fail('Could not reschedule the event'),
   });
@@ -263,6 +297,41 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     && event.startDate.slice(0, 10) >= today;
   const canChase =
     canRemind && event.requiresRsvp && !!event.rsvpDeadline && new Date(event.rsvpDeadline).getTime() > Date.now();
+
+  // Lane 2e-2 (R4-6.3): issued vs delivered. A reminder or chase is stamped only once it reached somebody, so one
+  // past its day with no stamp reached nobody; an invitation is Sent only once it reached its guest.
+  const reminderDue = canRemind && !event.reminderSentDate && !!event.reminderDueOn && event.reminderDueOn.slice(0, 10) <= today;
+  const chaseDue = canChase && !event.rsvpReminderSentDate && !!event.rsvpChaseDueOn && event.rsvpChaseDueOn.slice(0, 10) <= today;
+  const guests = event.participants ?? [];
+  const notDelivered = guests.filter((p) => p.invitationStatus === 'NotSent').length;
+  // The server's rule (RefuseInviting): open, not awaiting approval, not yet begun.
+  const canResend =
+    open && !awaitingApproval && event.status !== 'InProgress' && event.startDate.slice(0, 10) >= today && notDelivered > 0;
+  const stillDue = 'it has reached nobody yet. The hourly sweep tries again.';
+
+  const reminderText = !event.sendReminders
+    ? 'Off — turn on Send reminders in Edit'
+    : event.reminderSentDate
+      ? `Sent ${new Date(event.reminderSentDate).toLocaleString()}`
+      : reminderDue
+        ? `Due since ${day(event.reminderDueOn)} — ${stillDue}`
+        : canRemind
+          ? `Goes on ${day(event.reminderDueOn)}, ${event.reminderDaysBefore ?? 0} day${event.reminderDaysBefore === 1 ? '' : 's'} before the event, automatically`
+          : 'Not sent';
+  const chaseText = !event.requiresRsvp || !event.rsvpDeadline
+    ? 'No RSVP deadline'
+    : event.rsvpReminderSentDate
+      ? `Chased ${new Date(event.rsvpReminderSentDate).toLocaleString()}`
+      : chaseDue
+        ? `Due since ${day(event.rsvpChaseDueOn)} — ${stillDue}`
+        : canChase
+          ? `Goes on ${day(event.rsvpChaseDueOn)}, automatically, to everybody who has not answered`
+          : 'Not sent';
+  const invitationsText = !guests.length
+    ? 'Nobody invited yet'
+    : awaitingApproval && notDelivered
+      ? `${notDelivered} wait${notDelivered === 1 ? 's' : ''} for the approval`
+      : `${guests.length - notDelivered} of ${guests.length} delivered${notDelivered ? ` — ${notDelivered} not delivered` : ''}`;
 
   return (
     <div className="space-y-6 p-6">
@@ -383,34 +452,37 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Reminders</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Invitations and reminders</CardTitle></CardHeader>
         <CardContent className="space-y-4 text-sm">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Detail label="Event reminder">
-              {!event.sendReminders
-                ? 'Off — turn on Send reminders in Edit'
-                : event.reminderSentDate
-                  ? `Sent ${new Date(event.reminderSentDate).toLocaleString()}`
-                  : `Goes ${event.reminderDaysBefore ?? 0} day${event.reminderDaysBefore === 1 ? '' : 's'} before the event, automatically`}
-            </Detail>
-            <Detail label="RSVP chase">
-              {!event.requiresRsvp || !event.rsvpDeadline
-                ? 'No RSVP deadline'
-                : event.rsvpReminderSentDate
-                  ? `Chased ${new Date(event.rsvpReminderSentDate).toLocaleString()}`
-                  : 'Goes automatically ahead of the RSVP deadline, to everybody who has not answered'}
-            </Detail>
+          <div className="grid gap-6 sm:grid-cols-3">
+            <Detail label="Invitations">{invitationsText}</Detail>
+            <Detail label="Event reminder">{reminderText}</Detail>
+            <Detail label="RSVP chase">{chaseText}</Detail>
           </div>
+          {/* Lane 2e-2: why nothing reaches the outside guests on a database with no mail server (Rule 7). */}
+          {open && !event.mailServerSetUp && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+              No mail server is set up, so no email goes. Employees with a login are told in the app; guests from
+              outside, and staff without a login, are not reached.
+            </p>
+          )}
           {awaitingApproval && open && (
             <p className="text-muted-foreground">
               Nobody is invited while the event awaits approval: its invitations go out when it is approved.
             </p>
           )}
-          {canRemind && (
+          {(canRemind || canResend) && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
-                <BellRing className="mr-2 h-4 w-4" /> Send reminder now
-              </Button>
+              {canResend && (
+                <Button variant="outline" onClick={() => resendInvitations.mutate()} disabled={resendInvitations.isPending}>
+                  <Send className="mr-2 h-4 w-4" /> Send the undelivered invitation{notDelivered === 1 ? '' : 's'} ({notDelivered})
+                </Button>
+              )}
+              {canRemind && (
+                <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
+                  <BellRing className="mr-2 h-4 w-4" /> Send reminder now
+                </Button>
+              )}
               {canChase && (
                 <Button variant="outline" onClick={() => chaseNow.mutate()} disabled={chaseNow.isPending}>
                   <MailQuestion className="mr-2 h-4 w-4" /> Chase unanswered now
@@ -419,8 +491,10 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
             </div>
           )}
           <p className="text-muted-foreground">
-            Each is sent once. Sending it here counts as that send. Moving the event&apos;s date, or its
-            RSVP deadline, lets it go again for the new date.
+            An invitation, a reminder or a chase counts as sent once it reaches somebody — by an email the mail
+            server took, or in the app. The reminder and the chase are sent once; sending one here counts as that
+            send, and one that reaches nobody stays due. Moving the event&apos;s date, or its RSVP deadline, lets them
+            go again for the new date.
           </p>
         </CardContent>
       </Card>
@@ -449,7 +523,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="attachments">Attachments ({event.attachments?.length ?? 0})</TabsTrigger>
           {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
-        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} open={open} awaitingApproval={awaitingApproval} /></TabsContent>
+        <TabsContent value="participants" className="pt-4">
+          <ParticipantsPanel eventId={id} open={open} awaitingApproval={awaitingApproval} mailServerSetUp={event.mailServerSetUp} />
+        </TabsContent>
         <TabsContent value="attendance" className="pt-4">
           {/* Lane 2d: a register once the event has started, never for a cancelled one — as the server rules. */}
           <AttendancePanel

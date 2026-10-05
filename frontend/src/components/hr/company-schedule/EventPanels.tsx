@@ -88,14 +88,22 @@ export function ParticipantsPanel({
   eventId,
   open,
   awaitingApproval = false,
+  mailServerSetUp = true,
 }: {
   eventId: string;
   open: boolean;
   /** F-33 (lane 2e-1): guests added now are invited when the event is approved. */
   awaitingApproval?: boolean;
+  /** Lane 2e-2: why an invitation reached nobody, for the toast. */
+  mailServerSetUp?: boolean;
 }) {
   const queryClient = useQueryClient();
   const key = ['hr', 'company-schedule', 'events', eventId, 'participants'];
+  // Lane 2e-2 (R4-6.3): an invitation is Sent only once it reached the guest — by an email the mail server took,
+  // or in the app. Not yet sent is either waiting for the approval or not delivered.
+  const whyNotDelivered = `${
+    mailServerSetUp ? 'the mail server took no email for them' : 'no mail server is set up'
+  }, and they have no login to be told in the app. Send it again from Invitations and reminders once that is fixed.`;
 
   return (
     <ResourceCollectionTab<EventParticipant, ParticipantForm>
@@ -110,11 +118,14 @@ export function ParticipantsPanel({
           ? 'The event awaits approval: the invitation goes when it is approved, not now.'
           : 'Invite an employee, or a guest from outside with their email address — the invitation goes there.'
       }
-      savedDescription={(saved, editing) =>
-        !editing && (saved as EventParticipant | undefined)?.invitationStatus === 'NotSent'
-          ? 'Added. The invitation goes when the event is approved.'
-          : null
-      }
+      savedDescription={(saved, editing) => {
+        if ((saved as EventParticipant | undefined)?.invitationStatus !== 'NotSent') return null;
+        if (awaitingApproval) return editing ? null : 'Added. The invitation goes when the event is approved.';
+        // Added — or corrected (a new outside address re-sends it) — and it reached nobody.
+        return editing
+          ? `Saved. Their invitation has not reached them: ${whyNotDelivered}`
+          : `Added, but the invitation reached nobody: ${whyNotDelivered}`;
+      }}
       emptyDescription={open ? 'Nobody has been invited to this event yet.' : 'Nobody was invited to this event.'}
       list={(id) => companyEventService.getParticipants(id)}
       create={(id, v) =>
@@ -150,8 +161,18 @@ export function ParticipantsPanel({
         { header: 'Required', cell: (p) => (p.isRequired ? 'Yes' : 'Optional') },
         {
           header: 'Invitation',
-          // An invitation not sent waits for the event's approval (F-33).
-          cell: (p) => <StatusBadge status={p.invitationStatus === 'NotSent' ? 'Waits for approval' : spaced(p.invitationStatus)} />,
+          // Not sent: it waits for the event's approval (F-33), or it reached nobody (lane 2e-2).
+          cell: (p) => (
+            <StatusBadge
+              status={
+                p.invitationStatus !== 'NotSent'
+                  ? spaced(p.invitationStatus)
+                  : awaitingApproval
+                    ? 'Waits for approval'
+                    : 'Not delivered'
+              }
+            />
+          ),
         },
         { header: 'Responded', cell: (p) => p.responseDate?.slice(0, 10) ?? '—' },
       ]}

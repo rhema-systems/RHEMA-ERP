@@ -329,17 +329,26 @@ public class CompanyScheduleController : HrControllerBase
         Guid organizationUnitId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
         => Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
 
-    /// <summary>Chases everybody who has not answered their invitation (round 4, D6).</summary>
+    /// <summary>
+    /// Chases everybody who has not answered their invitation (round 4, D6) — answering who it was for and who it
+    /// reached (lane 2e-2). It counted attempts as <c>sent</c>.
+    /// </summary>
     [HttpPost("events/{eventId:guid}/rsvp-reminders")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SendRsvpReminders(Guid eventId, CancellationToken ct)
-        => Ok(new { sent = await _eventService.SendRsvpRemindersAsync(eventId, ct) });
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendRsvpReminders(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendRsvpRemindersAsync(eventId, ct));
 
-    /// <summary>Reminds every participant who has not declined that the event is coming (D6).</summary>
+    /// <summary>Reminds every participant who has not declined that the event is coming (D6), with who it reached (lane 2e-2).</summary>
     [HttpPost("events/{eventId:guid}/reminders")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SendEventReminders(Guid eventId, CancellationToken ct)
-        => Ok(new { sent = await _eventService.SendEventRemindersAsync(eventId, ct) });
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendEventReminders(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendEventRemindersAsync(eventId, ct));
+
+    /// <summary>Sends again the invitations that reached nobody (lane 2e-2), with who they reached this time.</summary>
+    [HttpPost("events/{eventId:guid}/invitations/send")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendUndeliveredInvitations(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendUndeliveredInvitationsAsync(eventId, ct));
 
     /// <summary>
     /// Runs the reminder sweep now for the caller's tenant (round 4, lane N-b2) — exactly the code the

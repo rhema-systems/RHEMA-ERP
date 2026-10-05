@@ -69,12 +69,22 @@ public interface ICompanyEventService
     /// stamped on the event (<c>RsvpReminderSentDate</c>), so the other does not send it again.
     /// When D6 was written this had to be an endpoint only: HR's sweeps delivered nothing until lane
     /// K made one that does.</para>
+    ///
+    /// <para>Since lane 2e-2 (R4-6.3) it answers who it was for and who it reached — by an email the mail
+    /// server took, or in the app — and is stamped only when it reached somebody.</para>
     /// </remarks>
-    Task<int> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+    Task<CompanyEventNoticeResultDto> SendRsvpRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
 
     /// <summary>Emails every participant that the event is coming up (round 4, D6).</summary>
-    /// <inheritdoc cref="SendRsvpRemindersAsync" path="/remarks/para[2]"/>
-    Task<int> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+    /// <inheritdoc cref="SendRsvpRemindersAsync" path="/remarks"/>
+    Task<CompanyEventNoticeResultDto> SendEventRemindersAsync(Guid eventId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends again the invitations that reached nobody (lane 2e-2) — once a mail server is set up, or a login made.
+    /// Refused for a closed event, one awaiting approval (its approval sends them), one that has begun, and one
+    /// whose invitations have all been delivered.
+    /// </summary>
+    Task<CompanyEventNoticeResultDto> SendUndeliveredInvitationsAsync(Guid eventId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The company-schedule reminder sweep for one tenant (round 4, lane N-b2): each live event's
