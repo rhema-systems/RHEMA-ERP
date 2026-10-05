@@ -344,6 +344,12 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<CompanyEventNoticeResultDto>> SendEventReminders(Guid eventId, CancellationToken ct)
         => Ok(await _eventService.SendEventRemindersAsync(eventId, ct));
 
+    /// <summary>Extends the event's series on its rule (lane 2f-1): either how many more occurrences, or until a date.</summary>
+    [HttpPost("events/{eventId:guid}/series/extend")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventSeriesResultDto>> ExtendSeries(Guid eventId, [FromBody] ExtendEventSeriesDto dto, CancellationToken ct)
+        => Ok(await _eventService.ExtendSeriesAsync(eventId, dto, ct));
+
     /// <summary>Sends again the invitations that reached nobody (lane 2e-2), with who they reached this time.</summary>
     [HttpPost("events/{eventId:guid}/invitations/send")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]

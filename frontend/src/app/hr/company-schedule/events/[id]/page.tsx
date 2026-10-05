@@ -46,6 +46,8 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
+import { EventSeriesCard } from '@/components/hr/company-schedule/EventSeriesCard';
+import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
 import { describeReach } from '@/components/hr/company-schedule/noticeReach';
 import type { CompanyEventChange, CompanyEventNoticeResult } from '@/types/hr/company-schedule';
 
@@ -337,7 +339,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     <div className="space-y-6 p-6">
       <PageHeader
         title={event.eventName}
-        description={`${event.eventNumber} · organised by ${event.organizerName}`}
+        description={`${event.eventNumber}${
+          event.occurrenceNumber && event.occurrenceCount ? ` · occurrence ${event.occurrenceNumber} of ${event.occurrenceCount}` : ''
+        } · organised by ${event.organizerName}`}
         backHref="/hr/company-schedule/events"
         actions={
           <div className="flex flex-wrap items-center gap-2">
@@ -378,6 +382,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         }
       />
 
+      {/* Lane 2f-1 (D-12): made and flagged, not skipped — moving it is HR's call. */}
+      {event.dayOffNote && open && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          {event.dayOffNote} It is kept as scheduled; reschedule it if it should not go ahead that day.
+        </p>
+      )}
+
       <Card>
         <CardHeader><CardTitle>Overview</CardTitle></CardHeader>
         <CardContent className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
@@ -395,7 +406,12 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
             {!event.isAllDayEvent && hhmm(event.endTime) ? ` · ${hhmm(event.endTime)}` : ''}
           </Detail>
           <Detail label="Repeats">
-            {event.isRecurring ? spaced(event.recurrencePattern) : 'One-off'}
+            {/* Lane 2f-1: a series' occurrence says which; a row saved as repeating before series existed says so. */}
+            {event.recurrenceSeriesId && event.recurrencePattern
+              ? `${RECURRENCE_PATTERN_LABELS[event.recurrencePattern]} — ${event.occurrenceNumber} of ${event.occurrenceCount ?? '?'}`
+              : event.isRecurring
+                ? `${spaced(event.recurrencePattern)} (no occurrences made)`
+                : 'One-off'}
           </Detail>
           <Detail label="Audience">{spaced(event.scope)}</Detail>
 
@@ -450,6 +466,8 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           )}
         </CardContent>
       </Card>
+
+      <EventSeriesCard event={event} open={open} />
 
       <Card>
         <CardHeader><CardTitle>Invitations and reminders</CardTitle></CardHeader>

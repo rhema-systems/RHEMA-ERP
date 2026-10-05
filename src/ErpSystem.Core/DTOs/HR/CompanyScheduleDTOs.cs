@@ -39,7 +39,16 @@ public class CompanyEventDto : BaseDto
     public string? RecurrenceDetails { get; set; }
     public DateTime? RecurrenceEndDate { get; set; }
     public int? RecurrenceCount { get; set; }
-    
+
+    /// <summary>The series this event is an occurrence of (lane 2f-1, D-12); null on a one-off event.</summary>
+    public Guid? RecurrenceSeriesId { get; set; }
+
+    /// <summary>Its place in the series, from 1.</summary>
+    public int? OccurrenceNumber { get; set; }
+
+    /// <summary>How many occurrences the series has, deleted ones apart — "occurrence 3 of 10".</summary>
+    public int? OccurrenceCount { get; set; }
+
     // Location
     public EventLocation LocationType { get; set; }
     public string LocationTypeName => LocationType.ToString();
@@ -200,6 +209,52 @@ public class CompanyEventDetailDto : CompanyEventDto
     /// a login are told, in the app.
     /// </summary>
     public bool MailServerSetUp { get; set; }
+
+    /// <summary>Every occurrence of its series, in order (lane 2f-1); empty for a one-off event.</summary>
+    public List<EventSeriesOccurrenceDto> SeriesOccurrences { get; set; } = new();
+
+    /// <summary>
+    /// "Falls on a public holiday: Republic Day" / "…a company-wide closure: …" — a day the company does not work
+    /// (lane 2f-1, D-12: an occurrence there is generated and flagged, not skipped). Null on an ordinary day.
+    /// </summary>
+    public string? DayOffNote { get; set; }
+}
+
+/// <summary>One occurrence of a series, as its list shows it (lane 2f-1).</summary>
+public class EventSeriesOccurrenceDto
+{
+    public Guid Id { get; set; }
+    public string EventNumber { get; set; } = string.Empty;
+    public int OccurrenceNumber { get; set; }
+    public DateTime StartDate { get; set; }
+    public TimeSpan? StartTime { get; set; }
+    public DateTime EndDate { get; set; }
+    public EventStatus Status { get; set; }
+    public string StatusName => Status.ToString();
+    public bool IsCancelled { get; set; }
+
+    /// <summary>Set when the occurrence falls on a public holiday or a company-wide closure.</summary>
+    public string? DayOffNote { get; set; }
+}
+
+/// <summary>
+/// More occurrences after a series' last, on its rule (lane 2f-1, D-12) — either how many more, or the date they run
+/// until; not both. The series holds at most 52.
+/// </summary>
+public class ExtendEventSeriesDto
+{
+    [Range(1, 51)]
+    public int? Count { get; set; }
+    public DateTime? Until { get; set; }
+}
+
+/// <summary>The occurrences a series action made, and what HR should know about their dates.</summary>
+public class EventSeriesResultDto
+{
+    public List<EventSeriesOccurrenceDto> Occurrences { get; set; } = new();
+
+    /// <summary>"EVT-… (Tuesday, 1 July 2026) falls on a public holiday: Republic Day" — flagged, not skipped.</summary>
+    public List<string> Warnings { get; set; } = new();
 }
 
 /// <summary>

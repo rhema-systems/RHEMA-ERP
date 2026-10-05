@@ -36,8 +36,9 @@ has not started (the user: "don't start the actual development yet").
    way:** source-checked and its four decisions settled (§ 1c), slice 2a built and proved
    (2026-10-05), 2b, approval on the workflow engine (D-10), and 2c, who an event is for (D-16), the
    diaries and the intranet, 2d, guests, the register and tasks, 2e-1, who is told, 2e-2, delivered vs
-   issued, and 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows).
-   **Next: 2f, recurrence as a light series (D-12).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   issued, 2e-3, calendar files and the overdue chase (its migration applied to UAT, 144 history rows), and
+   2f-1, a recurring event as a series (no migration). **Next: 2f-2, the series scope choice and the two series
+   notices (lane 2 State, the 2f split).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -312,7 +313,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
-| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e built and proved (516/516 ×2; round-4 net 205/205); 2e-3's migration on UAT (144); 2f next | events block |
+| **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ◐ 2a–2e and 2f-1 built and proved (570/570 ×2; round-4 net 209/209); 2e-3's migration on UAT (144); 2f-2 next | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13, D-18 (D-10 ✅) | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
@@ -927,7 +928,8 @@ change.
       firm once it is Scheduled or Rescheduled — no data change.
 
 **Recurrence (D-2, D-12 — settled: a light series)**
-- [ ] Create: a pattern and a count or end date required, up to 52 occurrences. Each occurrence is a
+- [x] *✅ 2f-1 (`CompanyEventSeries`), with "Weekdays" added (the user's ruling); the flag is also warned of on the
+      save, and an occurrence on a yearly 29 February falls on the 28th.* Create: a pattern and a count or end date required, up to 52 occurrences. Each occurrence is a
       full event with its own number, sharing `RecurrenceSeriesId` and carrying `OccurrenceNumber`.
       Dates are counted from the first, so a monthly rule on a day a month lacks falls on that month's
       last day; an occurrence on a public holiday or a company-wide closure is generated and flagged on
@@ -939,10 +941,11 @@ change.
       `EventSeriesInvitation`), and answers each date or all at once — through the desk door and the
       D-8 reply door alike. Reminders and the RSVP chase stay per occurrence. If D-14 is taken, each
       occurrence carries its own calendar entry.
-- [ ] "Book this room for every occurrence": one booking per date through lane 3's rules and lock;
+- [ ] *Moved to lane 3 (the user's ruling at 2f's source check), on its rules and lock.* "Book this room for every occurrence": one booking per date through lane 3's rules and lock;
       the dates where the room is taken are listed, the rest booked.
-- [ ] "Extend the series": more occurrences after the last, on the same rule, within the cap.
-- [ ] DTO gains `recurrenceSeriesId`, `occurrenceNumber`, `occurrenceCount`; the page shows
+- [x] *✅ 2f-1: from any occurrence, by a count or to a date, copied from the latest occurrence; its approval is
+      shared like the create's.* "Extend the series": more occurrences after the last, on the same rule, within the cap.
+- [x] *✅ 2f-1, with the series list on the page (each occurrence flagged where it falls on a day off).* DTO gains `recurrenceSeriesId`, `occurrenceNumber`, `occurrenceCount`; the page shows
       "Occurrence 3 of 10" and links the series; the register filters by series.
 
 **Audience and organiser** (*review: reuse the audience resolver; no new `EventAudience` helper*)
@@ -1071,8 +1074,158 @@ built, proved twice and handed over on its own:
       the event page.
     - **Cross-module #43 is registered.**
 - **2f** recurrence as a light series (D-12).
+  *Source check (2026-10-05):*
+  - The five recurrence fields are saved on create and generate nothing (C-14).
+  - `RecurrenceSeriesId` and `OccurrenceNumber` are read and written by nothing.
+  - The edit ignores recurrence.
+  - Approval asks the engine per event (`HasActiveApprovalInstanceAsync`).
+  - Event numbers come from an atomic counter, so a series can take up to 52 at once.
+
+  *Rulings by the user (2026-10-05, all as recommended):*
+  - **Approved once, for the series:** the first occurrence goes to the engine. Approving any occurrence approves
+    every occurrence of the series still awaiting approval with no approval of its own under way; rejecting
+    cancels them. An occurrence moved on its own later is approved on its own (D-10). Deciding an occurrence that
+    shares an approval under way elsewhere is refused, naming that one.
+  - **One notice per guest per series action,** listing the dates, with a calendar file per occurrence. Two new
+    templates: `EventSeriesInvitation` (D-12's) and `EventSeriesChanged` (moved, changed, cancelled or removed,
+    saying which). 52 templates.
+  - **"Book this room for every occurrence" moves to lane 3,** on its rules and lock.
+  - **A new "Weekdays" pattern** (Monday to Friday). "Daily" stays every calendar day. An enum value only.
+
+  *Split in two:*
+  - **2f-1** ✅ (2026-10-05; built and proved, below):
+    - generating a series: up to 52, a count or an end date (one, not both), the patterns with Weekdays, and
+      the monthly last-day and 29 February rules, counted from the first date;
+    - the series approval;
+    - the holiday and closure flag on an occurrence's page;
+    - "Occurrence k of n", the series list, and the register's series filter;
+    - extending a series;
+    - the pattern locked on edit.
+  - **2f-2:**
+    - the scope choice on guests, edit, move and cancel, never touching a past or completed occurrence;
+    - the two series notices;
+    - answering per date or for the series at the desk. The D-8 reply door is lane 7's.
 - **2g** search, export, the dashboard and clashes (C-10…C-13, C-15, C-25) on the two registers.
 - **2h** attachments on the gate (C-18, F-54) and the drill (C-51).
+
+*2f-1 — what was built (2026-10-05): a recurring event is a series (D-2, D-12, C-14).*
+- **No migration.** `RecurrenceSeriesId` and `OccurrenceNumber` came with lane 0, and `OriginalStartDate` with 2a.
+  `RecurrencePattern` gains **`Weekdays = 7`** (the user's ruling); the column is an int, so the value needs nothing.
+- **The rule** (`CompanyEventSeries`, new):
+  - **Dates come from the first date and the occurrence's index,** never from the previous occurrence:
+    - every day; every weekday (Monday to Friday); weekly; every two weeks;
+    - monthly and quarterly by `AddMonths`, so the 31st falls on a shorter month's last day and is the 31st
+      again after it;
+    - yearly by `AddYears`, so 29 February falls on the 28th in a common year.
+  - **`Plan` refuses, each with a sentence:**
+    - no pattern;
+    - both a count and an end date, or neither;
+    - fewer than 2;
+    - more than 52 (`MaxOccurrences`);
+    - an end date before the first date, or one that leaves a single occurrence;
+    - a weekday series starting at a weekend;
+    - an occurrence longer than the gap between occurrences.
+- **Create makes the whole series in one save.** The first occurrence takes a new `RecurrenceSeriesId` and
+  `OccurrenceNumber` 1. Each further occurrence is a full event with its own number:
+  - it copies everything the series shares, with its end date and reply-by date moved by the same amount;
+  - it copies nothing that belongs to one meeting: no guests, register, papers, tasks, approval, outcome or stamps.
+
+  A one-off event has its recurrence fields cleared. The answer carries `occurrenceCount`, and the toast says
+  "Series scheduled — N occurrences".
+- **Approved once, for the series (the user's ruling):**
+  - Only the first occurrence goes to the engine.
+  - Approving it approves every occurrence still awaiting approval with no approval of its own under way
+    (`SharingApprovalAsync`), and sends their waiting invitations.
+  - Rejecting cancels them, with their rooms, raises their calendar sequence, and tells any guest who held one.
+  - Deciding an occurrence whose series' approval is under way on another one is refused, naming that one
+    (`EnsureNotSharedElsewhereAsync`): "… is approved with its series: approve EVT-… (occurrence 1), and the
+    decision covers this occurrence too."
+  - An occurrence moved after approval is approved on its own (D-10, unchanged).
+- **A day the company does not work** (`DayOffNotesAsync`): an occurrence on a public holiday (by name, the day in
+  lieu said) or a company-wide non-working closure (by title) is made, never skipped. The save warns of each,
+  naming its event number and date, and the occurrence's page and the series list carry the flag. A site or unit
+  closure is not a company day off. The read covers one span when it is under 400 days, and goes event by event
+  when it is longer (a yearly series).
+- **Extending** (`POST events/{id}/series/extend`, Write):
+  - from any occurrence, by a count (1–51) or to a date, one not both;
+  - on the rule, counted from occurrence 1's original date, so moving the first occurrence alone does not move
+    the rule;
+  - numbered after the highest occurrence, deleted ones included, and copied from the latest live occurrence,
+    with its edits;
+  - the series' approval rule applies to what is added;
+  - refused on a single event, and past 52.
+- **The pattern is locked on edit:** the update carries no recurrence fields, so an edit keeps the occurrence in its
+  series.
+- **Screens:**
+  - **The event page:** "occurrence k of n" in the header; a day-off banner; the Repeats detail; and the series
+    card (`EventSeriesCard`, new):
+    - every occurrence, linked, with its status and flag;
+    - "Open in the register";
+    - "Extend the series", with room left shown out of 52.
+  - **A row saved as repeating before series existed** says so: nothing was ever made from it. UAT had two, both
+    `run-slice2` residue, deleted at this proof, so none is left.
+  - **The register:** "k of n" beside an occurrence, and a `?series=` filter that lists one series in order.
+  - **The form:** the patterns are named ("Every weekday (Mon–Fri)"), and it checks count or end date (one,
+    not both, 2–52) before the server does.
+- **Reads:** the register and the single read fill `occurrenceCount` with one grouped count. The series list is a
+  narrow projection. Measured on UAT after both passes: the largest ideal grant of any query on the series column
+  was 5 MB, and the slowest ran in 15 ms.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–2f-1: **570/570 on two clean passes**, with the blocking watcher beside both: no
+  memory-grant wait. The longest stall was the suite's own clean-up: its notice withdrawal scans `Notifications` for
+  85 events now, took up to 36 s, and held the dispatcher's poll behind it. That is the harness's cost, not the
+  product's. 2f-1 has **54 assertions**:
+  - **Nine refusals, each with its reason, and nothing written.**
+  - **Weekly ×4:**
+    - four occurrences a week apart, numbered 1–4, four event numbers;
+    - occurrence 3 is a full event in the series, at the same time and venue, with its reply-by date moved two
+      weeks;
+    - four rows share the series id, and no table holds the series;
+    - the register reads "3 of 4".
+  - **The rule's dates:**
+    - monthly from 31 August 2028: 31 Aug, 30 Sep, 31 Oct, 30 Nov;
+    - yearly from 29 February 2032: then the 28th;
+    - weekdays from a Thursday: Thursday, Friday, then Monday on;
+    - every day from a Friday: the weekend included;
+    - every two weeks until a date: the three that fall on or before it.
+  - **Approval** (UAT's real definition, two HR logins):
+    - every occurrence waits;
+    - one approval under way, on occurrence 1 alone;
+    - deciding occurrence 2 is refused, naming occurrence 1;
+    - approving 1 confirms all three;
+    - rejecting a two-date series cancels both, with the reason.
+  - **Edit and extend:**
+    - an edit keeps occurrence 4 in its series;
+    - extended by 2 from occurrence 2: numbered 5 and 6, on the rule, with occurrence 4's new venue; six in all;
+    - extended to a date: the two that fall on or before it;
+    - past 52, both a count and a date, and a single event: all refused.
+  - **Days off:** a weekly ×3 over the run's own holiday and company-wide closure is made whole. The save names
+    both; each occurrence carries its own flag (none on the ordinary one), and the holiday's page says so.
+  - **Clean-up, each pass:** 85/85 events (every occurrence tracked), the holiday, and 30 closures. A SQL check
+    after pass 1: 0 live `CSF-` events, 0 live series rows; the 8 live `CSF-` notices are 1e's announcements to
+    each run's own fixture login (switched off).
+- **Residue removed:** two live `run-slice2` events from earlier runs today that died before their clean-up
+  (`CS-153120`, `CS-086672`, "quarterly review (revised)"), deleted through the API. They had no live notices.
+- **Regression:**
+  - the round-4 net **209/209** (`run-slice0` 29, `run-slice1` 32, `run-slice2` 65, `run-slice3` 44,
+    `run-round4-d` 39). `run-slice2` rose from 61: the series check, and three more deletions;
+  - `hr-recruitment/run-round4-d` **58/58**.
+- **The API log:** no request answered 500. The 127 ERR lines are all known:
+  - 71 notifications with no mail server to send through (UAT);
+  - 6 refusals from the sink's "bounce" addresses (2e-2, 2e-3);
+  - 3 from master's identity sweep;
+  - EF save failures from payroll's profile foreign key on minted fixtures (#23) and from 2d's duplicate-key race
+    proofs.
+
+  None comes from the series code.
+- **After the runs:**
+  - the 21 harness logins the net and recruitment made are switched off (0 active, all dates);
+  - all 64 company-event notices the runs sent to the HR desk were withdrawn by the suites;
+  - the R4D requisition's approval notices to md.tdc, managing.director, hr.head and hr.officer were withdrawn,
+    twice, 10 s apart (#36). 0 live.
+- **`run-slice2.mjs`** made a quarterly ×4 and deleted only the first. It now asserts the series is made whole and
+  deletes all four.
 
 *2e-3 — what was built (2026-10-05): calendar files (D-14) and the overdue chase (F-34).*
 - **The migration** `20261005143701_CompanyScheduleInvitesAndTaskChase`, scaffolded by the user and rewritten as
@@ -1798,6 +1951,10 @@ built, proved twice and handed over on its own:
 - [ ] Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
 - [ ] (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
       register's.
+- [ ] **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
+      of a series (lane 2f-1's `RecurrenceSeriesId`): one booking per date, each through this lane's rules and
+      lock; the dates where the room is taken are listed, the rest booked. A past or completed occurrence is
+      never booked.
 
 **State:** *(filled when it lands)*
 
@@ -2294,3 +2451,28 @@ built API, so no web host and no seeders).
   - **Demo data:** the board-pack task was chased once, as ruled.
 
   Next: 2f, recurrence as a light series (D-12).
+- **2026-10-05, later** — **2e-3 committed** (`8c82b6401`). **2f source-checked**, and four rulings taken, all as
+  recommended (lane 2 State):
+  - a series is approved once;
+  - one notice per guest per series action;
+  - "book the room for every occurrence" moves to lane 3;
+  - a new "Weekdays" pattern.
+
+  2f is split in two: 2f-1 (the series, its approval, the day-off flag, extending, the screens) and 2f-2 (the scope
+  choice, the two series notices, answering per date or for the series).
+- **2026-10-05, later** — **Lane 2, slice 2f-1 built and proved**: a recurring event is a series (D-2, D-12, C-14)
+  (lane 2 State). No migration.
+  - **Built:**
+    - every occurrence made on create, up to 52, on the first date's rule;
+    - one approval for the series;
+    - an occurrence on a public holiday or a company-wide closure made, warned of and flagged;
+    - extending from any occurrence;
+    - "occurrence k of n", the series card and the register's series filter.
+  - **Results:** `run-final-review.mjs` scored 570/570 on two clean passes, with 54 checks in 2f-1; no memory-grant
+    wait, and the largest grant of a series query was 5 MB. The round-4 net was 209/209 (`run-slice2` now deletes
+    all four occurrences of its quarterly event) and recruitment 58/58. No request answered 500.
+  - **Cleaned:** two `run-slice2` events left live by earlier runs today, the run's logins, and the R4D
+    requisition's notices to real staff.
+
+  Next: 2f-2, the series scope choice on guests, edit, move and cancel, and the two series notices
+  (`EventSeriesInvitation`, `EventSeriesChanged`: 52 templates).

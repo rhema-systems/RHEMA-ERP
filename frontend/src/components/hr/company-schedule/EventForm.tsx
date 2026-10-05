@@ -34,6 +34,7 @@ import {
   EVENT_VISIBILITIES,
   PARTICIPANT_SCOPES,
   RECURRENCE_PATTERNS,
+  RECURRENCE_PATTERN_LABELS,
 } from '@/types/hr/company-schedule';
 import type {
   CompanyEvent,
@@ -129,6 +130,13 @@ const schema = z.object({
           : "Over several days the times are each day's hours: set the end time after the start time.");
     }
     if (v.isRecurring && !v.recurrencePattern) issue('recurrencePattern', 'Pick a pattern for a recurring event');
+    // Lane 2f-1: the server makes the series from a count OR an end date — one, not both, as a calendar rule does.
+    if (v.isRecurring && !!v.recurrenceCount && !!v.recurrenceEndDate)
+      issue('recurrenceEndDate', 'Give how many times it repeats, or the date it repeats until — not both.');
+    if (v.isRecurring && !v.recurrenceCount && !v.recurrenceEndDate)
+      issue('recurrenceCount', 'Give how many times it repeats (2 to 52), or the date it repeats until.');
+    if (v.isRecurring && v.recurrenceCount && (v.recurrenceCount < 2 || v.recurrenceCount > 52))
+      issue('recurrenceCount', 'A series repeats 2 to 52 times; it can be extended later.');
     if (v.requiresRsvp) {
       if (!v.rsvpDeadline) issue('rsvpDeadline', 'An event that asks for replies needs a reply-by date.');
       else if (v.startDate && v.rsvpDeadline > `${v.startDate}T${v.isAllDayEvent || !v.startTime ? '00:00' : hm(v.startTime)}`)
@@ -466,24 +474,31 @@ export function EventFormFields({
             </div>
           )}
 
-          {/* Recurrence is create-only — the update DTO has no recurrence fields at all. */}
+          {/* Recurrence is create-only — the update DTO has no recurrence fields at all. A series is lengthened
+              from the event page ("Extend the series"); each occurrence is then edited on its own page. */}
           {mode === 'create' && (
             <>
               <SwitchField form={form} name="isRecurring" label="Repeats" />
               {isRecurring && (
                 <>
+                  <p className="text-xs text-muted-foreground">
+                    Saving makes every occurrence now, each a full event with its own number, guest list, replies and
+                    register. Give how many times it happens, or the date it runs until — one, not both; at most 52, and
+                    the series can be extended later. A monthly series on the 31st falls on the last day of shorter
+                    months. An occurrence on a public holiday or a company-wide closure is made and flagged, not skipped.
+                  </p>
                   <FieldRow>
                     <SelectField
                       form={form}
                       name="recurrencePattern"
-                      label="Pattern"
+                      label="Repeats"
                       required
-                      options={opts(RECURRENCE_PATTERNS)}
+                      options={RECURRENCE_PATTERNS.map((p) => ({ value: p, label: RECURRENCE_PATTERN_LABELS[p] }))}
                     />
-                    <NumberField form={form} name="recurrenceCount" label="Number of occurrences" />
+                    <NumberField form={form} name="recurrenceCount" label="How many times (2–52)" />
                   </FieldRow>
                   <FieldRow>
-                    <DateField form={form} name="recurrenceEndDate" label="Repeat until" />
+                    <DateField form={form} name="recurrenceEndDate" label="…or until" />
                     <TextField form={form} name="recurrenceDetails" label="Recurrence notes" />
                   </FieldRow>
                 </>

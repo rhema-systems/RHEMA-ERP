@@ -15,6 +15,8 @@ import type {
   CompanyEventDetail,
   CompanyEventNoticeResult,
   EventAnnouncementPreview,
+  EventSeriesResult,
+  ExtendEventSeries,
   EventAudiencePreview,
   EventVisibility,
   ParticipantScope,
@@ -96,6 +98,11 @@ class CompanyEventService {
    */
   sendEventReminders(eventId: string): Promise<CompanyEventNoticeResult> {
     return apiService.post<CompanyEventNoticeResult>(`${this.baseUrl}/events/${eventId}/reminders`, {});
+  }
+
+  /** Adds occurrences after the series' last, on its rule: how many more, or until when (lane 2f-1). */
+  extendSeries(eventId: string, data: ExtendEventSeries): Promise<EventSeriesResult> {
+    return apiService.post<EventSeriesResult>(`${this.baseUrl}/events/${eventId}/series/extend`, data);
   }
 
   /** Sends again the invitations that reached nobody (lane 2e-2). */

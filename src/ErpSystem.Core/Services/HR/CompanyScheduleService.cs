@@ -53,6 +53,10 @@ public class CompanyEventService : ICompanyEventService
     /// <summary>The in-app half of every notice (lane 2e-1); email stays on the catalogue.</summary>
     private readonly CompanyScheduleNotices _notices;
 
+    /// <summary>The company's days off — public holidays and company-wide closures — an occurrence is flagged on (lane 2f-1).</summary>
+    private readonly IHrWorkingDayCalculator _workingDays;
+    private readonly IHrClosureCalendar _closureCalendar;
+
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
         IEventParticipantRepository participantRepository,
@@ -68,8 +72,12 @@ public class CompanyEventService : ICompanyEventService
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IHrAudienceResolver audience,
         IHrAnnouncementService announcements,
-        CompanyScheduleNotices notices)
+        CompanyScheduleNotices notices,
+        IHrWorkingDayCalculator workingDays,
+        IHrClosureCalendar closureCalendar)
     {
+        _workingDays = workingDays;
+        _closureCalendar = closureCalendar;
         _notices = notices;
         _audience = audience;
         _announcements = announcements;
@@ -507,7 +515,9 @@ public class CompanyEventService : ICompanyEventService
     public async Task<CompanyEventDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedEventAsync(id, cancellationToken);
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        await FillSeriesCountsAsync([dto], entity.TenantId, cancellationToken);
+        return dto;
     }
 
     /// <remarks>
@@ -547,6 +557,19 @@ public class CompanyEventService : ICompanyEventService
         detail.ReminderDueOn = ReminderDueOn(entity);
         detail.RsvpChaseDueOn = RsvpChaseDueOn(entity, lead);
         detail.MailServerSetUp = await MailServerSetUpAsync(tenantId, cancellationToken);
+
+        // Lane 2f-1: the series it belongs to, each occurrence flagged where it falls on a day the company does not
+        // work (D-12) — and this one's own flag, series or not.
+        var spans = new List<(Guid Id, DateTime Start, DateTime End)> { (entity.Id, entity.StartDate, entity.EndDate) };
+        if (entity.RecurrenceSeriesId is { } seriesId)
+        {
+            detail.SeriesOccurrences = await SeriesOccurrencesAsync(seriesId, tenantId, cancellationToken);
+            detail.OccurrenceCount = detail.SeriesOccurrences.Count;
+            spans = detail.SeriesOccurrences.Select(o => (o.Id, o.StartDate, o.EndDate)).ToList();
+        }
+        var notes = await DayOffNotesAsync(tenantId, spans, cancellationToken);
+        foreach (var o in detail.SeriesOccurrences) o.DayOffNote = notes.GetValueOrDefault(o.Id);
+        detail.DayOffNote = notes.GetValueOrDefault(entity.Id);
         return detail;
     }
 
@@ -554,8 +577,12 @@ public class CompanyEventService : ICompanyEventService
     {
         // The register shows the site; TenantEvents includes it — without it the register read blank
         // while the detail page showed it, which looked like missing data rather than a missing Include.
-        var entities = await TenantEvents(GetTenantId()).ToListAsync(cancellationToken);
-        return entities.ToDtoList();
+        var tenantId = GetTenantId();
+        var entities = await TenantEvents(tenantId).ToListAsync(cancellationToken);
+        var dtos = entities.ToDtoList().ToList();
+        // Lane 2f-1: "3 of 10" beside an occurrence in the register.
+        await FillSeriesCountsAsync(dtos, tenantId, cancellationToken);
+        return dtos;
     }
 
     public async Task<PagedResult<CompanyEventDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
@@ -569,10 +596,12 @@ public class CompanyEventService : ICompanyEventService
             .Skip((pageNumber - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
+        var dtos = items.ToDtoList().ToList();
+        await FillSeriesCountsAsync(dtos, GetTenantId(), cancellationToken);
 
         return new PagedResult<CompanyEventDto>
         {
-            Items = items.ToDtoList(),
+            Items = dtos,
             TotalCount = totalCount,
             Page = pageNumber,
             PageSize = pageSize
@@ -938,6 +967,267 @@ public class CompanyEventService : ICompanyEventService
     }
 
     // ═════════════════════════════════════════════════════════════════════════
+    //  Lane 2f-1 — a recurring event is a series (D-2, D-12)
+    // ═════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// An occurrence of <paramref name="template"/>'s series starting on <paramref name="start"/>: everything an
+    /// occurrence shares with its series, the dates and the reply-by date moved by the same amount, and nothing that
+    /// belongs to one meeting — no approval, outcome, cost, cancellation, move or sent stamps.
+    /// </summary>
+    /// <remarks>
+    /// Guests, the register, papers and tasks are each occurrence's own (D-12: people miss one week and not the next),
+    /// so none is copied. The retired department and a drill's source are not either.
+    /// </remarks>
+    private static CompanyEvent NewOccurrence(CompanyEvent template, DateTime start, int number)
+    {
+        var offset = start.Date - template.StartDate.Date;
+        return new CompanyEvent
+        {
+            TenantId = template.TenantId,
+            EventName = template.EventName,
+            Description = template.Description,
+            Category = template.Category,
+            Type = template.Type,
+            Priority = template.Priority,
+            StartDate = start.Date,
+            StartTime = template.StartTime,
+            EndDate = template.EndDate.Date + offset,
+            EndTime = template.EndTime,
+            IsAllDayEvent = template.IsAllDayEvent,
+            IsRecurring = true,
+            RecurrencePattern = template.RecurrencePattern,
+            RecurrenceDetails = template.RecurrenceDetails,
+            RecurrenceEndDate = template.RecurrenceEndDate,
+            RecurrenceCount = template.RecurrenceCount,
+            RecurrenceSeriesId = template.RecurrenceSeriesId,
+            OccurrenceNumber = number,
+            LocationType = template.LocationType,
+            VenueName = template.VenueName,
+            VenueAddress = template.VenueAddress,
+            OnlineMeetingLink = template.OnlineMeetingLink,
+            MeetingPassword = template.MeetingPassword,
+            LocationId = template.LocationId,
+            OrganizerId = template.OrganizerId,
+            OrganizationUnitId = template.OrganizationUnitId,
+            Scope = template.Scope,
+            EstimatedAttendees = template.EstimatedAttendees,
+            RequiresRsvp = template.RequiresRsvp,
+            RsvpDeadline = template.RsvpDeadline + offset,
+            Visibility = template.Visibility,
+            ShowOnCompanyCalendar = template.ShowOnCompanyCalendar,
+            ShowOnIntranet = template.ShowOnIntranet,
+            Status = EventStatus.Scheduled,
+            RequiresApproval = template.RequiresApproval,
+            HasBudget = template.HasBudget,
+            BudgetAmount = template.BudgetAmount,
+            BudgetCode = template.BudgetCode,
+            RequiredResources = template.RequiredResources,
+            CateringRequirements = template.CateringRequirements,
+            TechnicalRequirements = template.TechnicalRequirements,
+            SendReminders = template.SendReminders,
+            ReminderDaysBefore = template.ReminderDaysBefore,
+            AdditionalNotes = template.AdditionalNotes,
+        };
+    }
+
+    /// <summary>
+    /// For each event, the day the company does not work it falls on, worded — a public holiday or a company-wide
+    /// closure (D-12: generated and flagged, never skipped). Events on ordinary days are not keys.
+    /// </summary>
+    /// <remarks>
+    /// One read of each over the whole span when it is short; event by event when it is long (a yearly series spans
+    /// decades, and the holiday read refuses an absurd span). A site's or a unit's closure is not a company day off.
+    /// </remarks>
+    private async Task<Dictionary<Guid, string>> DayOffNotesAsync(
+        Guid tenantId, IReadOnlyCollection<(Guid Id, DateTime Start, DateTime End)> events, CancellationToken cancellationToken)
+    {
+        var notes = new Dictionary<Guid, string>();
+        if (events.Count == 0) return notes;
+
+        var min = events.Min(e => e.Start);
+        var max = events.Max(e => e.End);
+        var spans = (max - min).TotalDays <= 400
+            ? new List<(DateOnly From, DateOnly To)> { (DateOnly.FromDateTime(min), DateOnly.FromDateTime(max)) }
+            : events.Select(e => (From: DateOnly.FromDateTime(e.Start), To: DateOnly.FromDateTime(e.End))).ToList();
+
+        var holidays = new List<HrHolidayDay>();
+        var closures = new List<BusinessClosure>();
+        foreach (var (from, to) in spans)
+        {
+            holidays.AddRange(await _workingDays.GetHolidaysAsync(tenantId, from, to, cancellationToken));
+            closures.AddRange((await _closureCalendar.GetClosuresAsync(tenantId, from, to, cancellationToken))
+                .Where(c => BusinessClosureRules.IsNonWorking(c) && BusinessClosureRules.ScopeOf(c).Kind == ClosureScopeKind.Company));
+        }
+
+        foreach (var (id, start, end) in events)
+        {
+            for (var day = DateOnly.FromDateTime(start); day <= DateOnly.FromDateTime(end); day = day.AddDays(1))
+            {
+                var holiday = holidays.FirstOrDefault(h => h.Date == day);
+                var closure = holiday is null ? closures.FirstOrDefault(c => BusinessClosureRules.Covers(c, day)) : null;
+                if (holiday is null && closure is null) continue;
+                var what = holiday is not null
+                    ? $"a public holiday: {holiday.Name}{(holiday.InLieu ? " (the day given in lieu)" : string.Empty)}"
+                    : $"a company-wide closure: {closure!.Title}";
+                notes[id] = start.Date == end.Date ? $"Falls on {what}." : $"Its {day:dddd, d MMMM} is {what}.";
+                break;
+            }
+        }
+        return notes;
+    }
+
+    /// <summary>"EVT-2026-00412, Tuesday 1 July 2026: falls on …" — for a save's warnings.</summary>
+    private static List<string> DayOffWarnings(IEnumerable<CompanyEvent> events, IReadOnlyDictionary<Guid, string> notes) =>
+        events.Where(e => notes.ContainsKey(e.Id))
+            .Select(e => $"{e.EventNumber}, {e.StartDate:dddd d MMMM yyyy}: {char.ToLowerInvariant(notes[e.Id][0])}{notes[e.Id][1..]} "
+                         + "It is kept; move it if it should not go ahead that day.")
+            .ToList();
+
+    /// <summary>How many occurrences each series in <paramref name="dtos"/> has — "occurrence 3 of 10".</summary>
+    private async Task FillSeriesCountsAsync(IReadOnlyCollection<CompanyEventDto> dtos, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var ids = dtos.Where(d => d.RecurrenceSeriesId is not null).Select(d => d.RecurrenceSeriesId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return;
+        var counts = await _eventRepository.GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.RecurrenceSeriesId != null && ids.Contains(e.RecurrenceSeriesId.Value))
+            .GroupBy(e => e.RecurrenceSeriesId!.Value)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+        foreach (var d in dtos)
+            if (d.RecurrenceSeriesId is { } s && counts.TryGetValue(s, out var count)) d.OccurrenceCount = count;
+    }
+
+    /// <summary>A series' live occurrences, in order — narrow rows, no includes.</summary>
+    private Task<List<EventSeriesOccurrenceDto>> SeriesOccurrencesAsync(Guid seriesId, Guid tenantId, CancellationToken cancellationToken) =>
+        _eventRepository.GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && e.RecurrenceSeriesId == seriesId)
+            .OrderBy(e => e.OccurrenceNumber)
+            .Select(e => new EventSeriesOccurrenceDto
+            {
+                Id = e.Id,
+                EventNumber = e.EventNumber,
+                OccurrenceNumber = e.OccurrenceNumber ?? 0,
+                StartDate = e.StartDate,
+                StartTime = e.StartTime,
+                EndDate = e.EndDate,
+                Status = e.Status,
+                IsCancelled = e.IsCancelled,
+            })
+            .ToListAsync(cancellationToken);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>On the series' rule, counted from its first date</b> — the first occurrence's original date, so a
+    /// first occurrence moved on its own does not move the rule — and copied from its LAST occurrence, which carries
+    /// the latest edits. The series holds at most 52, deleted occurrences included in the numbering.</para>
+    ///
+    /// <para>An occurrence on a holiday or a company-wide closure is made and flagged. New occurrences that need
+    /// approval are approved together: the first of them goes to the engine, and its decision covers the rest
+    /// (the user's ruling).</para>
+    ///
+    /// <para>Guests are each occurrence's own, so the new dates start with none; 2f-2's series scope invites a guest
+    /// to them.</para>
+    /// </remarks>
+    public async Task<EventSeriesResultDto> ExtendSeriesAsync(Guid eventId, ExtendEventSeriesDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        if (ev.RecurrenceSeriesId is not { } seriesId || ev.RecurrencePattern is not { } pattern)
+            throw new InvalidOperationException($"{ev.EventName} is a single event, not a series. Make a new recurring event instead.");
+
+        // Deleted occurrences hold their place in the numbering and the rule, as a deleted event holds its number.
+        var all = await _eventRepository.GetQueryable().IgnoreQueryFilters()
+            .Where(e => e.TenantId == tenantId && e.RecurrenceSeriesId == seriesId)
+            .Select(e => new { e.Id, e.OccurrenceNumber, e.StartDate, e.OriginalStartDate, e.IsDeleted })
+            .ToListAsync(cancellationToken);
+        var anchor = all.Where(x => x.OccurrenceNumber == 1).Select(x => x.OriginalStartDate ?? x.StartDate).FirstOrDefault();
+        if (anchor == default) anchor = all.OrderBy(x => x.OccurrenceNumber).First().StartDate;
+        var last = all.Max(x => x.OccurrenceNumber ?? 0);
+        var templateId = all.Where(x => !x.IsDeleted).OrderByDescending(x => x.OccurrenceNumber).Select(x => x.Id).First();
+        var template = templateId == ev.Id ? ev : await GetOwnedEventAsync(templateId, cancellationToken);
+
+        var (total, refusal) = CompanyEventSeries.Plan(pattern, dto.Count, dto.Until, anchor,
+            (template.EndDate.Date - template.StartDate.Date).Days, already: last);
+        Refuse(refusal);
+
+        var made = new List<CompanyEvent>();
+        for (var index = last; index < total; index++)
+        {
+            var occurrence = NewOccurrence(template, CompanyEventSeries.DateAt(pattern, anchor, index), index + 1);
+            occurrence.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
+            StampCreator(occurrence);
+            await _eventRepository.AddAsync(occurrence);
+            made.Add(occurrence);
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Series of {EventNumber} extended by {Count} occurrence(s), to {Total}", ev.EventNumber, made.Count, total);
+
+        // The user's ruling: approved once for what was added — the first new occurrence asks, its decision covers the rest.
+        if (made[0].RequiresApproval) await StartApprovalAsync(made[0], cancellationToken);
+
+        var notes = await DayOffNotesAsync(tenantId, made.Select(m => (m.Id, m.StartDate, m.EndDate)).ToList(), cancellationToken);
+        return new EventSeriesResultDto
+        {
+            Occurrences = made.Select(m => new EventSeriesOccurrenceDto
+            {
+                Id = m.Id, EventNumber = m.EventNumber, OccurrenceNumber = m.OccurrenceNumber ?? 0,
+                StartDate = m.StartDate, StartTime = m.StartTime, EndDate = m.EndDate, Status = m.Status,
+                DayOffNote = notes.GetValueOrDefault(m.Id),
+            }).ToList(),
+            Warnings = DayOffWarnings(made, notes),
+        };
+    }
+
+    /// <summary>
+    /// The occurrences of <paramref name="e"/>'s series a decision on <paramref name="e"/> also decides (the user's
+    /// ruling: approved once, for the series) — those still awaiting approval with no approval of their own under way.
+    /// </summary>
+    /// <remarks>
+    /// An occurrence moved after its approval was sent back for approval of its own (D-10), and keeps it. The rule is
+    /// "every occurrence still waiting with nothing under way of its own", so an approval of a moved occurrence also
+    /// covers an extension waiting at the same moment.
+    /// </remarks>
+    private async Task<List<CompanyEvent>> SharingApprovalAsync(CompanyEvent e, CancellationToken cancellationToken)
+    {
+        if (e.RecurrenceSeriesId is not { } seriesId) return [];
+        var waiting = await _eventRepository.GetQueryable()
+            .Include(x => x.Organizer)
+            .Where(x => x.TenantId == e.TenantId && x.RecurrenceSeriesId == seriesId && x.Id != e.Id
+                        && x.RequiresApproval && x.ApprovalDate == null && !x.IsCancelled
+                        && x.Status != EventStatus.Cancelled && x.Status != EventStatus.Completed)
+            .OrderBy(x => x.OccurrenceNumber)
+            .ToListAsync(cancellationToken);
+        var sharing = new List<CompanyEvent>();
+        foreach (var x in waiting)
+            if (!await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, x.Id)) sharing.Add(x);
+        return sharing;
+    }
+
+    /// <summary>
+    /// Refuses a decision on an occurrence whose approval is under way on another occurrence of its series (the user's
+    /// ruling: approved once) — naming the one to decide.
+    /// </summary>
+    private async Task EnsureNotSharedElsewhereAsync(CompanyEvent e, string verb, CancellationToken cancellationToken)
+    {
+        if (e.RecurrenceSeriesId is not { } seriesId) return;
+        if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, e.Id)) return;
+
+        var others = await _eventRepository.GetQueryable().AsNoTracking()
+            .Where(x => x.TenantId == e.TenantId && x.RecurrenceSeriesId == seriesId && x.Id != e.Id
+                        && x.RequiresApproval && x.ApprovalDate == null && !x.IsCancelled
+                        && x.Status != EventStatus.Cancelled && x.Status != EventStatus.Completed)
+            .OrderBy(x => x.OccurrenceNumber)
+            .Select(x => new { x.Id, x.EventNumber, x.OccurrenceNumber })
+            .ToListAsync(cancellationToken);
+        foreach (var other in others)
+            if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, other.Id))
+                throw new InvalidOperationException(
+                    $"{e.EventName} is approved with its series: {verb} {other.EventNumber} (occurrence {other.OccurrenceNumber}), "
+                    + "and the decision covers this occurrence too.");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════
     //  Lane 2b — approval on the workflow engine (D-10)
     // ═════════════════════════════════════════════════════════════════════════
 
@@ -1166,16 +1456,48 @@ public class CompanyEventService : ICompanyEventService
         entity.OrganizerId = createDto.OrganizerId is { } chosen && chosen != Guid.Empty ? chosen : callerEmployeeId;
         await ValidateAsync(entity, EventWindow.Of(entity), tenantId, checkOrganiser: true, cancellationToken);
 
+        // Lane 2f-1 (D-2, D-12): a recurring event is a series, and every occurrence is made now — each a full event.
+        // It used to store "repeats weekly, 10 times" and make nothing (C-14).
+        var occurrences = 1;
+        if (entity.IsRecurring)
+        {
+            var (count, refusal) = CompanyEventSeries.Plan(entity.RecurrencePattern, entity.RecurrenceCount,
+                entity.RecurrenceEndDate, entity.StartDate, (entity.EndDate.Date - entity.StartDate.Date).Days);
+            Refuse(refusal);
+            occurrences = count;
+            entity.RecurrenceSeriesId = Guid.NewGuid();
+            entity.OccurrenceNumber = 1;
+        }
+        else
+        {
+            entity.RecurrencePattern = null;
+            entity.RecurrenceCount = null;
+            entity.RecurrenceEndDate = null;
+            entity.RecurrenceDetails = null;
+        }
+
         entity.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
         entity.Status = EventStatus.Scheduled;
         StampCreator(entity);
-
         await _eventRepository.AddAsync(entity);
+
+        var series = new List<CompanyEvent> { entity };
+        for (var index = 1; index < occurrences; index++)
+        {
+            var occurrence = NewOccurrence(entity, CompanyEventSeries.DateAt(entity.RecurrencePattern!.Value, entity.StartDate, index), index + 1);
+            occurrence.EventNumber = await _eventRepository.GetNextEventNumberAsync(tenantId, cancellationToken);
+            StampCreator(occurrence);
+            await _eventRepository.AddAsync(occurrence);
+            series.Add(occurrence);
+        }
+        // One save: a series is made whole or not at all.
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event created: {EventNumber}", entity.EventNumber);
+        _logger.LogInformation("Company event created: {EventNumber}{Series}", entity.EventNumber,
+            occurrences > 1 ? $" and {occurrences - 1} more occurrence(s), to {series[^1].EventNumber}" : string.Empty);
 
-        // D-10: an event that needs approval goes to the engine now — events have no draft to submit.
+        // D-10: an event that needs approval goes to the engine now — events have no draft to submit. A series is
+        // approved once (the user's ruling, 2f-1): its first occurrence asks, and the decision covers the rest.
         if (entity.RequiresApproval) await StartApprovalAsync(entity, cancellationToken);
 
         // ⚠ Re-read before mapping. `entity` is the graph we just inserted: its Organizer,
@@ -1185,6 +1507,9 @@ public class CompanyEventService : ICompanyEventService
         var created = await GetByIdAsync(entity.Id, cancellationToken);
         // D-16: an audience that reaches nobody is said, not refused — the guests can still be invited.
         if (await AudienceWarningAsync(entity, cancellationToken) is { } warning) created.Warnings.Add(warning);
+        // D-12: an occurrence on a day the company does not work is made and flagged, not skipped.
+        created.Warnings.AddRange(DayOffWarnings(series,
+            await DayOffNotesAsync(tenantId, series.Select(s => (s.Id, s.StartDate, s.EndDate)).ToList(), cancellationToken)));
         return created;
     }
 
@@ -1289,20 +1614,30 @@ public class CompanyEventService : ICompanyEventService
     {
         var entity = await GetOwnedEventAsync(eventId, cancellationToken);
         EnsureDecidable(entity, approvedById, "approve");
+        // Lane 2f-1: a series is approved once (the user's ruling) — not through an occurrence that shares an approval
+        // under way on another, and the decision covers every occurrence sharing it.
+        await EnsureNotSharedElsewhereAsync(entity, "approve", cancellationToken);
+        var sharing = await SharingApprovalAsync(entity, cancellationToken);
 
         var outcome = await DecideAsync(entity, "Approve", comments);
         // ⚠ The approver's EMPLOYEE id: ApprovedById is an Employee foreign key.
-        _workflowAdapters.GetAdapter(WorkflowEntityType).ApplyApprovalOutcome(entity, outcome, approvedById);
+        var adapter = _workflowAdapters.GetAdapter(WorkflowEntityType);
+        adapter.ApplyApprovalOutcome(entity, outcome, approvedById);
+        // Only a final approval covers the rest: a definition with another stage to go leaves them all waiting.
+        var covered = outcome == WorkflowOutcome.Approved && entity.ApprovalDate != null ? sharing : [];
+        foreach (var occurrence in covered) adapter.ApplyApprovalOutcome(occurrence, outcome, approvedById);
 
         await _eventRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Company event approval for {EventNumber}: {Outcome}", entity.EventNumber, outcome);
+        _logger.LogInformation("Company event approval for {EventNumber}: {Outcome}{Series}", entity.EventNumber, outcome,
+            covered.Count > 0 ? $", with {covered.Count} more occurrence(s) of its series" : string.Empty);
 
         // Lane 2e-1: approved at last — the invitations that waited go (F-33), and the organiser is told.
         if (outcome == WorkflowOutcome.Approved && entity.ApprovalDate != null)
         {
             var invited = await InviteWaitingGuestsAsync(entity, cancellationToken);
+            foreach (var occurrence in covered) invited.Add(await InviteWaitingGuestsAsync(occurrence, cancellationToken));
             await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventApproved, CompanyScheduleNotices.Approved,
                 tokens =>
                 {
@@ -1328,17 +1663,29 @@ public class CompanyEventService : ICompanyEventService
 
         var entity = await GetOwnedEventAsync(eventId, cancellationToken);
         EnsureDecidable(entity, rejectedById, "reject");
+        // Lane 2f-1: as for approval — a series is decided once, and not approving it cancels every occurrence sharing it.
+        await EnsureNotSharedElsewhereAsync(entity, "reject", cancellationToken);
+        var sharing = await SharingApprovalAsync(entity, cancellationToken);
 
         var outcome = await DecideAsync(entity, "Reject", reason.Trim());
-        _workflowAdapters.GetAdapter(WorkflowEntityType).ApplyApprovalOutcome(entity, outcome, rejectedById, reason.Trim());
+        var adapter = _workflowAdapters.GetAdapter(WorkflowEntityType);
+        adapter.ApplyApprovalOutcome(entity, outcome, rejectedById, reason.Trim());
 
         var change = new CompanyEventChangeDto();
+        var covered = outcome == WorkflowOutcome.Rejected ? sharing : [];
         if (outcome == WorkflowOutcome.Rejected)
         {
             change.BookingsCancelled = await CancelLinkedBookingsAsync(
                 entity, $"{entity.EventNumber} was not approved: {reason.Trim()}", cancellationToken);
             // Lane 2e-3 (D-14): a guest who held an entry (invited before a move sent it back for approval) loses it.
             entity.CalendarSequence++;
+            foreach (var occurrence in covered)
+            {
+                adapter.ApplyApprovalOutcome(occurrence, outcome, rejectedById, reason.Trim());
+                change.BookingsCancelled.AddRange(await CancelLinkedBookingsAsync(
+                    occurrence, $"{occurrence.EventNumber} was not approved: {reason.Trim()}", cancellationToken));
+                occurrence.CalendarSequence++;
+            }
         }
 
         await _eventRepository.UpdateAsync(entity);
@@ -1358,6 +1705,13 @@ public class CompanyEventService : ICompanyEventService
             change.Told = await NotifyParticipantsAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, WithReason,
                 "event not approved", CompanyScheduleNotices.Cancelled,
                 calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken);
+            // The occurrences it covered: only a guest invited before a move sent one back for approval was ever told
+            // of them, so in the ordinary case this tells nobody.
+            foreach (var occurrence in covered)
+                change.Told.Add(await NotifyParticipantsAsync(occurrence, CompanyScheduleEmailCatalog.Events.EventCancelled,
+                    tokens => { tokens["CancellationReason"] = occurrence.CancellationReason; return tokens; },
+                    "event not approved", CompanyScheduleNotices.Cancelled,
+                    calendar: HrCalendarMethod.Cancel, cancellationToken: cancellationToken));
             // Lane 2e-1: the organiser hears why, unless their invitation already said it.
             change.Told.Add(await TellOrganiserAsync(entity, CompanyScheduleEmailCatalog.Events.EventCancelled, CompanyScheduleNotices.NotApproved,
                 WithReason, "event not approved (organiser)", cancellationToken,

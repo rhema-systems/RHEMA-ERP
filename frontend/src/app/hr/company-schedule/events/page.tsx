@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -39,6 +39,8 @@ const hhmm = (t?: string | null) => (t ? t.slice(0, 5) : '');
 
 export default function CompanyEventsPage() {
   const router = useRouter();
+  // Lane 2f-1: the event page's "all occurrences" link opens the register on one series.
+  const series = useSearchParams().get('series');
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>(ALL);
   const [category, setCategory] = useState<string>(ALL);
@@ -51,6 +53,7 @@ export default function CompanyEventsPage() {
   const events = useMemo(() => {
     const term = search.trim().toLowerCase();
     return (data ?? [])
+      .filter((e) => !series || e.recurrenceSeriesId === series)
       .filter((e) => (status === ALL ? true : e.status === status))
       .filter((e) => (category === ALL ? true : e.category === category))
       .filter(
@@ -61,8 +64,9 @@ export default function CompanyEventsPage() {
           (e.venueName ?? '').toLowerCase().includes(term) ||
           e.organizerName.toLowerCase().includes(term),
       )
-      .sort((a, b) => b.startDate.localeCompare(a.startDate));
-  }, [data, search, status, category]);
+      .sort((a, b) =>
+        series ? (a.occurrenceNumber ?? 0) - (b.occurrenceNumber ?? 0) : b.startDate.localeCompare(a.startDate));
+  }, [data, search, status, category, series]);
 
   return (
     <div className="space-y-6 p-6">
@@ -80,7 +84,14 @@ export default function CompanyEventsPage() {
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>Events</CardTitle>
+            <CardTitle>
+              {series ? 'One series' : 'Events'}
+              {series && (
+                <Button variant="link" size="sm" onClick={() => router.push('/hr/company-schedule/events')}>
+                  Show all events
+                </Button>
+              )}
+            </CardTitle>
             <div className="flex flex-wrap items-center gap-2">
               <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
@@ -164,7 +175,14 @@ export default function CompanyEventsPage() {
                       onClick={() => router.push(`/hr/company-schedule/events/${e.id}`)}
                     >
                       <TableCell className="font-mono text-xs">{e.eventNumber}</TableCell>
-                      <TableCell className="font-medium">{e.eventName}</TableCell>
+                      <TableCell className="font-medium">
+                        {e.eventName}
+                        {e.occurrenceNumber && e.occurrenceCount ? (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            {e.occurrenceNumber} of {e.occurrenceCount}
+                          </span>
+                        ) : null}
+                      </TableCell>
                       <TableCell>{spaced(e.category)}</TableCell>
                       <TableCell className="whitespace-nowrap">
                         {e.startDate.slice(0, 10)}

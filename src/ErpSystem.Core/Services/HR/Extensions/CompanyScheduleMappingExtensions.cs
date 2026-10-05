@@ -37,6 +37,8 @@ public static class CompanyScheduleMappingExtensions
         dto.RecurrenceDetails = entity.RecurrenceDetails;
         dto.RecurrenceEndDate = entity.RecurrenceEndDate;
         dto.RecurrenceCount = entity.RecurrenceCount;
+        dto.RecurrenceSeriesId = entity.RecurrenceSeriesId;
+        dto.OccurrenceNumber = entity.OccurrenceNumber;
         dto.LocationType = entity.LocationType;
         dto.VenueName = entity.VenueName;
         dto.VenueAddress = entity.VenueAddress;

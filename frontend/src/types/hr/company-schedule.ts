@@ -29,7 +29,18 @@ export type EventType = 'Internal' | 'External' | 'ClientMeeting' | 'Statutory' 
 
 export type EventPriority = 'Critical' | 'High' | 'Medium' | 'Low';
 
-export type RecurrencePattern = 'Daily' | 'Weekly' | 'BiWeekly' | 'Monthly' | 'Quarterly' | 'Annually';
+export type RecurrencePattern = 'Daily' | 'Weekdays' | 'Weekly' | 'BiWeekly' | 'Monthly' | 'Quarterly' | 'Annually';
+
+/** How each pattern reads on a form (lane 2f-1). Weekdays is Monday to Friday; Daily every calendar day. */
+export const RECURRENCE_PATTERN_LABELS: Record<RecurrencePattern, string> = {
+  Daily: 'Every day',
+  Weekdays: 'Every weekday (Mon–Fri)',
+  Weekly: 'Every week',
+  BiWeekly: 'Every two weeks',
+  Monthly: 'Every month',
+  Quarterly: 'Every quarter',
+  Annually: 'Every year',
+};
 
 export type EventLocationType = 'OnSite' | 'OffSite' | 'Virtual' | 'Hybrid';
 
@@ -81,7 +92,7 @@ export const EVENT_EDITABLE_STATUSES: EventStatus[] = ['Scheduled', 'InProgress'
 export const EVENT_TYPES: EventType[] = ['Internal', 'External', 'ClientMeeting', 'Statutory', 'BoardMeeting'];
 export const EVENT_PRIORITIES: EventPriority[] = ['Critical', 'High', 'Medium', 'Low'];
 export const RECURRENCE_PATTERNS: RecurrencePattern[] = [
-  'Daily', 'Weekly', 'BiWeekly', 'Monthly', 'Quarterly', 'Annually',
+  'Daily', 'Weekdays', 'Weekly', 'BiWeekly', 'Monthly', 'Quarterly', 'Annually',
 ];
 export const EVENT_LOCATION_TYPES: EventLocationType[] = ['OnSite', 'OffSite', 'Virtual', 'Hybrid'];
 export const PARTICIPANT_SCOPES: ParticipantScope[] = [
@@ -179,6 +190,10 @@ export interface CompanyEvent extends AuditFields {
   recurrenceDetails?: string | null;
   recurrenceEndDate?: string | null;
   recurrenceCount?: number | null;
+  /** The series it is an occurrence of, its place in it, and how many the series has (lane 2f-1). */
+  recurrenceSeriesId?: string | null;
+  occurrenceNumber?: number | null;
+  occurrenceCount?: number | null;
 
   locationType: EventLocationType;
   locationTypeName: string;
@@ -298,6 +313,35 @@ export interface CompanyEventDetail extends CompanyEvent {
   rsvpChaseDueOn?: string | null;
   /** Whether the tenant has a mail server set up — without one, only people with a login are told, in the app. */
   mailServerSetUp: boolean;
+  /** Every occurrence of its series, in order (lane 2f-1); empty for a one-off event. */
+  seriesOccurrences: EventSeriesOccurrence[];
+  /** "Falls on a public holiday: …" — flagged, not skipped (D-12). */
+  dayOffNote?: string | null;
+}
+
+/** One occurrence of a series, as its list shows it (lane 2f-1). */
+export interface EventSeriesOccurrence {
+  id: string;
+  eventNumber: string;
+  occurrenceNumber: number;
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  status: EventStatus;
+  statusName: string;
+  isCancelled: boolean;
+  dayOffNote?: string | null;
+}
+
+/** More occurrences after a series' last: how many, or until when — not both (lane 2f-1). */
+export interface ExtendEventSeries {
+  count?: number | null;
+  until?: string | null;
+}
+
+export interface EventSeriesResult {
+  occurrences: EventSeriesOccurrence[];
+  warnings: string[];
 }
 
 /**

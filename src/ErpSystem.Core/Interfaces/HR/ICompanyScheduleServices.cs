@@ -87,6 +87,12 @@ public interface ICompanyEventService
     Task<CompanyEventNoticeResultDto> SendUndeliveredInvitationsAsync(Guid eventId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Adds occurrences after the last of the event's series, on its rule (lane 2f-1, D-12): either how many more, or
+    /// until a date; the series holds at most 52. Each new occurrence is a full event, copied from the last.
+    /// </summary>
+    Task<EventSeriesResultDto> ExtendSeriesAsync(Guid eventId, ExtendEventSeriesDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// The company-schedule reminder sweep for one tenant (round 4, lane N-b2): each live event's
     /// reminder <c>ReminderDaysBefore</c> days ahead where <c>SendReminders</c> is on, and the chase of
     /// unanswered invitations <c>CompanyEventRsvpChaseLeadDays</c> ahead of the RSVP deadline — each

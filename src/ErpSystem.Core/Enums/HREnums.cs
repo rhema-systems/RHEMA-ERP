@@ -7991,7 +7991,14 @@ public enum RecurrencePattern
     Quarterly = 5,
 
     [Description("Annually")]
-    Annually = 6
+    Annually = 6,
+
+    /// <summary>
+    /// Monday to Friday (company-schedule final closure, lane 2f-1: the user's ruling) — a daily stand-up. Daily stays
+    /// every calendar day. Stored as an int, so no schema change.
+    /// </summary>
+    [Description("Weekdays")]
+    Weekdays = 7
 }
 
 public enum RegularizationType

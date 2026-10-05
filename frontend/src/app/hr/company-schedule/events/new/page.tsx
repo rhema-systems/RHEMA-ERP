@@ -27,9 +27,13 @@ export default function NewCompanyEventPage() {
       const created = await companyEventService.create(toCreatePayload(values));
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
       toast({
-        title: 'Event scheduled',
-        // An audience that reaches nobody is said, not refused (lane 2c, D-16).
-        description: [`${created.eventNumber} — ${created.eventName}.`, ...(created.warnings ?? []).map((w) => `⚠ ${w}`)].join(' '),
+        // Lane 2f-1: a recurring event is made as its whole series now.
+        title: created.occurrenceCount ? `Series scheduled — ${created.occurrenceCount} occurrences` : 'Event scheduled',
+        // An audience that reaches nobody is said, not refused (lane 2c, D-16); an occurrence on a day off is flagged (D-12).
+        description: [
+          `${created.eventNumber} — ${created.eventName}${created.occurrenceCount ? ', the first of the series' : ''}.`,
+          ...(created.warnings ?? []).map((w) => `⚠ ${w}`),
+        ].join(' '),
       });
       router.push(`/hr/company-schedule/events/${created.id}`);
     } catch (error: any) {
