@@ -65,7 +65,7 @@ The configured approval target is the `Chief Accountant` role. A System Administ
 ## Completed commit
 
 - `4ce834927a78b742ea264194ab6274b5338636e4` - `fix(finance): close receipt and cash approval gaps`
-- Pending - `fix(finance): hide self-confirmation of bank deposits`
+- `4e30e26d43be376f5eb49717cba94728e43c73e4` - `fix(finance): hide self-confirmation of bank deposits`
 
 ## Authorization boundaries
 
