@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Enums;
@@ -7,7 +8,7 @@ namespace ErpSystem.Core.Services.HR;
 
 /// <summary>
 /// Counts working days for HR's statutory deadlines — Monday to Friday, less the tenant's public
-/// holidays.
+/// holidays and its company-wide business closures.
 /// </summary>
 /// <remarks>
 /// <para><b>Why this exists.</b> FR-HR-180 gives an employee five WORKING days to file an appeal and
@@ -30,6 +31,14 @@ namespace ErpSystem.Core.Services.HR;
 /// <para>Holidays come from the tenant's default <see cref="HolidayCalendar"/>. A tenant with no
 /// calendar configured simply gets Monday-to-Friday, which is the safe direction: the deadline lands
 /// no later than it should, so nobody's appeal is rejected because a holiday was missed.</para>
+///
+/// <para><b>Company-wide business closures are days off here too</b> (company-schedule final
+/// closure, lane 1b: F-28, F-29) — a full closure, or a partial one never, since a partial closure's
+/// day is still worked. A shutdown is not worked by anyone, so like a holiday it is a property of the
+/// process, and a statutory clock no longer counts the year-end shutdown as five working days. A
+/// closure of one site or one unit is NOT here: it belongs to the people it covers, which this is
+/// deliberately not — leave adds those per employee (<see cref="IHrClosureCalendar.GetClosureDatesAsync"/>).
+/// Through this one set, leave, the discipline deadlines and travel's on-duty posting all agree.</para>
 /// </remarks>
 public interface IHrWorkingDayCalculator
 {
@@ -47,8 +56,9 @@ public interface IHrWorkingDayCalculator
 
     /// <summary>
     /// Every date the tenant does not work in <paramref name="from"/>..<paramref name="to"/>, because
-    /// a holiday covers it or stands in lieu of one. Weekends are NOT included — a caller that counts
-    /// weekends differently (leave types can be configured either way) decides that for itself.
+    /// a holiday covers it or stands in lieu of one, or a company-wide closure makes it a day off.
+    /// Weekends are NOT included — a caller that counts weekends differently (leave types can be
+    /// configured either way) decides that for itself.
     /// </summary>
     /// <remarks>
     /// Exposed so leave can share this module's one answer to "is this a holiday" instead of keeping
@@ -60,8 +70,9 @@ public interface IHrWorkingDayCalculator
         Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// The same days as <see cref="GetHolidayDatesAsync"/>, each with the holiday's name, in date
-    /// order — for screens that say WHICH holiday (company-schedule final closure, R4-10A.4).
+    /// The holidays among <see cref="GetHolidayDatesAsync"/>'s days — closures not included — each with
+    /// the holiday's name, in date order, for screens that say WHICH holiday (company-schedule final
+    /// closure, R4-10A.4). A screen showing closures reads them as closures, with their own titles.
     /// </summary>
     /// <remarks>
     /// The diaries and the clash check used to read every holiday of every calendar, retired and
@@ -95,7 +106,9 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
     {
         if (workingDays <= 0) return from;
 
-        var holidays = await LoadHolidaysAsync(tenantId, cancellationToken);
+        // The walk stops at MaxDaysToWalk, so that is as far as closures need reading.
+        var start = DateOnly.FromDateTime(from);
+        var holidays = await LoadNonWorkingDaysAsync(tenantId, start, start.AddDays(MaxDaysToWalk), cancellationToken);
 
         var cursor = from.Date;
         var counted = 0;
@@ -117,7 +130,8 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
     {
         if (to.Date <= from.Date) return 0;
 
-        var holidays = await LoadHolidaysAsync(tenantId, cancellationToken);
+        var holidays = await LoadNonWorkingDaysAsync(
+            tenantId, DateOnly.FromDateTime(from), DateOnly.FromDateTime(to), cancellationToken);
 
         var counted = 0;
         var cursor = from.Date;
@@ -148,9 +162,7 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
     {
         if (to < from) return new HashSet<DateOnly>();
 
-        var all = await LoadHolidaysAsync(tenantId, cancellationToken);
-        all.RemoveWhere(d => d < from || d > to);
-        return all;
+        return await LoadNonWorkingDaysAsync(tenantId, from, to, cancellationToken);
     }
 
     public async Task<IReadOnlyList<HrHolidayDay>> GetHolidaysAsync(
@@ -164,8 +176,32 @@ public sealed class HrWorkingDayCalculator : IHrWorkingDayCalculator
             .ToList();
     }
 
-    private async Task<HashSet<DateOnly>> LoadHolidaysAsync(Guid tenantId, CancellationToken cancellationToken)
-        => (await LoadNamedHolidaysAsync(tenantId, cancellationToken)).Select(h => h.Date).ToHashSet();
+    /// <summary>
+    /// The days off in <paramref name="from"/>..<paramref name="to"/>: holidays, and the days of every
+    /// company-wide closure that is a day off.
+    /// </summary>
+    /// <remarks>
+    /// Bounded by the range, unlike the holidays alone: a closure that recurs every year has no last
+    /// occurrence. The scope comes from the closure's type, as everywhere
+    /// (<see cref="BusinessClosureRules.ScopeOf"/>), so a site or unit closure is left out here.
+    /// </remarks>
+    private async Task<HashSet<DateOnly>> LoadNonWorkingDaysAsync(
+        Guid tenantId, DateOnly from, DateOnly to, CancellationToken cancellationToken)
+    {
+        var days = (await LoadNamedHolidaysAsync(tenantId, cancellationToken))
+            .Where(h => h.Date >= from && h.Date <= to)
+            .Select(h => h.Date)
+            .ToHashSet();
+
+        var closures = await BusinessClosureRules
+            .Candidates(_unitOfWork.Repository<BusinessClosure>().GetQueryable(), tenantId, from, to)
+            .ToListAsync(cancellationToken);
+        foreach (var closure in closures.Where(c => BusinessClosureRules.IsNonWorking(c)
+                                                 && BusinessClosureRules.ScopeOf(c).Kind == ClosureScopeKind.Company))
+            days.UnionWith(BusinessClosureRules.DatesIn(closure, from, to));
+
+        return days;
+    }
 
     private async Task<List<HrHolidayDay>> LoadNamedHolidaysAsync(Guid tenantId, CancellationToken cancellationToken)
     {

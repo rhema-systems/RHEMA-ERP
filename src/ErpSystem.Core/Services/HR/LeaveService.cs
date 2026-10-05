@@ -33,6 +33,7 @@ public class LeaveService : ILeaveService
     private readonly IGenericRepository<LeaveAdjustment> _leaveAdjustmentRepository;
     private readonly IGenericRepository<EmployeeReliever> _employeeRelieverRepository;
     private readonly IHrWorkingDayCalculator _workingDayCalculator;
+    private readonly IHrClosureCalendar _closureCalendar;
     private readonly ILeaveAttendancePostingService _attendancePosting;
     private readonly IGenericRepository<StaffDailyAttendance> _dailyAttendanceRepository;
     private readonly IGenericRepository<PublicHoliday> _holidayNameLookupRepository;
@@ -87,6 +88,7 @@ public class LeaveService : ILeaveService
             IGenericRepository<LeaveAdjustment> leaveAdjustmentRepository,
             IGenericRepository<EmployeeReliever> employeeRelieverRepository,
             IHrWorkingDayCalculator workingDayCalculator,
+            IHrClosureCalendar closureCalendar,
             ILeaveAttendancePostingService attendancePosting,
             IGenericRepository<StaffDailyAttendance> dailyAttendanceRepository,
             IGenericRepository<PublicHoliday> holidayNameLookupRepository,
@@ -118,6 +120,7 @@ public class LeaveService : ILeaveService
         _leaveAdjustmentRepository = leaveAdjustmentRepository;
         _employeeRelieverRepository = employeeRelieverRepository;
         _workingDayCalculator = workingDayCalculator;
+        _closureCalendar = closureCalendar;
         _attendancePosting = attendancePosting;
         _dailyAttendanceRepository = dailyAttendanceRepository;
         _holidayNameLookupRepository = holidayNameLookupRepository;
@@ -361,7 +364,7 @@ public class LeaveService : ILeaveService
         }
 
         // Calculate total days
-        var totalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType);
+        var totalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType, dto.EmployeeId);
 
         // Validate against the ACCRUED balance (you cannot take more than has accrued to date).
         // We do NOT persist the balance here — the recalculation service (called inside the
@@ -521,7 +524,7 @@ public class LeaveService : ILeaveService
                 throw new InvalidOperationException("Employee already has a leave request for this period.");
         }
 
-        var totalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType);
+        var totalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType, request.EmployeeId);
 
         // Validate balance only when dates or type have changed. A missing balance means the
         // employee still has their full entitlement; the recalculation service persists it later.
@@ -614,7 +617,7 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException("Leave end date must be after or equal to start date.");
 
         // The same figures the create check reads, so the form and the refusal cannot disagree.
-        var requested = await CalculateLeaveDaysAsync(startDate, endDate, leaveType);
+        var requested = await CalculateLeaveDaysAsync(startDate, endDate, leaveType, employeeId);
         var year = LeaveYear.For(startDate, await _leaveYear.StartMonthAsync());
         var tenantId = GetTenantId();
         var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
@@ -1226,7 +1229,7 @@ public class LeaveService : ILeaveService
 
         request.StartDate = newStart;
         request.EndDate = newEnd;
-        request.TotalDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType);
+        request.TotalDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType, request.EmployeeId);
 
         // The suggestion is resolved either way - cleared before it goes back for approval.
         request.SuggestedStartDate = null;
@@ -1311,7 +1314,7 @@ public class LeaveService : ILeaveService
 
         request.StartDate = dto.StartDate;
         request.EndDate = dto.EndDate;
-        request.TotalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType);
+        request.TotalDays = await CalculateLeaveDaysAsync(dto.StartDate, dto.EndDate, leaveType, request.EmployeeId);
         request.RescheduledDate = _clock.UtcNow;
         request.RescheduledById = _currentUserService.EmployeeId;
         request.RescheduleReason = dto.Reason.Trim();
@@ -1483,7 +1486,7 @@ public class LeaveService : ILeaveService
         // The day before they are back is the last day of leave.
         var newEndDate = backOn.AddDays(-1);
         var daysBefore = request.TotalDays;
-        var daysAfter = await CalculateLeaveDaysAsync(request.StartDate, newEndDate, leaveType);
+        var daysAfter = await CalculateLeaveDaysAsync(request.StartDate, newEndDate, leaveType, request.EmployeeId);
 
         if (daysAfter >= daysBefore) return false;
 
@@ -1709,7 +1712,7 @@ public class LeaveService : ILeaveService
         if (hasConflict)
             throw new InvalidOperationException("The employee already has leave booked over those dates.");
 
-        var newDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType);
+        var newDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType, request.EmployeeId);
         var startMonth = await _leaveYear.StartMonthAsync();
         var year = LeaveYear.For(newStart, startMonth);
         var tenantId = GetTenantId();
@@ -2885,6 +2888,17 @@ public class LeaveService : ILeaveService
                 named.TryAdd(sub, $"{h.HolidayName} (observed)");
         }
 
+        // Company-schedule final closure, lane 1b: a company-wide closure is a day off in the set above,
+        // so it is named as what it is. A site or unit closure is not drawn here — this layer runs
+        // under every row, and it is a day off only for the people it covers.
+        foreach (var closure in await _closureCalendar.GetClosuresAsync(tenantId, from, to, ct))
+        {
+            if (!BusinessClosureRules.IsNonWorking(closure)
+                || BusinessClosureRules.ScopeOf(closure).Kind != ClosureScopeKind.Company) continue;
+            foreach (var d in BusinessClosureRules.DatesIn(closure, from, to))
+                named.TryAdd(d, $"Closure: {closure.Title}");
+        }
+
         var holidays = holidayDates
             .OrderBy(d => d)
             .Select(d => new LeaveCalendarHolidayDto
@@ -3886,7 +3900,7 @@ public class LeaveService : ILeaveService
         try
         {
             var leaveType = request.LeaveType ?? await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
-            var days = await GetChargeableDaysAsync(request.StartDate, request.EndDate, leaveType, tenantId);
+            var days = await GetChargeableDaysAsync(request.StartDate, request.EndDate, leaveType, request.EmployeeId, tenantId);
             var result = await _attendancePosting.PostAsync(request, tenantId, days);
             await _unitOfWork.SaveChangesAsync();
 
@@ -3937,24 +3951,32 @@ public class LeaveService : ILeaveService
     /// taken off when a holiday lands on a weekend (closure plan L-31/L-32). The overlap behaviour
     /// is kept: a Dec 30 – Jan 2 holiday still counts for a Jan 1 – 5 request, because the shared
     /// loader expands each holiday into its individual dates before the range is applied.</para>
+    ///
+    /// <para><b>The employee's closures are days off too</b> (company-schedule final closure, lane 1b:
+    /// F-28). The calculator's set already holds the company-wide ones; a closure of the employee's
+    /// site or unit is added here, for this employee only — which is why the employee is a parameter.
+    /// A colleague at another site on the same dates is charged the days that are worked there.</para>
     /// </remarks>
     private async Task<List<DateOnly>> GetChargeableDaysAsync(
-        DateOnly startDate, DateOnly endDate, LeaveType leaveType, Guid? tenantIdOverride = null)
+        DateOnly startDate, DateOnly endDate, LeaveType leaveType, Guid employeeId, Guid? tenantIdOverride = null)
     {
         var days = new List<DateOnly>();
         if (endDate < startDate) return days;
 
         // The override exists for the nightly reconciliation, which has no ambient user.
         var tenantId = tenantIdOverride ?? GetTenantId();
-        var holidayDates = await _workingDayCalculator.GetHolidayDatesAsync(tenantId, startDate, endDate);
+        var holidayDates = new HashSet<DateOnly>(
+            await _workingDayCalculator.GetHolidayDatesAsync(tenantId, startDate, endDate));
+        var closures = await _closureCalendar.GetClosureDatesAsync(tenantId, [employeeId], startDate, endDate);
+        holidayDates.UnionWith(closures[employeeId]);
 
         // The walk itself lives in LeaveChargeableDays (round 5, lane G), so the year-end run, the
         // reminder sweep and the leave owed report count leave exactly as it was charged here.
         return LeaveChargeableDays.Between(startDate, endDate, leaveType, holidayDates);
     }
 
-    private async Task<decimal> CalculateLeaveDaysAsync(DateOnly startDate, DateOnly endDate, LeaveType leaveType)
-        => (await GetChargeableDaysAsync(startDate, endDate, leaveType)).Count;
+    private async Task<decimal> CalculateLeaveDaysAsync(DateOnly startDate, DateOnly endDate, LeaveType leaveType, Guid employeeId)
+        => (await GetChargeableDaysAsync(startDate, endDate, leaveType, employeeId)).Count;
 
     private async Task ValidateRelieverAsync(Guid relieverId, Guid employeeId, DateOnly startDate, DateOnly endDate)
     {
@@ -4239,7 +4261,7 @@ public class LeaveService : ILeaveService
     private async Task<ExcessSplit?> PlanExcessSplitAsync(
         Guid employeeId, LeaveType leaveType, DateOnly start, DateOnly end, decimal available)
     {
-        var dates = await GetChargeableDaysAsync(start, end, leaveType);
+        var dates = await GetChargeableDaysAsync(start, end, leaveType, employeeId);
         var keep = (int)Math.Floor(Math.Max(0m, available));
         if (dates.Count <= keep) return null;
 
@@ -4262,7 +4284,7 @@ public class LeaveService : ILeaveService
             return Refuse("There is no annual leave to charge the extra days to.");
 
         var annualStart = dates[keep];
-        var annualDays = await CalculateLeaveDaysAsync(annualStart, end, annual);
+        var annualDays = await CalculateLeaveDaysAsync(annualStart, end, annual, employeeId);
         if (annualDays <= 0m)
             return Refuse(
                 $"The days beyond the {leaveType.Name} limit are not days of {annual.Name}, so nothing can be "

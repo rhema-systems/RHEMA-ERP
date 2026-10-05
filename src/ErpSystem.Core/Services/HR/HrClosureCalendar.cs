@@ -45,6 +45,22 @@ public interface IHrClosureCalendar
     Task<bool> IsNonWorkingClosureAsync(
         Guid tenantId, DateOnly date, Guid? locationId, Guid? organizationUnitId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// For each employee, every date in <paramref name="from"/>..<paramref name="to"/> that a closure
+    /// covering them makes a day off — company-wide, their site's, their unit's. Every employee asked
+    /// about is a key, with an empty set when nothing covers them.
+    /// </summary>
+    /// <remarks>
+    /// <para>Leave's per-employee overlay (lane 1b, F-28). The company-wide days are in it too, though
+    /// <see cref="IHrWorkingDayCalculator.GetHolidayDatesAsync"/> already holds them: a caller unions
+    /// the two, and a date in both is one date.</para>
+    ///
+    /// <para>A partial closure is not in it: its day is still worked.</para>
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlySet<DateOnly>>> GetClosureDatesAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class HrClosureCalendar : IHrClosureCalendar
@@ -139,5 +155,31 @@ public sealed class HrClosureCalendar : IHrClosureCalendar
         }
 
         return false;
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlySet<DateOnly>>> GetClosureDatesAsync(
+        Guid tenantId, IReadOnlyCollection<Guid> employeeIds, DateOnly from, DateOnly to,
+        CancellationToken cancellationToken = default)
+    {
+        var sets = employeeIds.Distinct().ToDictionary(id => id, _ => new HashSet<DateOnly>());
+        if (sets.Count > 0 && to >= from)
+        {
+            var closures = (await GetClosuresAsync(tenantId, from, to, cancellationToken))
+                .Where(BusinessClosureRules.IsNonWorking)
+                .ToList();
+            if (closures.Count > 0)
+            {
+                var coverage = await CoverageAsync(tenantId, closures, sets.Keys.ToList(), cancellationToken);
+                foreach (var closure in closures)
+                {
+                    var covered = coverage[closure.Id];
+                    if (covered.Count == 0) continue;
+                    var dates = BusinessClosureRules.DatesIn(closure, from, to).ToList();
+                    foreach (var employeeId in covered)
+                        sets[employeeId].UnionWith(dates);
+                }
+            }
+        }
+        return sets.ToDictionary(kv => kv.Key, kv => (IReadOnlySet<DateOnly>)kv.Value);
     }
 }

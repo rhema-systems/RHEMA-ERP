@@ -162,7 +162,7 @@ lane 1's source check (✅ below).** The other six are pending; each is needed b
 | Lane | Scope | Waits on | Status | Proof |
 |---|---|---|---|---|
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
-| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ◐ 1a built and proved (79/79 ×2); 1b–1e to come | `run-final-review.mjs` closures block |
+| **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ◐ 1a + 1b built and proved (93/93 ×2); 1c–1e to come | `run-final-review.mjs` closures block |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | D-10, D-11, D-14, D-16 | ☐ | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-10, D-13, D-18 | ☐ | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
@@ -402,7 +402,8 @@ it was applied to UAT (§ 6).
         false); a query with no scope answers company-wide closures only (C-37);
       - `ClosureCommitmentSource` (R4-13.1);
       - leave, below.
-- [ ] **Leave, redesigned by the review (F-28).**
+- [x] **Leave, redesigned by the review (F-28).** *✅ 1b — see the State below for what was proved and what
+      was not.*
       - Company-wide closures that are not working days join `IHrWorkingDayCalculator`'s holiday set, so
         leave, the discipline statutory clocks (F-29) and the diary agree with no change at those call
         sites. So does travel's on-duty posting (`StaffTravelAttendancePosting`, § 3c): a trip day
@@ -411,8 +412,10 @@ it was applied to UAT (§ 6).
         `GetChargeableDaysAsync` / `CalculateLeaveDaysAsync`, and `LeaveUsageReader` and
         `LeaveReminderService` keep the company set once plus an overlay per employee.
       - The leave calendar draws them as "Closure: title".
-- [ ] **(D-15a, F-52) One re-charge routine.** A closure created, moved or deleted re-charges the
-      approved leave it overlaps. It covers each Approved, InProgress or Completed request over the
+- [ ] **(D-15a, F-52) One re-charge routine.** *1b found a gap for it to close: a closure that existed
+      before 1c never changes, so it never triggers the routine — 1c also gives HR a one-time "re-charge
+      for existing closures" pass (UAT has none to re-charge: no leave touches its one closure, 29–30
+      Dec 2026).* A closure created, moved or deleted re-charges the approved leave it overlaps. It covers each Approved, InProgress or Completed request over the
       changed days (old and new, for a move), for the employees the closure covers:
       - `CalculateLeaveDaysAsync` recounts the days, with that employee's overlay;
       - `RecalculateAsync` re-derives the balance, for each leave year the request touches;
@@ -455,7 +458,7 @@ it was applied to UAT (§ 6).
       `departmentId` on the wire. No legacy department rows exist (L0-1), so nothing is shown for them;
       once lanes 1 and 2 read only the unit, a later migration drops `DepartmentId` from both tables.
 
-**State (2026-10-05): slice 1a built and proved; 1b–1e to come.** Slices: **1a** closure rules and
+**State (2026-10-05): slices 1a and 1b built and proved; 1c–1e to come.** Slices: **1a** closure rules and
 scope · **1b** leave counts closures · **1c** the re-charge routine for closures and holidays · **1d**
 announce on HR's click, payroll reader and hand-off · **1e** the closures screen.
 
@@ -492,7 +495,61 @@ not the 400 the first suite draft expected.
   (`tools/switch-off-login.mjs`). Their 10 employees, 6 events, 1 room and 3 bookings stay on UAT:
   R4-2.1, lane 6's tidy step.
 - API log: only cross-module #23 (the payroll profile FK, on every fixture employee) and the first
-  pass's user delete. (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
+  pass's user delete.
+
+*1b — what was built (2026-10-05):*
+- **The working-day calculator's day-off set** (`GetHolidayDatesAsync`, `AddWorkingDaysAsync`,
+  `CountWorkingDaysAsync`) adds the days of every company-wide closure that is a day off. Leave, the
+  discipline clocks (F-29) and travel's on-duty posting read it unchanged. It is read for the range
+  asked, because a yearly closure has no last day. `GetHolidaysAsync` stays holidays only, so the
+  diary does not list a closure twice.
+- `IHrClosureCalendar.GetClosureDatesAsync`: each employee's closure days off.
+- **Leave's `GetChargeableDaysAsync` takes the employee** and adds those days. All ten call sites pass
+  the employee they hold. The leave usage reader and the leave reminder sweep add each person's own
+  closures, read once per run, tenant-explicit.
+- **The leave calendar names a company-wide closure day "Closure: title"**. A site or unit closure is
+  not drawn on that layer, which runs under every row.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a + 1b: **93/93 on two clean passes.** 1b reads what leave would charge
+  for a working week through `GET /api/Leaves/excess-preview`, which counts with
+  `CalculateLeaveDaysAsync` and saves nothing. It measures before and after each closure:
+  - company-wide: A, B and C each lose a day;
+  - a site: A and C lose one, B (another site) is charged in full;
+  - a unit: A and B (beneath it) lose one, C is charged in full;
+  - partial: nobody loses one;
+  - a yearly closure: next year's repeat is not charged.
+
+  The leave calendar names the company-wide day and does not draw the site day. Deleting the closure
+  charges the day again.
+- The first pass failed one harness step: it deleted a closure as HR, which needs HR.Company.Admin —
+  a correct refusal. Fixed to delete as admin.
+- **Not driven end to end:** the discipline clocks and travel's posting. They share the loader that
+  the leave calendar's layer proves; driving them means opening a disciplinary case or approving a
+  trip on UAT.
+- Regression, once each: `run-slice0` 24/24, `run-slice1` 32/32, `run-slice2` **62/62 on its third
+  run**, `run-slice3` 44/44, `run-round4-d` 39/39.
+  - `run-slice2`'s first two runs died at the event detail read. That is a 30-second SQL timeout on a
+    single query joining four `Employee` records: 1.3 GB of 23.4 GB RAM was free, and SQL Server was
+    trimmed to under 1 GB. The read is untouched by 1b. Restarting the API freed memory and the suite
+    passed.
+- **The leave harness, a targeted pass of the suites that count days** (`dev-harness/hr-leave`, on the
+  user's go):
+  - `run-slice1-lifecycle` **72/75**. The 3 failures are the README's documented UAT gap: UAT was
+    seeded with the two-stage ladders directly, so there is no old single-stage row to supersede.
+  - `run-slice2-attendance` **31/31**; `run-slice5-recall` **51/51**.
+  - **`run-slice4-reads` NOT run.** Its section [6] runs the real tenant-wide leave reminder sweep,
+    and the preview (`GET /api/hr/leave/reminders/preview`, which claims nothing) said that sweep
+    would send **4,203 reminders** on UAT: 4,193 "annual leave outstanding", 7 awaiting a decision,
+    2 not closed, 1 available. ⚠ The API's hosted sweep would send them the first time it stays up
+    past its start delay.
+  - Clean-up:
+    - the run's 4 minted leave types were switched off, back to TDC's 9;
+    - the leave fixture logins (`leave.hr`, `leave.mgr`, `leave.emp`, `leave.hr2`) were created by
+      this run, since UAT was rebuilt on 2026-09-28, and were switched off — they are HR and Manager
+      logins whose passwords are in the harness README. A future leave run switches them on first.
+- Residue: 21 more round-4 `csv_` logins were switched off by hand. 8 events, 1 room, 3 bookings and
+  14 employees stay on UAT (R4-2.1). (D-2, D-3, D-5, D-10, D-11, D-12, D-14, D-16; C-7, C-10…C-15, C-18…C-25, C-29, C-51, R4-5.1, R4-6.3, R4-6.4, R4-6.7, R4-7.1, R4-10A.2, F-1, F-8…F-12, F-30…F-46, F-54)
 
 **Validation and references**
 - [ ] One window validator for create, update and reschedule (end on or after start; times only when
@@ -970,3 +1027,8 @@ built API, so no web host and no seeders).
   corrected the suite, not the code: refusals here are 422. It also showed that a login which has
   signed in cannot be deleted, so it is switched off instead. 16 harness logins left active on UAT
   (1 of this suite's, 15 of the round-4 suites') were switched off. Next: 1b, leave counts closures.
+- **2026-10-05, later** — **Lane 1, slice 1b built and proved** (leave counts closures; lane 1 State).
+  `run-final-review.mjs` scored 93/93 on two clean passes, and the round-4 net 201/201. `run-slice2` needed
+  a third run: a 30-second SQL timeout under memory pressure, not 1b. Found: a closure that predates 1c
+  never triggers the re-charge, so 1c gains a one-time pass. Not run: the leave harness, pending the
+  user. Next: 1c, the re-charge routine.

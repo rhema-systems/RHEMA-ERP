@@ -61,6 +61,7 @@ public class LeaveReminderService : ILeaveReminderService
     private readonly ILeaveUsageReader _usage;
     private readonly ILeaveEntitlementService _entitlement;
     private readonly IHrWorkingDayCalculator _workingDays;
+    private readonly IHrClosureCalendar _closures;
     private readonly UserManager<ApplicationUser> _userManager;
 
     public LeaveReminderService(
@@ -72,6 +73,7 @@ public class LeaveReminderService : ILeaveReminderService
         ILeaveUsageReader usage,
         ILeaveEntitlementService entitlement,
         IHrWorkingDayCalculator workingDays,
+        IHrClosureCalendar closures,
         UserManager<ApplicationUser> userManager)
     {
         _unitOfWork = unitOfWork;
@@ -82,6 +84,7 @@ public class LeaveReminderService : ILeaveReminderService
         _usage = usage;
         _entitlement = entitlement;
         _workingDays = workingDays;
+        _closures = closures;
         _userManager = userManager;
     }
 
@@ -964,10 +967,17 @@ public class LeaveReminderService : ILeaveReminderService
         if (plans.Count > 0)
         {
             var holidays = await _workingDays.GetHolidayDatesAsync(tenantId, yearStart, yearEnd, cancellationToken);
+            // Each planner's own site and unit closures too (company-schedule final closure, lane 1b):
+            // the plan will be charged as leave is, and a closure of their site is not a day of leave.
+            var ownClosures = await _closures.GetClosureDatesAsync(
+                tenantId, plans.Select(p => p.EmployeeId).Distinct().ToList(), yearStart, yearEnd, cancellationToken);
             foreach (var p in plans)
             {
+                var daysOff = ownClosures.TryGetValue(p.EmployeeId, out var own) && own.Count > 0
+                    ? new HashSet<DateOnly>(holidays.Concat(own))
+                    : holidays;
                 planned[p.EmployeeId] = planned.GetValueOrDefault(p.EmployeeId)
-                    + LeaveChargeableDays.Between(p.StartDate, p.EndDate, annual, holidays).Count;
+                    + LeaveChargeableDays.Between(p.StartDate, p.EndDate, annual, daysOff).Count;
             }
         }
 
