@@ -10,7 +10,8 @@ target_ref: origin/master
 depends_on: FIN-UAT-2026-10-04-A
 migration_status: none
 verification_status: passed
-pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/353
+predecessor_pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/352
 ---
 
 # Finance transaction, approval route, role, and permission audit
@@ -205,7 +206,14 @@ The safe local code work is complete. For AUTH-11, capture the rejected Journal 
 
 ## Authorization boundaries retained
 
-Push/update of PR #352 is authorized. Deployment and restart are authorized only through the repository's guarded release path after a green build; the current PR branch is not an eligible deployment candidate. Do not merge PR #352, bypass release guards, apply migrations, or mutate UAT data without separate authorization.
+Push/update of follow-up PR #353 is authorized. Do not merge, deploy, restart services, bypass release guards, apply migrations, or mutate UAT data without separate authorization.
+
+## 2026-10-05 receipt and cash-approval follow-up PR
+
+- PR #352 was merged externally at head `121f051149c1bdcf4d7385521c08c31db9fe88c8` before the receipt, till-closure, and bank-deposit remediation commits were pushed.
+- Commits `4ce834927a78b742ea264194ab6274b5338636e4` and `5f3b15434` were confirmed absent from `origin/master` after that merge.
+- The complete follow-up set is owned by [PR #353](https://github.com/rhema-systems/RHEMA-ERP/pull/353).
+- Push/update of PR #353 is authorized. Merge, deployment, service restart, migration application, and UAT-data mutation remain unauthorized.
 
 ## 2026-10-05 local exchange-rate runtime follow-up
 

@@ -50,6 +50,10 @@ Diagnose and correct AR receipt processing that fails with: At least one authori
 
 - `4ce834927a78b742ea264194ab6274b5338636e4` - `fix(finance): close receipt and cash approval gaps`
 
+## Pull request
+
+- [#353](https://github.com/rhema-systems/RHEMA-ERP/pull/353), a follow-up to externally merged PR #352.
+
 ## Authorization boundaries
 
-Local diagnosis, implementation, testing, commit, and push to existing PR #352 are within the active Finance remediation scope. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
+Local diagnosis, implementation, testing, commit, and push to follow-up PR #353 are within the active Finance remediation scope. Do not merge, deploy, restart services, apply migrations, or mutate UAT data without separate authorization.
