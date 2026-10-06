@@ -675,6 +675,12 @@ export default function BusinessPartnerDetailPage() {
                   <p className="font-semibold">{partner.taxNumber}</p>
                 </div>
               )}
+              {partner.ssnitNumber && (
+                <div>
+                  <Label className="text-gray-600">SSNIT Number</Label>
+                  <p className="font-semibold">{partner.ssnitNumber}</p>
+                </div>
+              )}
               {partner.vatNumber && (
                 <div>
                   <Label className="text-gray-600">VAT Number</Label>

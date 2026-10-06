@@ -86,6 +86,7 @@ interface FormData {
   tradingName: string;
   registrationNumber: string;
   taxNumber: string;
+  ssnitNumber: string;
   email: string;
   phone: string;
   website: string;
@@ -124,6 +125,7 @@ const initialFormData: FormData = {
   tradingName: '',
   registrationNumber: '',
   taxNumber: '',
+  ssnitNumber: '',
   email: '',
   phone: '',
   website: '',
@@ -313,6 +315,7 @@ export default function NewBusinessPartnerPage() {
         tradingName: formData.tradingName || undefined,
         registrationNumber: formData.registrationNumber || undefined,
         taxNumber: formData.taxNumber || undefined,
+        ssnitNumber: formData.ssnitNumber || undefined,
         email: formData.email || undefined,
         phone: formData.phone || undefined,
         website: formData.website || undefined,
@@ -761,7 +764,10 @@ export default function NewBusinessPartnerPage() {
                 </TabsContent>
 
                 <TabsContent value="options" className="py-4">
-                  <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                    <div className="space-y-2"><Label htmlFor="partner-ssnit">SSNIT Number</Label><Input id="partner-ssnit" value={formData.ssnitNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, ssnitNumber: event.target.value }))} placeholder="Enter SSNIT number" /></div>
+                  </div>
                   <p className="text-sm text-muted-foreground">Maintain payment, tax and withholding defaults in Finance Profiles after saving the partner.</p>
                 </TabsContent>
 

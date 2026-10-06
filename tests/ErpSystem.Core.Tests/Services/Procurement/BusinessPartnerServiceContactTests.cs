@@ -27,6 +27,19 @@ public class BusinessPartnerServiceContactTests
     }
 
     [Fact]
+    public async Task GetByIdAsync_ShouldReturnSsnitNumber()
+    {
+        var fixture = new BusinessPartnerContactFixture();
+        fixture.Partner.SsnitNumber = "SSNIT-001";
+        var service = fixture.CreateService();
+
+        var result = await service.GetByIdAsync(fixture.Partner.Id);
+
+        result.Should().NotBeNull();
+        result!.SsnitNumber.Should().Be("SSNIT-001");
+    }
+
+    [Fact]
     public async Task AddContactAsync_ShouldCreatePrimaryContactAndSyncPartnerSummary()
     {
         var fixture = new BusinessPartnerContactFixture();

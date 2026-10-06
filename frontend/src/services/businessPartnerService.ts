@@ -82,6 +82,7 @@ export interface BusinessPartnerDto {
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
+  ssnitNumber?: string;
   vatNumber?: string;
   email?: string;
   phone?: string;
@@ -328,6 +329,7 @@ export interface CreateBusinessPartnerDto {
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
+  ssnitNumber?: string;
   email?: string;
   phone?: string;
   website?: string;
@@ -371,6 +373,7 @@ export interface UpdateBusinessPartnerDto {
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
+  ssnitNumber?: string;
   email?: string;
   phone?: string;
   physicalAddress?: string;

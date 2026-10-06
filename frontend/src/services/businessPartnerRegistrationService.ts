@@ -15,6 +15,7 @@ export interface BusinessPartnerRegistrationDto {
   status: string; // Draft, Submitted, UnderReview, Approved, Rejected
   companyName: string;
   registrationNumber?: string;
+  ssnitNumber?: string;
   email?: string;
   phone?: string;
   submittedDate?: string;
@@ -72,6 +73,7 @@ export interface CreateBusinessPartnerRegistrationDto {
   registrationCategory?: 'Goods' | 'Works' | 'Services';
   companyName: string;
   registrationNumber?: string;
+  ssnitNumber?: string;
   email?: string;
   phone?: string;
   registrationData?: string; // JSON data
@@ -81,6 +83,7 @@ export interface UpdateBusinessPartnerRegistrationDto {
   companyName: string;
   registrationCategory?: 'Goods' | 'Works' | 'Services';
   registrationNumber?: string;
+  ssnitNumber?: string;
   email?: string;
   phone?: string;
   registrationData?: string; // JSON data
@@ -93,6 +96,7 @@ export interface RegistrationFormData {
   tradingName?: string;
   registrationNumber?: string;
   taxNumber?: string;
+  ssnitNumber?: string;
   vatNumber?: string;
   partnerType: string;
   registrationCategory?: 'Goods' | 'Works' | 'Services';
@@ -438,6 +442,7 @@ export const businessPartnerRegistrationService = {
       registrationCategory: formData.registrationCategory,
       companyName: formData.companyName,
       registrationNumber: formData.registrationNumber || undefined,
+      ssnitNumber: formData.ssnitNumber || undefined,
       email: formData.email || undefined,
       phone: formData.phone || undefined,
       registrationData: JSON.stringify(formData),
@@ -455,6 +460,7 @@ export const businessPartnerRegistrationService = {
       companyName: formData.companyName,
       registrationCategory: formData.registrationCategory,
       registrationNumber: formData.registrationNumber || undefined,
+      ssnitNumber: formData.ssnitNumber || undefined,
       email: formData.email || undefined,
       phone: formData.phone || undefined,
       registrationData: JSON.stringify(formData),
@@ -502,6 +508,12 @@ export const businessPartnerRegistrationService = {
           raw?.registrationCategory ?? raw?.RegistrationCategory ?? undefined,
         email: (raw?.email ?? raw?.Email ?? '').toString(),
         phone: (raw?.phone ?? raw?.Phone ?? '').toString(),
+        ssnitNumber: (
+          raw?.ssnitNumber ??
+          raw?.SsnitNumber ??
+          raw?.SSNITNumber ??
+          ''
+        ).toString(),
       };
 
       return result;
@@ -528,6 +540,7 @@ export const businessPartnerRegistrationService = {
       formData.tradingName,
       formData.registrationNumber,
       formData.taxNumber,
+      formData.ssnitNumber,
       formData.website,
       formData.contactPersonName,
       formData.contactPersonEmail,

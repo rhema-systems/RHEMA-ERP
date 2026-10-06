@@ -139,6 +139,7 @@ export default function RegistrationWizardDialog({
       partnerType: formData.partnerType,
       companyName: formData.companyName,
       registrationNumber: formData.registrationNumber,
+      ssnitNumber: formData.ssnitNumber,
       email: formData.email,
       phone: formData.phone,
       registrationData: JSON.stringify(formData),
@@ -151,6 +152,7 @@ export default function RegistrationWizardDialog({
         const updatePayload: UpdateBusinessPartnerRegistrationDto = {
           companyName: formData.companyName,
           registrationNumber: formData.registrationNumber,
+          ssnitNumber: formData.ssnitNumber,
           email: formData.email,
           phone: formData.phone,
           registrationData: JSON.stringify(formData),

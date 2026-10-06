@@ -30,7 +30,7 @@ async function openTab(name: string) {
 }
 
 describe('new business partner canonical finance setup', () => {
-  it('saves canonical Supplier role and TIN then opens governed Finance Profiles', async () => {
+  it('saves canonical Supplier role, TIN and SSNIT then opens governed Finance Profiles', async () => {
     render(<NewBusinessPartnerPage />);
     fireEvent.click(screen.getByRole('button', { name: 'Supplier' }));
     fireEvent.change(screen.getByLabelText('Partner Name *'), { target: { value: 'Freight Supplier' } });
@@ -38,8 +38,13 @@ describe('new business partner canonical finance setup', () => {
     expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
     await openTab('Options');
     fireEvent.change(screen.getByLabelText('TIN'), { target: { value: 'TIN-NEW' } });
+    fireEvent.change(screen.getByLabelText('SSNIT Number'), { target: { value: 'SSNIT-NEW' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Partner' }));
-    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({ roleTypes: ['Supplier'], taxNumber: 'TIN-NEW' })));
+    await waitFor(() => expect(businessPartnerService.createPartner).toHaveBeenCalledWith(expect.objectContaining({
+      roleTypes: ['Supplier'],
+      taxNumber: 'TIN-NEW',
+      ssnitNumber: 'SSNIT-NEW',
+    })));
     const request = vi.mocked(businessPartnerService.createPartner).mock.calls[0][0];
     expect(request).not.toHaveProperty('postingDefaults');
     expect(request).not.toHaveProperty('receivablesDefaults');
