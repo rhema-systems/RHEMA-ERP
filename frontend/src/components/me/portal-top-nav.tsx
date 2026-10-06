@@ -154,6 +154,8 @@ const NAV_GROUPS: NavGroup[] = [
       // business uses. Round 2, lane F1.
       { label: 'My Team', href: '/me/team' },
       { label: 'My Teams', href: '/me/teams' },
+      // Company schedule lane 7 (D-7): what is on — for the company and for you; invitations answered from it (D-8).
+      { label: 'Calendar', href: '/me/calendar' },
       // Company schedule lane 3c (D-13): staff book meeting rooms themselves; others' bookings show as busy times.
       { label: 'Room Bookings', href: '/me/room-bookings' },
     ],

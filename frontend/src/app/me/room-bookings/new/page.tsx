@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -53,20 +53,27 @@ const schema = z
 type FormValues = z.infer<typeof schema>;
 
 const orNull = (s?: string) => (s && s.trim() ? s.trim() : null);
+const isDay = (s: string | null): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+const isId = (s: string | null): s is string => !!s && /^[0-9a-f-]{36}$/i.test(s);
 
 export default function NewMyRoomBookingPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Company-schedule lane 7b (D-13): the calendar's "Book this room" opens here for a day (`?date=`) and a room (`?room=`)
+  // — 09:00 to 10:00 that day, the rooms searched at once; a room that is not free then drops out as before.
+  const params = useSearchParams();
+  const preDay = params.get('date');
+  const preRoom = params.get('room');
   const [saving, setSaving] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const [searched, setSearched] = useState(isDay(preDay));
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema) as any,
     defaultValues: {
-      startDateTime: '',
-      endDateTime: '',
-      roomId: '',
+      startDateTime: isDay(preDay) ? `${preDay}T09:00` : '',
+      endDateTime: isDay(preDay) ? `${preDay}T10:00` : '',
+      roomId: isId(preRoom) ? preRoom : '',
       purpose: '',
       expectedAttendees: 1,
       specialRequirements: '',

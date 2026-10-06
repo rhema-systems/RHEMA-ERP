@@ -13,6 +13,15 @@ import { companyEventService, personalScheduleService } from '@/services/hr/comp
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 
+/** Lane 7: each summary card opens the calendar, where the same things sit in their weeks. */
+function CalendarLink() {
+  return (
+    <Link href="/hr/company-schedule/calendar" className="text-xs font-medium text-primary underline-offset-4 hover:underline">
+      See the calendar
+    </Link>
+  );
+}
+
 /**
  * The company schedule landing page. Operational screens live here; the things that get set up
  * once — rooms, milestones, closures, fiscal years — live under Administration.
@@ -54,6 +63,12 @@ export default function CompanySchedulePage() {
               This summary of the company&apos;s events, room bookings, closures and milestones is for the HR desk.
             </p>
             <p className="text-muted-foreground">What is yours to see:</p>
+            <Link
+              href="/hr/company-schedule/calendar"
+              className="flex items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <CalendarDays className="h-4 w-4" /> Company Calendar — what is on for the company and for you; answer your invitations
+            </Link>
             <Link
               href="/hr/company-schedule/my-schedule"
               className="inline-flex items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
@@ -98,6 +113,13 @@ export default function CompanySchedulePage() {
       <NavCardGrid
         items={[
           {
+            // Lane 7 (D-7): the whole company's calendar, month and week.
+            title: 'Company calendar',
+            description: 'Events, closures, holidays, milestones and bookings, month by month.',
+            href: '/hr/company-schedule/calendar',
+            icon: CalendarRange,
+          },
+          {
             title: 'Events',
             description: 'Meetings, training days, conferences and company occasions.',
             href: '/hr/company-schedule/events',
@@ -133,8 +155,9 @@ export default function CompanySchedulePage() {
       {!isError && (
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Next 30 days</CardTitle>
+            <CalendarLink />
           </CardHeader>
           <CardContent>
             {(events ?? []).length === 0 ? (
@@ -158,10 +181,11 @@ export default function CompanySchedulePage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">
               Bookings awaiting approval {pending?.length ? `(${pending.length})` : ''}
             </CardTitle>
+            <CalendarLink />
           </CardHeader>
           <CardContent>
             {(pending ?? []).length === 0 ? (
@@ -189,8 +213,9 @@ export default function CompanySchedulePage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Closures ahead</CardTitle>
+            <CalendarLink />
           </CardHeader>
           <CardContent>
             {(closures ?? []).length === 0 ? (
@@ -218,8 +243,9 @@ export default function CompanySchedulePage() {
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Milestones ahead</CardTitle>
+            <CalendarLink />
           </CardHeader>
           <CardContent>
             {(milestones ?? []).length === 0 ? (

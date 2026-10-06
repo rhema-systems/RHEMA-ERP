@@ -94,17 +94,21 @@ export default function NewRoomBookingPage() {
   const params = useSearchParams();
   const preEvent = params.get('event') ?? '';
   const preScope = params.get('scope');
+  // Lane 7b: the calendar's room view opens here for a day (`?date=`) and a room (`?room=`) — 09:00 to 10:00, searched at once.
+  const preDay = params.get('date');
+  const preRoom = params.get('room');
+  const dayGiven = !!preDay && /^\d{4}-\d{2}-\d{2}$/.test(preDay) && !Number.isNaN(Date.parse(preDay));
   const [saving, setSaving] = useState(false);
-  const [searched, setSearched] = useState(false);
+  const [searched, setSearched] = useState(dayGiven);
   const [seriesScope, setSeriesScope] = useState<SeriesScope>(isSeriesScope(preScope) ? preScope : 'ThisOccurrence');
   const [seriesResult, setSeriesResult] = useState<RoomBookingSeriesResult | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema) as any,
     defaultValues: {
-      startDateTime: '',
-      endDateTime: '',
-      roomId: '',
+      startDateTime: dayGiven ? `${preDay}T09:00` : '',
+      endDateTime: dayGiven ? `${preDay}T10:00` : '',
+      roomId: preRoom && /^[0-9a-f-]{36}$/i.test(preRoom) ? preRoom : '',
       eventId: preEvent,
       purpose: '',
       expectedAttendees: 1,

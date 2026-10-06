@@ -8,6 +8,8 @@
     "src/app/hr/company-schedule/**/*.tsx",
     "src/app/administration/hr/company-schedule/**/*.tsx",
     "src/app/me/room-bookings/**/*.tsx",
+    "src/app/me/calendar/**/*.tsx",
+    "src/components/me/portal-top-nav.tsx",
     "src/app/me/page.tsx",
     "src/components/me/portal-top-nav.tsx",
     "src/components/hr/manpower/ManpowerBudgetFormFields.tsx",

@@ -1379,3 +1379,103 @@ export interface CompanyScheduleReminderRun {
   toldInApp: number;
   rsvpChaseLeadDays: number;
 }
+
+// ── The company calendar (lane 7, D-7, D-8) ───────────────────────────────────
+
+export type CalendarEntryKind = 'Event' | 'Closure' | 'Milestone' | 'Holiday' | 'RoomBooking' | 'Mine';
+
+/** One thing on the calendar: a band from `start` to `end` — what the server decided this caller may see. */
+export interface CalendarEntry {
+  kind: CalendarEntryKind;
+  /** An event's category; Full / Partial for a closure; Holiday / InLieu; for Mine, Leave / Travel / Interview / Training. */
+  subKind?: string | null;
+  label: string;
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  colourKey: string;
+  reference?: string | null;
+  /** Where a click goes — the HR page for the desk, the portal page otherwise — or nowhere. */
+  link?: string | null;
+  eventId?: string | null;
+  seriesId?: string | null;
+  status?: string | null;
+  awaitingApproval: boolean;
+  isOrganiser: boolean;
+  /** The caller's own invitation to the event, their answer so far, and whether they may answer now (and why not). */
+  myParticipantId?: string | null;
+  myAnswer?: InvitationStatus | null;
+  canAnswer: boolean;
+  whyNotAnswer?: string | null;
+  roomId?: string | null;
+  roomName?: string | null;
+  /** The caller booked it. Somebody else's booking, to staff, is only "booked". */
+  isMine: boolean;
+  bookingId?: string | null;
+}
+
+export interface CompanyCalendar {
+  from: string;
+  to: string;
+  /** The caller holds HR.Company.Read: the whole company's calendar. */
+  hrDesk: boolean;
+  roomId?: string | null;
+  roomName?: string | null;
+  entries: CalendarEntry[];
+  /** Parts of the caller's own diary that could not be read. */
+  incompleteSources: string[];
+}
+
+/** The caller's own invitation to an event (lane 7). */
+export interface MyInvitation {
+  participantId: string;
+  status: InvitationStatus;
+  responseDate?: string | null;
+  responseComments?: string | null;
+  canAnswer: boolean;
+  whyNot?: string | null;
+}
+
+/** An event as staff see it (lane 7): no budget, no other guest's answer; the password only to a guest or the organiser. */
+export interface CalendarEventView {
+  id: string;
+  eventNumber: string;
+  eventName: string;
+  description?: string | null;
+  category: string;
+  type: string;
+  status: string;
+  isCancelled: boolean;
+  cancellationReason?: string | null;
+  awaitingApproval: boolean;
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  endTime?: string | null;
+  isAllDay: boolean;
+  when: string;
+  locationType: string;
+  siteName?: string | null;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  onlineMeetingLink?: string | null;
+  meetingPassword?: string | null;
+  rooms: string[];
+  organizerName?: string | null;
+  isOrganiser: boolean;
+  audienceDescription: string;
+  requiresRsvp: boolean;
+  rsvpDeadline?: string | null;
+  seriesId?: string | null;
+  occurrenceNumber?: number | null;
+  occurrenceCount?: number | null;
+  myInvitation?: MyInvitation | null;
+  canOpenHrPage: boolean;
+}
+
+/** The invitee's own answer (lane 7, D-8). */
+export interface ReplyToEventInvitation {
+  response: InvitationStatus;
+  comment?: string | null;
+  scope?: SeriesScope;
+}

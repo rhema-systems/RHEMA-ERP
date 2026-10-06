@@ -52,7 +52,11 @@ has not started (the user: "don't start the actual development yet").
    source-checked and its four questions settled (lane 5 State), in two slices; 5a, the screens' removes, dates, landing,
    site pickers and sidebar test (no server change), and 5b, the diaries and the team schedule (unit heads read theirs),
    built and proved. ✅ Lane 5's code is done (2026-10-06); its browser walk (lane 5 State, items 1–8) is the user's.
-   Next: lane 7, the company calendar — source-check first; its decisions to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   **Lane 7** (the company calendar) is source-checked and its four questions settled (lane 7 State), in two slices; 7a,
+   the server (the calendar read, the staff event view, the invitee's own answer), and 7b, the screens (month bands and
+   week, the room view, the staff event page, the menus), built and proved. ✅ Lane 7's code is done (2026-10-06); its
+   browser walk (lane 7 State, items 9–12) is the user's. Next: **lane 6** — the harness, the guide, the registers and
+   memory (lane 6's list), which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -331,7 +335,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
-| **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
+| **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
 
 ---
@@ -3359,6 +3363,48 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
 - **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
   running; the R4D requisition's notices withdrawn. The API and the scanner stub are stopped.
 
+*7b — what was built (2026-10-06): the screens — no server change, no migration.*
+- **`CompanyCalendar.tsx`**, one component for both doors: month (six Monday-start weeks) and week; a several-day entry
+  ONE band across its days, broken at each week's end with ◂ ▸ (the user's ruling), packed into lanes, four to a week
+  row and "+n more" per day (which opens the week); the week view with the all-day and several-day bands on top and the
+  timed entries listed under their day; Today, previous and next; kind chips that are both the filter and the legend,
+  and a dashed swatch for "waiting for your answer". The layout is `calendarLayout.ts` with its own unit tests (7).
+- **Clicking an entry** opens its card — what and when, its badges (awaiting approval, you organise it), the caller's own
+  invitation with Accept / "May attend" / Decline, a note, and on a series which dates (`InvitationAnswer.tsx`, shared
+  with the event page) — and "Open" for its page.
+- **The room view:** a room picker (the desk's room register, or the rooms staff may book) narrows the calendar to that
+  room; "Book this room" opens the booking form for the day — the desk's form for the desk, the portal's otherwise; both
+  forms now take `?date=&room=` (09:00–10:00, searched at once).
+- **Pages:** `/hr/company-schedule/calendar` (sidebar "Company Calendar", no permission, in `KEEP_OPEN`);
+  `/me/calendar` (portal Company menu, "Calendar"); `/me/calendar/events/[id]` — the staff event page the guest's notice
+  opens: when, where, rooms, joining (and the password, when the server gives it), organiser, who it is for, the reply-by
+  date, and "Your invitation" with the answer; "Open the HR page" for the desk; a lookup miss says so.
+- **The landing:** a "Company calendar" card first, "See the calendar" on each summary card, and the Company Calendar
+  link in the "for the HR desk" card.
+- **No new server assertion:** 7a's block proves every read and write these screens make.
+
+*7b — proof (UAT, the 7a build — no server change, so no build was needed):*
+- The band layout's unit tests **7/7** (one band across days; broken at the week's end and carried in from the week
+  before; out of the week left out; lanes shared and reused; all-day above a meeting; an end before the start read as the
+  start). The sidebar test **4/4** with the Company Calendar in `KEEP_OPEN`. The scoped type-check and lint pass.
+- `run-final-review.mjs` **1147/1147 on two clean passes**; the round-4 net **191/191**, recruitment **59/59**, the probe
+  **42/42**, `run-lane-n` **109/115** (#40). No request answered 500; the ERR kinds are the known ones.
+- **The blocking watcher:** 111 waits, 82 of 2 s or more (longest 7.7 s), all on `Notifications`, as before.
+- **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
+  running. The API and the scanner stub are stopped.
+- ✅ **Lane 7's code is done (2026-10-06): 7a and 7b built and proved.** Its browser walk (items 9–12) is the user's.
+
+*7b — the browser walk (the user's):*
+9. **As a member of staff, `/me/calendar`:** an invitation drawn dashed; click it — Accept with a note; it turns solid,
+   and the organiser has the notice. A several-day closure or a week's leave as one band, broken with ▸ at the week's
+   end; "+n more" opens the week.
+10. **The notice:** a guest's "You are invited" opens `/me/calendar/events/{id}` and answers from there; an event not for
+    them says it was not found.
+11. **The room view:** pick a room — others' bookings read "booked"; "Book this room" opens the portal form with the day
+    and the room filled in. As hr.head, the desk's form instead, and every booking in full.
+12. **As hr.head, the HR menu's Company Calendar:** every event (a private one too), both kinds of closure, each opening its
+    HR page; the landing's "See the calendar" links.
+
 ### Lane 6 — Harness, guide, registers, memory
 
 - [ ] `dev-harness/hr-company-schedule/run-final-review.mjs`: surname-identified fixtures of its own;
@@ -3989,3 +4035,12 @@ built API, so no web host and no seeders).
     (items 1–8) is the user's.
 
   Next: lane 7 — the company calendar (D-7, D-8, D-13, D-16; C-9, C-26, C-35, R4-6.4). Source-check first.
+- **2026-10-06** — **5b committed. Lane 7 source-checked** (two read-only surveys; four rulings, all as recommended).
+  **Slice 7a built and proved** (the calendar read, the staff event view, the invitee's own answer; the organiser told in
+  the app; guest notices to the portal page) — 1147/1147 on two clean passes after one pass's own-suite naming fault.
+  **7a committed. Slice 7b built and proved** — the screens, no server change: month bands broken at the week, the week
+  view, filters as the legend, the room view and booking from it, the staff event page, the menus and the landing's links.
+  - **Results:** `run-final-review.mjs` 1147/1147 on two clean passes; the layout tests 7/7; the sidebar test 4/4; the
+    round-4 net 191/191, recruitment 59/59, the probe 42/42, `run-lane-n` 109/115 (#40). **Lane 7's code is done.**
+
+  Next: lane 6 — the harness, the guide, the registers, memory. The browser walks of lanes 1–5 and 7 are the user's.

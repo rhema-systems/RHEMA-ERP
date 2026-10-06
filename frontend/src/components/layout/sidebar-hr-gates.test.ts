@@ -38,6 +38,8 @@ const KEEP_OPEN = new Set<string>([
   '/hr/leave/calendar', // "mine" and "my team" are open to all staff; "Everyone" needs HR.Leave.Read on the server
   // Lane 5b (R4-10B.3, the user's ruling):
   '/hr/company-schedule/team', // the HR desk, or a unit's head for their own subtree — headship is data, decided per unit on the server
+  // Lane 7 (D-7):
+  '/hr/company-schedule/calendar', // the company calendar — the server decides per caller what is shown (the desk all, anyone else theirs)
 ]);
 
 const MODULE_GATES = new Set(['hr.access', 'she.access']);

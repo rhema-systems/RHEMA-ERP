@@ -1308,6 +1308,13 @@ export const navigationItems: NavItem[] = [
             icon: CalendarDays,
             children: [
               {
+                // ⚠ NO permission (company-schedule lane 7, D-7): the server decides what each caller sees —
+                // the desk the whole company, anyone else what is theirs. Listed in the sidebar test's KEEP_OPEN.
+                title: 'Company Calendar',
+                href: '/hr/company-schedule/calendar',
+                icon: CalendarDays,
+              },
+              {
                 title: 'Events',
                 href: '/hr/company-schedule/events',
                 icon: CalendarDays,

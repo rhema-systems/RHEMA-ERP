@@ -66,6 +66,9 @@ import type {
   RoomBusyTime,
   TeamSchedule,
   TeamScheduleUnits,
+  CompanyCalendar,
+  CalendarEventView,
+  ReplyToEventInvitation,
   UpdateBusinessClosure,
   UpdateCompanyEvent,
   UpdateCompanyMilestone,
@@ -767,6 +770,30 @@ class PersonalScheduleService {
   }
 }
 
+/**
+ * The company calendar (lane 7, D-7, D-8) — any signed-in internal user; the server decides what each may see. Also the
+ * event as staff see it, and the invitee's own answer.
+ */
+class CompanyCalendarService {
+  private readonly baseUrl = '/CompanySchedule';
+
+  /** At most sixty days; `roomId` narrows it to one room — the room view. */
+  get(from: string, to: string, roomId?: string | null): Promise<CompanyCalendar> {
+    return apiService.get<CompanyCalendar>(`${this.baseUrl}/calendar`, roomId ? { from, to, roomId } : { from, to });
+  }
+
+  /** The event as staff see it — 404 for anyone it is not for. */
+  getEvent(id: string): Promise<CalendarEventView> {
+    return apiService.get<CalendarEventView>(`${this.baseUrl}/calendar/events/${id}`);
+  }
+
+  /** The invitee answers their own invitation; on a series, the scope says which dates. */
+  reply(eventId: string, participantId: string, body: ReplyToEventInvitation): Promise<EventSeriesGuestResult> {
+    return apiService.post<EventSeriesGuestResult>(`${this.baseUrl}/events/${eventId}/participants/${participantId}/reply`, body);
+  }
+}
+
+export const companyCalendarService = new CompanyCalendarService();
 export const companyEventService = new CompanyEventService();
 export const meetingRoomService = new MeetingRoomService();
 export const roomBookingService = new RoomBookingService();
