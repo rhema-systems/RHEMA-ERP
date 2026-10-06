@@ -58,8 +58,10 @@ has not started (the user: "don't start the actual development yet").
    browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
    110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, 6c, its event
-   chapters (3, 3a, 4–7, 6a), 6d, its bookings, diaries and staff booking (8–10, 10A–10C), and 6e-1, its setup chapters
-   (11–17), written. Next: **6e-2**, § 18–21 and the appendices, then 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   chapters (3, 3a, 4–7, 6a), 6d, its bookings, diaries and staff booking (8–10, 10A–10C), 6e-1, its setup chapters
+   (11–17), and 6e-2, § 18–21 and the appendices, written — the guide is rewritten whole. Next: **6f**, the README, the
+   finish plan, the configuration register, cross-module #33, the demo runbook's aside and memory, which closes the
+   plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -339,7 +341,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters), 6d (bookings, diaries, staff booking) and 6e-1 (setup, 11–17) written; 6e-2 (§ 18–21, appendices) and 6f (the docs) to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters), 6d (bookings, diaries, staff booking), 6e-1 (setup, 11–17) and 6e-2 (§ 18–21, appendices) written — the guide done; 6f (the docs) to do | both suites green twice |
 
 ---
 
@@ -3429,7 +3431,10 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       D suites' tidy step in 3a; ✅ 6a: the second booking is `head.dev`'s through the staff door, its failure reported
       (L6-2).* Scenario 110: event files uploaded as files (F-54), no HR fiscal year, `hr.head` books the
       second room (R4-2.3); the D suites get a tidy step (R4-2.1).
-- [ ] The guide: § 21 "Final review" closing every finding this plan closes; the eight rules
+- [x] *✅ 6b–6e-2 (2026-10-06): rewritten whole (L6-1) — seven rules; every chapter from the code, forked UAT /
+      Rebuilt; 3a, 6a and 10C new; 15 the fiscal calendar, 16 retired; § 21 a pointer to § 5 with what is open;
+      Appendix A 24 routes, Appendix B route by route.*
+      The guide: § 21 "Final review" closing every finding this plan closes; the eight rules
       rewritten; **every changed chapter rewritten**, not only § 21 (events, bookings, rooms, closures,
       milestones, the diaries, the company profile; the fiscal chapters replaced by the fiscal calendar
       card; a calendar chapter); Appendix B's permission map gains the new doors; Appendix A's route
@@ -3668,6 +3673,40 @@ UAT checked by SQL: Finance's years read *Fiscal Year 2025/2026*, with months li
     it;
   - 16 (optional), a milestone with its certificate;
   - 17 (optional), a logo uploaded as `admin`.
+- **No new finding.**
+
+*6e-2 — what was written (2026-10-06): the guide's § 18–21 and its appendices, and the rewrite banner taken off. Docs
+only.* Every claim checked in the code:
+- **§ 18, fourteen places outside the menu**, each with the way its data goes:
+  - the letters (six kinds carry the images);
+  - the interview clash check (the seven registered sources, which ones refuse);
+  - Safety's drill making its event;
+  - the seventeen emails in six categories (`CompanyScheduleEmailCatalog`);
+  - the policy page (the chase lead; the fiscal start greyed out while Finance has years; saving is Admin);
+  - the hourly host (23 minutes, hourly, a 20-minute lease; F-59);
+  - leave, discipline and travel reading closures, and attendance not (A-92);
+  - payroll's `closures/employee-days`;
+  - requisitions and budgets on Finance's year;
+  - HR Announcements;
+  - the inbox (#15) and the bell.
+- **§ 19, the reset for live writes 1–17.** Row 1's Cancel takes the guests, the approval, the answer and the event's
+  rooms with it. Removes that are an administrator's (the task, the closure, the milestone) are done in window D. The
+  one SQL is optional: clearing the board meeting's reminder stamp. **The rebuild is a warning now:**
+  `New-UatDatabase.ps1` drops its target, `ErpSystemDB_UAT` by default, and UAT holds TDC's staff list. So never
+  rebuild UAT to reset; name a new database (`-Database ErpSystemDB_DEMO -ApiPort 5010`).
+- **§ 20, the short path:** seven screens in windows A and C, 20 minutes; the approval beat is the five minutes to add.
+- **§ 21, a pointer to § 5 (L6-1).** Where the 135 findings went (D-9; closed by decision: C-41 by D-17, C-42…C-48 by
+  D-6, D-02 by D-8). What is open:
+  - the twelve browser walks;
+  - F-59…F-66;
+  - A-92, the payroll hand-off's item 4, #15, #33, #40 and #23;
+  - UAT's data: the anniversary date, the board meeting with no reply-by date, and the seeded dates that do not move.
+
+  "What is genuinely strong" was rewritten for what the closure built.
+- **Appendices:**
+  - A, the 24 routes with window and persona;
+  - B, the permission map route by route, from the three controllers, including the doors that need no permission;
+  - C, the related documents, with the plan first.
 - **No new finding.**
 
 ---
@@ -4306,3 +4345,10 @@ built API, so no web host and no seeders).
 
   Next: 6e-2 — § 18–21 (where it shows up elsewhere, the reset for live writes 1–17, the short path, the findings as a
   pointer to § 5) and the appendices.
+- **2026-10-06, later** — **6e-1 committed. Slice 6e-2 written** — the guide's last part: § 18 (fourteen places the module
+  shows up elsewhere, each checked in the code), § 19 (the reset for live writes 1–17, and the rebuild warning), § 20 (the
+  short path in two windows), § 21 (a pointer to § 5, with what is still open) and Appendices A–C (24 routes; the
+  permission map route by route; the related documents). The rewrite banner is off. No new finding.
+
+  Next: 6f — the README, the finish plan, the configuration register, cross-module #33, the demo runbook's aside and
+  memory, which closes the plan.
