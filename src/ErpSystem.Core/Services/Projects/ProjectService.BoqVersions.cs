@@ -17,10 +17,12 @@ public partial class ProjectService
     {
         await RequireProjectAsync(projectId, ProjectAccessOperation.View);
         var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToDictionary(item => item.Id);
+        var workingItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
         var workingLines = BuildWorkingVersionLines(
             projectId,
-            (await GetProjectBoqItemEntitiesAsync(projectId)).ToList(),
-            packages);
+            workingItems,
+            packages,
+            await GetProjectBoqWorkItemLookupAsync(projectId, workingItems));
         var versionEntities = (await _unitOfWork.Repository<ProjectBoqVersion>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && item.ProjectId == projectId))
@@ -134,10 +136,12 @@ public partial class ProjectService
                     $"qs-boq-version:{_currentUserProvider.TenantId:N}:{projectId:N}");
 
                 var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToDictionary(item => item.Id);
+                var workingItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
                 var workingLines = BuildWorkingVersionLines(
                     projectId,
-                    (await GetProjectBoqItemEntitiesAsync(projectId)).ToList(),
-                    packages);
+                    workingItems,
+                    packages,
+                    await GetProjectBoqWorkItemLookupAsync(projectId, workingItems));
                 if (workingLines.Count == 0)
                 {
                     throw new InvalidOperationException("Add at least one BoQ line before creating a version snapshot.");
@@ -444,7 +448,8 @@ public partial class ProjectService
     private List<ProjectBoqVersionLine> BuildWorkingVersionLines(
         Guid projectId,
         IReadOnlyCollection<ProjectBoqItem> items,
-        IReadOnlyDictionary<Guid, ProjectPackage> packages)
+        IReadOnlyDictionary<Guid, ProjectPackage> packages,
+        IReadOnlyDictionary<Guid, ProjectWorkItem> workItems)
     {
         var duplicateKey = items
             .Where(item => item.VersionLineKey == Guid.Empty)
@@ -461,6 +466,10 @@ public partial class ProjectService
             .Select(item =>
             {
                 packages.TryGetValue(item.ProjectPackageId, out var package);
+                var workItem = item.ProjectWorkItemId.HasValue
+                    && workItems.TryGetValue(item.ProjectWorkItemId.Value, out var resolvedWorkItem)
+                        ? resolvedWorkItem
+                        : null;
                 return new ProjectBoqVersionLine
                 {
                     TenantId = _currentUserProvider.TenantId,
@@ -470,6 +479,9 @@ public partial class ProjectService
                     ProjectPackageId = item.ProjectPackageId,
                     PackageCode = package?.Code,
                     PackageName = package?.Name,
+                    ProjectWorkItemId = workItem?.Id,
+                    ActivityNodeType = workItem?.NodeType,
+                    ActivityTitle = workItem?.Title,
                     SectionCode = item.SectionCode,
                     SectionName = item.SectionName,
                     TradeCode = item.TradeCode,
@@ -496,6 +508,27 @@ public partial class ProjectService
             .ToList();
     }
 
+    private async Task<IReadOnlyDictionary<Guid, ProjectWorkItem>> GetProjectBoqWorkItemLookupAsync(
+        Guid projectId,
+        IReadOnlyCollection<ProjectBoqItem> items)
+    {
+        var workItemIds = items
+            .Where(item => item.ProjectWorkItemId.HasValue)
+            .Select(item => item.ProjectWorkItemId!.Value)
+            .Distinct()
+            .ToList();
+        if (workItemIds.Count == 0)
+        {
+            return new Dictionary<Guid, ProjectWorkItem>();
+        }
+
+        return (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(item =>
+                item.TenantId == _currentUserProvider.TenantId
+                && item.ProjectId == projectId
+                && workItemIds.Contains(item.Id)))
+            .ToDictionary(item => item.Id);
+    }
+
     private static string ComputeBoqSnapshotHash(IEnumerable<ProjectBoqVersionLine> lines)
     {
         var canonical = lines
@@ -509,6 +542,9 @@ public partial class ProjectService
                 item.ProjectPackageId,
                 item.PackageCode,
                 item.PackageName,
+                item.ProjectWorkItemId,
+                item.ActivityNodeType,
+                item.ActivityTitle,
                 item.SectionCode,
                 item.SectionName,
                 item.TradeCode,
@@ -566,6 +602,7 @@ public partial class ProjectService
         if (baseline == null || comparison == null) return [];
         var fields = new List<string>();
         AddIfDifferent(fields, "Package", baseline.ProjectPackageId, comparison.ProjectPackageId);
+        AddIfDifferent(fields, "Activity", baseline.ProjectWorkItemId, comparison.ProjectWorkItemId);
         AddIfDifferent(fields, "Section", baseline.SectionCode, comparison.SectionCode);
         AddIfDifferent(fields, "Trade", baseline.TradeCode, comparison.TradeCode);
         AddIfDifferent(fields, "CostCode", baseline.CostCode, comparison.CostCode);
@@ -658,6 +695,9 @@ public partial class ProjectService
         ProjectPackageId = item.ProjectPackageId,
         PackageCode = item.PackageCode,
         PackageName = item.PackageName,
+        ProjectWorkItemId = item.ProjectWorkItemId,
+        ActivityNodeType = item.ActivityNodeType,
+        ActivityTitle = item.ActivityTitle,
         SectionCode = item.SectionCode,
         SectionName = item.SectionName,
         TradeCode = item.TradeCode,

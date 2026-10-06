@@ -2,6 +2,12 @@
 
 import { hasCustomerRole, hasSupplierRole, hasContractorRole } from '@/lib/business-partner-roles';
 import { BusinessPartnerCurrentAccountsPanel } from '@/components/procurement/BusinessPartnerCurrentAccountsPanel';
+import { BusinessPartnerContactsManager } from '@/components/procurement/BusinessPartnerContactsManager';
+import {
+  BusinessPartnerBankAccountsEditPanel,
+  BusinessPartnerDocumentsEditPanel,
+  BusinessPartnerLicensesManager,
+} from '@/components/procurement/BusinessPartnerRelatedRecords';
 
 
 import { useEffect, useState } from 'react';
@@ -48,6 +54,7 @@ const emptyForm: UpdateBusinessPartnerDto = {
   tradingName: '',
   registrationNumber: '',
   taxNumber: '',
+  ssnitNumber: '',
   email: '',
   phone: '',
   website: '',
@@ -64,15 +71,29 @@ const emptyForm: UpdateBusinessPartnerDto = {
   parentId: '',
 };
 
+const partnerEditTabs = [
+  'details',
+  'contact',
+  'contacts',
+  'bank-accounts',
+  'documents',
+  'licenses',
+  'options',
+  'finance-profiles',
+  'accounts-payable',
+  'accounts-receivable',
+];
+
 export default function EditBusinessPartnerPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
+  const requestedTab = searchParams.get('tab');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState(
-    ['finance-profiles', 'accounts-payable', 'accounts-receivable'].includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'details'
+    requestedTab && partnerEditTabs.includes(requestedTab) ? requestedTab : 'details'
   );
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
@@ -82,10 +103,8 @@ export default function EditBusinessPartnerPage() {
   const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
   const [creditLimit, setCreditLimit] = useState('');
   const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
-  const requestedTab = searchParams.get('tab');
-
   useEffect(() => {
-    if (requestedTab && ['finance-profiles', 'accounts-payable', 'accounts-receivable'].includes(requestedTab)) {
+    if (requestedTab && partnerEditTabs.includes(requestedTab)) {
       setActiveTab(requestedTab);
     }
   }, [requestedTab]);
@@ -113,6 +132,7 @@ export default function EditBusinessPartnerPage() {
           tradingName: data.tradingName || '',
           registrationNumber: data.registrationNumber || '',
           taxNumber: data.taxNumber || '',
+          ssnitNumber: data.ssnitNumber || '',
           email: data.email || '',
           phone: data.phone || '',
           website: data.website || '',
@@ -224,6 +244,17 @@ export default function EditBusinessPartnerPage() {
     );
 
   const hasPayables = hasSupplierRole(formData.partnerType) || hasContractorRole(formData.partnerType);
+  const partnerBankAccounts = (partner.bankAccounts || []).map((account) => ({
+    id: account.id,
+    bankName: account.bankName,
+    bankBranch: account.branchName,
+    accountNumber: account.accountNumber,
+    accountName: account.accountName,
+    swiftCode: account.swiftCode,
+    iban: account.iban,
+    currency: account.currency,
+    isPrimary: account.isPrimary,
+  }));
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-4">
@@ -266,6 +297,10 @@ export default function EditBusinessPartnerPage() {
               <TabsList className="h-auto w-full flex-wrap justify-start">
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="contact">Contact</TabsTrigger>
+                <TabsTrigger value="contacts">Contacts ({partner.contacts?.length || 0})</TabsTrigger>
+                <TabsTrigger value="bank-accounts">Bank Accounts ({partnerBankAccounts.length})</TabsTrigger>
+                <TabsTrigger value="documents">Documents ({partner.documents?.length || 0})</TabsTrigger>
+                <TabsTrigger value="licenses">Licences ({partner.licenses?.length || 0})</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
                 {hasPayables && <TabsTrigger value="accounts-payable">Accounts Payable</TabsTrigger>}
                 {hasCustomerRole(formData.partnerType) && <TabsTrigger value="accounts-receivable">Accounts Receivable</TabsTrigger>}
@@ -374,8 +409,41 @@ export default function EditBusinessPartnerPage() {
                     {textField('postalCode', 'Postal Code')}
                   </div>
                 </TabsContent>
+                <TabsContent value="contacts" className="py-3">
+                  <BusinessPartnerContactsManager
+                    partnerId={id}
+                    contacts={partner.contacts || []}
+                    onContactsChange={(contacts) =>
+                      setPartner((current) => current ? { ...current, contacts } : current)
+                    }
+                  />
+                </TabsContent>
+                <TabsContent value="bank-accounts" className="py-3">
+                  <BusinessPartnerBankAccountsEditPanel
+                    partnerId={id}
+                    accounts={partnerBankAccounts}
+                  />
+                </TabsContent>
+                <TabsContent value="documents" className="py-3">
+                  <BusinessPartnerDocumentsEditPanel
+                    partnerId={id}
+                    documents={partner.documents || []}
+                  />
+                </TabsContent>
+                <TabsContent value="licenses" className="py-3">
+                  <BusinessPartnerLicensesManager
+                    partnerId={id}
+                    licenses={partner.licenses || []}
+                    onLicensesChange={(licenses) =>
+                      setPartner((current) => current ? { ...current, licenses } : current)
+                    }
+                  />
+                </TabsContent>
                 <TabsContent value="options" className="space-y-4 py-3">
-                  <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-2"><Label htmlFor="partner-tin">TIN</Label><Input id="partner-tin" value={formData.taxNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, taxNumber: event.target.value }))} /></div>
+                    <div className="space-y-2"><Label htmlFor="partner-ssnit">SSNIT Number</Label><Input id="partner-ssnit" value={formData.ssnitNumber} disabled={saving} onChange={event => setFormData(previous => ({ ...previous, ssnitNumber: event.target.value }))} placeholder="Enter SSNIT number" /></div>
+                  </div>
                   <p className="text-sm text-muted-foreground">Maintain payment, tax and withholding defaults in Finance Profiles after saving the partner.</p>
                   <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="space-y-1.5">

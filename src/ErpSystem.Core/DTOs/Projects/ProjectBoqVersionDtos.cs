@@ -84,8 +84,11 @@ public sealed class ProjectBoqVersionLineDto
     public Guid LineKey { get; set; }
     public Guid? SourceBoqItemId { get; set; }
     public Guid? ProjectPackageId { get; set; }
+    public Guid? ProjectWorkItemId { get; set; }
     public string? PackageCode { get; set; }
     public string? PackageName { get; set; }
+    public string? ActivityNodeType { get; set; }
+    public string? ActivityTitle { get; set; }
     public string? SectionCode { get; set; }
     public string? SectionName { get; set; }
     public string? TradeCode { get; set; }

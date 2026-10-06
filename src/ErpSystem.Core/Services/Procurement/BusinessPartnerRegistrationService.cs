@@ -1462,6 +1462,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             LegalName = additionalData.CompanyName,
             BusinessRegistrationNumber = additionalData.RegistrationNumber,
             TaxIdentificationNumber = additionalData.TaxNumber,
+            SsnitNumber = additionalData.SsnitNumber,
             VATNumber = additionalData.VatNumber,
             PrimaryEmail = additionalData.Email,
             PrimaryPhone = additionalData.Phone,
@@ -1679,6 +1680,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             PartnerType = createdPartner.PartnerType,
             RegistrationNumber = createdPartner.BusinessRegistrationNumber,
             TaxNumber = createdPartner.TaxIdentificationNumber,
+            SsnitNumber = createdPartner.SsnitNumber,
             VatNumber = createdPartner.VATNumber,
             Email = createdPartner.PrimaryEmail,
             Phone = createdPartner.PrimaryPhone,
@@ -1757,6 +1759,8 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
                     dto.RegistrationNumber = regNumber.GetString();
                 if (TryGetProperty(registrationData, "taxNumber", out var taxNumber))
                     dto.TaxNumber = taxNumber.GetString();
+                if (TryGetProperty(registrationData, "ssnitNumber", out var ssnitNumber))
+                    dto.SsnitNumber = ssnitNumber.GetString();
                 if (TryGetProperty(registrationData, "vatNumber", out var vatNumber))
                     dto.VatNumber = vatNumber.GetString();
                 if (TryGetProperty(registrationData, "website", out var website))
@@ -2293,6 +2297,7 @@ public class BusinessPartnerRegistrationService : IBusinessPartnerRegistrationSe
             result.TradingName = TryGetStringProperty(dataElement, "TradingName", "tradingName");
             result.RegistrationNumber = TryGetStringProperty(dataElement, "RegistrationNumber", "registrationNumber");
             result.TaxNumber = TryGetStringProperty(dataElement, "TaxNumber", "taxNumber");
+            result.SsnitNumber = TryGetStringProperty(dataElement, "SsnitNumber", "ssnitNumber", "SSNITNumber", "ssnitNo");
             result.VatNumber = TryGetStringProperty(dataElement, "VatNumber", "vatNumber");
 
             // Contact Information
@@ -3047,6 +3052,7 @@ internal class RegistrationAdditionalData
     public string? TradingName { get; set; }
     public string? RegistrationNumber { get; set; }
     public string? TaxNumber { get; set; }
+    public string? SsnitNumber { get; set; }
     public string? VatNumber { get; set; }
 
     // Contact Information

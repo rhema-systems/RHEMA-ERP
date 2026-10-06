@@ -209,6 +209,7 @@ public sealed class ProjectBoqItemConfiguration : IEntityTypeConfiguration<Proje
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.SortOrder });
         builder.HasIndex(x => new { x.ProjectId, x.ProjectPackageId, x.LineNumber });
         builder.HasIndex(x => new { x.ProjectId, x.ItemType });
+        builder.HasIndex(x => new { x.TenantId, x.ProjectWorkItemId });
         builder.HasIndex(x => new { x.TenantId, x.SectionCatalogEntryId });
         builder.HasIndex(x => new { x.TenantId, x.TradeCatalogEntryId });
         builder.HasIndex(x => new { x.TenantId, x.CostCodeCatalogEntryId });
@@ -223,6 +224,11 @@ public sealed class ProjectBoqItemConfiguration : IEntityTypeConfiguration<Proje
             .WithMany(x => x.BoqItems)
             .HasForeignKey(x => x.ProjectPackageId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.HasOne(x => x.ProjectWorkItem)
+            .WithMany()
+            .HasForeignKey(x => x.ProjectWorkItemId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(x => x.SectionCatalogEntry)
             .WithMany()

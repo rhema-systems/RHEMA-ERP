@@ -80,7 +80,8 @@ public enum CashierTillSessionStatus
 {
     Open = 1,
     PendingReview = 2,
-    Closed = 3
+    Closed = 3,
+    Cancelled = 4
 }
 
 public enum BankDepositStatus
@@ -96,9 +97,9 @@ public enum BankDepositStatus
 }
 
 /// <summary>
-/// Operational acknowledgement that the destination bank accepted a posted deposit. This is
-/// deliberately separate from GL posting and bank-statement reconciliation: each answers a
-/// different control question and therefore retains its own timestamp and actor.
+/// Operational acknowledgement that the destination bank accepted an approved deposit. This is
+/// deliberately required before GL posting and remains separate from bank-statement
+/// reconciliation: each answers a different control question and retains its own evidence.
 /// </summary>
 public enum BankDepositConfirmationStatus
 {

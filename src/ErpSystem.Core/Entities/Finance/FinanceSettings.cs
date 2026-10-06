@@ -200,7 +200,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// </summary>
         public DepositPolicy BankDepositPolicy { get; set; } = DepositPolicy.DepositIntact;
         public bool RequireBankDepositPrimaryEvidence { get; set; } = true;
-        public bool AutoPostBankDepositAfterApproval { get; set; } = true;
+        public bool AutoPostBankDepositAfterConfirmation { get; set; } = true;
         public decimal? MaximumDepositDeductionAmount { get; set; }
         public decimal? MaximumDepositDeductionPercentage { get; set; }
         public int BankStatementMatchDateToleranceDays { get; set; } = 3;

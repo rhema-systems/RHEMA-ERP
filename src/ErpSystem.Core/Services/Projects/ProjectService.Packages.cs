@@ -133,6 +133,18 @@ public partial class ProjectService
         var packages = (await GetProjectPackageEntitiesAsync(projectId)).ToList();
         var packageLookup = packages.ToDictionary(x => x.Id);
         var boqItems = (await GetProjectBoqItemEntitiesAsync(projectId)).ToList();
+        var workItemIds = boqItems
+            .Where(item => item.ProjectWorkItemId.HasValue)
+            .Select(item => item.ProjectWorkItemId!.Value)
+            .Distinct()
+            .ToList();
+        var workItemLookup = workItemIds.Count == 0
+            ? new Dictionary<Guid, ProjectWorkItem>()
+            : (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(item =>
+                    item.TenantId == _currentUserProvider.TenantId
+                    && item.ProjectId == projectId
+                    && workItemIds.Contains(item.Id)))
+                .ToDictionary(item => item.Id);
         var derivationContext = await BuildProjectCommercialDerivationContextAsync(projectId, packages, boqItems);
         return boqItems
             .OrderBy(x => x.SortOrder)
@@ -140,9 +152,14 @@ public partial class ProjectService
             .Select(x =>
             {
                 var package = packageLookup.TryGetValue(x.ProjectPackageId, out var resolvedPackage) ? resolvedPackage : null;
+                var workItem = x.ProjectWorkItemId.HasValue
+                    && workItemLookup.TryGetValue(x.ProjectWorkItemId.Value, out var resolvedWorkItem)
+                        ? resolvedWorkItem
+                        : null;
                 return MapToDto(
                     x,
                     package,
+                    workItem,
                     DeriveProjectBoqCommercialAmounts(x, package, derivationContext));
             })
             .ToList();
@@ -193,6 +210,7 @@ public partial class ProjectService
 
         var classification = await ResolveProjectBoqClassificationAsync(dto);
         await ValidateProjectBoqItemAsync(project, dto, classification);
+        var activity = await ResolveProjectBoqActivityAsync(projectId, dto.ProjectPackageId, dto.ProjectWorkItemId);
 
         var siblings = (await _unitOfWork.Repository<ProjectBoqItem>().FindAsync(x =>
             x.ProjectPackageId == dto.ProjectPackageId
@@ -209,6 +227,7 @@ public partial class ProjectService
             TenantId = _currentUserProvider.TenantId,
             ProjectId = projectId,
             ProjectPackageId = dto.ProjectPackageId,
+            ProjectWorkItemId = activity?.Id,
             SectionCatalogEntryId = classification.Section?.Id,
             SectionCode = classification.Section?.Code,
             SectionName = classification.Section?.Name,
@@ -266,6 +285,7 @@ public partial class ProjectService
 
         var classification = await ResolveProjectBoqClassificationAsync(dto, entity);
         await ValidateProjectBoqItemAsync(project, dto, classification);
+        var activity = await ResolveProjectBoqActivityAsync(entity.ProjectId, dto.ProjectPackageId, dto.ProjectWorkItemId);
 
         var previousPackageId = entity.ProjectPackageId;
         var (resolvedBudgetQuantity, resolvedBudgetUnitRate, resolvedBudgetAmount) = ResolveBoqBudgetFields(
@@ -278,6 +298,7 @@ public partial class ProjectService
             entity.BudgetUnitRate,
             entity.BudgetAmount);
         entity.ProjectPackageId = dto.ProjectPackageId;
+        entity.ProjectWorkItemId = activity?.Id;
         entity.SectionCatalogEntryId = classification.Section?.Id;
         entity.SectionCode = classification.Section?.Code;
         entity.SectionName = classification.Section?.Name;
@@ -520,6 +541,42 @@ public partial class ProjectService
         await EnsureTenantEntityExistsAsync<PurchaseRequisitionItem>(dto.PurchaseRequisitionItemId, "purchase requisition item");
         await EnsureTenantEntityExistsAsync<PurchaseOrderItem>(dto.PurchaseOrderItemId, "purchase order item");
         await ValidateEffectiveBoqStandardsPolicyAsync(project, classification);
+    }
+
+    private async Task<ProjectWorkItem?> ResolveProjectBoqActivityAsync(
+        Guid projectId,
+        Guid projectPackageId,
+        Guid? projectWorkItemId)
+    {
+        if (!projectWorkItemId.HasValue)
+        {
+            return null;
+        }
+
+        var activity = await _unitOfWork.Repository<ProjectWorkItem>().FirstOrDefaultAsync(item =>
+            item.Id == projectWorkItemId.Value
+            && item.TenantId == _currentUserProvider.TenantId);
+        if (activity == null)
+        {
+            throw new InvalidOperationException("The selected project activity could not be found for this tenant.");
+        }
+
+        if (activity.ProjectId != projectId)
+        {
+            throw new InvalidOperationException("The selected project activity does not belong to this project.");
+        }
+
+        if (string.Equals(activity.NodeType, ProjectWorkItemNodeTypes.Phase, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Select a project activity, task, or workstream instead of a phase node.");
+        }
+
+        if (activity.ProjectPackageId.HasValue && activity.ProjectPackageId.Value != projectPackageId)
+        {
+            throw new InvalidOperationException("The selected project activity belongs to a different work component.");
+        }
+
+        return activity;
     }
 
     private async Task ValidateEffectiveBoqStandardsPolicyAsync(
@@ -767,7 +824,11 @@ public partial class ProjectService
                 group => group.Select(item =>
                 {
                     var package = referenceContext.PackageLookup.TryGetValue(item.ProjectPackageId, out var resolvedPackage) ? resolvedPackage : null;
-                    return MapToDto(item, package, DeriveProjectBoqCommercialAmounts(item, package, derivationContext));
+                    var workItem = item.ProjectWorkItemId.HasValue
+                        && referenceContext.WorkItemLookup.TryGetValue(item.ProjectWorkItemId.Value, out var resolvedWorkItem)
+                            ? resolvedWorkItem
+                            : null;
+                    return MapToDto(item, package, workItem, DeriveProjectBoqCommercialAmounts(item, package, derivationContext));
                 }).ToList());
 
         return packages
@@ -810,6 +871,7 @@ public partial class ProjectService
             .ToList();
         var purchaseRequisitionIds = packages.Where(x => x.PurchaseRequisitionId.HasValue).Select(x => x.PurchaseRequisitionId!.Value).Distinct().ToList();
         var purchaseOrderIds = packages.Where(x => x.PurchaseOrderId.HasValue).Select(x => x.PurchaseOrderId!.Value).Distinct().ToList();
+        var workItemIds = boqItems.Where(x => x.ProjectWorkItemId.HasValue).Select(x => x.ProjectWorkItemId!.Value).Distinct().ToList();
 
         var businessPartners = businessPartnerIds.Count == 0
             ? new Dictionary<Guid, BusinessPartner>()
@@ -835,6 +897,13 @@ public partial class ProjectService
             ? new Dictionary<Guid, PurchaseOrder>()
             : (await _unitOfWork.Repository<PurchaseOrder>().FindAsync(x => x.TenantId == _currentUserProvider.TenantId && purchaseOrderIds.Contains(x.Id)))
                 .ToDictionary(x => x.Id);
+        var workItems = workItemIds.Count == 0
+            ? new Dictionary<Guid, ProjectWorkItem>()
+            : (await _unitOfWork.Repository<ProjectWorkItem>().FindAsync(x =>
+                    x.TenantId == _currentUserProvider.TenantId
+                    && x.ProjectId == projectId
+                    && workItemIds.Contains(x.Id)))
+                .ToDictionary(x => x.Id);
 
         return new ProjectPackageReferenceContext(
             phases,
@@ -844,7 +913,8 @@ public partial class ProjectService
             contracts,
             procurementPlanItems,
             purchaseRequisitions,
-            purchaseOrders);
+            purchaseOrders,
+            workItems);
     }
 
     private async Task<ProjectPackageDto> GetProjectPackageDtoAsync(Guid projectId, Guid packageId)
@@ -1045,13 +1115,20 @@ public partial class ProjectService
         };
     }
 
-    private static ProjectBoqItemDto MapToDto(ProjectBoqItem entity, ProjectPackage? package, ProjectDerivedCommercialAmounts derivedAmounts) => new()
+    private static ProjectBoqItemDto MapToDto(
+        ProjectBoqItem entity,
+        ProjectPackage? package,
+        ProjectWorkItem? workItem,
+        ProjectDerivedCommercialAmounts derivedAmounts) => new()
     {
         Id = entity.Id,
         ProjectId = entity.ProjectId,
         ProjectPackageId = entity.ProjectPackageId,
         PackageCode = package?.Code,
         PackageName = package?.Name,
+        ProjectWorkItemId = entity.ProjectWorkItemId,
+        ActivityNodeType = workItem?.NodeType,
+        ActivityTitle = workItem?.Title,
         SectionCatalogEntryId = entity.SectionCatalogEntryId,
         SectionCode = entity.SectionCode,
         SectionName = entity.SectionName,
@@ -1096,7 +1173,8 @@ public partial class ProjectService
         IReadOnlyDictionary<Guid, Contract> ContractLookup,
         IReadOnlyDictionary<Guid, ProcurementPlanItem> ProcurementPlanLookup,
         IReadOnlyDictionary<Guid, PurchaseRequisition> PurchaseRequisitionLookup,
-        IReadOnlyDictionary<Guid, PurchaseOrder> PurchaseOrderLookup);
+        IReadOnlyDictionary<Guid, PurchaseOrder> PurchaseOrderLookup,
+        IReadOnlyDictionary<Guid, ProjectWorkItem> WorkItemLookup);
 
     private sealed record ProjectBoqClassificationSnapshot(
         ProjectCatalogEntry? Section,

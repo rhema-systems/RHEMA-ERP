@@ -15,6 +15,24 @@ public sealed class OpenCashierTillSessionDto
     public Guid? OpeningEvidenceFileId { get; set; }
 }
 
+/// <summary>
+/// Replaces the mutable opening evidence on an unused custody session. Till, cashier,
+/// business date, currency, session number, and opening timestamp remain immutable.
+/// </summary>
+public sealed class UpdateCashierTillOpeningDto
+{
+    public decimal OpeningFloatAmount { get; set; }
+    public string? OpeningNotes { get; set; }
+    public Guid? OpeningEvidenceFileId { get; set; }
+    public string RowVersion { get; set; } = string.Empty;
+}
+
+public sealed class CancelCashierTillSessionDto
+{
+    public string Reason { get; set; } = string.Empty;
+    public string RowVersion { get; set; } = string.Empty;
+}
+
 public sealed class CashierTillCountLineInputDto
 {
     public decimal Denomination { get; set; }
@@ -103,6 +121,11 @@ public sealed class CashierTillSessionDto
     public Guid? ReviewedById { get; set; }
     public string? ReviewComments { get; set; }
     public DateTime? ClosedAt { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public Guid? CancelledById { get; set; }
+    public string? CancellationReason { get; set; }
+    public bool OpeningDetailsMutable { get; set; }
+    public string? OpeningDetailsLockReason { get; set; }
     public Guid? CorrectsSessionId { get; set; }
     public string? CorrectionReason { get; set; }
     public IReadOnlyList<CashierTillCountLineDto> CountLines { get; set; } =

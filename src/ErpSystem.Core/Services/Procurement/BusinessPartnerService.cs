@@ -159,6 +159,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             LegalName = dto.PartnerName,
             BusinessRegistrationNumber = dto.RegistrationNumber,
             TaxIdentificationNumber = dto.TaxNumber,
+            SsnitNumber = dto.SsnitNumber,
             VATNumber = dto.TaxNumber, // Using TaxNumber as VATNumber for now
             PrimaryEmail = dto.Email,
             PrimaryPhone = dto.Phone,
@@ -249,6 +250,7 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.LegalName = dto.PartnerName;
         partner.BusinessRegistrationNumber = dto.RegistrationNumber;
         partner.TaxIdentificationNumber = dto.TaxNumber;
+        partner.SsnitNumber = dto.SsnitNumber;
         partner.VATNumber = dto.TaxNumber; // Using TaxNumber as VATNumber for now
         partner.PrimaryEmail = dto.Email;
         partner.PrimaryPhone = dto.Phone;
@@ -846,6 +848,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             RoleTypes = MapRoleTypes(partner),
             RegistrationNumber = partner.BusinessRegistrationNumber,
             TaxNumber = partner.TaxIdentificationNumber,
+            SsnitNumber = partner.SsnitNumber,
             VatNumber = partner.VATNumber,
             Email = partner.PrimaryEmail,
             Phone = partner.PrimaryPhone,
@@ -889,6 +892,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             RoleTypes = MapRoleTypes(partner),
             RegistrationNumber = partner.BusinessRegistrationNumber,
             TaxNumber = partner.TaxIdentificationNumber,
+            SsnitNumber = partner.SsnitNumber,
             VatNumber = partner.VATNumber,
             Email = partner.PrimaryEmail,
             Phone = partner.PrimaryPhone,

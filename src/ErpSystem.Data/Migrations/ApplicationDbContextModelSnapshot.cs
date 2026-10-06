@@ -13119,13 +13119,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("SegmentValueId");
 
-                    b.HasIndex("TenantId", "BudgetScenarioId", "DistributionDimensionValueId")
+                    b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId", "DistributionDimensionValueId")
                         .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
-
-                    b.HasIndex("TenantId", "BudgetScenarioId", "SegmentValueId")
-                        .IsUnique()
-                        .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("BudgetReturns");
                 });
@@ -13512,6 +13508,64 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("BudgetScenarioControlDimensions", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BudgetScenarioControlSegment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountSegmentStructureId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("BudgetScenarioId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountSegmentStructureId");
+
+                    b.HasIndex("BudgetScenarioId");
+
+                    b.HasIndex("TenantId", "BudgetScenarioId", "AccountSegmentStructureId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("BudgetScenarioControlSegments", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.CashTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -13848,6 +13902,16 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<DateTime>("BusinessDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CancelledById")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CashierName")
                         .IsRequired()
@@ -18318,7 +18382,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("ArSettlementQuoteSide")
                         .HasColumnType("int");
 
-                    b.Property<bool>("AutoPostBankDepositAfterApproval")
+                    b.Property<bool>("AutoPostBankDepositAfterConfirmation")
                         .HasColumnType("bit");
 
                     b.Property<int>("BankDepositPolicy")
@@ -27858,9 +27922,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("BankStatementLineId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("CashTransactionId");
+                    b.HasIndex("CashTransactionId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.HasIndex("ReconciliationId");
 
@@ -124923,6 +124990,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<string>("SsnitNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<bool>("SubjectToWithholdingDeduction")
                         .HasColumnType("bit");
 
@@ -155423,6 +155494,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("ProjectPackageId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("ProjectWorkItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("PurchaseOrderItemId")
                         .HasColumnType("uniqueidentifier");
 
@@ -155489,6 +155563,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ProjectPackageId");
 
+                    b.HasIndex("ProjectWorkItemId");
+
                     b.HasIndex("SectionCatalogEntryId");
 
                     b.HasIndex("TradeCatalogEntryId");
@@ -155498,6 +155574,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "CostCodeCatalogEntryId");
 
                     b.HasIndex("TenantId", "MeasurementCodeCatalogEntryId");
+
+                    b.HasIndex("TenantId", "ProjectWorkItemId");
 
                     b.HasIndex("TenantId", "SectionCatalogEntryId");
 
@@ -155954,6 +156032,14 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ActivityNodeType")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("ActivityTitle")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<string>("CostCode")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -156039,6 +156125,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ProjectPackageId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ProjectWorkItemId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("Quantity")
@@ -185128,6 +185217,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("CreatedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("DarkLoginBackgroundFileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("DeletedAt")
                         .HasColumnType("datetime2");
 
@@ -185148,17 +185240,14 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("JwtTokenLifetimeMinutes")
                         .HasColumnType("int");
 
-                    b.Property<int>("LoginPageStyle")
-                        .HasColumnType("int");
-
-                    b.Property<Guid?>("DarkLoginBackgroundFileUploadRecordId")
+                    b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("LightLoginBackgroundFileUploadRecordId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid?>("LastModifiedById")
-                        .HasColumnType("uniqueidentifier");
+                    b.Property<int>("LoginPageStyle")
+                        .HasColumnType("int");
 
                     b.Property<int>("MaxFailedLoginAttempts")
                         .HasColumnType("int");
@@ -191937,6 +192026,33 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("BudgetScenario");
 
                     b.Navigation("FinanceDimensionDefinition");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.BudgetScenarioControlSegment", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountSegmentStructure", "AccountSegmentStructure")
+                        .WithMany()
+                        .HasForeignKey("AccountSegmentStructureId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.BudgetScenario", "BudgetScenario")
+                        .WithMany("ControlSegments")
+                        .HasForeignKey("BudgetScenarioId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountSegmentStructure");
+
+                    b.Navigation("BudgetScenario");
 
                     b.Navigation("Tenant");
                 });
@@ -233275,6 +233391,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Projects.ProjectWorkItem", "ProjectWorkItem")
+                        .WithMany()
+                        .HasForeignKey("ProjectWorkItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Projects.ProjectCatalogEntry", "SectionCatalogEntry")
                         .WithMany()
                         .HasForeignKey("SectionCatalogEntryId")
@@ -233298,6 +233419,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Project");
 
                     b.Navigation("ProjectPackage");
+
+                    b.Navigation("ProjectWorkItem");
 
                     b.Navigation("SectionCatalogEntry");
 
@@ -242907,6 +243030,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("BudgetReturns");
 
                     b.Navigation("ControlDimensions");
+
+                    b.Navigation("ControlSegments");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.CashTransaction", b =>

@@ -55,6 +55,7 @@ public interface IBankReconciliationService
     Task<ReconciliationAdjustmentDto> CreateAndPostAdjustmentAsync(Guid reconciliationId, CreateReconciliationAdjustmentDto dto, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> FinalizeReconciliationAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> CancelReconciliationAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+    Task<decimal> ValidateApprovalBalanceAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> ApproveReconciliationAsync(Guid id);
     Task<ReconciliationSummaryDto> GetSummaryAsync(Guid id);
 }
@@ -128,6 +129,8 @@ public interface ICashierTillService
         CancellationToken cancellationToken = default);
     Task<CashierTillSessionDto?> GetSessionAsync(Guid id, CancellationToken cancellationToken = default);
     Task<CashierTillSessionDto> OpenSessionAsync(OpenCashierTillSessionDto dto, CancellationToken cancellationToken = default);
+    Task<CashierTillSessionDto> UpdateOpeningAsync(Guid id, UpdateCashierTillOpeningDto dto, CancellationToken cancellationToken = default);
+    Task<CashierTillSessionDto> CancelSessionAsync(Guid id, CancelCashierTillSessionDto dto, CancellationToken cancellationToken = default);
     Task<CashierTillSessionDto> SubmitCountAsync(Guid id, SubmitCashierTillCountDto dto, CancellationToken cancellationToken = default);
     Task<CashierTillSessionDto> ApproveClosureAsync(Guid id, ReviewCashierTillSessionDto dto, CancellationToken cancellationToken = default);
     Task<CashierTillSessionDto> ReturnForRecountAsync(Guid id, ReviewCashierTillSessionDto dto, CancellationToken cancellationToken = default);

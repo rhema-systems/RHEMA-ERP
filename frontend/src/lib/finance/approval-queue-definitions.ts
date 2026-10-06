@@ -105,6 +105,7 @@ function toWorkflowApprovalItem(row: FinanceWorkflowApprovalQueueItem): Approval
         decisionOnDetailPage: row.decisionOnDetailPage,
         approveDisabledReason: row.approveDisabledReason,
         rejectDisabledReason: row.rejectDisabledReason,
+        rejectLabel: normalizeEntityType(row.entityType) === 'BANKRECONCILIATION' ? 'Return for correction' : undefined,
         metadata: toMetadata(row),
     };
 }

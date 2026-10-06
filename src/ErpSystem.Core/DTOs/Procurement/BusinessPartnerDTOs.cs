@@ -26,6 +26,7 @@ public class BusinessPartnerDto
     public string? TradingName { get; set; }
     public string? RegistrationNumber { get; set; }
     public string? TaxNumber { get; set; }
+    public string? SsnitNumber { get; set; }
     public string? VatNumber { get; set; }
     public string? CompanyName { get; set; }
     public string? AlternatePhone { get; set; }
@@ -230,6 +231,9 @@ public class CreateBusinessPartnerDto
     [MaxLength(100)]
     public string? TaxNumber { get; set; }
 
+    [MaxLength(100)]
+    public string? SsnitNumber { get; set; }
+
     // Validates email format only when not empty
     [OptionalEmailAddress]
     [MaxLength(200)]
@@ -332,6 +336,9 @@ public class UpdateBusinessPartnerDto
 
     [MaxLength(100)]
     public string? TaxNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? SsnitNumber { get; set; }
 
     // Validates email format only when not empty
     [OptionalEmailAddress]
@@ -815,6 +822,7 @@ public class BusinessPartnerRegistrationDetailDto : BusinessPartnerRegistrationD
     // Parsed fields from RegistrationData JSON
     public string? TradingName { get; set; }
     public string? TaxNumber { get; set; }
+    public string? SsnitNumber { get; set; }
     public string? VatNumber { get; set; }
     public string? Website { get; set; }
     public string? IndustryType { get; set; }
@@ -862,6 +870,9 @@ public class CreateBusinessPartnerRegistrationDto
 
     [MaxLength(100)]
     public string? TaxNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? SsnitNumber { get; set; }
 
     [MaxLength(100)]
     public string? VatNumber { get; set; }
@@ -930,6 +941,9 @@ public class UpdateBusinessPartnerRegistrationDto
 
     [MaxLength(100)]
     public string? RegistrationNumber { get; set; }
+
+    [MaxLength(100)]
+    public string? SsnitNumber { get; set; }
 
     // Email validation only if provided (not null or empty) - removed validation for draft saves
     [MaxLength(200)]

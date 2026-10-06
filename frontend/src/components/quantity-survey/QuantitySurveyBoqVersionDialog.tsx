@@ -1122,7 +1122,13 @@ export function QuantitySurveyBoqVersionActions({
                         {line.lineNumber || line.itemCode || '—'}
                       </TableCell>
                       <TableCell>
-                        {line.packageCode || line.packageName || '—'}
+                        <div>{line.packageCode || line.packageName || '—'}</div>
+                        {line.activityTitle ? (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {line.activityNodeType || 'Activity'} ·{' '}
+                            {line.activityTitle}
+                          </div>
+                        ) : null}
                       </TableCell>
                       <TableCell className="min-w-64">
                         {line.description}

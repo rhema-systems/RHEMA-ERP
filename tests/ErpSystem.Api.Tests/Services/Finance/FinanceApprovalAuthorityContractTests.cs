@@ -242,6 +242,30 @@ public sealed class FinanceApprovalAuthorityContractTests
         process.Should().Contain("FinancePermissions.ApproveBankDeposits");
     }
 
+    [Fact]
+    public void BankReconciliationWorkbench_UsesMakerCheckerAndReturnsForCorrection()
+    {
+        var source = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Finance",
+            "FinanceApprovalsController.cs"));
+        var process = ExtractMethod(source, "private async Task<ActionResult<WorkflowExecutionResult>> ProcessApprovalAsync");
+        var rejected = ExtractMethod(source, "private async Task ApplyRejectedOutcomeAsync");
+        var separation = ExtractMethod(source, "private static bool RequiresSubmitterApproverSeparation");
+
+        FinanceApprovalsController.IsFinanceEntity("BankReconciliation").Should().BeTrue();
+        FinanceApprovalsController.ResolveDetailHref("BankReconciliation", Guid.Empty, null)
+            .Should().Be($"/finance/cash/reconciliation?reconciliation={Guid.Empty:D}");
+        process.Should().Contain("FinancePermissions.ApproveBankReconciliation");
+        separation.Should().Contain("BANKRECONCILIATION");
+        rejected.Should().Contain("ReconciliationStatus.InProgress");
+        rejected.Should().Contain("BankReconciliationReturnedForCorrection");
+        rejected.Should().Contain("reconciliation.ReconciledBy = null");
+    }
+
     private static string ExtractMethod(string source, string methodName)
     {
         var methodIndex = source.IndexOf(methodName, StringComparison.Ordinal);

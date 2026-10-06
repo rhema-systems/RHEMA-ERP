@@ -388,7 +388,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> CashierTillPolicy(string action)
         => action switch
         {
-            "OpenSession" or "SubmitCount" => One(FinancePermissions.OperateCashTills),
+            "OpenSession" or "UpdateOpening" or "CancelSession" or "SubmitCount" => One(FinancePermissions.OperateCashTills),
             "ApproveClosure" or "ReturnForRecount" => One(FinancePermissions.ReviewCashTillClosures),
             "ReopenAsCorrection" => One(FinancePermissions.ReopenCashTillSessions),
             _ => One(FinancePermissions.ViewFinance)

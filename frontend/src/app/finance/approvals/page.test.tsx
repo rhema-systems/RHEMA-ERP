@@ -138,4 +138,35 @@ describe('Finance approval workbench', () => {
       'href', '/procurement/business-partners/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
     );
   });
+
+  it('labels a bank reconciliation rejection as return for correction', async () => {
+    apiServiceMock.get.mockResolvedValueOnce([{
+      approvalId: 'approval-reconciliation-1',
+      entityId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      entityType: 'BankReconciliation',
+      reference: 'REC-20261005',
+      title: 'ABC Bank reconciliation',
+      detailHref: '/finance/cash/reconciliation?reconciliation=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      documentType: 'Bank Reconciliation',
+      module: 'Cash and Bank',
+      currentStep: 'Accounts Officer Review',
+      statusLabel: 'Completed',
+      canApprove: true,
+      canReject: true,
+    }]);
+
+    render(
+      <ApprovalWorkbench
+        title="Finance Approval Workbench"
+        description="Finance approvals"
+        definitions={getFinanceApprovalQueueDefinitions()}
+      />
+    );
+
+    expect(await screen.findByText('ABC Bank reconciliation')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Return for correction' })).toBeInTheDocument();
+    expect(screen.getAllByRole('link', { name: 'Review' }).some(link =>
+      link.getAttribute('href') === '/finance/cash/reconciliation?reconciliation=aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    )).toBe(true);
+  });
 });

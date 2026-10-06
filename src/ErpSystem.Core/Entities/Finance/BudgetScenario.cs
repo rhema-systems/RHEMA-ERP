@@ -110,6 +110,7 @@ public class BudgetScenario : TenantEntity
 
     public virtual ICollection<BudgetReturn> BudgetReturns { get; set; } = new List<BudgetReturn>();
     public virtual ICollection<BudgetScenarioControlDimension> ControlDimensions { get; set; } = new List<BudgetScenarioControlDimension>();
+    public virtual ICollection<BudgetScenarioControlSegment> ControlSegments { get; set; } = new List<BudgetScenarioControlSegment>();
 }
 
 /// <summary>
@@ -132,4 +133,26 @@ public sealed class BudgetScenarioControlDimension : TenantEntity
 
     [ForeignKey(nameof(FinanceDimensionDefinitionId))]
     public FinanceDimensionDefinition FinanceDimensionDefinition { get; set; } = null!;
+}
+
+/// <summary>
+/// Declares an account-number segment structure that can scope distributed returns
+/// for this scenario. Each return currently selects at most one lookup value from one
+/// of the declared structures, matching the existing SegmentValueId budget-control grain.
+/// </summary>
+public sealed class BudgetScenarioControlSegment : TenantEntity
+{
+    [Required]
+    public Guid BudgetScenarioId { get; set; }
+
+    [Required]
+    public Guid AccountSegmentStructureId { get; set; }
+
+    public int DisplayOrder { get; set; }
+
+    [ForeignKey(nameof(BudgetScenarioId))]
+    public BudgetScenario BudgetScenario { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountSegmentStructureId))]
+    public AccountSegmentStructure AccountSegmentStructure { get; set; } = null!;
 }

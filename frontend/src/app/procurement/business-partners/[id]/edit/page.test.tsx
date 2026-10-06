@@ -56,6 +56,7 @@ const saved = {
   partnerType: 'Supplier',
   status: 'Active',
   taxNumber: 'TIN-001',
+  ssnitNumber: 'SSNIT-001',
   creditLimit: 1500,
   paymentTermId: 'term-1',
   currency: 'GHS',
@@ -88,7 +89,7 @@ beforeEach(() => {
   vi.mocked(businessPartnerService.updatePartner).mockResolvedValue(saved);
 });
 
-async function openTab(name: string) {
+async function openTab(name: string | RegExp) {
   fireEvent.mouseDown(screen.getByRole('tab', { name }), {
     button: 0,
     ctrlKey: false,
@@ -155,14 +156,40 @@ describe('business partner governed finance setup', () => {
     expect(request).not.toHaveProperty('postingDefaults');
     expect(request).not.toHaveProperty('receivablesDefaults');
   });
-  it('retains master TIN editing without exposing legacy WHT defaults', async () => {
+  it('restores the related-record edit tabs available from the partner record', async () => {
+    render(<EditBusinessPartnerPage />);
+    await screen.findByLabelText('Company Name *');
+    expect(screen.getByRole('tab', { name: /^Contacts \(0\)$/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Bank Accounts \(0\)$/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Documents \(0\)$/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^Licences \(0\)$/ })).toBeInTheDocument();
+
+    await openTab(/^Contacts \(0\)$/);
+    expect(screen.getByText('No contact persons recorded.')).toBeInTheDocument();
+
+    await openTab(/^Bank Accounts \(0\)$/);
+    expect(screen.getByRole('link', { name: 'Request bank detail change' })).toHaveAttribute(
+      'href',
+      '/administration/procurement/supplier-master-changes?partnerId=partner-1&resourceType=SupplierBankDetails&new=1'
+    );
+
+    await openTab(/^Documents \(0\)$/);
+    expect(screen.getByText('No documents are linked to this business partner.')).toBeInTheDocument();
+  });
+
+  it('retains master TIN and SSNIT editing without exposing legacy WHT defaults', async () => {
     render(<EditBusinessPartnerPage />);
     await screen.findByLabelText('Company Name *');
     expect(screen.queryByLabelText('WHT Rate (%)')).not.toBeInTheDocument();
     await openTab('Options');
     fireEvent.change(screen.getByLabelText('TIN'), { target: { value: 'TIN-002' } });
+    expect(screen.getByLabelText('SSNIT Number')).toHaveValue('SSNIT-001');
+    fireEvent.change(screen.getByLabelText('SSNIT Number'), { target: { value: 'SSNIT-002' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.objectContaining({ taxNumber: 'TIN-002' })));
+    await waitFor(() => expect(businessPartnerService.updatePartner).toHaveBeenCalledWith('partner-1', expect.objectContaining({
+      taxNumber: 'TIN-002',
+      ssnitNumber: 'SSNIT-002',
+    })));
   });
   it('retains edits after failed save and exposes the server reason', async () => {
     vi.mocked(businessPartnerService.updatePartner).mockRejectedValue(

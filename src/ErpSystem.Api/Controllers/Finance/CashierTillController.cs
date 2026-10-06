@@ -48,6 +48,20 @@ public sealed class CashierTillController : ControllerBase
         return CreatedAtAction(nameof(GetSession), new { id = item.Id }, item);
     }
 
+    [HttpPut("sessions/{id:guid}/opening-details")]
+    public async Task<ActionResult<CashierTillSessionDto>> UpdateOpening(
+        Guid id,
+        [FromBody] UpdateCashierTillOpeningDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.UpdateOpeningAsync(id, dto, cancellationToken));
+
+    [HttpPost("sessions/{id:guid}/cancel")]
+    public async Task<ActionResult<CashierTillSessionDto>> CancelSession(
+        Guid id,
+        [FromBody] CancelCashierTillSessionDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.CancelSessionAsync(id, dto, cancellationToken));
+
     [HttpPost("sessions/{id:guid}/submit-count")]
     public async Task<ActionResult<CashierTillSessionDto>> SubmitCount(
         Guid id,

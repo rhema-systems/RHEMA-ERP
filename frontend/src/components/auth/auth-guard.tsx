@@ -4,21 +4,31 @@ import { useEffect, ReactNode, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { authService } from '../../services/auth';
 import { useAuth } from '../../hooks/use-auth';
-import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '../../lib/auth-redirect';
-import { hasAnyPermissionAccess } from '../../lib/permissions';
+import {
+  buildLoginRedirectUrl,
+  getCurrentRelativeUrl,
+} from '../../lib/auth-redirect';
+import {
+  hasAnyPermissionAccess,
+  hasAnyRoleAccess,
+} from '../../lib/permissions';
 
 interface AuthGuardProps {
   children: ReactNode;
   fallback?: ReactNode;
   redirectTo?: string;
   requiredPermissions?: string[];
+  requiredRoles?: string[];
+  accessMode?: 'all' | 'any';
 }
 
-export function AuthGuard({ 
-  children, 
-  fallback = null, 
+export function AuthGuard({
+  children,
+  fallback = null,
   redirectTo = '/login',
   requiredPermissions,
+  requiredRoles,
+  accessMode = 'all',
 }: AuthGuardProps) {
   const router = useRouter();
   const { user, isLoading } = useAuth();
@@ -26,10 +36,25 @@ export function AuthGuard({
   const storedUser = hasMounted ? authService.getStoredUser() : null;
   const isAuthenticated = hasMounted && authService.isAuthenticated();
   const effectiveUser = user ?? storedUser;
-  const permissionsResolved = !requiredPermissions?.length || !!effectiveUser || !isLoading;
+  const hasAccessRequirements =
+    !!requiredPermissions?.length || !!requiredRoles?.length;
+  const accessResolved =
+    !hasAccessRequirements || !!effectiveUser || !isLoading;
   const hasRequiredPermission = requiredPermissions?.length
     ? hasAnyPermissionAccess(effectiveUser, requiredPermissions)
     : true;
+  const hasRequiredRole = requiredRoles?.length
+    ? hasAnyRoleAccess(effectiveUser, requiredRoles)
+    : true;
+  const accessChecks = [
+    ...(requiredPermissions?.length ? [hasRequiredPermission] : []),
+    ...(requiredRoles?.length ? [hasRequiredRole] : []),
+  ];
+  const hasRequiredAccess =
+    accessChecks.length === 0 ||
+    (accessMode === 'any'
+      ? accessChecks.some(Boolean)
+      : accessChecks.every(Boolean));
 
   useEffect(() => {
     setHasMounted(true);
@@ -41,14 +66,15 @@ export function AuthGuard({
     }
 
     if (!isAuthenticated) {
-      const loginTarget = redirectTo === '/login'
-        ? buildLoginRedirectUrl(getCurrentRelativeUrl())
-        : redirectTo;
+      const loginTarget =
+        redirectTo === '/login'
+          ? buildLoginRedirectUrl(getCurrentRelativeUrl())
+          : redirectTo;
       router.replace(loginTarget);
       return;
     }
 
-    if (requiredPermissions?.length && permissionsResolved && !hasRequiredPermission) {
+    if (hasAccessRequirements && accessResolved && !hasRequiredAccess) {
       router.replace('/dashboard');
     }
   }, [
@@ -57,8 +83,10 @@ export function AuthGuard({
     router,
     redirectTo,
     requiredPermissions,
-    permissionsResolved,
-    hasRequiredPermission,
+    requiredRoles,
+    hasAccessRequirements,
+    accessResolved,
+    hasRequiredAccess,
   ]);
 
   if (!hasMounted) {
@@ -69,11 +97,11 @@ export function AuthGuard({
     return <>{fallback}</>;
   }
 
-  if (requiredPermissions?.length && !permissionsResolved) {
+  if (hasAccessRequirements && !accessResolved) {
     return <>{fallback}</>;
   }
 
-  if (requiredPermissions?.length && !hasRequiredPermission) {
+  if (hasAccessRequirements && !hasRequiredAccess) {
     return <>{fallback}</>;
   }
 

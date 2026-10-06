@@ -12,6 +12,13 @@ export interface BudgetControlDimension {
     displayOrder: number;
 }
 
+export interface BudgetControlSegment {
+    accountSegmentStructureId: string;
+    segmentCode: string;
+    segmentName: string;
+    displayOrder: number;
+}
+
 export interface BudgetDimensionAssignmentInput {
     financeDimensionDefinitionId: string;
     financeDimensionValueId: string;
@@ -54,6 +61,7 @@ export interface BudgetScenario {
     tenantId: string;
     rowVersion: string;
     controlDimensions: BudgetControlDimension[];
+    controlSegments: BudgetControlSegment[];
 }
 
 export interface BudgetReturn {
@@ -61,6 +69,9 @@ export interface BudgetReturn {
     budgetScenarioId: string;
     budgetScenarioName?: string;
     segmentValueId?: string;
+    segmentStructureId?: string;
+    segmentStructureCode?: string;
+    segmentStructureName?: string;
     distributionDimensionValueId?: string;
     distributionDimensionDefinitionId?: string;
     distributionDimensionCode?: string;
@@ -124,6 +135,7 @@ export interface CreateBudgetScenarioDto {
     fiscalYearId: string;
     baseCurrencyCode: string;
     controlDimensionDefinitionIds: string[];
+    controlSegmentStructureIds: string[];
 }
 
 export interface UpdateBudgetScenarioDto {
@@ -132,6 +144,9 @@ export interface UpdateBudgetScenarioDto {
     isActive?: boolean;
     rowVersion: string;
     controlDimensionDefinitionIds?: string[];
+    controlSegmentStructureIds?: string[];
+    fiscalYearId?: string;
+    baseCurrencyCode?: string;
 }
 
 export interface CreateBudgetReturnDto {

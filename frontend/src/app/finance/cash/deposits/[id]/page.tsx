@@ -20,7 +20,10 @@ import {
     toFinancePostingDimensionValues,
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
-import { isIndependentBankDepositReviewer } from '@/lib/finance/bank-deposit-access';
+import {
+    canRecordBankDepositAcknowledgement,
+    isIndependentBankDepositReviewer,
+} from '@/lib/finance/bank-deposit-access';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
 import { useAuth } from '@/hooks/use-auth';
@@ -164,12 +167,22 @@ export default function BankDepositDetailPage() {
     const canSubmitDeposit = hasPermission('Finance.Banking.Deposits.Submit');
     const canApproveDeposit = hasPermission('Finance.Banking.Deposits.Approve');
     const canPostDeposit = hasPermission('Finance.Workflow.PostAfterApproval');
-    const canConfirmDeposit = hasPermission('Finance.Banking.Deposits.Confirm');
+    const hasConfirmDepositPermission = hasPermission('Finance.Banking.Deposits.Confirm');
     const isOwnSubmission = Boolean(
         user?.id && deposit.submittedById && user.id.toLowerCase() === deposit.submittedById.toLowerCase(),
     );
     const canReviewDeposit = canApproveDeposit &&
         isIndependentBankDepositReviewer(user?.id, deposit.submittedById);
+    const canConfirmDeposit = canRecordBankDepositAcknowledgement(
+        user?.id,
+        deposit.submittedById,
+        hasConfirmDepositPermission,
+    );
+    const awaitingBankAcknowledgement =
+        (deposit.status === 'Approved' || deposit.status === 'Posted') &&
+        deposit.confirmationStatus === 'Pending';
+    const isLegacyPostedAwaitingAcknowledgement =
+        deposit.status === 'Posted' && deposit.confirmationStatus === 'Pending';
 
     return (
         <div className="space-y-6 p-6">
@@ -190,7 +203,7 @@ export default function BankDepositDetailPage() {
                     )}
                     {submitted && canReviewDeposit && (
                         <>
-                            <Button disabled={working} onClick={() => void run(() => cashManagementDataService.approveBankDeposit(deposit.id), 'Deposit approved and posted.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button>
+                            <Button disabled={working} onClick={() => void run(() => cashManagementDataService.approveBankDeposit(deposit.id), 'Deposit approved. Bank acknowledgement is required before posting.')}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button>
                             <Button variant="outline" disabled={working} onClick={() => { const comments = window.prompt('What needs to be corrected?'); if (comments) void run(() => cashManagementDataService.returnBankDeposit(deposit.id, comments), 'Deposit returned for changes.'); }}><RotateCcw className="mr-2 h-4 w-4" />Return</Button>
                             <Button variant="destructive" disabled={working} onClick={() => { const reason = window.prompt('Rejection reason'); if (reason) void run(() => cashManagementDataService.rejectBankDeposit(deposit.id, reason), 'Deposit rejected.'); }}><XCircle className="mr-2 h-4 w-4" />Reject</Button>
                         </>
@@ -200,8 +213,15 @@ export default function BankDepositDetailPage() {
                             Awaiting the assigned Chief Accountant. You cannot review your own deposit.
                         </span>
                     )}
-                    {deposit.status === 'Approved' && canPostDeposit && (
+                    {deposit.status === 'Approved' &&
+                        deposit.confirmationStatus === 'Confirmed' &&
+                        canPostDeposit && (
                         <Button disabled={working} onClick={() => void run(() => cashManagementDataService.postBankDeposit(deposit.id), 'Deposit posted to the bank control account.')}><Landmark className="mr-2 h-4 w-4" />Post deposit</Button>
+                    )}
+                    {deposit.status === 'Approved' && deposit.confirmationStatus === 'Pending' && (
+                        <span className="self-center text-sm text-muted-foreground">
+                            Awaiting independent bank acknowledgement before posting.
+                        </span>
                     )}
                 </div>
             </div>
@@ -283,9 +303,16 @@ export default function BankDepositDetailPage() {
                     </CardContent>
                 </Card>
             </div>
-            {deposit.status === 'Posted' && deposit.confirmationStatus === 'Pending' && canConfirmDeposit && (
+            {awaitingBankAcknowledgement && canConfirmDeposit && (
                 <Card>
-                    <CardHeader><CardTitle>Record bank acknowledgement</CardTitle><CardDescription>Capture the bank-issued reference after the approved deposit has been accepted. This does not create another accounting entry.</CardDescription></CardHeader>
+                    <CardHeader>
+                        <CardTitle>Record bank acknowledgement</CardTitle>
+                        <CardDescription>
+                            {isLegacyPostedAwaitingAcknowledgement
+                                ? 'Capture the bank-issued reference for this legacy deposit. The existing posting will not be repeated.'
+                                : 'Capture the bank-issued reference after the approved deposit has been accepted. Posting follows this independent evidence step.'}
+                        </CardDescription>
+                    </CardHeader>
                     <CardContent className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2"><Label htmlFor="bank-confirmation-reference">Bank confirmation reference</Label><Input id="bank-confirmation-reference" maxLength={100} value={confirmationForm.bankConfirmationReference} onChange={event => setConfirmationForm(current => ({ ...current, bankConfirmationReference: event.target.value }))} placeholder="Stamped slip / bank advice reference" /></div>
                         <div className="space-y-2"><Label htmlFor="bank-confirmation-date">Confirmation date</Label><Input id="bank-confirmation-date" type="date" min={deposit.depositDate.slice(0, 10)} max={new Date().toISOString().slice(0, 10)} value={confirmationForm.bankConfirmationDate} onChange={event => setConfirmationForm(current => ({ ...current, bankConfirmationDate: event.target.value }))} /></div>
@@ -295,6 +322,18 @@ export default function BankDepositDetailPage() {
                     </CardContent>
                 </Card>
             )}
+            {awaitingBankAcknowledgement &&
+                hasConfirmDepositPermission &&
+                isOwnSubmission && (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Bank acknowledgement requires an independent user</CardTitle>
+                            <CardDescription>
+                                A different authorized user must record the bank acknowledgement. You cannot confirm a deposit you submitted.
+                            </CardDescription>
+                        </CardHeader>
+                    </Card>
+                )}
         </div>
     );
 }

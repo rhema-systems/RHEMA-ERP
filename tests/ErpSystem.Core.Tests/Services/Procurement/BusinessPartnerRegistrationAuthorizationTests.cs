@@ -104,14 +104,15 @@ public sealed class BusinessPartnerRegistrationAuthorizationTests
                 RegistrationCategory =
                     ProcurementSupplierRegistrationCategory.Goods,
                 RegistrationData =
-                    "{\"taxNumber\":\"TAX-001\",\"legacyField\":\"retained\"}"
+                    "{\"taxNumber\":\"TAX-001\",\"ssnitNumber\":\"SSNIT-001\",\"legacyField\":\"retained\"}"
             },
             systemActorId);
 
         updated.CompanyName.Should().Be("Retained Supplier Updated");
         updated.TaxNumber.Should().Be("TAX-001");
+        updated.SsnitNumber.Should().Be("SSNIT-001");
         registration.RegistrationDataJson.Should().Be(
-            "{\"taxNumber\":\"TAX-001\",\"legacyField\":\"retained\"}");
+            "{\"taxNumber\":\"TAX-001\",\"ssnitNumber\":\"SSNIT-001\",\"legacyField\":\"retained\"}");
         registration.CreatedById.Should().Be(originalOwnerId);
         registrations.Verify(item => item.UpdateAsync(registration), Times.Once);
 

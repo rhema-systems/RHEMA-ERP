@@ -2,15 +2,19 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   Archive,
   FileText,
   Loader2,
   LockKeyhole,
+  Pencil,
   Plus,
+  Power,
   Scale,
   ShieldCheck,
   Workflow,
+  X,
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -38,6 +42,7 @@ import {
   type CentralDocumentAccessRule,
   type CentralDocumentRetentionPolicy,
 } from '@/services/document-management.service';
+import { adminApiService } from '@/services/admin-api.service';
 
 const governanceAreas = [
   {
@@ -181,6 +186,13 @@ function formatSaveError(error: unknown, fallback: string) {
 }
 
 export default function DmsAccessRetentionSetupPage() {
+  const searchParams = useSearchParams();
+  const setupScope = searchParams.get('q')?.trim() ?? '';
+  const scopedModule = setupScope.toLowerCase().includes('legal')
+    ? 'Legal Department'
+    : setupScope.toLowerCase().includes('estate')
+      ? 'Estate / Facilities'
+      : initialAccessForm.module;
   const [accessRules, setAccessRules] = React.useState<
     CentralDocumentAccessRule[]
   >([]);
@@ -190,9 +202,21 @@ export default function DmsAccessRetentionSetupPage() {
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSavingAccess, setIsSavingAccess] = React.useState(false);
   const [isSavingRetention, setIsSavingRetention] = React.useState(false);
-  const [accessForm, setAccessForm] = React.useState(initialAccessForm);
-  const [retentionForm, setRetentionForm] =
-    React.useState(initialRetentionForm);
+  const [accessForm, setAccessForm] = React.useState({
+    ...initialAccessForm,
+    module: scopedModule,
+  });
+  const [retentionForm, setRetentionForm] = React.useState({
+    ...initialRetentionForm,
+    module: scopedModule,
+  });
+  const [identityRoles, setIdentityRoles] = React.useState<string[]>([]);
+  const [editingAccessId, setEditingAccessId] = React.useState<string | null>(
+    null
+  );
+  const [editingRetentionId, setEditingRetentionId] = React.useState<
+    string | null
+  >(null);
   const [error, setError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -200,13 +224,20 @@ export default function DmsAccessRetentionSetupPage() {
 
     const load = async () => {
       try {
-        const [rules, policies] = await Promise.all([
+        const [rules, policies, roles] = await Promise.all([
           documentManagementService.getAccessRules(),
           documentManagementService.getRetentionPolicies(),
+          adminApiService.getRoles().catch(() => []),
         ]);
         if (mounted) {
           setAccessRules(rules);
           setRetentionPolicies(policies);
+          setIdentityRoles(
+            roles
+              .map((role) => role.name)
+              .filter(Boolean)
+              .sort((a, b) => a.localeCompare(b))
+          );
         }
       } finally {
         if (mounted) {
@@ -229,21 +260,31 @@ export default function DmsAccessRetentionSetupPage() {
     setAccessForm((current) => ({ ...current, [field]: value }));
   };
 
-  const selectedModuleRoles =
-    dmsModuleRoleOptions.find((option) => option.module === accessForm.module)
-      ?.roles || [];
+  const selectedModuleRoles = identityRoles.length
+    ? identityRoles
+    : dmsModuleRoleOptions.find((option) => option.module === accessForm.module)
+        ?.roles || [];
+
+  const scopeMatches = React.useCallback(
+    (module?: string | null) =>
+      !setupScope || module?.toLowerCase().includes(setupScope.toLowerCase()),
+    [setupScope]
+  );
+  const visibleAccessRules = accessRules.filter((rule) =>
+    scopeMatches(rule.module)
+  );
+  const visibleRetentionPolicies = retentionPolicies.filter((policy) =>
+    scopeMatches(policy.module)
+  );
 
   const updateAccessModule = (module: string) => {
+    const availableRoles = identityRoles.length
+      ? identityRoles
+      : dmsModuleRoleOptions.find((option) => option.module === module)?.roles || [];
     setAccessForm((current) => ({
       ...current,
       module,
-      roleName:
-        !current.roleName ||
-        dmsModuleRoleOptions
-          .find((option) => option.module === module)
-          ?.roles.includes(current.roleName)
-          ? current.roleName
-          : '',
+      roleName: !current.roleName || availableRoles.includes(current.roleName) ? current.roleName : '',
     }));
   };
 
@@ -259,12 +300,26 @@ export default function DmsAccessRetentionSetupPage() {
     setError(null);
     setIsSavingAccess(true);
     try {
-      const created = await documentManagementService.createAccessRule({
+      const payload = {
         ...accessForm,
-        isActive: true,
-      });
-      setAccessRules((current) => [created, ...current]);
-      setAccessForm(initialAccessForm);
+        isActive: editingAccessId
+          ? (accessRules.find((rule) => rule.id === editingAccessId)
+              ?.isActive ?? true)
+          : true,
+      };
+      const saved = editingAccessId
+        ? await documentManagementService.updateAccessRule(
+            editingAccessId,
+            payload
+          )
+        : await documentManagementService.createAccessRule(payload);
+      setAccessRules((current) =>
+        editingAccessId
+          ? current.map((rule) => (rule.id === editingAccessId ? saved : rule))
+          : [saved, ...current]
+      );
+      setEditingAccessId(null);
+      setAccessForm({ ...initialAccessForm, module: scopedModule });
     } catch (saveError) {
       setError(formatSaveError(saveError, 'Could not save the access rule.'));
     } finally {
@@ -285,7 +340,7 @@ export default function DmsAccessRetentionSetupPage() {
 
     setIsSavingRetention(true);
     try {
-      const created = await documentManagementService.createRetentionPolicy({
+      const payload = {
         policyCode: retentionForm.policyCode.trim(),
         name: retentionForm.name.trim(),
         module: retentionForm.module.trim(),
@@ -294,17 +349,119 @@ export default function DmsAccessRetentionSetupPage() {
         requiresLegalHoldReview: retentionForm.requiresLegalHoldReview,
         allowArchive: retentionForm.allowArchive,
         allowDestruction: retentionForm.allowDestruction,
-        isActive: true,
+        isActive: editingRetentionId
+          ? (retentionPolicies.find(
+              (policy) => policy.id === editingRetentionId
+            )?.isActive ?? true)
+          : true,
         notes: retentionForm.notes.trim(),
-      });
-      setRetentionPolicies((current) => [created, ...current]);
-      setRetentionForm(initialRetentionForm);
+      };
+      const saved = editingRetentionId
+        ? await documentManagementService.updateRetentionPolicy(
+            editingRetentionId,
+            payload
+          )
+        : await documentManagementService.createRetentionPolicy(payload);
+      setRetentionPolicies((current) =>
+        editingRetentionId
+          ? current.map((policy) =>
+              policy.id === editingRetentionId ? saved : policy
+            )
+          : [saved, ...current]
+      );
+      setEditingRetentionId(null);
+      setRetentionForm({ ...initialRetentionForm, module: scopedModule });
     } catch (saveError) {
       setError(
         formatSaveError(saveError, 'Could not save the retention policy.')
       );
     } finally {
       setIsSavingRetention(false);
+    }
+  };
+
+  const editAccessRule = (rule: CentralDocumentAccessRule) => {
+    setEditingAccessId(rule.id);
+    setAccessForm({
+      accessProfile: rule.accessProfile,
+      module: rule.module || scopedModule,
+      roleName: rule.roleName || '',
+      permissionKey: rule.permissionKey || '',
+      canView: rule.canView,
+      canUpload: rule.canUpload,
+      canAnnotate: rule.canAnnotate,
+      canApprove: rule.canApprove,
+      canArchive: rule.canArchive,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const editRetentionPolicy = (policy: CentralDocumentRetentionPolicy) => {
+    setEditingRetentionId(policy.id);
+    setRetentionForm({
+      policyCode: policy.policyCode,
+      name: policy.name,
+      module: policy.module || scopedModule,
+      documentType: policy.documentType || '',
+      retentionDays: String(policy.retentionDays),
+      requiresLegalHoldReview: policy.requiresLegalHoldReview,
+      allowArchive: policy.allowArchive,
+      allowDestruction: policy.allowDestruction,
+      notes: policy.notes || '',
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const toggleAccessRule = async (rule: CentralDocumentAccessRule) => {
+    setError(null);
+    try {
+      const saved = await documentManagementService.updateAccessRule(rule.id, {
+        accessProfile: rule.accessProfile,
+        module: rule.module || undefined,
+        roleName: rule.roleName || undefined,
+        permissionKey: rule.permissionKey || undefined,
+        canView: rule.canView,
+        canUpload: rule.canUpload,
+        canAnnotate: rule.canAnnotate,
+        canApprove: rule.canApprove,
+        canArchive: rule.canArchive,
+        isActive: !rule.isActive,
+      });
+      setAccessRules((current) =>
+        current.map((item) => (item.id === rule.id ? saved : item))
+      );
+    } catch (saveError) {
+      setError(formatSaveError(saveError, 'Could not update the access rule.'));
+    }
+  };
+
+  const toggleRetentionPolicy = async (
+    policy: CentralDocumentRetentionPolicy
+  ) => {
+    setError(null);
+    try {
+      const saved = await documentManagementService.updateRetentionPolicy(
+        policy.id,
+        {
+          policyCode: policy.policyCode,
+          name: policy.name,
+          module: policy.module || undefined,
+          documentType: policy.documentType || undefined,
+          retentionDays: policy.retentionDays,
+          requiresLegalHoldReview: policy.requiresLegalHoldReview,
+          allowArchive: policy.allowArchive,
+          allowDestruction: policy.allowDestruction,
+          isActive: !policy.isActive,
+          notes: policy.notes || undefined,
+        }
+      );
+      setRetentionPolicies((current) =>
+        current.map((item) => (item.id === policy.id ? saved : item))
+      );
+    } catch (saveError) {
+      setError(
+        formatSaveError(saveError, 'Could not update the retention policy.')
+      );
     }
   };
 
@@ -445,14 +602,32 @@ export default function DmsAccessRetentionSetupPage() {
                 ))}
               </div>
 
-              <Button type="submit" disabled={isSavingAccess}>
-                {isSavingAccess ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Save access rule
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={isSavingAccess}>
+                  {isSavingAccess ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  {editingAccessId ? 'Update access rule' : 'Save access rule'}
+                </Button>
+                {editingAccessId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditingAccessId(null);
+                      setAccessForm({
+                        ...initialAccessForm,
+                        module: scopedModule,
+                      });
+                    }}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -570,14 +745,34 @@ export default function DmsAccessRetentionSetupPage() {
                 />
               </div>
 
-              <Button type="submit" disabled={isSavingRetention}>
-                {isSavingRetention ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Plus className="mr-2 h-4 w-4" />
-                )}
-                Save retention policy
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button type="submit" disabled={isSavingRetention}>
+                  {isSavingRetention ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Plus className="mr-2 h-4 w-4" />
+                  )}
+                  {editingRetentionId
+                    ? 'Update retention policy'
+                    : 'Save retention policy'}
+                </Button>
+                {editingRetentionId ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setEditingRetentionId(null);
+                      setRetentionForm({
+                        ...initialRetentionForm,
+                        module: scopedModule,
+                      });
+                    }}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -624,11 +819,11 @@ export default function DmsAccessRetentionSetupPage() {
             <CardDescription>
               {isLoading
                 ? 'Loading access rules'
-                : `${accessRules.length} access rules configured`}
+                : `${visibleAccessRules.length} access rules configured`}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {accessRules.map((rule) => (
+            {visibleAccessRules.map((rule) => (
               <div
                 key={rule.id}
                 className="rounded-md border bg-background p-3"
@@ -662,9 +857,29 @@ export default function DmsAccessRetentionSetupPage() {
                       </Badge>
                     ))}
                 </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => editAccessRule(rule)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void toggleAccessRule(rule)}
+                  >
+                    <Power className="mr-2 h-4 w-4" />
+                    {rule.isActive ? 'Deactivate' : 'Activate'}
+                  </Button>
+                </div>
               </div>
             ))}
-            {!isLoading && accessRules.length === 0 ? (
+            {!isLoading && visibleAccessRules.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No access rules configured yet.
               </p>
@@ -678,11 +893,11 @@ export default function DmsAccessRetentionSetupPage() {
             <CardDescription>
               {isLoading
                 ? 'Loading retention policies'
-                : `${retentionPolicies.length} retention policies configured`}
+                : `${visibleRetentionPolicies.length} retention policies configured`}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {retentionPolicies.map((policy) => (
+            {visibleRetentionPolicies.map((policy) => (
               <div
                 key={policy.id}
                 className="rounded-md border bg-background p-3"
@@ -710,9 +925,29 @@ export default function DmsAccessRetentionSetupPage() {
                     <Badge variant="secondary">Destruction allowed</Badge>
                   ) : null}
                 </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => editRetentionPolicy(policy)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void toggleRetentionPolicy(policy)}
+                  >
+                    <Power className="mr-2 h-4 w-4" />
+                    {policy.isActive ? 'Deactivate' : 'Activate'}
+                  </Button>
+                </div>
               </div>
             ))}
-            {!isLoading && retentionPolicies.length === 0 ? (
+            {!isLoading && visibleRetentionPolicies.length === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No retention policies configured yet.
               </p>

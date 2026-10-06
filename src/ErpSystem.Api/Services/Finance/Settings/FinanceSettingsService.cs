@@ -313,8 +313,8 @@ namespace ErpSystem.Api.Services.Finance.Settings
             if (dto.BankDepositPolicy.HasValue) settings.BankDepositPolicy = dto.BankDepositPolicy.Value;
             if (dto.RequireBankDepositPrimaryEvidence.HasValue)
                 settings.RequireBankDepositPrimaryEvidence = dto.RequireBankDepositPrimaryEvidence.Value;
-            if (dto.AutoPostBankDepositAfterApproval.HasValue)
-                settings.AutoPostBankDepositAfterApproval = dto.AutoPostBankDepositAfterApproval.Value;
+            if (dto.AutoPostBankDepositAfterConfirmation.HasValue)
+                settings.AutoPostBankDepositAfterConfirmation = dto.AutoPostBankDepositAfterConfirmation.Value;
             if (dto.MaximumDepositDeductionAmount.HasValue)
             {
                 if (dto.MaximumDepositDeductionAmount.Value < 0m)
@@ -760,7 +760,7 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 OpeningBalanceAutoRoutingEnabled = settings.OpeningBalanceAutoRoutingEnabled,
                 BankDepositPolicy = settings.BankDepositPolicy,
                 RequireBankDepositPrimaryEvidence = settings.RequireBankDepositPrimaryEvidence,
-                AutoPostBankDepositAfterApproval = settings.AutoPostBankDepositAfterApproval,
+                AutoPostBankDepositAfterConfirmation = settings.AutoPostBankDepositAfterConfirmation,
                 MaximumDepositDeductionAmount = settings.MaximumDepositDeductionAmount,
                 MaximumDepositDeductionPercentage = settings.MaximumDepositDeductionPercentage,
                 BankStatementMatchDateToleranceDays = settings.BankStatementMatchDateToleranceDays,
