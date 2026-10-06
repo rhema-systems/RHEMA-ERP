@@ -783,43 +783,84 @@ public class BankReconciliationService : IBankReconciliationService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var reconciliation = await _context.Set<BankReconciliation>()
-            .Include(r => r.BankAccount)
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted, cancellationToken)
-            ?? throw new Exception("Reconciliation not found");
-        EnsureReconciliationCanBeMutated(reconciliation, "finalize");
+        if (CurrentUserId == Guid.Empty)
+            throw new InvalidOperationException("Unable to resolve the current reconciliation preparer.");
+        Guid? workflowInstanceId = null;
 
-        await RecalculateCountsAsync(reconciliation);
-        reconciliation.BookBalance = await CalculatePostedBookBalanceAsync(reconciliation.BankAccountId, reconciliation.ReconciliationDate);
-        reconciliation.Difference = RoundMoney(reconciliation.StatementBalance - reconciliation.BookBalance);
-        if (RoundMoney(reconciliation.Difference) != 0m)
+        async Task FinalizeAttemptAsync(CancellationToken operationToken)
         {
-            throw new InvalidOperationException("Reconciliation cannot be finalized while the statement and posted GL book balance differ. Post an approved adjustment first.");
+            _context.ChangeTracker.Clear();
+            workflowInstanceId = null;
+            var reconciliation = await _context.Set<BankReconciliation>()
+                .Include(r => r.BankAccount)
+                .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted, operationToken)
+                ?? throw new Exception("Reconciliation not found");
+            EnsureReconciliationCanBeMutated(reconciliation, "finalize");
+
+            await RecalculateCountsAsync(reconciliation);
+            reconciliation.BookBalance = await CalculatePostedBookBalanceAsync(reconciliation.BankAccountId, reconciliation.ReconciliationDate);
+            reconciliation.Difference = RoundMoney(reconciliation.StatementBalance - reconciliation.BookBalance);
+            if (RoundMoney(reconciliation.Difference) != 0m)
+            {
+                throw new InvalidOperationException("Reconciliation cannot be finalized while the statement and posted GL book balance differ. Post an approved adjustment first.");
+            }
+
+            var now = DateTime.UtcNow;
+            reconciliation.Status = ReconciliationStatus.Completed;
+            reconciliation.ReconciledAt = now;
+            reconciliation.ReconciledBy = CurrentUserId;
+            reconciliation.UpdatedAt = now;
+            reconciliation.UpdatedBy = _currentUserService.UserName;
+            await _context.SaveChangesAsync(operationToken);
+
+            var workflowResult = await _workflowService.StartApprovalWorkflowAsync("BankReconciliation", id);
+            if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
+                throw new InvalidOperationException(workflowResult.Message ?? "Unable to submit the bank reconciliation for approval.");
+            workflowInstanceId = workflowResult.WorkflowInstanceId;
+
+            await RecordReconciliationAuditAsync(
+                FinanceAuditEvents.BankReconciliationFinalized,
+                reconciliation,
+                afterValues: new
+                {
+                    reconciliation.Status,
+                    reconciliation.StatementBalance,
+                    reconciliation.BookBalance,
+                    reconciliation.Difference,
+                    reconciliation.MatchedCount,
+                    reconciliation.UnmatchedBookCount,
+                    reconciliation.UnmatchedStatementCount,
+                    workflowInstanceId
+                },
+                comment: "Bank reconciliation finalized and submitted for approval from posted GL book balance.",
+                cancellationToken: operationToken);
         }
 
-        var now = DateTime.UtcNow;
-        reconciliation.Status = ReconciliationStatus.Completed;
-        reconciliation.ReconciledAt = now;
-        reconciliation.ReconciledBy = CurrentUserId == Guid.Empty ? null : CurrentUserId;
-        reconciliation.UpdatedAt = now;
-        reconciliation.UpdatedBy = _currentUserService.UserName;
-        await _context.SaveChangesAsync(cancellationToken);
-        await RecordReconciliationAuditAsync(
-            FinanceAuditEvents.BankReconciliationFinalized,
-            reconciliation,
-            afterValues: new
+        if (_context.Database.IsRelational())
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
             {
-                reconciliation.Status,
-                reconciliation.StatementBalance,
-                reconciliation.BookBalance,
-                reconciliation.Difference,
-                reconciliation.MatchedCount,
-                reconciliation.UnmatchedBookCount,
-                reconciliation.UnmatchedStatementCount
-            },
-            comment: "Bank reconciliation finalized from posted GL book balance.",
-            cancellationToken: cancellationToken);
+                await using var transaction = await _context.Database.BeginTransactionAsync(cancellationToken);
+                try
+                {
+                    await FinalizeAttemptAsync(cancellationToken);
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                catch
+                {
+                    await transaction.RollbackAsync(CancellationToken.None);
+                    _context.ChangeTracker.Clear();
+                    throw;
+                }
+            });
+        }
+        else
+        {
+            await FinalizeAttemptAsync(cancellationToken);
+        }
 
+        _context.ChangeTracker.Clear();
         return await GetByIdAsync(id) ?? throw new Exception("Failed to finalize reconciliation");
     }
 
@@ -911,9 +952,11 @@ public class BankReconciliationService : IBankReconciliationService
         if (CurrentUserId == Guid.Empty)
             throw new Exception("Unable to resolve the current approver");
 
-        var startResult = await _workflowService.StartApprovalWorkflowAsync("BankReconciliation", id);
-        if (!startResult.Success)
-            throw new Exception(startResult.Message ?? "Unable to start bank reconciliation approval workflow");
+        if (reconciliation.ReconciledBy.HasValue && reconciliation.ReconciledBy.Value == CurrentUserId)
+        {
+            throw new InvalidOperationException(
+                "Maker-checker control: the user who finalized this bank reconciliation cannot approve it.");
+        }
 
         if (!await _workflowService.CanUserApproveAsync("BankReconciliation", id, CurrentUserId))
             throw new Exception("This bank reconciliation is assigned to another workflow approver");

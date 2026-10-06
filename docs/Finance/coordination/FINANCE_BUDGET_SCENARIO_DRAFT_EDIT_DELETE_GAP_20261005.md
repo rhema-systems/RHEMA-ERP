@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-05-A
+integration_status: ready
+integration_decision: include
+candidate_branch: codex/finance-uat-remediation-20261004
+candidate_head: 09b9a630782218bb765ba4ef6d0275233062ec45
+base_commit: e1c25df6558f3df70d27d3027ad104dffdd43166
+target_ref: origin/master
+depends_on: bank-deposit-acknowledgement-lifecycle
+migration_status: 20261005225306-authored-unapplied
+verification_status: focused-passed-baseline-typecheck-failures
+integration_commit: pending
+pull_request: pending
+---
+
 # Finance budgeting hybrid scope and unused-Draft lifecycle - 2026-10-05
 
 ## Objective and scope
@@ -105,4 +120,5 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 ## Authorization boundaries
 
 - Local implementation, tests, migration authoring, documentation, and local commit are authorized.
-- Do not push, create or update a PR, deploy, restart services, apply a migration, or mutate UAT data without separate authorization.
+- The user has now authorized consolidation onto latest `origin/master`, pushing the integration branch, and creating one unified PR.
+- Do not merge, deploy, restart services, apply the pending migration, mutate UAT data, or remove branches/worktrees without separate authorization.

@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-05-A
+integration_status: ready
+integration_decision: include
+candidate_branch: codex/finance-uat-remediation-20261004
+candidate_head: 95ad224a5769d4a4ff98ac4df9127886cf1e8f11
+base_commit: 283a8d35811eab0e16d7779e78db05d5ae91915e
+target_ref: origin/master
+depends_on: none
+migration_status: 20261005211546-applied-RHEMAERP_BOOKV2_UAT_20260922
+verification_status: focused-passed
+integration_commit: pending
+pull_request: pending
+---
+
 # Finance bank-deposit acknowledgement and posting lifecycle - 2026-10-05
 
 ## Objective and scope
@@ -78,5 +93,5 @@ The existing `BankDepositStatus` and `BankDepositConfirmationStatus` fields rema
 
 - Implementation and local commit are authorized.
 - Applying this workstream's verified migration to `RHEMAERP_BOOKV2_UAT_20260922` is authorized.
-- The user subsequently withdrew authorization to create, update, or push a PR until the remaining gaps are closed and a finalized unified PR is requested.
-- Do not push, create or update a PR, merge, deploy, restart services, or perform other UAT data mutation without separate authorization.
+- The user has now authorized consolidation onto latest `origin/master`, pushing the integration branch, and creating one unified PR.
+- Do not merge, deploy, restart services, reapply migrations, or perform other UAT data mutation without separate authorization.

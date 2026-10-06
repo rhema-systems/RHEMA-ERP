@@ -995,6 +995,38 @@ public sealed class BankReconciliationPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
+    public async Task Finalizer_ShouldNotApproveOwnReconciliation()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-001", 0m);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.Completed,
+            ReconciledBy = makerId,
+            ReconciledAt = DateTime.UtcNow
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId, currentUserId: makerId);
+
+        var act = () => service.ApproveReconciliationAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Maker-checker control: the user who finalized this bank reconciliation cannot approve it.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
     public async Task MatchesAndSummary_ShouldReturnWorkspaceDetailsForSelectedStatementOnly()
     {
         var tenantId = Guid.NewGuid();
@@ -1096,9 +1128,10 @@ public sealed class BankReconciliationPostingMigrationTests
         ApplicationDbContext db,
         Guid tenantId,
         string documentPrefix = "BRC",
-        bool withDimensions = false)
+        bool withDimensions = false,
+        Guid? currentUserId = null)
     {
-        var currentUser = CreateCurrentUserService(tenantId);
+        var currentUser = CreateCurrentUserService(tenantId, currentUserId);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -1119,7 +1152,12 @@ public sealed class BankReconciliationPostingMigrationTests
             db, currentUser.Object, auditService, documentPrefix, sourceDimensions);
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(x => x.StartApprovalWorkflowAsync("BankReconciliation", It.IsAny<Guid>()))
-            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.Completed,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
         workflow.Setup(x => x.CanUserApproveAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>()))
             .ReturnsAsync(true);
         workflow.Setup(x => x.ProcessApprovalStepAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>(), "Approve", It.IsAny<string?>()))
@@ -1185,12 +1223,12 @@ public sealed class BankReconciliationPostingMigrationTests
         return scope;
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId, Guid? userId = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(x => x.UserId).Returns((userId ?? Guid.NewGuid()).ToString());
         currentUser.SetupGet(x => x.UserName).Returns("bank.reconciliation.tests");
         currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(x => x.UserAgent).Returns("bank-reconciliation-tests");

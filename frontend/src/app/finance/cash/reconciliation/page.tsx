@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { format } from 'date-fns';
@@ -12,6 +12,7 @@ import {
     Download,
     Link2,
     Loader2,
+    Printer,
     RefreshCw,
     RotateCcw,
     Scale,
@@ -95,7 +96,7 @@ function formatDate(value: string) {
 
 export default function BankReconciliationPage() {
     const router = useRouter();
-    const { hasPermission } = useAuth();
+    const { hasPermission, user } = useAuth();
     const canPerformReconciliation = hasPermission('Finance.BankReconciliation.Perform');
     const canApproveReconciliation = hasPermission('Finance.BankReconciliation.Approve');
     const searchParams = useSearchParams();
@@ -108,6 +109,20 @@ export default function BankReconciliationPage() {
     const [notes, setNotes] = useState('');
     const [accountPickerOpen, setAccountPickerOpen] = useState(false);
     const [importDialogOpen, setImportDialogOpen] = useState(false);
+    const requestedReconciliationId = searchParams.get('reconciliation') ?? '';
+
+    const requestedReconciliationQuery = useQuery({
+        queryKey: ['bank-reconciliation', requestedReconciliationId],
+        queryFn: () => cashManagementDataService.getBankReconciliationById(requestedReconciliationId),
+        enabled: Boolean(requestedReconciliationId),
+    });
+
+    useEffect(() => {
+        const requested = requestedReconciliationQuery.data;
+        if (requested?.bankAccountId && requested.bankAccountId !== selectedAccountId) {
+            setSelectedAccountId(requested.bankAccountId);
+        }
+    }, [requestedReconciliationQuery.data, selectedAccountId]);
 
     const accountsQuery = useQuery({
         queryKey: ['bank-accounts', 'active'],
@@ -124,7 +139,9 @@ export default function BankReconciliationPage() {
         queryKey: ['active-reconciliation', selectedAccountId],
         queryFn: async () => {
             const reconciliations = await cashManagementDataService.getBankReconciliations(selectedAccountId);
-            return reconciliations.find((item) => OPEN_STATUSES.has(item.status)) ?? null;
+            return reconciliations.find((item) => item.id === requestedReconciliationId)
+                ?? reconciliations.find((item) => OPEN_STATUSES.has(item.status))
+                ?? null;
         },
         enabled: Boolean(selectedAccountId),
     });
@@ -278,7 +295,8 @@ export default function BankReconciliationPage() {
                     reconciliation={activeReconciliation}
                     account={selectedAccount}
                     canPerform={canPerformReconciliation}
-                    canApprove={canApproveReconciliation}
+                    canApprove={canApproveReconciliation && Boolean(user?.id) && user?.id.toLowerCase() !== activeReconciliation.reconciledBy?.toLowerCase()}
+                    isMaker={Boolean(user?.id) && user?.id.toLowerCase() === activeReconciliation.reconciledBy?.toLowerCase()}
                 />
             ) : (
                 <Card className="mx-auto mt-12 max-w-2xl">
@@ -476,11 +494,13 @@ function ReconciliationWorkspace({
     account,
     canPerform,
     canApprove,
+    isMaker,
 }: {
     reconciliation: BankReconciliation;
     account?: BankAccount;
     canPerform: boolean;
     canApprove: boolean;
+    isMaker: boolean;
 }) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
@@ -590,6 +610,17 @@ function ReconciliationWorkspace({
     ));
     const isRefreshing = summaryQuery.isFetching || matchesQuery.isFetching;
 
+    const printReport = () => {
+        const cleanup = () => {
+            document.body.classList.remove('printing-bank-reconciliation');
+            window.removeEventListener('afterprint', cleanup);
+        };
+        document.body.classList.add('printing-bank-reconciliation');
+        window.addEventListener('afterprint', cleanup);
+        window.print();
+        window.setTimeout(cleanup, 1000);
+    };
+
     if (summaryQuery.isLoading || matchesQuery.isLoading) {
         return <div className="flex justify-center p-16"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
@@ -623,6 +654,9 @@ function ReconciliationWorkspace({
                     <Badge variant="outline">Auto-match date window: ±{statementDateToleranceDays} calendar days</Badge>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" onClick={printReport}>
+                        <Printer className="mr-2 h-4 w-4" />Print report
+                    </Button>
                     <Button variant="outline" size="sm" onClick={() => refresh()} disabled={isRefreshing}>
                         <RefreshCw className={cn('mr-2 h-4 w-4', isRefreshing && 'animate-spin')} />Refresh
                     </Button>
@@ -703,9 +737,40 @@ function ReconciliationWorkspace({
                             {approveMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Approve reconciliation
                         </Button>
+                    ) : isMaker && reconciliation.status === ReconciliationStatus.Completed ? (
+                        <p className="text-sm text-muted-foreground">A different authorized user must approve this reconciliation.</p>
                     ) : null}
                 </CardFooter>
             </Card>
+
+            <section className="bank-reconciliation-print-root hidden bg-white p-8 text-black">
+                <style>{`@media print {
+                    body.printing-bank-reconciliation * { visibility: hidden !important; }
+                    body.printing-bank-reconciliation .bank-reconciliation-print-root,
+                    body.printing-bank-reconciliation .bank-reconciliation-print-root * { visibility: visible !important; }
+                    body.printing-bank-reconciliation .bank-reconciliation-print-root { display: block !important; position: absolute; inset: 0; }
+                }`}</style>
+                <div className="border-b pb-4">
+                    <h1 className="text-2xl font-bold">Bank Reconciliation Report</h1>
+                    <p>{account?.accountName ?? reconciliation.bankAccountName} · {formatDate(reconciliation.reconciliationDate)}</p>
+                    <p className="mt-2 font-semibold">Status: {reconciliation.status === ReconciliationStatus.Approved ? 'APPROVED' : reconciliation.status === ReconciliationStatus.Completed ? 'FINALIZED — AWAITING APPROVAL' : 'WORKING DRAFT — NOT APPROVED'}</p>
+                </div>
+                <div className="my-5 grid grid-cols-3 gap-4">
+                    <div><span className="text-sm">Statement balance</span><p className="font-semibold">{formatCurrency(summary.statementBalance, currency)}</p></div>
+                    <div><span className="text-sm">Book balance (GL)</span><p className="font-semibold">{formatCurrency(summary.bookBalance, currency)}</p></div>
+                    <div><span className="text-sm">Difference</span><p className="font-semibold">{formatCurrency(summary.difference, currency)}</p></div>
+                </div>
+                <p className="mb-3">Matches: {summary.totalMatches} ({summary.autoMatches} automatic, {summary.manualMatches} manual)</p>
+                <table className="w-full border-collapse text-sm">
+                    <thead><tr><th className="border p-2 text-left">Book transaction</th><th className="border p-2 text-left">Statement line</th><th className="border p-2 text-left">Method</th><th className="border p-2 text-right">Amount</th></tr></thead>
+                    <tbody>{matches.map((match) => <tr key={match.id}><td className="border p-2">{match.cashTransactionNumber}<br />{formatDate(match.cashTransactionDate)}</td><td className="border p-2">{match.statementDescription}<br />{formatDate(match.statementTransactionDate)}</td><td className="border p-2">{match.isAutoMatched ? 'Automatic' : 'Manual'}</td><td className="border p-2 text-right">{formatCurrency(match.cashTransactionAmount, currency)}</td></tr>)}</tbody>
+                </table>
+                <div className="mt-6 grid grid-cols-2 gap-8 border-t pt-4 text-sm">
+                    <div><p>Prepared/finalized by: {reconciliation.reconciledByName ?? reconciliation.reconciledBy ?? 'Not finalized'}</p><p>Finalized at: {reconciliation.reconciledAt ? format(new Date(reconciliation.reconciledAt), 'dd MMM yyyy HH:mm') : 'Not finalized'}</p></div>
+                    <div><p>Approved by: {reconciliation.approvedByName ?? reconciliation.approvedBy ?? 'Pending'}</p><p>Approved at: {reconciliation.approvedAt ? format(new Date(reconciliation.approvedAt), 'dd MMM yyyy HH:mm') : 'Pending'}</p></div>
+                </div>
+                <p className="mt-6 text-xs">Generated {format(new Date(), 'dd MMM yyyy HH:mm')}</p>
+            </section>
 
             {canPerform && <>
                 <AdjustmentDialog

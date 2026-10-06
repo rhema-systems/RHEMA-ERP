@@ -245,6 +245,7 @@ public static class FinanceAuditEvents
     public const string BankReconciliationSubmitted = "Finance.BankReconciliation.Submitted";
     public const string BankReconciliationApproved = "Finance.BankReconciliation.Approved";
     public const string BankReconciliationRejected = "Finance.BankReconciliation.Rejected";
+    public const string BankReconciliationReturnedForCorrection = "Finance.BankReconciliation.ReturnedForCorrection";
     public const string BankReconciliationAdjustmentPosted = "Finance.BankReconciliation.AdjustmentPosted";
     public const string BankReconciliationAdjustmentDuplicatePostingAttempt = "Finance.BankReconciliation.AdjustmentDuplicatePostingAttempt";
     public const string BankReconciliationFinalized = "Finance.BankReconciliation.Finalized";

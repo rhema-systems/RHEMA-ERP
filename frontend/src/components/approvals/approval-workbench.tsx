@@ -53,6 +53,7 @@ export interface ApprovalQueueItem {
     decisionOnDetailPage?: boolean;
     approveDisabledReason?: string | null;
     rejectDisabledReason?: string | null;
+    rejectLabel?: string;
     metadata?: Array<{
         label: string;
         value: React.ReactNode;
@@ -260,8 +261,8 @@ export function ApprovalWorkbench({
         const reason = rejectReason.trim();
         if (!reason) {
             toast({
-                title: 'Rejection reason required',
-                description: 'Enter a reason before rejecting this document.',
+                title: `${rejectTarget.item.rejectLabel || 'Rejection'} reason required`,
+                description: `Enter a reason before ${rejectTarget.item.rejectLabel ? rejectTarget.item.rejectLabel.toLowerCase() : 'rejecting this document'}.`,
                 variant: 'destructive',
             });
             return;
@@ -283,9 +284,10 @@ export function ApprovalWorkbench({
         try {
             setActionKey(key);
             await definition.reject?.(item, reason);
+            const returnedForCorrection = item.rejectLabel === 'Return for correction';
             toast({
-                title: 'Rejected',
-                description: `${item.reference} has been rejected.`,
+                title: returnedForCorrection ? 'Returned for correction' : 'Rejected',
+                description: `${item.reference} has been ${returnedForCorrection ? 'returned for correction' : 'rejected'}.`,
             });
             setRejectTarget(null);
             setRejectReason('');
@@ -523,7 +525,7 @@ export function ApprovalWorkbench({
                                                             ) : (
                                                                 <XCircle className="mr-2 h-4 w-4" />
                                                             )}
-                                                            Reject
+                                                            {row.rejectLabel || 'Reject'}
                                                         </Button>
                                                     )}
                                                 </div>
@@ -545,13 +547,13 @@ export function ApprovalWorkbench({
             }}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Reject {rejectTarget?.item.reference}</DialogTitle>
+                        <DialogTitle>{rejectTarget?.item.rejectLabel || 'Reject'} {rejectTarget?.item.reference}</DialogTitle>
                         <DialogDescription>
                             Provide a clear reason so the document creator knows what to correct before resubmission.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2">
-                        <Label htmlFor="approval-rejection-reason">Rejection reason</Label>
+                        <Label htmlFor="approval-rejection-reason">Reason</Label>
                         <Textarea
                             id="approval-rejection-reason"
                             value={rejectReason}
@@ -572,7 +574,7 @@ export function ApprovalWorkbench({
                         </Button>
                         <Button variant="destructive" onClick={handleReject} disabled={actionKey !== null || !rejectReason.trim()}>
                             {actionKey?.endsWith(':reject') ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <XCircle className="mr-2 h-4 w-4" />}
-                            Reject Document
+                            {rejectTarget?.item.rejectLabel || 'Reject Document'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

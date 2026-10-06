@@ -1,3 +1,18 @@
+---
+integration_cycle: FIN-UAT-2026-10-05-A
+integration_status: in_progress
+integration_decision: include
+candidate_branch: codex/finance-uat-remediation-20261004
+candidate_head: pending-final-commit
+base_commit: 283a8d35811eab0e16d7779e78db05d5ae91915e
+target_ref: origin/master
+depends_on: bank-deposit-acknowledgement-lifecycle,budget-scenario-draft-lifecycle
+migration_status: 20261006010000-authored-unapplied
+verification_status: focused-passed-known-legacy-fixture-failure
+integration_commit: pending
+pull_request: pending
+---
+
 # Finance bank-reconciliation matching gap - 2026-10-05
 
 ## Objective and scope
@@ -48,6 +63,12 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - `tests/ErpSystem.Api.Tests/Services/Finance/BankAccountTenantIsolationTests.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/BankReconciliationPostingMigrationTests.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/FinanceConcurrencyHardeningTests.cs`
+- `src/ErpSystem.Api/Controllers/Finance/FinanceApprovalsController.cs`
+- `src/ErpSystem.Shared/FinanceAuditEvents.cs`
+- `frontend/src/app/finance/approvals/page.test.tsx`
+- `frontend/src/components/approvals/approval-workbench.tsx`
+- `frontend/src/lib/finance/approval-queue-definitions.ts`
+- `tests/ErpSystem.Api.Tests/Services/Finance/FinanceApprovalAuthorityContractTests.cs`
 
 ## Migrations and application state
 
@@ -82,4 +103,21 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 ## Authorization boundaries
 
 - Diagnosis, implementation, tests, and a local commit are authorized.
-- Do not push, create or update a PR, deploy, restart services, or mutate UAT data without separate authorization.
+- The user authorized consolidation onto latest `origin/master`, pushing the integration branch, and creating one unified PR.
+- Do not merge, deploy, restart services, apply migrations, mutate UAT data, or remove branches/worktrees without separate authorization.
+## Maker-checker and printable evidence follow-up (2026-10-06)
+
+- Added server-side enforcement preventing the user recorded in `ReconciledBy` from approving the same reconciliation.
+- Hid the approval action from that maker in the reconciliation workspace and display a different-authorized-user message.
+- Added printable reconciliation evidence during preparation and after finalization, labelled `WORKING DRAFT — NOT APPROVED`, `FINALIZED — AWAITING APPROVAL`, or `APPROVED`, with balances, matches, and maker/checker timestamps.
+- Added focused regression `Finalizer_ShouldNotApproveOwnReconciliation`.
+- Finalization now creates the `BankReconciliation` approval workflow atomically with the Completed transition so the assigned checker receives a Finance Approval Workbench item.
+- The workbench requires the banking approval permission, enforces submitter/finalizer separation, and routes review to the exact reconciliation.
+- `Return for correction` requires a reason, preserves matches and audit evidence, clears finalization/approval actors, returns the reconciliation to `InProgress`, and requires a new finalization/workflow cycle.
+- The workbench labels the action and confirmation consistently as `Return for correction` rather than terminal rejection.
+- `Unreconcile` / reopening an already approved reconciliation is explicitly deferred as a separate high-risk correction-version workstream.
+- Focused backend command covering `Finalizer_ShouldNotApproveOwnReconciliation` and `BankReconciliationWorkbench_UsesMakerCheckerAndReturnsForCorrection`: 2/2 passed.
+- The same run including legacy `ValidSameTenantReconciliation_ShouldFinalizeAndCreateAuditEvent`: the two new tests passed; the legacy test failed before reconciliation assertions on the documented `SOURCE_BOOK_AUTHORITY_MISSING` fixture gap.
+- Targeted Approval Workbench Vitest: 5/5 passed.
+- Targeted ESLint for the changed reconciliation/workbench files: passed.
+- Intended-file `git diff --check`: passed; unrelated user-owned HR files elsewhere in the worktree retain pre-existing trailing whitespace and remain excluded.
