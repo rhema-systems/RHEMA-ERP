@@ -186,40 +186,7 @@ public class CompanyMilestoneRepository : GenericRepository<CompanyMilestone>, I
     {
     }
 
-    public async Task<IEnumerable<CompanyMilestone>> GetByCategoryAsync(MilestoneCategory category)
-    {
-        return await _dbSet
-            .Where(m => m.Category == category)
-            .OrderBy(m => m.MilestoneDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<CompanyMilestone>> GetByDateRangeAsync(DateTime startDate, DateTime endDate)
-    {
-        return await _dbSet
-            .Where(m => m.MilestoneDate >= startDate && m.MilestoneDate <= endDate)
-            .OrderBy(m => m.MilestoneDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<CompanyMilestone>> GetUpcomingMilestonesAsync(int daysAhead = 90)
-    {
-        var today = DateTime.Today;
-        var futureDate = today.AddDays(daysAhead);
-
-        return await _dbSet
-            .Where(m => m.MilestoneDate >= today && m.MilestoneDate <= futureDate)
-            .OrderBy(m => m.MilestoneDate)
-            .ToListAsync();
-    }
-
-    public async Task<IEnumerable<CompanyMilestone>> GetRecurringMilestonesAsync()
-    {
-        return await _dbSet
-            .Where(m => m.IsRecurringAnnually)
-            .OrderBy(m => m.MilestoneDate)
-            .ToListAsync();
-    }
+    // ⚠ Lane 4a: the four custom reads that stood here are gone — see ICompanyMilestoneRepository.
 }
 
 #endregion Company Milestone Repository

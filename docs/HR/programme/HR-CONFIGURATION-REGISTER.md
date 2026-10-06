@@ -445,6 +445,13 @@ Lane 3d-2, also fixed in code: **extending a series books the rooms its latest d
 whoever extends (a login with no employee link carries none and is told); the dates a room cannot take are warnings. `GET
 api/CompanySchedule/events/{id}/bookings` (Read) feeds the event page's Rooms card. Proof: block 3d-2.
 
+**A milestone's "Repeats every year" (`CompanyMilestone.IsRecurringAnnually`, per milestone) — Enforced since lane 4a; it was
+a ghost** (stored, read by nothing: an anniversary was "upcoming" in its first year only). It now puts the milestone on the
+same month and day every year from its own (29 February on the 28th in common years): the upcoming read answers its next
+occurrence, a range read one row per occurrence (at most five years), and each row counts its years. Its files go
+through the upload gate (`milestones/{id}/documents`), removed on `HR.Company.Write`. Proof: block 4a, both positions
+(yearly and one-off).
+
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|
 | `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |

@@ -32,6 +32,7 @@ import type {
   ParticipantScope,
   CompanyEventSummary,
   CompanyMilestone,
+  CompanyMilestoneDocument,
   CompanyScheduleReminderRun,
   CompleteEvent,
   CompleteEventTask,
@@ -582,6 +583,26 @@ class CompanyMilestoneService {
 
   getAll(): Promise<CompanyMilestone[]> {
     return apiService.get<CompanyMilestone[]>(`${this.baseUrl}/milestones`);
+  }
+
+  // ── its files (lane 4a, D-3) ──────────────────────────────────────────────
+
+  getDocuments(milestoneId: string): Promise<CompanyMilestoneDocument[]> {
+    return apiService.get<CompanyMilestoneDocument[]>(`${this.baseUrl}/milestones/${milestoneId}/documents`);
+  }
+
+  /** The gated upload route, for `DocumentUploadField`, with `description` as its form field. Each file is scanned. */
+  documentUploadEndpoint(milestoneId: string): string {
+    return `${this.baseUrl}/milestones/${milestoneId}/documents`;
+  }
+
+  downloadDocument(document: CompanyMilestoneDocument): Promise<void> {
+    return hrDocumentService.download(`${this.baseUrl}/milestones/documents/${document.id}/download`, document.fileName);
+  }
+
+  /** On Write, as event files (the user's ruling); deleting the milestone itself is Admin. */
+  removeDocument(documentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/milestones/documents/${documentId}`);
   }
 
   getPaged(pageNumber = 1, pageSize = 20): Promise<PagedResult<CompanyMilestone>> {

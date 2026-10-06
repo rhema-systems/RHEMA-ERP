@@ -1,8 +1,12 @@
 'use client';
 
+import { useState } from 'react';
 import { z } from 'zod';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { MilestoneFilesDialog } from '@/components/hr/company-schedule/MilestoneFilesDialog';
+import { ordinal } from '@/components/hr/company-schedule/milestoneWords';
+import { useAuth } from '@/hooks/use-auth';
 import {
   DateField,
   FieldRow,
@@ -45,8 +49,15 @@ const empty: FormValues = {
 /**
  * Company milestones — anniversaries, achievements, launches, targets and certifications that
  * appear on the company calendar. Reference data, so it lives under Administration.
+ *
+ * Lane 4a: a milestone's files open from its row ("Files") — real files through the upload gate (D-3); the free text is
+ * "References". A yearly milestone shows its next occurrence and which anniversary it is. Delete is offered only with
+ * `HR.Company.Admin`, which it needs.
  */
 export default function CompanyMilestonesPage() {
+  const { hasPermission } = useAuth();
+  const [filesFor, setFilesFor] = useState<CompanyMilestone | null>(null);
+
   return (
     <div className="space-y-6 p-6">
       <PageHeader
@@ -90,13 +101,24 @@ export default function CompanyMilestonesPage() {
           })
         }
         remove={(_p, id) => companyMilestoneService.remove(id)}
+        allowRemove={hasPermission('HR.Company.Admin')}
+        onOpenItem={(m) => setFilesFor(m)}
+        openItemLabel="Files"
         getId={(m) => m.id}
         columns={[
           { header: 'Title', cell: (m) => m.title },
           { header: 'Category', cell: (m) => spaced(m.category) },
           { header: 'Date', cell: (m) => m.milestoneDate.slice(0, 10) },
+          {
+            header: 'Next',
+            cell: (m) =>
+              m.nextOccurrence
+                ? `${m.nextOccurrence.slice(0, 10)}${m.isRecurringAnnually && m.yearsSince > 0 ? ` · ${ordinal(m.yearsSince)}` : ''}`
+                : 'Past',
+          },
           { header: 'Repeats', cell: (m) => (m.isRecurringAnnually ? 'Every year' : 'Once') },
           { header: 'On calendar', cell: (m) => (m.showOnCalendar ? 'Yes' : 'Hidden') },
+          { header: 'Files', cell: (m) => (m.documentCount > 0 ? m.documentCount : '—') },
         ]}
         schema={schema}
         emptyForm={empty}
@@ -125,7 +147,8 @@ export default function CompanyMilestonesPage() {
             </FieldRow>
             <TextareaField form={form} name="description" label="Description" />
             <TextareaField form={form} name="significance" label="Why it matters" />
-            <TextField form={form} name="relatedDocuments" label="Related documents" />
+            {/* Lane 4a (D-3): references only — the files themselves open from the row's "Files". */}
+            <TextField form={form} name="relatedDocuments" label="References" />
             <FieldRow>
               <SwitchField form={form} name="isRecurringAnnually" label="Repeats every year" />
               <SwitchField form={form} name="showOnCalendar" label="Show on the calendar" />
@@ -133,6 +156,8 @@ export default function CompanyMilestonesPage() {
           </>
         )}
       />
+
+      <MilestoneFilesDialog milestone={filesFor} onClose={() => setFilesFor(null)} />
     </div>
   );
 }

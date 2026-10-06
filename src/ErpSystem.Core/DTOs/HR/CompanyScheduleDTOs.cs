@@ -1564,7 +1564,36 @@ public class CompanyMilestoneDto : BaseDto
     public bool IsRecurringAnnually { get; set; }
     public bool ShowOnCalendar { get; set; }
     public string? Significance { get; set; }
+
+    /// <summary>Free-text references ("certificate no. …") — not the files, which are <see cref="DocumentCount"/>.</summary>
     public string? RelatedDocuments { get; set; }
+
+    /// <summary>
+    /// The date this row stands for (lane 4a): in a range or upcoming read, the occurrence that falls there; otherwise its
+    /// next occurrence, or its own date once a one-off has passed.
+    /// </summary>
+    public DateTime OccurrenceDate { get; set; }
+
+    /// <summary>The next time it falls, today or later; null for a one-off already past (lane 4a).</summary>
+    public DateTime? NextOccurrence { get; set; }
+
+    /// <summary>Whole years from its own date to <see cref="OccurrenceDate"/> — "the 10th anniversary"; 0 on the first.</summary>
+    public int YearsSince { get; set; }
+
+    /// <summary>How many files evidence it — the certificate, the licence, the photograph (lane 4a, D-3).</summary>
+    public int DocumentCount { get; set; }
+}
+
+/// <summary>A file evidencing a company milestone, through the upload gate (lane 4a, D-3).</summary>
+public class CompanyMilestoneDocumentDto
+{
+    public Guid Id { get; set; }
+    public Guid MilestoneId { get; set; }
+    public string FileName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public long? FileSizeBytes { get; set; }
+    public DateTime UploadDate { get; set; }
+    public string? UploadedByName { get; set; }
 }
 
 /// <summary>

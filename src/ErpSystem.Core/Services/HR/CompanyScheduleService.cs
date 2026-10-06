@@ -5481,42 +5481,91 @@ public class CompanyMilestoneService : ICompanyMilestoneService
         return current;
     }
 
-    private async Task<CompanyMilestone> GetOwnedAsync(Guid id)
+    /// <summary>This tenant's milestones — the tenant inside the query (lane 4a, F-30: the reads loaded every tenant's).</summary>
+    private IQueryable<CompanyMilestone> TenantMilestones(Guid tenantId) =>
+        _milestoneRepository.GetQueryable().Where(m => m.TenantId == tenantId);
+
+    private IQueryable<CompanyMilestoneDocument> TenantDocuments(Guid tenantId) =>
+        _unitOfWork.Repository<CompanyMilestoneDocument>().GetQueryable().Where(d => d.TenantId == tenantId);
+
+    /// <summary>The milestone, tracked — or "not found" for one not in this tenant.</summary>
+    private async Task<CompanyMilestone> GetOwnedAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _milestoneRepository.GetByIdAsync(id);
-        if (entity == null || entity.TenantId != GetTenantId())
-            throw new ArgumentException($"Company milestone with ID '{id}' not found.");
-        return entity;
+        var entity = await TenantMilestones(GetTenantId()).FirstOrDefaultAsync(m => m.Id == id, cancellationToken);
+        return entity ?? throw new ArgumentException($"Company milestone with ID '{id}' not found.");
+    }
+
+    /// <summary>Today, as UTC — Ghana's time — not the server's clock (the upcoming read used <c>DateTime.Today</c>).</summary>
+    private static DateOnly Today => DateOnly.FromDateTime(DateTime.UtcNow);
+
+    /// <summary>
+    /// A milestone's DTO at an occurrence (lane 4a): <paramref name="at"/> when a dated read found it there, otherwise its
+    /// next occurrence, or its own date once a one-off has passed.
+    /// </summary>
+    private static CompanyMilestoneDto Shape(CompanyMilestone m, DateOnly today, int documents, DateOnly? at = null)
+    {
+        var dto = m.ToDto();
+        var next = CompanyMilestoneRules.NextOccurrence(m, today);
+        var occurrence = at ?? next ?? DateOnly.FromDateTime(m.MilestoneDate);
+        dto.OccurrenceDate = occurrence.ToDateTime(TimeOnly.MinValue);
+        dto.NextOccurrence = next?.ToDateTime(TimeOnly.MinValue);
+        dto.YearsSince = CompanyMilestoneRules.YearsSince(m, occurrence);
+        dto.DocumentCount = documents;
+        return dto;
+    }
+
+    private async Task<Dictionary<Guid, int>> DocumentCountsAsync(Guid tenantId, List<Guid> milestoneIds, CancellationToken cancellationToken) =>
+        milestoneIds.Count == 0
+            ? new Dictionary<Guid, int>()
+            : await TenantDocuments(tenantId).AsNoTracking()
+                .Where(d => milestoneIds.Contains(d.MilestoneId))
+                .GroupBy(d => d.MilestoneId)
+                .Select(g => new { g.Key, Count = g.Count() })
+                .ToDictionaryAsync(x => x.Key, x => x.Count, cancellationToken);
+
+    private async Task<List<CompanyMilestoneDto>> ShapeAllAsync(Guid tenantId, List<CompanyMilestone> milestones, CancellationToken cancellationToken)
+    {
+        var counts = await DocumentCountsAsync(tenantId, milestones.Select(m => m.Id).ToList(), cancellationToken);
+        var today = Today;
+        return milestones.Select(m => Shape(m, today, counts.GetValueOrDefault(m.Id))).ToList();
     }
 
     public async Task<CompanyMilestoneDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedAsync(id);
-        return entity.ToDto();
+        var tenantId = GetTenantId();
+        var entity = await TenantMilestones(tenantId).AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, cancellationToken)
+                     ?? throw new ArgumentException($"Company milestone with ID '{id}' not found.");
+        return (await ShapeAllAsync(tenantId, [entity], cancellationToken))[0];
     }
+
+    /// <inheritdoc />
+    public Task<CompanyMilestoneDto> RequireAsync(Guid milestoneId, CancellationToken cancellationToken = default) =>
+        GetByIdAsync(milestoneId, cancellationToken);
 
     public async Task<IEnumerable<CompanyMilestoneDto>> GetAllAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _milestoneRepository.GetAllAsync()).Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var entities = await TenantMilestones(tenantId).AsNoTracking()
+            .OrderByDescending(m => m.MilestoneDate)
+            .ToListAsync(cancellationToken);
+        return await ShapeAllAsync(tenantId, entities, cancellationToken);
     }
 
     public async Task<PagedResult<CompanyMilestoneDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var query = _milestoneRepository.GetQueryable().Where(m => m.TenantId == tenantId);
+        var query = TenantMilestones(tenantId).AsNoTracking();
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
             .OrderByDescending(m => m.MilestoneDate)
-            .Skip((pageNumber - 1) * pageSize)
+            .Skip((Math.Max(1, pageNumber) - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync(cancellationToken);
 
         return new PagedResult<CompanyMilestoneDto>
         {
-            Items = items.ToDtoList(),
+            Items = await ShapeAllAsync(tenantId, items, cancellationToken),
             TotalCount = totalCount,
             Page = pageNumber,
             PageSize = pageSize
@@ -5526,58 +5575,99 @@ public class CompanyMilestoneService : ICompanyMilestoneService
     public async Task<IEnumerable<CompanyMilestoneDto>> GetByCategoryAsync(MilestoneCategory category, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _milestoneRepository.GetByCategoryAsync(category))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var entities = await TenantMilestones(tenantId).AsNoTracking()
+            .Where(m => m.Category == category)
+            .OrderBy(m => m.MilestoneDate)
+            .ToListAsync(cancellationToken);
+        return await ShapeAllAsync(tenantId, entities, cancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<CompanyMilestoneDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _milestoneRepository.GetByDateRangeAsync(startDate, endDate))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var from = DateOnly.FromDateTime(startDate);
+        var to = DateOnly.FromDateTime(endDate);
+        if (to < from)
+            throw new InvalidOperationException("The range ends before it starts.");
+        if (to.DayNumber - from.DayNumber > CompanyMilestoneRules.MaxRangeYears * 366)
+            throw new InvalidOperationException($"Ask for at most {CompanyMilestoneRules.MaxRangeYears} years at a time.");
+
+        var afterTo = to.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var fromStart = from.ToDateTime(TimeOnly.MinValue);
+        var candidates = await TenantMilestones(tenantId).AsNoTracking()
+            .Where(m => m.MilestoneDate < afterTo && (m.IsRecurringAnnually || m.MilestoneDate >= fromStart))
+            .ToListAsync(cancellationToken);
+        var counts = await DocumentCountsAsync(tenantId, candidates.Select(m => m.Id).ToList(), cancellationToken);
+        var today = Today;
+        return candidates
+            .SelectMany(m => CompanyMilestoneRules.OccurrencesIn(m, from, to)
+                .Select(d => Shape(m, today, counts.GetValueOrDefault(m.Id), d)))
+            .OrderBy(d => d.OccurrenceDate).ThenBy(d => d.Title)
+            .ToList();
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<CompanyMilestoneDto>> GetUpcomingMilestonesAsync(int daysAhead = 90, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var entities = (await _milestoneRepository.GetUpcomingMilestonesAsync(daysAhead))
-            .Where(e => e.TenantId == tenantId);
-        return entities.ToDtoList();
+        var today = Today;
+        var last = today.AddDays(Math.Clamp(daysAhead, 0, 366));
+        var todayStart = today.ToDateTime(TimeOnly.MinValue);
+        var afterLast = last.AddDays(1).ToDateTime(TimeOnly.MinValue);
+        var candidates = await TenantMilestones(tenantId).AsNoTracking()
+            .Where(m => m.MilestoneDate < afterLast && (m.IsRecurringAnnually || m.MilestoneDate >= todayStart))
+            .ToListAsync(cancellationToken);
+        var counts = await DocumentCountsAsync(tenantId, candidates.Select(m => m.Id).ToList(), cancellationToken);
+        return candidates
+            .Select(m => (Milestone: m, Next: CompanyMilestoneRules.NextOccurrence(m, today)))
+            .Where(x => x.Next is { } next && next <= last)
+            .Select(x => Shape(x.Milestone, today, counts.GetValueOrDefault(x.Milestone.Id), x.Next))
+            .OrderBy(d => d.OccurrenceDate).ThenBy(d => d.Title)
+            .ToList();
     }
 
+    /// <remarks>Lane 4a: a date is required — <c>[Required]</c> on a non-nullable date does nothing; answers with a re-read.</remarks>
     public async Task<CompanyMilestoneDto> CreateAsync(CreateCompanyMilestoneDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        if (CompanyMilestoneRules.RefuseDate(createDto.MilestoneDate) is { } refusal)
+            throw new InvalidOperationException(refusal);
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
+        entity.Title = entity.Title.Trim();
 
         await _milestoneRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Company milestone created: {Title}", entity.Title);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>Lane 4a: saved by tracking, and answered with a re-read (F-46: it answered the unsaved entity).</remarks>
     public async Task<CompanyMilestoneDto> UpdateAsync(UpdateCompanyMilestoneDto updateDto, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedAsync(updateDto.Id);
+        var entity = await GetOwnedAsync(updateDto.Id, cancellationToken);
+        if (CompanyMilestoneRules.RefuseDate(updateDto.MilestoneDate) is { } refusal)
+            throw new InvalidOperationException(refusal);
 
         updateDto.UpdateEntity(entity);
-
-        await _milestoneRepository.UpdateAsync(entity);
+        entity.Title = entity.Title.Trim();
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Company milestone updated: {Title}", entity.Title);
 
-        return entity.ToDto();
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>Lane 4a: its files go with it — the DMS keeps their records.</remarks>
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await GetOwnedAsync(id);
+        var entity = await GetOwnedAsync(id, cancellationToken);
+        var documentRepository = _unitOfWork.Repository<CompanyMilestoneDocument>();
+        foreach (var document in await TenantDocuments(entity.TenantId).Where(d => d.MilestoneId == id).ToListAsync(cancellationToken))
+            await documentRepository.DeleteAsync(document);
 
         await _milestoneRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -5585,6 +5675,81 @@ public class CompanyMilestoneService : ICompanyMilestoneService
         _logger.LogInformation("Company milestone deleted: {Id}", id);
 
         return true;
+    }
+
+    // ── Lane 4a (D-3): its files, through the upload gate ──
+
+    private static CompanyMilestoneDocumentDto ToDocumentDto(CompanyMilestoneDocument d) => new()
+    {
+        Id = d.Id,
+        MilestoneId = d.MilestoneId,
+        FileName = d.FileName,
+        Description = d.Description,
+        FileSizeBytes = d.FileSizeBytes,
+        UploadDate = d.UploadDate,
+        UploadedByName = d.UploadedBy is { } e ? $"{e.FirstName} {e.LastName}".Trim() : null,
+    };
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<CompanyMilestoneDocumentDto>> GetDocumentsAsync(Guid milestoneId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        await RequireAsync(milestoneId, cancellationToken);
+        var documents = await TenantDocuments(tenantId).AsNoTracking()
+            .Include(d => d.UploadedBy)
+            .Where(d => d.MilestoneId == milestoneId)
+            .OrderByDescending(d => d.UploadDate)
+            .ToListAsync(cancellationToken);
+        return documents.Select(ToDocumentDto).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<CompanyMilestoneDocumentDto> AddDocumentAsync(
+        Guid milestoneId, string? description, Guid uploadedById, string fileName, string filePath, long fileSize,
+        Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var milestone = await GetOwnedAsync(milestoneId, cancellationToken);
+        var entity = new CompanyMilestoneDocument
+        {
+            TenantId = tenantId,
+            MilestoneId = milestone.Id,
+            FileName = fileName,
+            FilePath = filePath,
+            Description = CompanyEventRules.Clean(description),
+            UploadDate = DateTime.UtcNow,
+            UploadedById = uploadedById,
+            FileSizeBytes = fileSize,
+            FileUploadRecordId = fileUploadRecordId,
+            DocumentRecordId = documentRecordId,
+            DocumentVersionId = documentVersionId,
+        };
+        await _unitOfWork.Repository<CompanyMilestoneDocument>().AddAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("File {FileName} added to milestone {Title}", fileName, milestone.Title);
+        var saved = await TenantDocuments(tenantId).AsNoTracking().Include(d => d.UploadedBy)
+            .FirstAsync(d => d.Id == entity.Id, cancellationToken);
+        return ToDocumentDto(saved);
+    }
+
+    /// <inheritdoc />
+    public async Task<CompanyMilestoneDocumentFile> GetDocumentFileAsync(Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var document = await TenantDocuments(GetTenantId()).AsNoTracking()
+                           .FirstOrDefaultAsync(d => d.Id == documentId, cancellationToken)
+                       ?? throw new ArgumentException("That file was not found.");
+        return new CompanyMilestoneDocumentFile(document.FileName, document.DocumentRecordId, document.DocumentVersionId, document.FileUploadRecordId);
+    }
+
+    /// <inheritdoc />
+    public async Task DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default)
+    {
+        var document = await TenantDocuments(GetTenantId()).FirstOrDefaultAsync(d => d.Id == documentId, cancellationToken)
+                       ?? throw new ArgumentException("That file was not found.");
+        await _unitOfWork.Repository<CompanyMilestoneDocument>().DeleteAsync(document);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("File {FileName} removed from milestone {MilestoneId}", document.FileName, document.MilestoneId);
     }
 }
 

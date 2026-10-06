@@ -273,12 +273,37 @@ public interface ICompanyMilestoneService
     Task<IEnumerable<CompanyMilestoneDto>> GetAllAsync(CancellationToken cancellationToken = default);
     Task<PagedResult<CompanyMilestoneDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<CompanyMilestoneDto>> GetByCategoryAsync(MilestoneCategory category, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Each occurrence in the range (lane 4a): a repeating milestone answers one row per year it falls in, each with its
+    /// <c>OccurrenceDate</c> and <c>YearsSince</c>. At most <c>CompanyMilestoneRules.MaxRangeYears</c> years.
+    /// </summary>
     Task<IEnumerable<CompanyMilestoneDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
+
+    /// <summary>Each milestone whose next occurrence falls within <paramref name="daysAhead"/> days of today (UTC), in date order (lane 4a).</summary>
     Task<IEnumerable<CompanyMilestoneDto>> GetUpcomingMilestonesAsync(int daysAhead = 90, CancellationToken cancellationToken = default);
     Task<CompanyMilestoneDto> CreateAsync(CreateCompanyMilestoneDto createDto, CancellationToken cancellationToken = default);
     Task<CompanyMilestoneDto> UpdateAsync(UpdateCompanyMilestoneDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+
+    // ── Lane 4a (D-3): its files, through the upload gate ──
+
+    /// <summary>The milestone, refusing one not in this tenant ("not found") — asked before a byte is stored.</summary>
+    Task<CompanyMilestoneDto> RequireAsync(Guid milestoneId, CancellationToken cancellationToken = default);
+    Task<IEnumerable<CompanyMilestoneDocumentDto>> GetDocumentsAsync(Guid milestoneId, CancellationToken cancellationToken = default);
+    Task<CompanyMilestoneDocumentDto> AddDocumentAsync(
+        Guid milestoneId, string? description, Guid uploadedById, string fileName, string filePath, long fileSize,
+        Guid fileUploadRecordId, Guid? documentRecordId, Guid? documentVersionId, CancellationToken cancellationToken = default);
+
+    /// <summary>The stored file behind a document, this tenant's — for the download door, which checks nothing itself.</summary>
+    Task<CompanyMilestoneDocumentFile> GetDocumentFileAsync(Guid documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>Removes a file from its milestone — on Write (the user's ruling, as event files).</summary>
+    Task DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 }
+
+/// <summary>Where a milestone document's bytes are, for the download door (lane 4a).</summary>
+public sealed record CompanyMilestoneDocumentFile(
+    string FileName, Guid? DocumentRecordId, Guid? DocumentVersionId, Guid? FileUploadRecordId);
 
 #endregion Company Milestone Service
 

@@ -1031,7 +1031,27 @@ export interface CompanyMilestone extends AuditFields {
   isRecurringAnnually: boolean;
   showOnCalendar: boolean;
   significance?: string | null;
+  /** Free-text references ("certificate no. …") — the files are `documentCount`. */
   relatedDocuments?: string | null;
+  /** Lane 4a: the date this row stands for — the occurrence a dated read found, else the next one, else its own date. */
+  occurrenceDate: string;
+  /** The next time it falls, today or later; null for a one-off already past. */
+  nextOccurrence?: string | null;
+  /** Whole years from its own date to `occurrenceDate` — "the 10th anniversary"; 0 on the first. */
+  yearsSince: number;
+  /** How many files evidence it (lane 4a, D-3). */
+  documentCount: number;
+}
+
+/** A file evidencing a milestone, through the upload gate (lane 4a, D-3). */
+export interface CompanyMilestoneDocument {
+  id: string;
+  milestoneId: string;
+  fileName: string;
+  description?: string | null;
+  fileSizeBytes?: number | null;
+  uploadDate: string;
+  uploadedByName?: string | null;
 }
 
 export interface CreateCompanyMilestone {

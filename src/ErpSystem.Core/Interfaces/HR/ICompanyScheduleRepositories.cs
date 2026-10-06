@@ -105,12 +105,13 @@ public interface IRoomBookingRepository : IGenericRepository<RoomBooking>
 
 #region Company Milestone Repository
 
+/// <remarks>
+/// ⚠ Lane 4a: its four custom reads are gone — they loaded every tenant's rows, compared the milestone's own date only (a
+/// yearly one was never upcoming after its first year) and read "today" in server time. The service reads milestones
+/// through its own tenant-scoped query and <c>CompanyMilestoneRules</c>.
+/// </remarks>
 public interface ICompanyMilestoneRepository : IGenericRepository<CompanyMilestone>
 {
-    Task<IEnumerable<CompanyMilestone>> GetByCategoryAsync(MilestoneCategory category);
-    Task<IEnumerable<CompanyMilestone>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<CompanyMilestone>> GetUpcomingMilestonesAsync(int daysAhead = 90);
-    Task<IEnumerable<CompanyMilestone>> GetRecurringMilestonesAsync();
 }
 
 #endregion Company Milestone Repository

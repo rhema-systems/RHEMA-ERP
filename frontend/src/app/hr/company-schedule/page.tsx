@@ -1,6 +1,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { ordinal } from '@/components/hr/company-schedule/milestoneWords';
 import { CalendarCheck, CalendarDays, CalendarClock, DoorOpen, Flag } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -166,7 +167,9 @@ export default function CompanySchedulePage() {
                   <li key={m.id} className="text-sm">
                     <p className="font-medium">{m.title}</p>
                     <p className="text-muted-foreground">
-                      {m.milestoneDate.slice(0, 10)} · {spaced(m.category)}
+                      {/* Lane 4a: the occurrence ahead — a yearly milestone's anniversary, not its first date. */}
+                      {m.occurrenceDate.slice(0, 10)} · {spaced(m.category)}
+                      {m.isRecurringAnnually && m.yearsSince > 0 ? ` · ${ordinal(m.yearsSince)} anniversary` : ''}
                     </p>
                   </li>
                 ))}

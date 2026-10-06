@@ -924,6 +924,63 @@ public class CompanyScheduleController : HrControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Adds a file evidencing the milestone — the certificate, the licence, the photograph — through the upload gate:
+    /// scanned, stored and registered (lane 4a, D-3). It had a text box only.
+    /// </summary>
+    /// <remarks>⚠ The milestone is resolved BEFORE a byte is stored: the gate cannot roll a stored file back.</remarks>
+    [HttpPost("milestones/{id:guid}/documents")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddMilestoneDocument(Guid id, IFormFile file, [FromForm] string? description, CancellationToken ct)
+    {
+        var milestone = await _milestoneService.RequireAsync(id, ct);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "CompanyMilestone",
+            sourceRecordId: id,
+            sourceLabel: $"Company milestone {milestone.Title}",
+            documentType: "CompanyMilestoneDocument",
+            description: description,
+            persist: (uploadedById, document) => _milestoneService.AddDocumentAsync(
+                id, description, uploadedById, document.OriginalFileName, document.FilePath, document.FileSize,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId, ct),
+            ct,
+            category: ControlledFileUploadCategories.HrCompanyScheduleAttachments);
+    }
+
+    /// <summary>The milestone's files (lane 4a).</summary>
+    [HttpGet("milestones/{id:guid}/documents")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IEnumerable<CompanyMilestoneDocumentDto>>> GetMilestoneDocuments(Guid id, CancellationToken ct)
+        => Ok(await _milestoneService.GetDocumentsAsync(id, ct));
+
+    /// <summary>Downloads a milestone's file (lane 4a), on the read permission. The service applies the tenant.</summary>
+    [HttpGet("milestones/documents/{documentId:guid}/download")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> DownloadMilestoneDocument(Guid documentId, CancellationToken ct)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is this endpoint's: the download helper performs none.
+        var file = await _milestoneService.GetDocumentFileAsync(documentId, ct);
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            file.DocumentRecordId, file.DocumentVersionId, file.FileUploadRecordId,
+            legacyPath: null, file.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Removes a file from its milestone — on Write (the user's ruling, as event files); deleting the milestone stays Admin.</summary>
+    [HttpDelete("milestones/documents/{documentId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> DeleteMilestoneDocument(Guid documentId, CancellationToken ct)
+    {
+        await _milestoneService.DeleteDocumentAsync(documentId, ct);
+        return NoContent();
+    }
+
     #endregion
 
     #region Business Closures

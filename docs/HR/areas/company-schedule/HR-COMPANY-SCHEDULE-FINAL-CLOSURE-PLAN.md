@@ -45,7 +45,8 @@ has not started (the user: "don't start the actual development yet").
    no-show, 3c, staff booking from `/me` (D-13), 3d-1, a room for every date of a series, approved once and the booker
    told once, and 3d-2, an extended series bringing its rooms and the event page's Rooms card (D-12), built and proved
    (no migration; UAT has the real Room Booking Approval). ✅ Lane 3 is done (2026-10-06); its screens await lane 5's
-   walk. Next: lane 4 (milestones, fiscal, company profile) — source-check first.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   walk. **Lane 4** is source-checked and its five questions settled (lane 4 State), in three slices; 4a, milestone files
+   and a yearly milestone's dates, built and proved. Next 4b: HR reads Finance's fiscal calendar (D-6).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -322,7 +323,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
-| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
+| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ◐ source-checked, three slices; 4a built and proved (1027/1027 ×2); 4b next | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
@@ -2849,13 +2850,14 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
 
 ### Lane 4 — Milestones, fiscal years, company profile (D-3, D-6, D-17; C-40, C-41, C-42…C-50, R4-2.2, F-3, F-13, F-14, F-25, F-55, F-56)
 
-- [ ] `CompanyMilestoneDocument` entity, repository, service (add, list, delete); endpoints
+- [x] *✅ 4a; the delete on Write (the user's ruling, as event files).* `CompanyMilestoneDocument` entity, repository, service (add, list, delete); endpoints
       `POST milestones/{id}/documents` (multipart, Write), `GET milestones/{id}/documents` (Read),
       `GET milestones/documents/{docId}/download` (Read), `DELETE milestones/documents/{docId}`
       (Admin). `RelatedDocuments` stays as "References".
-- [ ] The milestone dialog gains a Documents section after save: the list with download links and a
+- [x] *✅ 4a: a "Files" dialog from the milestone's row (the generic dialog has no room for files), one file at a time.*
+      The milestone dialog gains a Documents section after save: the list with download links and a
       multi-file upload control.
-- [ ] Recurring milestones projected onto their next anniversary in upcoming and range reads; DTO
+- [x] *✅ 4a: and `occurrenceDate`; the range read answers one row per occurrence.* Recurring milestones projected onto their next anniversary in upcoming and range reads; DTO
       gains `nextOccurrence` and `yearsSince`.
 - ~~C-41, the milestone link~~ — **closed by D-17: not built.** The certificate is a milestone
       document (above); nothing to build here.
@@ -2878,7 +2880,81 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       **(F-55) The free-text `LogoUrl` is retired once the asset exists**: letters and emails read the
       logo asset, then `Tenant.LogoUrl`; the field leaves the profile form.
 
-**State:** *(filled when it lands)*
+**State:**
+
+*Source check (2026-10-06, at HEAD d8c948773):*
+- **Milestones:** lane 0's `CompanyMilestoneDocument` table exists, read and written by nothing — no upload, list, download.
+  `IsRecurringAnnually` is read by nothing; the upcoming read takes server-local "today" and compares the milestone's own
+  date, so a yearly anniversary is never upcoming after its first year (UAT's one milestone, "TDC 74th Anniversary",
+  recurring, 18 October). The service filters tenants in memory, validates nothing, answers an edit without a re-read
+  (F-30, F-46 shapes). The screen is the generic list-and-dialog (`ResourceCollectionTab`), with no room for files; its
+  Delete calls an Admin route. Precedent for the yearly rule: `BusinessClosureRules.OccurrencesIn` (C-38) — same month and
+  day each year, 29 February on 28 February otherwise.
+- **Fiscal:** HR's `FiscalYear`/`FiscalPeriod` (singular tables) are read by nothing but their own service, routes and two
+  screens; UAT holds one HR year ("FY 2026", from scenario 110), no periods. Requisitions label the year with
+  `HrFiscalYear.For` from `FiscalYearStartMonth` (UAT: 1). Finance's calendar is read in-process today
+  (`HrFinanceActualsService` → `IFiscalPeriodService`). ⚠ **Corrections to this plan:** Finance's GET routes DO require
+  `Finance.Read` (a global convention, `FinancePermissionAuthorizationConvention`) — F-56's premise is wrong, the
+  in-process read stands; F-3's line references are stale (now `CompanyScheduleRepository.cs:252-264`). Finance's year-end
+  close is per accounting book (`YearEndBookCloseCycle`) and never writes the year's own `IsClosed`/`Status` — only the
+  seeder does (UAT: FY2025 Closed by the seeder, no cycles; FY2026 Open). Finance years end at 23:59:59. The manpower
+  budget form already reads policy settings on `HR.Company.Read`.
+- **Company profile:** `CompanySealAssetKind.Logo = 3` exists (lane 0) and the Admin route accepts it; nothing reads it.
+  Six letter renderers fill `{{CompanyLogoUrl}}` from the free-text `LogoUrl`; `Tenant.LogoUrl` applies only when NO
+  profile row exists. Seals are embedded as `data:` images (`GetCurrentAsDataUriAsync`). The page's seal buttons check no
+  permission (its comment says they do). The seal upload accepts any allowed file (PDF, Word…). UAT: no logo anywhere; one
+  current seal and signature.
+
+*Rulings by the user (2026-10-06, all as recommended):*
+- **A year's status on the Fiscal calendar card:** the year's own status AND each accounting book whose year-end is closed
+  (from Finance's book-close cycles; a reopened one is not).
+- **The logo embedded in letters**, as the seal and signature are (a `data:` image); the asset-terms email body may not
+  show it in some webmail.
+- **The free-text Logo URL retired** (F-55): letters read the uploaded logo, then `Tenant.LogoUrl` — which now applies
+  whether or not a profile row exists; the field leaves the form and the API ignores it.
+- **Seal, signature and logo: PNG or JPEG only**, refused on the server otherwise (new finding).
+- **A milestone file is removed on `HR.Company.Write`**, as event files are; deleting the milestone stays Admin.
+- *Defaults stated at the check:* a recurring milestone follows the closures' yearly rule; the upcoming read answers each
+  milestone's next occurrence from today (UTC, Ghana's time); the range read answers one row per occurrence in the range;
+  the DTO gains `occurrenceDate`, `nextOccurrence` and `yearsSince`. The fiscal year for a date is Finance's year covering
+  it (its own `Year` label), else the start-month fallback, per date; HR reads Finance's calendar on `HR.Company.Read`.
+- **Three slices:** 4a milestones (files, the yearly projection, the service's tenant scoping); 4b fiscal (Finance's
+  calendar card, `IHrFiscalCalendar` for requisitions and the manpower form, HR's fiscal screens and routes retired, the
+  suites); 4c company profile (the logo asset, the Logo URL retired, image-only uploads, the seal buttons gated).
+
+*4a — what was built (2026-10-06): milestone files, and a yearly milestone's dates (D-3, C-40).*
+- **No migration** (lane 0 made the table), no template, no topic.
+- **`CompanyMilestoneRules`** (pure): the closures' yearly rule (29 February on the 28th in common years), the next
+  occurrence, years since, a date required.
+- **The service:** tenant-scoped queries (the repository's four custom reads deleted — every tenant's rows, the own date
+  only, server-local "today"); create and edit answer with a re-read (F-46); the upcoming read at each milestone's next
+  occurrence from today (UTC); the range read one row per occurrence, at most five years; the DTO gains `occurrenceDate`,
+  `nextOccurrence`, `yearsSince` and `documentCount`; deleting a milestone takes its files.
+- **Files:** `POST milestones/{id}/documents` (Write; the milestone resolved before a byte is stored), `GET
+  milestones/{id}/documents` and `GET milestones/documents/{id}/download` (Read), `DELETE milestones/documents/{id}` (Write,
+  the user's ruling) — through the gate (scanned, DMS-registered), the event files' category.
+- **Screens:** the milestones page's "Files" from each row (`MilestoneFilesDialog`: upload, download, remove), "Next" (with
+  the anniversary) and "Files" columns, the free text called "References", Delete only for Admin; the landing's
+  milestones at their coming occurrence, "74th anniversary".
+- **Demo data:** scenario 110's milestone dated from the founding (1952), so it counts as the 74th. UAT's own row is still
+  dated 2026-10-18 (it reads as the first) — re-dating it is the user's call.
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–4a: **1027/1027 on two clean passes**, first time. 4a has **25 assertions**: no date
+  refused; a past one-off with no next occurrence; a yearly one founded ten years ago at its next anniversary, the 10th;
+  upcoming within 90 days the anniversary, not the past one-off nor the one 200 days away, within a year that one too; 29
+  February on the 28th in common years and the 29th in 2028, counted 1–4; a range over two anniversaries, the 10th and
+  11th; more than five years and a backwards range refused; an edit re-read; a file through the gate — its name, size,
+  note and uploader, a clean scan, in the DMS, the same bytes back, listed and counted; a missing milestone refused
+  before a byte is stored; a program file refused; removed by the HR desk; the milestone's delete refused the HR desk,
+  done by Admin, its files gone with it.
+- **Regression:** the round-4 net **212/212** (slice 3's milestone checks unchanged); recruitment **59/59**; the templates
+  probe **42/42**; `run-lane-n` **109/115**, the six section-J failures of #40.
+- **The API log:** no request answered 500; the milestone routes' refusals are the intended ones. The blocking watcher
+  logged one 3.6 s parallel wait on the notification poll at the API's start, and nothing in the second pass.
+- **After the runs:** no CSF milestone, file or booking is live; no company-schedule notice to a real login is live; every
+  harness login is off; the R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are
+  stopped.
 
 ### Lane 5 — Screens (C-1, C-16, R4-3.1, R4-6.1, R4-6.2, R4-6.3, R4-6.6, R4-10A.1, R4-10A.3, R4-10B.1…R4-10B.4, F-19…F-23, F-26, F-27, F-57)
 
@@ -3534,3 +3610,13 @@ built API, so no web host and no seeders).
 
   Next: lane 4 — milestones (documents, recurring projection), fiscal (Finance's calendar, HR's retired), the company
   profile. Source-check first; its decisions to the user.
+- **2026-10-06** — **3d-2 committed** (`d8c948773`). **Lane 4 source-checked** (two read-only surveys — Finance's calendar,
+  the company profile — and the milestones by hand); five questions settled by the user as recommended; two corrections to
+  this plan (F-56's premise; Finance's year-end close is per book). **Slice 4a built and proved:** milestone files, and a
+  yearly milestone's dates.
+  - **Results:** `run-final-review.mjs` scored 1002 + 25 = 1027/1027 on two clean passes, first time. The round-4 net was
+    212/212, recruitment 59/59, the templates probe 42/42 and `run-lane-n` 109/115 (section J, #40). No request answered
+    500.
+
+  Next: 4b — HR reads Finance's fiscal calendar (D-6): the card, `IHrFiscalCalendar` for requisitions and the manpower
+  form, HR's fiscal screens and routes retired.
