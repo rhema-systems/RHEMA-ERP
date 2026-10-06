@@ -6,7 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Ban, CheckCircle2, Loader2, Save, Trash2, XCircle } from 'lucide-react';
+import { Ban, CheckCircle2, Loader2, Save, Trash2, UserX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useAuth } from '@/hooks/use-auth';
@@ -149,6 +149,20 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     onError: fail('Could not approve the booking'),
   });
 
+  // Lane 3b-2 (the user's ruling): a confirmed booking whose start has passed — completed too — held and not used.
+  const [noShowOpen, setNoShowOpen] = useState(false);
+  const markNoShow = async () => {
+    try {
+      await roomBookingService.markNoShow(id);
+      await refresh();
+      toast({ title: 'Marked a no-show', description: 'The booker is told.' });
+      return true;
+    } catch (error: any) {
+      fail('Could not mark the booking a no-show')(error);
+      return false;
+    }
+  };
+
   // Lane 3b-1 (D-10): not approving cancels the booking, and its booker is told why.
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -225,6 +239,8 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
   // marked a no-show — as the server now rules.
   const open = !booking.isCancelled && (booking.status === 'Tentative' || booking.status === 'Confirmed');
   const mine = !!myEmployeeId && booking.bookedById?.toLowerCase() === myEmployeeId.toLowerCase();
+  const started = new Date(booking.startDateTime).getTime() <= Date.now();
+  const canNoShow = !booking.isCancelled && (booking.status === 'Confirmed' || booking.status === 'Completed') && started;
 
   return (
     <div className="space-y-6 p-6">
@@ -247,6 +263,11 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
             {open && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
                 <XCircle className="mr-2 h-4 w-4" /> Cancel
+              </Button>
+            )}
+            {canNoShow && (
+              <Button variant="outline" onClick={() => setNoShowOpen(true)}>
+                <UserX className="mr-2 h-4 w-4" /> Mark no-show
               </Button>
             )}
             {canDelete && (
@@ -375,6 +396,15 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmationDialog
+        open={noShowOpen}
+        onOpenChange={setNoShowOpen}
+        title="Mark this booking a no-show?"
+        description={`The room was held and not used. This cannot be undone, and ${booking.bookedByName} is told.`}
+        confirmText="Mark no-show"
+        onConfirm={markNoShow}
+      />
 
       <ConfirmationDialog
         open={deleteOpen}

@@ -4953,6 +4953,73 @@ public class RoomBookingService : IRoomBookingService
         return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
+    /// <remarks>
+    /// Lane 3b-2 (the user's ruling): a confirmed booking whose start has passed — one the sweep has completed too — is
+    /// marked a no-show, for good, and its booker told (never of their own act).
+    /// </remarks>
+    public async Task<RoomBookingDto> MarkNoShowAsync(Guid bookingId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedAsync(bookingId, cancellationToken);
+        Refuse(RoomBookingRules.RefuseNoShow(entity, DateTime.UtcNow));
+
+        entity.Status = BookingStatus.NoShow;
+        // Saved by tracking: UpdateAsync would mark the loaded room, people and event modified too.
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Room booking marked a no-show: {BookingNumber}", entity.BookingNumber);
+        await _desk.TellNoShowAsync(entity, cancellationToken);
+
+        return await GetByIdAsync(entity.Id, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Lapse (F-48).</b> A booking still Tentative when its start comes was never approved in time: it is
+    /// cancelled, "Not approved before it started.", its approval withdrawn and its booker told. It used to sit under
+    /// "awaiting approval" for ever, holding the room.</para>
+    ///
+    /// <para><b>Completion.</b> A confirmed booking whose end has passed is Completed — silently (the user's ruling).</para>
+    ///
+    /// <para>Tenant-explicit, and safe with nobody signed in: the hourly sweep runs it so. Each lapse is saved before its
+    /// approval is withdrawn and its booker told, so a failure costs only what was not yet done, and the next pass does
+    /// exactly that.</para>
+    /// </remarks>
+    public async Task<RoomBookingSweepDto> SweepAsync(Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default)
+    {
+        var result = new RoomBookingSweepDto();
+
+        var lapsing = await _bookingRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId && !b.IsCancelled && b.Status == BookingStatus.Tentative && b.StartDateTime <= nowUtc)
+            .OrderBy(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
+        foreach (var b in lapsing)
+        {
+            RoomBookingRules.Cancel(b, RoomBookingRules.LapsedReason, nowUtc);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _desk.WithdrawLapsedApprovalAsync(b, RoomBookingRules.LapsedReason, cancellationToken);
+            await _desk.TellCancelledAsync(b, notApproved: true, cancellationToken);
+            result.Lapsed.Add(b.BookingNumber);
+        }
+
+        var ended = await _bookingRepository.GetQueryable()
+            .Where(b => b.TenantId == tenantId && !b.IsCancelled && b.Status == BookingStatus.Confirmed && b.EndDateTime <= nowUtc)
+            .ToListAsync(cancellationToken);
+        foreach (var b in ended)
+            b.Status = BookingStatus.Completed;
+        if (ended.Count > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        result.Completed.AddRange(ended.Select(b => b.BookingNumber));
+
+        if (result.Lapsed.Count + result.Completed.Count > 0)
+            _logger.LogInformation("Room booking sweep for tenant {TenantId}: {Lapsed} lapsed, {Completed} completed",
+                tenantId, result.Lapsed.Count, result.Completed.Count);
+        return result;
+    }
+
+    /// <inheritdoc />
+    public Task<RoomBookingSweepDto> SweepNowAsync(CancellationToken cancellationToken = default)
+        => SweepAsync(GetTenantId(), DateTime.UtcNow, cancellationToken);
+
     /// <remarks>Lane 3a (F-8): not once cancelled, completed or marked a no-show, and with a reason.</remarks>
     public async Task<bool> CancelBookingAsync(CancelRoomBookingDto cancelDto, CancellationToken cancellationToken = default)
     {

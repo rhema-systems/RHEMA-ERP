@@ -89,6 +89,8 @@ public sealed class CompanyScheduleReminderBackgroundService : BackgroundService
 
         var unitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         var events = scope.ServiceProvider.GetRequiredService<ICompanyEventService>();
+        // Lane 3b-2: the booking half — a Tentative booking lapses at its start (F-48), a confirmed one completes at its end.
+        var bookings = scope.ServiceProvider.GetRequiredService<IRoomBookingService>();
 
         var tenants = await unitOfWork.Repository<Tenant>()
             .GetQueryable(t => !t.IsDeleted)
@@ -107,6 +109,15 @@ public sealed class CompanyScheduleReminderBackgroundService : BackgroundService
             {
                 // One tenant's failure must not starve the rest.
                 _logger.LogError(ex, "Company schedule reminder sweep failed for tenant {TenantId}", tenantId);
+            }
+
+            try
+            {
+                await bookings.SweepAsync(tenantId, DateTime.UtcNow, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Room booking sweep failed for tenant {TenantId}", tenantId);
             }
         }
     }

@@ -22,8 +22,8 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// the topic path queues rows with no delivery result, would lose the catalogue's wording, and cannot carry an
 /// attachment (the calendar invite, D-14). So the topics are seeded with email off, and the caller sends the email.</para>
 ///
-/// <para><b>Eighteen topics since lane 3b-1</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a; a
-/// room booking approved, not approved, cancelled — to its booker — at 3b-1).
+/// <para><b>Nineteen topics since lane 3b-2</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a; a
+/// room booking approved, not approved, cancelled — to its booker — at 3b-1; marked a no-show at 3b-2).
 /// A tenant seeded with fewer gets the rest the next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds
 /// whatever key is missing.</para>
 ///
@@ -72,6 +72,8 @@ public sealed class CompanyScheduleNotices
     public const string BookingApproved = "BookingApproved";
     public const string BookingNotApproved = "BookingNotApproved";
     public const string BookingCancelled = "BookingCancelled";
+    // Lane 3b-2: marked a no-show.
+    public const string BookingNoShow = "BookingNoShow";
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -292,6 +294,10 @@ public sealed class CompanyScheduleNotices
             "Sent in the app to whoever booked a room when the booking is cancelled by somebody else — by the desk, with the event it was for, or because the room was taken out of use (lane 3b-1). The email says why.",
             "Cancelled: {{RoomName}}",
             "{{BookingNumber}} — {{When}} — has been cancelled, and the room is released. The email says why."),
+        new(BookingNoShow, ToBooker, "Room bookings: marked a no-show (booker)",
+            "Sent in the app to whoever booked a room when the desk marks the booking a no-show — held and not used (lane 3b-2), with the no-show email.",
+            "Marked a no-show: {{RoomName}}",
+            "{{BookingNumber}} — {{When}} — was marked a no-show: the room was held and not used."),
     };
 
     /// <summary>Seeds the topics a tenant does not have yet. Every notice calls it; once per tenant per scope.</summary>

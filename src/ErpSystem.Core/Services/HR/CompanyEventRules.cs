@@ -502,6 +502,20 @@ public static class RoomBookingRules
     public static string? RefuseCancelling(RoomBooking b) =>
         IsLive(b) ? null : $"{b.BookingNumber} is already {Word(b)}.";
 
+    /// <summary>Why the hourly sweep cancels a booking still Tentative when its time comes (lane 3b-2, F-48).</summary>
+    public const string LapsedReason = "Not approved before it started.";
+
+    /// <summary>
+    /// A no-show (lane 3b-2, the user's ruling): a confirmed booking whose start has passed — including one the sweep has
+    /// completed — and never undone.
+    /// </summary>
+    public static string? RefuseNoShow(RoomBooking b, DateTime nowUtc) =>
+        b.IsCancelled || b.Status == BookingStatus.Cancelled ? $"{b.BookingNumber} is cancelled, so it cannot be a no-show."
+        : b.Status == BookingStatus.NoShow ? $"{b.BookingNumber} is already marked a no-show."
+        : b.Status == BookingStatus.Tentative ? $"{b.BookingNumber} was never confirmed, so it cannot be a no-show."
+        : AsUtc(b.StartDateTime) > nowUtc ? $"{b.BookingNumber} has not started yet — a booking is a no-show only once its time has come."
+        : null;
+
     /// <summary>Cancels it, with the reason. The one place a booking is cancelled, so each path reads the same.</summary>
     public static void Cancel(RoomBooking b, string reason, DateTime nowUtc)
     {

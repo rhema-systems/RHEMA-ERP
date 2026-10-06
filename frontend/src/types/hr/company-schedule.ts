@@ -1234,6 +1234,10 @@ export interface TeamSchedule {
 
 /** One pass of the reminder sweep (round 4, lane N-b2) — the scheduled run and run-now return the same. */
 export interface CompanyScheduleReminderRun {
+  /** Bookings still Tentative when their start came: cancelled, their bookers told (lane 3b-2). */
+  bookingsLapsed?: string[];
+  /** Confirmed bookings whose end had passed: completed (lane 3b-2). */
+  bookingsCompleted?: string[];
   /** Event numbers whose reminder went this pass. */
   reminded: string[];
   /** Event numbers whose unanswered invitations were chased this pass. */

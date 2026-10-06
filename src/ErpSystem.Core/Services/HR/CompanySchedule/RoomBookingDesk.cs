@@ -1,9 +1,11 @@
 using System.Globalization;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.CompanySchedule;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -37,6 +39,7 @@ public sealed class RoomBookingDesk
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<RoomBookingDesk> _logger;
+    private readonly IWorkflowEngine _engine;
 
     public RoomBookingDesk(
         IWorkflowIntegrationService workflow,
@@ -45,7 +48,8 @@ public sealed class RoomBookingDesk
         CompanyScheduleNotices notices,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
-        ILogger<RoomBookingDesk> logger)
+        ILogger<RoomBookingDesk> logger,
+        IWorkflowEngine engine)
     {
         _workflow = workflow;
         _workflowAdapters = workflowAdapters;
@@ -54,6 +58,7 @@ public sealed class RoomBookingDesk
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _logger = logger;
+        _engine = engine;
     }
 
     // ---- the engine ----
@@ -118,7 +123,41 @@ public sealed class RoomBookingDesk
         }
     }
 
+    /// <summary>
+    /// Withdraws the approval of a booking the hourly sweep lapsed (lane 3b-2, F-48) — which may run with nobody signed in.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <see cref="WithdrawApprovalAsync"/> cannot serve here: the integration finds the instance by the signed-in user's
+    /// tenant and records the signed-in user, and with nobody signed in it throws — the lapsed booking's approval went on
+    /// asking the desk. So the engine is asked directly, by the instance, in the name of the login that started the
+    /// approval (the booker's): its activity log needs a real user, and the reason says it lapsed.
+    /// </remarks>
+    public async Task WithdrawLapsedApprovalAsync(RoomBooking b, string reason, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var instance = await _unitOfWork.Repository<WorkflowInstance>().GetQueryable().AsNoTracking()
+                .Where(i => i.TenantId == b.TenantId && i.EntityId == b.Id
+                            && (i.Status == WorkflowInstanceStatus.Created || i.Status == WorkflowInstanceStatus.InProgress
+                                || i.Status == WorkflowInstanceStatus.Waiting || i.Status == WorkflowInstanceStatus.Suspended))
+                .OrderByDescending(i => i.CreatedAt)
+                .Select(i => new { i.Id, i.InitiatedById })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (instance is null) return;
+            await _engine.CancelWorkflowAsync(instance.Id, instance.InitiatedById, reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not withdraw the approval of lapsed booking {BookingNumber}.", b.BookingNumber);
+        }
+    }
+
     // ---- telling the booker ----
+
+    /// <summary>Marked a no-show (lane 3b-2).</summary>
+    public Task TellNoShowAsync(RoomBooking b, CancellationToken cancellationToken) =>
+        TellBookerAsync(b, CompanyScheduleNotices.BookingNoShow, CompanyScheduleEmailCatalog.Events.BookingNoShow,
+            null, "booking marked a no-show", cancellationToken);
 
     /// <summary>Approved, at its last stage.</summary>
     public Task TellApprovedAsync(RoomBooking b, string? approvedBy, CancellationToken cancellationToken) =>

@@ -491,6 +491,11 @@ class RoomBookingService {
     return apiService.post<void>(`${this.baseUrl}/bookings/${id}/approve`);
   }
 
+  /** A confirmed booking whose start has passed, held and not used (lane 3b-2): for good, its booker told. */
+  markNoShow(id: string): Promise<RoomBooking> {
+    return apiService.post<RoomBooking>(`${this.baseUrl}/bookings/${id}/no-show`);
+  }
+
   /** Not approved (lane 3b-1): the booking is cancelled, and its booker told why. A reason is required. */
   reject(id: string, comments: string): Promise<RoomBooking> {
     return apiService.post<RoomBooking>(`${this.baseUrl}/bookings/${id}/reject`, { comments });

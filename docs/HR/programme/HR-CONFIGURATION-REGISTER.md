@@ -301,7 +301,7 @@ was off.
 
 Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
 template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
-**54 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two, lane 3b-1 two). Since this lane a tenant can reword any of them at **Administration → HR Settings →
+**55 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two, lane 3b-1 two, lane 3b-2 one). Since this lane a tenant can reword any of them at **Administration → HR Settings →
 Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
 and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
 is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
@@ -384,7 +384,8 @@ every render, and the escaped form would have printed their markup as text.
 | `CompanySchedule/EventSeriesInvitation` | Event Series Invitation | email | a guest is invited to several dates of a recurring event at once — added with a series scope, invited by the series' approval, or carried onto the dates an extension adds; **one** per guest, listing the dates, a calendar file per date (lane 2f-2a, D-12) | signed in | **Enforced** |
 | `CompanySchedule/EventSeriesChanged` | Event Series Changed | email | several dates of a recurring event change for a guest together — taken off the guest list with a series scope (lane 2f-2a); moved, changed or cancelled from lane 2f-2b; **one** per guest, listing the dates, each date's calendar update or cancellation | signed in | **Enforced** |
 | `CompanySchedule/BookingApproved` | Room Booking Approved | email | a booking of a room that needs approval is approved at its last stage; to its booker, with the in-app notice (lane 3b-1) | signed in | **Enforced** |
-| `CompanySchedule/BookingCancelled` | Room Booking Cancelled | email | a booking is cancelled by somebody other than its booker — by the desk, with its event, by retiring its room — or not approved; to its booker, with the reason (lane 3b-1) | signed in | **Enforced** |
+| `CompanySchedule/BookingCancelled` | Room Booking Cancelled | email | a booking is cancelled by somebody other than its booker — by the desk, with its event, by retiring its room — or not approved; to its booker, with the reason (lane 3b-1). From lane 3b-2 also when the hourly sweep lapses one still Tentative at its start ("Not approved before it started.") — that send has nobody signed in, so under #40 it finds no mail server and only the in-app notice reaches the booker | signed in; the sweep's has nobody | **Enforced** |
+| `CompanySchedule/BookingNoShow` | Room Booking No-Show | email | the desk marks a confirmed booking whose start has passed a no-show — for good; to its booker, with the in-app notice (lane 3b-2) | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
 | `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
 | `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |
@@ -417,6 +418,12 @@ so it goes **once**. A reschedule or an edit that moves a date clears the matchi
 **Send reminder now** and **Chase unanswered now**, on the event page's Reminders card, stamp the same
 dates. **Two of the three settings were ghosts**: the event form offered them, the database saved them,
 and nothing read them.
+
+**The booking half (company-schedule final closure lane 3b-2, F-48).** The same hourly pass, and HR's run-now, also
+sweep room bookings (`IRoomBookingService.SweepAsync`, tenant-explicit): a booking still **Tentative** when its start
+comes is cancelled, "Not approved before it started.", its approval withdrawn and its booker told; a **confirmed**
+booking whose end has passed is **Completed**, silently. No setting governs either — they follow the booking's own
+times. The run-now answer lists them (`bookingsLapsed`, `bookingsCompleted`).
 
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|

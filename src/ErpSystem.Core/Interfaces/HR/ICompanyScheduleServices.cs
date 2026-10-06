@@ -220,6 +220,18 @@ public interface IRoomBookingService
 
     /// <summary>Not approved: the booking is cancelled, "Not approved: …", and its booker told why (lane 3b-1, D-10).</summary>
     Task<RoomBookingDto> RejectBookingAsync(Guid bookingId, Guid rejectedById, string reason, CancellationToken cancellationToken = default);
+
+    /// <summary>Marks a confirmed booking whose start has passed a no-show, for good; its booker told (lane 3b-2).</summary>
+    Task<RoomBookingDto> MarkNoShowAsync(Guid bookingId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The hourly sweep's booking half (lane 3b-2): lapses a Tentative booking whose start has come (F-48) and completes
+    /// a confirmed one whose end has passed. Tenant-explicit; safe with nobody signed in.
+    /// </summary>
+    Task<RoomBookingSweepDto> SweepAsync(Guid tenantId, DateTime nowUtc, CancellationToken cancellationToken = default);
+
+    /// <summary>The same, for the signed-in tenant now — HR's run-now.</summary>
+    Task<RoomBookingSweepDto> SweepNowAsync(CancellationToken cancellationToken = default);
     Task<bool> CancelBookingAsync(CancelRoomBookingDto cancelDto, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 }

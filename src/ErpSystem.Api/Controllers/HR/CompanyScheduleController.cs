@@ -429,7 +429,14 @@ public class CompanyScheduleController : HrControllerBase
     [HttpPost("reminders/run")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<CompanyScheduleReminderRunDto>> RunDueReminders(CancellationToken ct)
-        => Ok(await _eventService.RunDueRemindersNowAsync(ct));
+    {
+        var run = await _eventService.RunDueRemindersNowAsync(ct);
+        // Lane 3b-2: the sweep's booking half — lapses and completions — as the hourly run does it.
+        var swept = await _bookingService.SweepNowAsync(ct);
+        run.BookingsLapsed = swept.Lapsed;
+        run.BookingsCompleted = swept.Completed;
+        return Ok(run);
+    }
 
     /// <summary>
     /// Uninvites a guest — organiser work, on Write (lane 2d); it needed Admin. On a series, <c>?scope=</c>
@@ -791,6 +798,15 @@ public class CompanyScheduleController : HrControllerBase
     /// Not approved (lane 3b-1, D-10): the booking is cancelled, "Not approved: …", and its booker told why. Decided through
     /// the engine when an approval is under way, the approve tier otherwise; never by the booker.
     /// </summary>
+    /// <summary>
+    /// Marks a confirmed booking whose start has passed a no-show — held and not used — for good; its booker told (lane
+    /// 3b-2, the user's ruling).
+    /// </summary>
+    [HttpPost("bookings/{id:guid}/no-show")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingDto>> MarkBookingNoShow(Guid id, CancellationToken ct)
+        => Ok(await _bookingService.MarkNoShowAsync(id, ct));
+
     [HttpPost("bookings/{id:guid}/reject")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<RoomBookingDto>> RejectBooking(Guid id, [FromBody] EventDecisionDto dto)

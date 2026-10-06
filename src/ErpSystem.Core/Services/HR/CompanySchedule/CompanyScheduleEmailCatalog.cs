@@ -85,6 +85,9 @@ public static class CompanyScheduleEmailCatalog
         /// not approved, with the reason (lane 3b-1, F-34). Never for their own act.
         /// </summary>
         public const string BookingCancelled = "BookingCancelled";
+
+        /// <summary>Sent to the booker when the desk marks a booking a no-show — booked and not used (lane 3b-2).</summary>
+        public const string BookingNoShow = "BookingNoShow";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -521,6 +524,25 @@ public static class CompanyScheduleEmailCatalog
                 T("CancelSentence", "The outcome as the middle of a sentence: has been cancelled, or was not approved.", "has been cancelled"),
                 T("CancellationReason", "Why; hidden when none was recorded.", "Boardroom was taken out of use."),
             }).ToList(),
+        });
+
+        // ── 16. A room booking marked a no-show (lane 3b-2) ────────────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.BookingNoShow,
+            Name = "Room Booking No-Show",
+            Category = "Booking",
+            Description =
+                "Sent to whoever booked a meeting room when the desk marks the booking a no-show: the room was held and not "
+                + "used (lane 3b-2). It cannot be undone. Nobody is told of their own act.",
+            DefaultSubject = "Marked a no-show: {{RoomName}} on {{BookingDate}}",
+            DefaultHtmlBody = Shell(AmberGradient, "Marked a no-show",
+                @"  <p>Hi <strong>{{BookerName}}</strong>,</p>
+  <p>Your booking of <strong>{{RoomName}}</strong> has been marked a no-show: the room was held for you and not used.</p>" +
+                BookingBlock + @"
+  <p style='color:#6b7280;font-size:0.875rem'>If the room was used, or you could not cancel in time, please speak to the HR desk.</p>"),
+            Tokens = BookingTokens(),
         });
 
         return list;

@@ -1928,8 +1928,24 @@ public class TeamScheduleDto
 /// One pass of the company-schedule reminder sweep (round 4, lane N-b2): which events it reminded and
 /// chased, and how many emails that made. The scheduled run and HR's run-now return the same thing.
 /// </summary>
+/// <summary>One pass of the sweep's booking half (lane 3b-2): the booking numbers lapsed and completed.</summary>
+public class RoomBookingSweepDto
+{
+    /// <summary>Still Tentative when their start came: cancelled, "Not approved before it started.", their bookers told.</summary>
+    public List<string> Lapsed { get; set; } = new();
+
+    /// <summary>Confirmed and ended: Completed, silently.</summary>
+    public List<string> Completed { get; set; } = new();
+}
+
 public class CompanyScheduleReminderRunDto
 {
+    /// <summary>The bookings this pass lapsed (lane 3b-2, F-48).</summary>
+    public List<string> BookingsLapsed { get; set; } = new();
+
+    /// <summary>The bookings this pass completed (lane 3b-2).</summary>
+    public List<string> BookingsCompleted { get; set; } = new();
+
     /// <summary>The event numbers whose reminder went this pass — each once, ever, per date.</summary>
     public List<string> Reminded { get; set; } = new();
 

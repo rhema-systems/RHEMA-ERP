@@ -41,8 +41,9 @@ has not started (the user: "don't start the actual development yet").
    export and dashboard (2g-1) and the event-against-event clash rule (2g-2), and 2h, files through the upload gate
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
    **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
-   rules and guards, and 3b-1, approval on the engine and the booker told, built and proved (no migration; UAT has the
-   real Room Booking Approval). Next 3b-2: the hourly lapse and completion, and no-show.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   rules and guards, 3b-1, approval on the engine and the booker told, and 3b-2, the hourly lapse and completion and
+   no-show, built and proved (no migration; UAT has the real Room Booking Approval). Next 3c: staff booking from `/me`
+   (D-13).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -318,7 +319,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a and 3b-1 built and proved (851/851 ×2; round-4 net 212/212); 3b-2 next | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1 and 3b-2 built and proved (876/876 ×2; round-4 net 212/212); 3c next | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2423,12 +2424,12 @@ closes lane 2.*
 - [x] *✅ 3a: the guards, and never the booker; ✅ 3b-1: on the engine, with Not approve (which cancels) beside it.* **Approve:** Tentative and not cancelled — *review: the first draft also required the room to
       need approval, which strands bookings made before that switch was turned off*; on the engine per
       D-10. **Cancel:** not cancelled or completed.
-- [ ] **(F-48)** The hourly sweep lapses a Tentative booking whose start has passed — cancelled with
+- [x] *✅ 3b-2; HR's run-now runs it too.* **(F-48)** The hourly sweep lapses a Tentative booking whose start has passed — cancelled with
       "Not approved before it started", the booker told.
-- [ ] `Completed` by the hourly sweep for past Confirmed bookings; "Mark no-show" for HR on a past
+- [x] *✅ 3b-2: completion silent; no-show from the start, a completed one too, for good (the user's ruling).* `Completed` by the hourly sweep for past Confirmed bookings; "Mark no-show" for HR on a past
       booking.
-- [ ] *◐ 3b-1: the approver through the engine (inbox and notice, linked to the booking page); the booker of approved,
-      not approved and cancelled any way, in the app and by email; lapsed and no-show come with 3b-2.* **(F-34)** The approver is told a booking awaits them (or the engine inbox, D-10); the booker is
+- [x] *✅ 3b-1: the approver through the engine (inbox and notice, linked to the booking page); the booker of approved,
+      not approved and cancelled any way, in the app and by email; ✅ 3b-2: lapsed and no-show.* **(F-34)** The approver is told a booking awaits them (or the engine inbox, D-10); the booker is
       told when it is approved, cancelled, lapsed or marked no-show — in-app and email.
 - [x] *✅ 3a (`RoomBookingRules.AsUtc`, on the way in and out).* **(F-50)** Booking instants read back as UTC (`DateTime.SpecifyKind`), as the reminder stamps
       already are.
@@ -2508,6 +2509,42 @@ beyond 2a's linked bookings moving and cancelling with their event and 2g-1's bo
   publishes it on UAT once. No UAT room needs approval yet.
 - **Two slices:** 3b-1, approval on the engine (approve, a new Reject, re-approval after a move) and the booker notices
   on every path; 3b-2, the hourly lapse and completion, and no-show.
+
+*3b-2 — what was built (2026-10-06): the sweep's booking half, and no-show (F-48, F-34).*
+- **No migration.** One email (55 templates), one in-app topic (19).
+- **`IRoomBookingService.SweepAsync(tenantId, now)`** — tenant-explicit, safe with nobody signed in — called by the hourly
+  `CompanyScheduleReminderBackgroundService` per tenant (after the events' reminders, in its own try) and by HR's
+  `POST reminders/run`, whose answer gains `bookingsLapsed` and `bookingsCompleted`:
+  - **lapse (F-48):** a booking still Tentative when its start comes is cancelled, "Not approved before it started.",
+    saved, its approval withdrawn, its booker told ("not approved");
+  - **completion:** a confirmed booking whose end has passed is Completed, silently (the user's ruling).
+  - ⚠ **Found while building:** the integration's withdrawal (`IWorkflowIntegrationService.CancelWorkflowAsync`) resolves
+    the instance by the signed-in user's tenant and records the signed-in user — with nobody signed in it throws, and
+    a lapsed booking's approval would have gone on asking the desk. `RoomBookingDesk.WithdrawLapsedApprovalAsync` finds
+    the instance itself and asks the engine (`IWorkflowEngine.CancelWorkflowAsync`) in the name of the login that
+    started it — the activity log's foreign key needs a real user.
+- **No-show** (`POST bookings/{id}/no-show`, Write; `RoomBookingRules.RefuseNoShow`): a confirmed booking whose start has
+  passed, one the sweep completed too; never undone; a booking to come, a cancelled one or one already a no-show is
+  refused with its reason. The booker is told — "Room Booking No-Show" email, `BookingNoShow` topic.
+- **Screens:** the booking page's "Mark no-show", with a confirmation that says it cannot be undone.
+- **UAT:** the first hourly pass after the deploy — nobody signed in — completed BK-2026-00001 (the demo booking of 1
+  October), as the source check foresaw.
+
+*Proof (UAT, API in Staging; the real Room Booking Approval live):*
+- `run-final-review.mjs` blocks 1a–3b-2: **876/876 on two clean passes**, first time, the blocking watcher silent. 3b-2
+  has **25 assertions**, its mail through the run's own sink:
+  - **the sweep** (HR's run-now): the booking still Tentative at its start lapsed — cancelled with the reason, its
+    approval withdrawn on the engine, the booker told in the app and by email; the ended confirmed booking Completed,
+    with no notice and no email; a booking under way left as it is;
+  - **no-show:** refused for a booking to come and a cancelled one; a booking under way marked, its booker told in the
+    app and by email; a completed one marked too; not again; and a no-show cannot be changed.
+- **Regression:** the round-4 net **212/212**; recruitment **59/59**; the templates probe **39/39**; `run-lane-n`
+  **109/115**, the six section-J failures of #40, its TOTAL 55.
+- **The API log:** no request answered 500; no sweep, withdrawal or notice failed. The hourly pass ran with nobody
+  signed in (one completion) and each run-now lapsed one booking and completed one.
+- **After the runs:** every RoomBooking approval the runs started is finished (9 completed, 16 cancelled); no
+  company-schedule notice to a real login is live; every harness login is off (28; the no-email one by SQL, #42); the
+  R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 *3b-1 — what was built (2026-10-05): a booking's approval on the engine, and its booker told (D-10, F-34; C-8).*
 - **No migration.** Two emails (54 templates), three in-app topics (18).
@@ -3277,3 +3314,15 @@ built API, so no web host and no seeders).
     `run-lane-n` 109/115 (section J, #40). No request answered 500.
 
   Next: 3b-2 — the hourly lapse of an unapproved booking at its start and the completion of past ones, and no-show.
+- **2026-10-06** — **3b-1 committed** (`d9cb27c8b`). **Lane 3, slice 3b-2 built and proved**: the sweep's booking half
+  and no-show (lane 3 State). No migration. **3b is done.**
+  - **Built:**
+    - the hourly pass and HR's run-now lapse a booking still Tentative at its start and complete an ended confirmed one;
+    - a lapsed booking's approval withdrawn on the engine with nobody signed in (the integration's withdrawal throws
+      without a user — found while building);
+    - no-show, for good, its booker told (one email, 55 templates; one topic, 19).
+  - **Results:** `run-final-review.mjs` scored 876/876 on two clean passes, with 25 checks in 3b-2, first time; the
+    blocking watcher was silent. The round-4 net was 212/212, recruitment 59/59, the templates probe 39/39 and
+    `run-lane-n` 109/115 (section J, #40). No request answered 500.
+
+  Next: 3c — staff booking from `/me` (D-13): their own bookings, others' as busy times only.
