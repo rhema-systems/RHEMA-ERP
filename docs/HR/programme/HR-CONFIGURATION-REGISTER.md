@@ -452,6 +452,16 @@ occurrence, a range read one row per occurrence (at most five years), and each r
 through the upload gate (`milestones/{id}/documents`), removed on `HR.Company.Write`. Proof: block 4a, both positions
 (yearly and one-off).
 
+**The fiscal year (`CompanyHrPolicySettings.FiscalYearStartMonth`, "Fiscal year starts (when Finance has no calendar)") —
+a fallback only, since lane 4b (D-6).** Requisitions' budget checks and links and the manpower budget forms take a year
+from **Finance's** fiscal calendar, read in-process on `HR.Company.Read` (`api/CompanySchedule/fiscal-calendar`, `…/year?date=`,
+`…/period?year=`): Finance's year covering the date, or numbered so; else **Finance's sequence continued** (the next year
+one higher, from the day after the last ends — Finance's own rule for opening it; backwards before the first); the month
+answers only while Finance has **no** fiscal year at all, and the policy screen shows it read-only meanwhile, with
+Finance's start. HR's own fiscal years and periods, and their 16 routes and two screens, are retired (the tables stay
+until a later migration). Proof: block 4b — the month moved to July and back changes none of the answers on a tenant with
+Finance years (UAT); the "no Finance year" position cannot be reached on UAT.
+
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|
 | `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |

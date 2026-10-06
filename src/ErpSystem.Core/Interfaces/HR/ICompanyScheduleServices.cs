@@ -348,28 +348,32 @@ public interface IBusinessClosureService
 
 #endregion Business Closure Service
 
-#region Fiscal Year Service
+#region Fiscal Calendar (lane 4b, D-6)
 
-public interface IFiscalYearService
+/// <summary>
+/// The fiscal calendar as HR reads it (company-schedule final closure lane 4b, D-6): Finance's years and periods, read
+/// in-process — Finance's own routes need <c>Finance.Read</c>, which HR's people do not hold. A year Finance has not opened
+/// continues Finance's sequence (the user's ruling, 2026-10-06); the policy's "Fiscal year starts" month answers only while
+/// Finance has no fiscal year at all. HR's own fiscal years and periods (and their service) are retired; their tables stay
+/// until a later migration drops them.
+/// </summary>
+public interface IHrFiscalCalendar
 {
-    Task<FiscalYearDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<FiscalYearDetailDto> GetDetailByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<IEnumerable<FiscalYearDto>> GetAllAsync(CancellationToken cancellationToken = default);
-    Task<PagedResult<FiscalYearDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
-    Task<FiscalYearDto?> GetByYearAsync(int year, CancellationToken cancellationToken = default);
-    Task<FiscalYearDto?> GetCurrentFiscalYearAsync(CancellationToken cancellationToken = default);
-    Task<IEnumerable<FiscalYearDto>> GetByStatusAsync(FiscalYearStatus status, CancellationToken cancellationToken = default);
-    Task<FiscalYearDto> CreateAsync(CreateFiscalYearDto createDto, CancellationToken cancellationToken = default);
-    Task<FiscalYearDto> UpdateAsync(UpdateFiscalYearDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> SetAsCurrentAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    /// <summary>Finance's years with their periods and each book's year-end close, the year after them, and the fallback month.</summary>
+    Task<HrFiscalCalendarDto> GetCalendarAsync(CancellationToken cancellationToken = default);
 
-    // Period operations
-    Task<FiscalPeriodDto> AddPeriodAsync(CreateFiscalPeriodDto createDto, CancellationToken cancellationToken = default);
-    Task<IEnumerable<FiscalPeriodDto>> GetPeriodsAsync(Guid fiscalYearId, CancellationToken cancellationToken = default);
-    Task<FiscalPeriodDto> UpdatePeriodAsync(UpdateFiscalPeriodDto updateDto, CancellationToken cancellationToken = default);
-    Task<bool> ClosePeriodAsync(CloseFiscalPeriodDto closeDto, CancellationToken cancellationToken = default);
-    Task<bool> DeletePeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// The fiscal year a date falls in: Finance's year covering it (labelled by Finance's own <c>Year</c>); else Finance's
+    /// sequence continued to it; else, with no Finance year at all, the policy's start month (a year labelled by the
+    /// calendar year it starts in).
+    /// </summary>
+    Task<HrFiscalYearAnswerDto> YearForDateAsync(DateOnly date, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The dates of fiscal year <paramref name="fiscalYear"/>: Finance's year of that number, else Finance's sequence
+    /// continued to it, else the policy month's.
+    /// </summary>
+    Task<HrFiscalYearAnswerDto> PeriodForYearAsync(int fiscalYear, CancellationToken cancellationToken = default);
 }
 
-#endregion Fiscal Year Service
+#endregion Fiscal Calendar

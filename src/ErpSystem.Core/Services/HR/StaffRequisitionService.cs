@@ -33,6 +33,8 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IStaffRequisitionHistoryRepository _historyRepository;
     private readonly IJobDescriptionRepository _jobDescriptionRepository;
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    // Company-schedule lane 4b (D-6): the fiscal year a date falls in — Finance's calendar first.
+    private readonly IHrFiscalCalendar _fiscalCalendar;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -62,8 +64,10 @@ public class StaffRequisitionService : IStaffRequisitionService
         IUnitOfWork unitOfWork,
         HrCurrencyBridge currency,
         IHrFinancePostingAdapter financePosting,
-        ILogger<StaffRequisitionService> logger)
+        ILogger<StaffRequisitionService> logger,
+        IHrFiscalCalendar fiscalCalendar)
     {
+        _fiscalCalendar = fiscalCalendar;
         _currency = currency;
         _financePosting = financePosting;
         _requisitionRepository = requisitionRepository;
@@ -1167,9 +1171,10 @@ public class StaffRequisitionService : IStaffRequisitionService
         var settings = await _policyProvider.GetAsync(cancellationToken);
         var mode = settings.BudgetEnforcementMode;
 
-        // Round 2b, R5: the policy's fiscal year, not the calendar year (§ 3 defect 3).
+        // Round 2b, R5: the fiscal year, not the calendar year (§ 3 defect 3). Company-schedule lane 4b (D-6): Finance's year
+        // covering the date, else the policy's start month.
         var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
-        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
+        var fiscalYear = (await _fiscalCalendar.YearForDateAsync(DateOnly.FromDateTime(referenceDate), cancellationToken)).FiscalYear;
 
         var result = new RequisitionBudgetCheckDto
         {
@@ -1377,9 +1382,9 @@ public class StaffRequisitionService : IStaffRequisitionService
         var budget = line.ManpowerBudget ?? throw new InvalidOperationException("The manpower budget line named belongs to no budget.");
         if (budget.IsDeleted || (budget.Status != ManpowerBudgetStatus.Approved && budget.Status != ManpowerBudgetStatus.Active))
             throw new InvalidOperationException($"Budget {budget.BudgetNumber} is {budget.Status}; only an Approved budget can be drawn down from.");
-        var settings = await _policyProvider.GetAsync(cancellationToken);
+        // Company-schedule lane 4b (D-6): Finance's fiscal year covering the date, else the policy's start month.
         var referenceDate = entity.DesiredStartDate != default ? entity.DesiredStartDate : entity.RequestDate;
-        var fiscalYear = HrFiscalYear.For(referenceDate, settings);
+        var fiscalYear = (await _fiscalCalendar.YearForDateAsync(DateOnly.FromDateTime(referenceDate), cancellationToken)).FiscalYear;
         if (budget.FiscalYear != fiscalYear)
             throw new InvalidOperationException($"Budget {budget.BudgetNumber} is for {budget.FiscalYear}; the desired start date falls in fiscal year {fiscalYear}.");
 

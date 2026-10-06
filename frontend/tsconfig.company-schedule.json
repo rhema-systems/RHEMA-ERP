@@ -10,6 +10,11 @@
     "src/app/me/room-bookings/**/*.tsx",
     "src/app/me/page.tsx",
     "src/components/me/portal-top-nav.tsx",
+    "src/components/hr/manpower/ManpowerBudgetFormFields.tsx",
+    "src/components/hr/manpower/PlanBudgetFromEstablishmentDialog.tsx",
+    "src/app/hr/manpower-budgets/new/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/config/hr-setup-nav.ts",
     "src/components/hr/company-schedule/**/*.ts",
     "src/components/hr/company-schedule/**/*.tsx"
   ]

@@ -125,27 +125,5 @@ public interface IBusinessClosureRepository : IGenericRepository<BusinessClosure
 
 #endregion Business Closure Repository
 
-#region Fiscal Year Repository
-
-public interface IFiscalYearRepository : IGenericRepository<FiscalYear>
-{
-    Task<FiscalYear?> GetByYearAsync(int year);
-    Task<FiscalYear?> GetCurrentFiscalYearAsync();
-    Task<IEnumerable<FiscalYear>> GetByStatusAsync(FiscalYearStatus status);
-    Task<FiscalYear?> GetFiscalYearForDateAsync(DateTime date);
-}
-
-#endregion Fiscal Year Repository
-
-#region Fiscal Period Repository
-
-public interface IFiscalPeriodRepository : IGenericRepository<FiscalPeriod>
-{
-    Task<IEnumerable<FiscalPeriod>> GetByFiscalYearIdAsync(Guid fiscalYearId);
-    Task<FiscalPeriod?> GetByPeriodNumberAsync(Guid fiscalYearId, int periodNumber);
-    Task<FiscalPeriod?> GetCurrentPeriodAsync();
-    Task<FiscalPeriod?> GetPeriodForDateAsync(DateTime date);
-    Task<IEnumerable<FiscalPeriod>> GetOpenPeriodsAsync();
-}
-
-#endregion Fiscal Period Repository
+// ⚠ Company-schedule final closure lane 4b (D-6): HR's fiscal-year and fiscal-period repositories are retired with HR's own
+// calendar — they read every tenant's rows (F-3). HR reads Finance's calendar (IHrFiscalCalendar).

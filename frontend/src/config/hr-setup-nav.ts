@@ -505,10 +505,11 @@ export const hrSetupGroups: HrSetupGroup[] = [
         description: 'Dates the organisation marks in its own calendar.',
       },
       {
-        title: 'Fiscal Years',
-        href: '/administration/hr/company-schedule/fiscal-years',
+        // Company-schedule lane 4b (D-6): Finance's calendar, read-only — HR's own fiscal years are retired.
+        title: 'Fiscal Calendar',
+        href: '/administration/hr/company-schedule/fiscal-calendar',
         icon: CalendarRange,
-        description: 'The financial years budgets, plans and appraisal cycles are cut against.',
+        description: 'Finance\'s fiscal years and periods, which requisitions and manpower budgets are cut against.',
       },
     ],
   },

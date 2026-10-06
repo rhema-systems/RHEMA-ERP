@@ -1825,6 +1825,93 @@ public class UpdateBusinessClosureDto : UpdateDtoBase
 
 #endregion
 
+#region Fiscal Calendar DTOs (lane 4b, D-6)
+
+/// <summary>
+/// Finance's fiscal calendar as HR reads it (company-schedule final closure lane 4b, D-6): Finance owns the years and
+/// periods, HR only reads them, in-process. HR's own fiscal years and periods are retired.
+/// </summary>
+public class HrFiscalCalendarDto
+{
+    public List<HrFiscalCalendarYearDto> Years { get; set; } = new();
+
+    /// <summary>
+    /// The year after Finance's last, as Finance itself requires it to be opened — numbered one higher, from the day after
+    /// (source "Projected"); null when Finance has no year. What the policy screen shows instead of its own month.
+    /// </summary>
+    public HrFiscalYearAnswerDto? NextYear { get; set; }
+
+    /// <summary>
+    /// The policy's "Fiscal year starts" month — used only while Finance has no fiscal year at all.
+    /// </summary>
+    public int FallbackStartMonth { get; set; }
+}
+
+/// <summary>A Finance fiscal year: its own status, and each accounting book's year-end (the user's ruling).</summary>
+public class HrFiscalCalendarYearDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public int Year { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+
+    /// <summary>The year's own status in Finance: Future, Open, Closed, Locked or Archived.</summary>
+    public string Status { get; set; } = string.Empty;
+    public bool IsLocked { get; set; }
+
+    /// <summary>
+    /// Each accounting book with a year-end close under way or done — Finance closes a year per book and never marks the
+    /// year itself closed. A reopened close is not listed.
+    /// </summary>
+    public List<HrFiscalBookCloseDto> Books { get; set; } = new();
+    public List<HrFiscalCalendarPeriodDto> Periods { get; set; } = new();
+}
+
+public class HrFiscalBookCloseDto
+{
+    public string BookCode { get; set; } = string.Empty;
+    public string? BookName { get; set; }
+
+    /// <summary>"Closed", or "Closing" while the close is under way.</summary>
+    public string Status { get; set; } = string.Empty;
+    public DateTime ClosedAtUtc { get; set; }
+}
+
+public class HrFiscalCalendarPeriodDto
+{
+    public int Number { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+
+    /// <summary>Finance's period status: Future, Open, Closed or Locked.</summary>
+    public string Status { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// The fiscal year a date falls in, or the dates of a fiscal year (lane 4b): Finance's year when it has one, else Finance's
+/// sequence continued, else (no Finance year at all) the policy's start month — and which of the three answered.
+/// </summary>
+public class HrFiscalYearAnswerDto
+{
+    public int FiscalYear { get; set; }
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+
+    /// <summary>
+    /// "Finance" — a year Finance has; "Projected" — a year Finance has not opened, continued from its sequence; "Fallback" —
+    /// Finance has no year at all, so the policy's start month answered.
+    /// </summary>
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>Finance's name for the year; null for a projected or fallback year.</summary>
+    public string? Name { get; set; }
+}
+
+#endregion
+
 #region Fiscal Year DTOs
 
 /// <summary>

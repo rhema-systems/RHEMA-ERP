@@ -15,7 +15,6 @@ import type {
   CancelEvent,
   CancelRoomBooking,
   CheckOutEvent,
-  CloseFiscalPeriod,
   ClosureAnnouncementPreview,
   ClosureType,
   CompanyEvent,
@@ -41,8 +40,6 @@ import type {
   CreateCompanyMilestone,
   CreateEventParticipant,
   CreateEventTask,
-  CreateFiscalPeriod,
-  CreateFiscalYear,
   CreateMeetingRoom,
   CreateRoomBooking,
   CreateRoomBookingSeries,
@@ -53,10 +50,8 @@ import type {
   EventParticipant,
   EventStatus,
   EventTask,
-  FiscalPeriod,
-  FiscalYear,
-  FiscalYearDetail,
-  FiscalYearStatus,
+  HrFiscalCalendar,
+  HrFiscalYearAnswer,
   LeaveRechargeResult,
   MarkEventAttendance,
   MeetingRoom,
@@ -75,8 +70,6 @@ import type {
   UpdateCompanyMilestone,
   UpdateEventParticipant,
   UpdateEventTask,
-  UpdateFiscalPeriod,
-  UpdateFiscalYear,
   UpdateMeetingRoom,
   UpdateRoomBooking,
 } from '@/types/hr/company-schedule';
@@ -715,81 +708,26 @@ class BusinessClosureService {
   }
 }
 
-class FiscalYearService {
-  private readonly baseUrl = '/CompanySchedule';
+/**
+ * Finance's fiscal calendar as HR reads it (company schedule lane 4b, D-6) — read-only, on `HR.Company.Read`. HR's own
+ * fiscal years and periods are retired: years and periods are set up and closed in Finance.
+ */
+class FiscalCalendarService {
+  private readonly baseUrl = '/CompanySchedule/fiscal-calendar';
 
-  getAll(): Promise<FiscalYear[]> {
-    return apiService.get<FiscalYear[]>(`${this.baseUrl}/fiscal-years`);
+  /** Finance's years with their periods, each year's status and each book's year-end close, and the fallback month. */
+  get(): Promise<HrFiscalCalendar> {
+    return apiService.get<HrFiscalCalendar>(this.baseUrl);
   }
 
-  getPaged(pageNumber = 1, pageSize = 20): Promise<PagedResult<FiscalYear>> {
-    return apiService.get<PagedResult<FiscalYear>>(`${this.baseUrl}/fiscal-years/paged`, {
-      pageNumber,
-      pageSize,
-    });
+  /** The fiscal year a date (yyyy-MM-dd) falls in — Finance's, else the policy's start month. */
+  yearFor(date: string): Promise<HrFiscalYearAnswer> {
+    return apiService.get<HrFiscalYearAnswer>(`${this.baseUrl}/year`, { date });
   }
 
-  getById(id: string): Promise<FiscalYear> {
-    return apiService.get<FiscalYear>(`${this.baseUrl}/fiscal-years/${id}`);
-  }
-
-  /** Fiscal year plus its periods. */
-  getDetail(id: string): Promise<FiscalYearDetail> {
-    return apiService.get<FiscalYearDetail>(`${this.baseUrl}/fiscal-years/${id}/details`);
-  }
-
-  getByYear(year: number): Promise<FiscalYear> {
-    return apiService.get<FiscalYear>(`${this.baseUrl}/fiscal-years/by-year/${year}`);
-  }
-
-  getCurrent(): Promise<FiscalYear> {
-    return apiService.get<FiscalYear>(`${this.baseUrl}/fiscal-years/current`);
-  }
-
-  getByStatus(status: FiscalYearStatus): Promise<FiscalYear[]> {
-    return apiService.get<FiscalYear[]>(`${this.baseUrl}/fiscal-years/status/${status}`);
-  }
-
-  create(data: CreateFiscalYear): Promise<FiscalYear> {
-    return apiService.post<FiscalYear>(`${this.baseUrl}/fiscal-years`, data);
-  }
-
-  update(id: string, data: UpdateFiscalYear): Promise<FiscalYear> {
-    return apiService.put<FiscalYear>(`${this.baseUrl}/fiscal-years/${id}`, { ...data, id });
-  }
-
-  setCurrent(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/fiscal-years/${id}/set-current`);
-  }
-
-  remove(id: string): Promise<void> {
-    return apiService.delete<void>(`${this.baseUrl}/fiscal-years/${id}`);
-  }
-
-  // ── periods ───────────────────────────────────────────────────────────────
-
-  getPeriods(fiscalYearId: string): Promise<FiscalPeriod[]> {
-    return apiService.get<FiscalPeriod[]>(`${this.baseUrl}/fiscal-years/${fiscalYearId}/periods`);
-  }
-
-  addPeriod(fiscalYearId: string, data: Omit<CreateFiscalPeriod, 'fiscalYearId'>): Promise<FiscalPeriod> {
-    return apiService.post<FiscalPeriod>(`${this.baseUrl}/fiscal-years/${fiscalYearId}/periods`, {
-      ...data,
-      fiscalYearId,
-    });
-  }
-
-  updatePeriod(periodId: string, data: UpdateFiscalPeriod): Promise<FiscalPeriod> {
-    return apiService.put<FiscalPeriod>(`${this.baseUrl}/periods/${periodId}`, { ...data, id: periodId });
-  }
-
-  closePeriod(periodId: string): Promise<void> {
-    const body: CloseFiscalPeriod = { periodId };
-    return apiService.post<void>(`${this.baseUrl}/periods/${periodId}/close`, body);
-  }
-
-  removePeriod(periodId: string): Promise<void> {
-    return apiService.delete<void>(`${this.baseUrl}/periods/${periodId}`);
+  /** The dates of a fiscal year — Finance's year of that number, else the policy's start month. */
+  periodFor(year: number): Promise<HrFiscalYearAnswer> {
+    return apiService.get<HrFiscalYearAnswer>(`${this.baseUrl}/period`, { year });
   }
 }
 
@@ -829,5 +767,5 @@ export const roomBookingService = new RoomBookingService();
 export const myRoomBookingService = new MyRoomBookingService();
 export const companyMilestoneService = new CompanyMilestoneService();
 export const businessClosureService = new BusinessClosureService();
-export const fiscalYearService = new FiscalYearService();
+export const fiscalCalendarService = new FiscalCalendarService();
 export const personalScheduleService = new PersonalScheduleService();

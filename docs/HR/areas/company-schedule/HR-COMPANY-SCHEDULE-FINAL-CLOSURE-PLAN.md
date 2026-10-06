@@ -46,7 +46,9 @@ has not started (the user: "don't start the actual development yet").
    told once, and 3d-2, an extended series bringing its rooms and the event page's Rooms card (D-12), built and proved
    (no migration; UAT has the real Room Booking Approval). ✅ Lane 3 is done (2026-10-06); its screens await lane 5's
    walk. **Lane 4** is source-checked and its five questions settled (lane 4 State), in three slices; 4a, milestone files
-   and a yearly milestone's dates, built and proved. Next 4b: HR reads Finance's fiscal calendar (D-6).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   and a yearly milestone's dates, and 4b, HR reads Finance's fiscal calendar (D-6; a year Finance has not opened
+   continues its sequence), built and proved. Next 4c: the company profile (the logo asset, the Logo URL retired,
+   image-only uploads, the seal buttons gated).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -323,7 +325,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
-| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ◐ source-checked, three slices; 4a built and proved (1027/1027 ×2); 4b next | milestones + fiscal block |
+| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ◐ source-checked, three slices; 4a built and proved (1027/1027 ×2); 4b built and proved (1066/1066 ×2); 4c next | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
@@ -2861,7 +2863,7 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       gains `nextOccurrence` and `yearsSince`.
 - ~~C-41, the milestone link~~ — **closed by D-17: not built.** The certificate is a milestone
       document (above); nothing to build here.
-- [ ] **Fiscal (D-6).** An HR backend read of Finance's `FiscalYears` and periods, in-process —
+- [x] *✅ 4b; the year's status beside each book whose latest close stands (the user's ruling).* **Fiscal (D-6).** An HR backend read of Finance's `FiscalYears` and periods, in-process —
       *review: the first draft had the browser call Finance's endpoint, which documents a Finance read
       permission it does not yet enforce (F-56)*. The two HR screens are replaced by one read-only
       **Fiscal calendar** card on it (years, status, periods; "Set up and closed in Finance", a link to
@@ -2869,11 +2871,11 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       from the controller and registration; tables and DTOs untouched this slice. *At 1163bbc47 Finance
       closes a year per accounting book (§ 3c): what the card calls a year's status — the year's own
       `Status` / `IsClosed`, or its book-close cycles — is settled at this lane's source check.*
-- [ ] `IHrFiscalCalendar` answering the fiscal year for a date from Finance's years, falling back to
+- [x] *✅ 4b; also the dates for a year by its number (the manpower forms' period).* `IHrFiscalCalendar` answering the fiscal year for a date from Finance's years, falling back to
       `FiscalYearStartMonth` only when Finance has none; `StaffRequisitionService` uses it, **and so
       does the manpower budget form's fiscal period (`fiscalPeriodFor`, F-56)**; the settings screen
       calls the month the fallback.
-- [ ] `110-company-schedule.mjs` stops seeding an HR fiscal year; `run-slice3.mjs` drops its fiscal
+- [x] *✅ 4b; and `run-slice14-company.mjs` reads the calendar instead.* `110-company-schedule.mjs` stops seeding an HR fiscal year; `run-slice3.mjs` drops its fiscal
       assertions.
 - [ ] (D-9, C-49, C-50) Company profile: the two seal buttons hidden without `HR.Company.Admin`;
       `CompanySealAssetKind.Logo` as a third versioned asset through the same replace/retire doors.
@@ -2955,6 +2957,75 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
 - **After the runs:** no CSF milestone, file or booking is live; no company-schedule notice to a real login is live; every
   harness login is off; the R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are
   stopped.
+
+*4b — what was built (2026-10-06): the fiscal calendar is Finance's (D-6, C-42, F-56).*
+- **No migration**, no template, no topic. HR's `FiscalYear`/`FiscalPeriod` tables, entities, DTOs and mapping stay (a
+  later migration drops them); UAT's one HR year ("FY 2026", scenario 110) is left in its table, read by nothing.
+- **`IHrFiscalCalendar`** (`Services/HR/CompanySchedule/HrFiscalCalendar.cs`), in-process on Finance's
+  `IFiscalPeriodService` (tenant from the token): the calendar — Finance's years in date order with their periods, the
+  year's own status and lock, and each accounting book whose **latest** close cycle is not *Reopened* (book code and name,
+  *Closing* or *Closed*, when); the year for a date — Finance's year covering it (compared as days: Finance's years end at
+  23:59:59), else Finance's sequence continued, else `HrFiscalYear.For` from the policy month; the dates for a year by its number — Finance's year of that
+  number, else Finance's sequence continued (below), else the policy month's year. Answers carry `source` (*Finance* /
+  *Projected* / *Fallback*).
+- **Routes:** `GET fiscal-calendar`, `GET fiscal-calendar/year?date=`, `GET fiscal-calendar/period?year=` (Read; 400 with
+  the reason for no date or a year outside 1900–2200). **Retired:** the 16 `fiscal-years` / `periods` routes,
+  `FiscalYearService`, `IFiscalYearRepository`/`IFiscalPeriodRepository` and their registrations.
+- **Requisitions:** `StaffRequisitionService`'s budget check and budget link ask `YearForDateAsync`, not the policy month.
+- **Screens:** one read-only **Fiscal calendar** page (`…/company-schedule/fiscal-calendar`; a card per year — status,
+  Locked, each book "year-end closed"/"closing", the period grid; "Set up and closed in Finance" links to
+  `/finance/fiscal-years`; the fallback month named) replaces the two Fiscal Years pages (deleted); the hub card and the
+  setup navigation renamed. The manpower budget form, the new-budget page and *Plan from the establishment* take a
+  year's period from Finance's year of that number first (`fiscalPeriodFor` with Finance's years; the hint says so). The
+  policy screen's field reads "Fiscal year starts (when Finance has no year)".
+- **Suites (dev-harness):** `run-final-review.mjs` block 4b; `run-slice3.mjs` loses its fiscal sections (21 assertions,
+  44 → 23); `hr-w3-permissions/run-slice14-company.mjs` reads `fiscal-calendar` and drops the fiscal-year delete (2
+  fewer); scenario 110 no longer seeds an HR year.
+- **⚠ The block writes to Finance (the user's ruling, 2026-10-06):** one temporary `YearEndBookCloseCycle` on a Finance
+  year for the default book, to prove the per-book display both ways. Finance's trigger
+  `TR_YearEndBookCloseCycles_ImmutableEvidence` refuses every delete of close evidence, so the suite removes its rows in
+  ONE transaction that switches the trigger off, deletes them by id, and switches it on (all rolled back on failure), and
+  asserts the trigger is on afterwards. It also moves the policy month to July by SQL and back in a `finally`, to prove
+  that nothing it answers moves while Finance has years.
+- **A year Finance has not opened (the user's rulings, 2026-10-06, after the first build).** As first built, a date no
+  Finance year covered fell to the policy month — independent of Finance: with a July month and Finance's calendar-year
+  FY2026, 15 March 2027 was labelled 2026, the label Finance's Jan–Dec 2026 also carries; and a Finance that labels a year
+  by the calendar year it ends in clashed even with matching months. **Ruled:** continue Finance's sequence by Finance's
+  own rule for its next year (`FiscalPeriodService.CreateFiscalYearCoreAsync` refuses anything else) — numbered one
+  higher, from the day after the last ends, twelve months each (`AddYears` from the origin, so the years tile); before
+  the first year, the same backwards. Answers carry `source` *Projected*; the calendar names `nextYear`. **The policy
+  month answers only while Finance has no fiscal year at all**, and the policy screen shows it read-only while Finance
+  has one ("Finance's calendar decides: its years start on 1 January (next, FY2027)"). The manpower forms' `fiscalPeriodFor`
+  mirrors the server (its `addYears` copies .NET's 29 February). `fiscal-calendar/year` refuses a date outside 1900–2200.
+
+*Proof (UAT, API in Staging, after the second build):*
+- `run-final-review.mjs` blocks 1a–4b: **1066/1066 on two clean passes**, first time. 4b has **39 assertions**: staff
+  refused the calendar; Finance's own route refuses the HR desk (403 — why the read is in-process); Finance's two years and
+  their 24 periods equal to SQL; the fallback month and the book-close count against SQL; the year for today, a year's
+  last day (Finance's 23:59:59) and first day, a year by its number — Finance's; no date, a date past 2200 and a year of
+  1800 refused with the reason; FY2027 named as Finance must open it; the day after FY2026 and a date in 2028 continued;
+  2029 by number; the day before FY2025 and 2023 by number, backwards; the month moved to July — said by the calendar,
+  and none of those six answers moved; a requisition's budget check for Finance's year and for a year continued; the month
+  back; a temporary BASE-book close on FY2025 — on its card by the book's name, on no other year, read by Finance's own
+  route as its own; reopened, gone; a second close under way, shown as the latest; the rows removed with Finance's trigger
+  on again, the card as it was; HR's old list, current year and create all 404.
+- **After each pass, by SQL:** Finance's trigger enabled, no close-cycle row, the policy month 1.
+- **Regression:** the round-4 net **191/191** (29 + 33 + 66 + 23 + 40; slice 3 lost its 21 fiscal assertions);
+  recruitment **59/59** (its requisitions submit through the budget check 4b changed); the templates probe **42/42**;
+  `run-lane-n` **109/115**, the six section-J failures of #40. **Not run:** `hr-w3-permissions/run-slice14-company.mjs`
+  (UAT has no `w3.*` logins; 4b proves the same two doors) and `hr-jobarch/run-slice7.mjs` / `run-r5.mjs` (they publish a
+  ManpowerBudget definition of their own, and UAT has the real "Manpower Budget Approval" live — not run on UAT).
+- **The API log:** no request answered 500; the ERR kinds are the known ones (payroll's foreign key #23 on minted
+  fixtures, the participant and attendance unique-index races, notifications with no mail server, the sinks' bounces, one
+  identity reconciliation). One EF "command error" on the notification service's own 90-day clean-up, with no exception
+  reaching the service (it logged "Deleted 0") — not 4b's code.
+- **The blocking watcher:** 78 waits in pass one, 15 in pass two (4a: one), all on `Notifications` (414k rows, 292k live):
+  the suite's own unindexed count oracles and the notification service's poll and clean-up running parallel scans of
+  3–6 s, notification inserts queued 2.4–3.6 s behind them. Concentrated in the first pass after the API's cold start;
+  no request timed out. None touches the fiscal calendar. Lane 6's suite work: index-friendly oracles, or a
+  `CreatedAt >= runSince` bound on each.
+- **After the runs:** every harness login off; no company-schedule notice to a real login live; no RoomBooking approval
+  running; the R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 ### Lane 5 — Screens (C-1, C-16, R4-3.1, R4-6.1, R4-6.2, R4-6.3, R4-6.6, R4-10A.1, R4-10A.3, R4-10B.1…R4-10B.4, F-19…F-23, F-26, F-27, F-57)
 
@@ -3620,3 +3691,13 @@ built API, so no web host and no seeders).
 
   Next: 4b — HR reads Finance's fiscal calendar (D-6): the card, `IHrFiscalCalendar` for requisitions and the manpower
   form, HR's fiscal screens and routes retired.
+- **2026-10-06** — **4a committed** (`080759034`). **Slice 4b built and proved:** HR reads Finance's fiscal calendar
+  in-process; HR's fiscal years, their 16 routes and two screens retired; one read-only Fiscal calendar page. Two rulings
+  by the user: the suite may add a temporary Finance book close (and, since Finance's trigger refuses its delete, switch
+  the trigger off for that one delete in one transaction); and, after the first build, a year Finance has not opened
+  continues Finance's sequence, the policy month answering only with no Finance year at all (shown read-only meanwhile).
+  - **Results:** `run-final-review.mjs` scored 1027 + 39 = 1066/1066 on two clean passes, first time. The round-4 net was
+    191/191 (slice 3's 21 fiscal assertions retired), recruitment 59/59, the templates probe 42/42 and `run-lane-n` 109/115
+    (section J, #40). No request answered 500.
+
+  Next: 4c — the company profile (D-9, C-49, C-50, F-55).

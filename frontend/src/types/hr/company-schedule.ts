@@ -1170,7 +1170,45 @@ export interface UpdateBusinessClosure extends CreateBusinessClosure {
   id: string;
 }
 
-// ── Fiscal years and periods ──────────────────────────────────────────────────
+// ── The fiscal calendar, Finance's (lane 4b, D-6) ─────────────────────────────
+
+/** A Finance fiscal year as HR reads it: its own status, and each accounting book's year-end close. */
+export interface HrFiscalCalendarYear {
+  id: string;
+  name: string;
+  code: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  /** Finance's year status: Future, Open, Closed, Locked or Archived. */
+  status: string;
+  isLocked: boolean;
+  /** Each book with a year-end close done ("Closed") or under way ("Closing"); a reopened close is not listed. */
+  books: { bookCode: string; bookName?: string | null; status: string; closedAtUtc: string }[];
+  periods: { number: number; name: string; startDate: string; endDate: string; status: string }[];
+}
+
+export interface HrFiscalCalendar {
+  years: HrFiscalCalendarYear[];
+  /** The year after Finance's last, as Finance must open it (numbered one higher, from the day after); null with no year. */
+  nextYear?: HrFiscalYearAnswer | null;
+  /** The policy's "Fiscal year starts" month — used only while Finance has no fiscal year at all. */
+  fallbackStartMonth: number;
+}
+
+/**
+ * The fiscal year a date falls in, or a fiscal year's dates — and what answered: a year Finance has, a year Finance has not
+ * opened continued from its sequence ("Projected"), or — with no Finance year at all — the policy's start month.
+ */
+export interface HrFiscalYearAnswer {
+  fiscalYear: number;
+  startDate: string;
+  endDate: string;
+  source: 'Finance' | 'Projected' | 'Fallback';
+  name?: string | null;
+}
+
+// ── Fiscal years and periods (HR's own — retired at lane 4b; the types stay with the tables) ──────────────────
 
 export interface FiscalYear extends AuditFields {
   tenantId: string;

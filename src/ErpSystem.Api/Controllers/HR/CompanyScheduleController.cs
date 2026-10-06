@@ -13,7 +13,8 @@ namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
 /// The company schedule — events with participants, attendance, attachments and tasks; meeting
-/// rooms and their bookings; company milestones; business closures; fiscal years and periods.
+/// rooms and their bookings; company milestones; business closures; and Finance's fiscal calendar, read-only (lane 4b:
+/// HR's own fiscal years and periods are retired, D-6).
 /// </summary>
 /// <remarks>
 /// <para><b>W3 slice 14.</b> All 90 actions carried a bare <c>[Authorize]</c> and no screen has
@@ -46,7 +47,6 @@ public class CompanyScheduleController : HrControllerBase
     private readonly IRoomBookingService _bookingService;
     private readonly ICompanyMilestoneService _milestoneService;
     private readonly IBusinessClosureService _closureService;
-    private readonly IFiscalYearService _fiscalYearService;
     // Lane 2h (C-18): event attachments through the upload gate, and their download.
     private readonly ErpSystem.Api.Services.HR.IHrControlledDocumentService _hrDocuments;
     private readonly ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService _centralDocuments;
@@ -60,7 +60,6 @@ public class CompanyScheduleController : HrControllerBase
         IRoomBookingService bookingService,
         ICompanyMilestoneService milestoneService,
         IBusinessClosureService closureService,
-        IFiscalYearService fiscalYearService,
         ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService personalSchedule,
         ICurrentUserService currentUser,
         ErpSystem.Api.Services.HR.IHrControlledDocumentService hrDocuments,
@@ -75,7 +74,6 @@ public class CompanyScheduleController : HrControllerBase
         _bookingService = bookingService;
         _milestoneService = milestoneService;
         _closureService = closureService;
-        _fiscalYearService = fiscalYearService;
         _personalSchedule = personalSchedule;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
@@ -1120,123 +1118,47 @@ public class CompanyScheduleController : HrControllerBase
 
     #endregion
 
-    #region Fiscal Years
+    #region Fiscal Calendar (lane 4b, D-6)
 
-    [HttpGet("fiscal-years")]
+    // ⚠ Company-schedule final closure lane 4b (D-6): sixteen routes over HR's own fiscal years and periods stood here
+    // (fiscal-years, periods) — a calendar read by nothing but its own two screens. HR reads Finance's, in-process: Finance's
+    // routes need Finance.Read, which HR's people do not hold.
+
+    /// <summary>
+    /// Finance's fiscal calendar, read-only: its years with their periods, each year's own status and each accounting book's
+    /// year-end close (the user's ruling), and the policy's fallback month.
+    /// </summary>
+    [HttpGet("fiscal-calendar")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalYearDto>>> GetFiscalYears()
-        => Ok(await _fiscalYearService.GetAllAsync());
+    public async Task<ActionResult<HrFiscalCalendarDto>> GetFiscalCalendar(
+        [FromServices] IHrFiscalCalendar calendar, CancellationToken ct)
+        => Ok(await calendar.GetCalendarAsync(ct));
 
-    [HttpGet("fiscal-years/paged")]
+    /// <summary>
+    /// The fiscal year a date falls in — Finance's year covering it, else Finance's sequence continued, else (no Finance year
+    /// at all) the policy's start month.
+    /// </summary>
+    [HttpGet("fiscal-calendar/year")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<PagedResult<FiscalYearDto>>> GetFiscalYearsPaged(
-        [FromQuery] int pageNumber = 1,
-        [FromQuery] int pageSize = 20)
-        => Ok(await _fiscalYearService.GetPagedAsync(pageNumber, pageSize));
-
-    [HttpGet("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetFiscalYear(Guid id)
-        => Ok(await _fiscalYearService.GetByIdAsync(id));
-
-    [HttpGet("fiscal-years/{id:guid}/details")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDetailDto>> GetFiscalYearDetail(Guid id)
-        => Ok(await _fiscalYearService.GetDetailByIdAsync(id));
-
-    [HttpGet("fiscal-years/by-year/{year:int}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetFiscalYearByYear(int year)
-        => Ok(await _fiscalYearService.GetByYearAsync(year));
-
-    [HttpGet("fiscal-years/current")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetCurrentFiscalYear()
-        => Ok(await _fiscalYearService.GetCurrentFiscalYearAsync());
-
-    [HttpGet("fiscal-years/status/{status}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalYearDto>>> GetFiscalYearsByStatus(FiscalYearStatus status)
-        => Ok(await _fiscalYearService.GetByStatusAsync(status));
-
-    [HttpPost("fiscal-years")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalYearDto>> CreateFiscalYear([FromBody] CreateFiscalYearDto dto)
+    public async Task<ActionResult<HrFiscalYearAnswerDto>> GetFiscalYearForDate(
+        [FromServices] IHrFiscalCalendar calendar, [FromQuery] DateOnly date, CancellationToken ct)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var created = await _fiscalYearService.CreateAsync(dto);
-        return CreatedAtAction(nameof(GetFiscalYear), new { id = created.Id }, created);
+        if (date.Year is < 1900 or > 2200) return BadRequest(new { message = "Say which date (between 1900 and 2200)." });
+        return Ok(await calendar.YearForDateAsync(date, ct));
     }
 
-    [HttpPut("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalYearDto>> UpdateFiscalYear(Guid id, [FromBody] UpdateFiscalYearDto dto)
-    {
-        if (id != dto.Id) return BadRequest("ID mismatch");
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var updated = await _fiscalYearService.UpdateAsync(dto);
-        return Ok(updated);
-    }
-
-    [HttpPost("fiscal-years/{id:guid}/set-current")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SetCurrentFiscalYear(Guid id)
-    {
-        await _fiscalYearService.SetAsCurrentAsync(id);
-        return Ok(new { message = "Fiscal year set as current" });
-    }
-
-    [HttpDelete("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteFiscalYear(Guid id)
-    {
-        await _fiscalYearService.DeleteAsync(id);
-        return NoContent();
-    }
-
-    #region Fiscal Periods
-
-    [HttpPost("fiscal-years/{fiscalYearId:guid}/periods")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalPeriodDto>> AddFiscalPeriod(Guid fiscalYearId, [FromBody] CreateFiscalPeriodDto dto)
-    {
-        dto.FiscalYearId = fiscalYearId;
-        var created = await _fiscalYearService.AddPeriodAsync(dto);
-        return CreatedAtAction(nameof(GetFiscalPeriods), new { fiscalYearId }, created);
-    }
-
-    [HttpGet("fiscal-years/{fiscalYearId:guid}/periods")]
+    /// <summary>
+    /// The dates of a fiscal year — Finance's year of that number, else Finance's sequence continued, else the policy's
+    /// start month.
+    /// </summary>
+    [HttpGet("fiscal-calendar/period")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalPeriodDto>>> GetFiscalPeriods(Guid fiscalYearId)
-        => Ok(await _fiscalYearService.GetPeriodsAsync(fiscalYearId));
-
-    [HttpPut("periods/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalPeriodDto>> UpdateFiscalPeriod(Guid id, [FromBody] UpdateFiscalPeriodDto dto)
+    public async Task<ActionResult<HrFiscalYearAnswerDto>> GetFiscalPeriodForYear(
+        [FromServices] IHrFiscalCalendar calendar, [FromQuery] int year, CancellationToken ct)
     {
-        if (id != dto.Id) return BadRequest("ID mismatch");
-        var updated = await _fiscalYearService.UpdatePeriodAsync(dto);
-        return Ok(updated);
+        if (year is < 1900 or > 2200) return BadRequest(new { message = "Say which fiscal year (e.g. 2026)." });
+        return Ok(await calendar.PeriodForYearAsync(year, ct));
     }
-
-    [HttpPost("periods/{id:guid}/close")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> CloseFiscalPeriod(Guid id, [FromBody] CloseFiscalPeriodDto dto)
-    {
-        dto.PeriodId = id;
-        await _fiscalYearService.ClosePeriodAsync(dto);
-        return Ok(new { message = "Fiscal period closed" });
-    }
-
-    [HttpDelete("periods/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteFiscalPeriod(Guid id)
-    {
-        await _fiscalYearService.DeletePeriodAsync(id);
-        return NoContent();
-    }
-
-    #endregion
 
     #endregion
 }

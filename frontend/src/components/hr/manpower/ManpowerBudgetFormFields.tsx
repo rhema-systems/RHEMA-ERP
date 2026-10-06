@@ -11,19 +11,67 @@ import { Textarea } from '@/components/ui/textarea';
 import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { policySettingsService } from '@/services/hr/policy-settings.service';
+import { fiscalCalendarService } from '@/services/hr/company-schedule.service';
 import type { ManpowerBudget, ManpowerPlanningBaseline } from '@/types/hr/job-architecture';
+import type { HrFiscalCalendarYear } from '@/types/hr/company-schedule';
 import { PlanningBaselinePanel } from './PlanningBaselinePanel';
 
 /**
- * The fiscal period for a year, from the tenant's `fiscalYearStartMonth` (round 2b, R2). A
- * fiscal year starting in July 2027 is labelled by the year it STARTS in and runs to June 2028.
+ * Finance's fiscal years, as HR reads them (company-schedule lane 4b, D-6) — on `HR.Company.Read`, which the policy-settings
+ * read beside it needs too. Undefined until loaded, or when the read fails: the start-month fallback then answers.
  */
-export function fiscalPeriodFor(fiscalYear: number, startMonth: number): { start: string; end: string } {
+export function useFinanceFiscalYears(): HrFiscalCalendarYear[] | undefined {
+  const { data } = useQuery({
+    queryKey: ['hr', 'fiscal-calendar'],
+    queryFn: () => fiscalCalendarService.get(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  return data?.years;
+}
+
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/** A `yyyy-mm-dd` day moved by whole years as .NET's `AddYears` does: 29 February becomes the 28th in a common year. */
+function addYears(day: string, years: number): string {
+  const [y, m, d] = day.slice(0, 10).split('-').map(Number);
+  const lastDay = new Date(Date.UTC(y + years, m, 0)).getUTCDate(); // day 0 of the next month
+  return isoDay(new Date(Date.UTC(y + years, m - 1, Math.min(d, lastDay))));
+}
+
+function addDays(day: string, days: number): string {
+  const d = new Date(`${day.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return isoDay(d);
+}
+
+/**
+ * The fiscal period for a year — the same answer as the server's `HrFiscalCalendar.PeriodForYearAsync`. Company-schedule
+ * lane 4b (D-6): Finance's year of that number when Finance has one — Finance owns the calendar. A year Finance has not
+ * opened continues its sequence (the user's ruling): Finance's next year is numbered one higher and starts the day after
+ * the last ends, twelve months each; before its first year, the same backwards. Only with no Finance year at all does the
+ * tenant's `fiscalYearStartMonth` answer (round 2b, R2), by which a fiscal year starting in July 2027 is labelled by the
+ * year it STARTS in and runs to June 2028.
+ */
+export function fiscalPeriodFor(
+  fiscalYear: number,
+  startMonth: number,
+  financeYears?: HrFiscalCalendarYear[],
+): { start: string; end: string; source: 'Finance' | 'Projected' | 'Fallback' } {
+  const finance = financeYears?.find((y) => y.year === fiscalYear);
+  if (finance) return { start: finance.startDate.slice(0, 10), end: finance.endDate.slice(0, 10), source: 'Finance' };
+  if (financeYears?.length && Number.isInteger(fiscalYear) && fiscalYear >= 1900 && fiscalYear <= 2200) {
+    // Forward from the highest Finance year numbered below it; else back from the lowest.
+    const below = financeYears.filter((y) => y.year < fiscalYear).sort((a, b) => b.year - a.year)[0];
+    const lowest = [...financeYears].sort((a, b) => a.year - b.year)[0];
+    const origin = below ? addDays(below.endDate, 1) : lowest.startDate.slice(0, 10);
+    const steps = below ? fiscalYear - below.year - 1 : fiscalYear - lowest.year;
+    return { start: addYears(origin, steps), end: addDays(addYears(origin, steps + 1), -1), source: 'Projected' };
+  }
   const m = Math.min(12, Math.max(1, Math.floor(startMonth || 1)));
   const start = new Date(Date.UTC(fiscalYear, m - 1, 1));
   const end = new Date(Date.UTC(fiscalYear + 1, m - 1, 0)); // day 0 of the next-year month = last day before it
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  return { start: iso(start), end: iso(end) };
+  return { start: isoDay(start), end: isoDay(end), source: 'Fallback' };
 }
 
 /**
@@ -175,6 +223,10 @@ export function ManpowerBudgetFormFields({
     staleTime: 5 * 60 * 1000,
   });
   const fiscalStartMonth = policy?.fiscalYearStartMonth ?? 1;
+  // Lane 4b (D-6): Finance's year of the number typed, or its sequence continued; the month only with no Finance year.
+  const financeYears = useFinanceFiscalYears();
+  const yearTyped = Number.isInteger(value.fiscalYear) && value.fiscalYear >= 2000 && value.fiscalYear <= 2100;
+  const periodSource = yearTyped ? fiscalPeriodFor(value.fiscalYear, fiscalStartMonth, financeYears).source : null;
 
   // The planning baseline: what the system knows about this unit for this period (R2). Fetched
   // once unit + period are set; re-fetched when any of the three change.
@@ -246,7 +298,7 @@ export function ManpowerBudgetFormFields({
                 // Changing the year re-derives the period from the tenant's fiscal year; the
                 // dates stay editable.
                 const ok = Number.isFinite(year) && year >= 2000 && year <= 2100;
-                const period = ok ? fiscalPeriodFor(year, fiscalStartMonth) : null;
+                const period = ok ? fiscalPeriodFor(year, fiscalStartMonth, financeYears) : null;
                 onChange({
                   ...value,
                   fiscalYear: year,
@@ -258,7 +310,11 @@ export function ManpowerBudgetFormFields({
             {/* The API validates this range, so the input mirrors it rather than discovering it. */}
             <p className="text-xs text-muted-foreground">
               Between 2000 and 2100.
-              {fiscalStartMonth !== 1 && ` The fiscal year starts in month ${fiscalStartMonth}; the period follows it.`}
+              {periodSource === 'Finance' && ' The period follows Finance\'s fiscal year.'}
+              {periodSource === 'Projected' &&
+                ` Finance has not opened FY${value.fiscalYear} yet; the period continues Finance's calendar.`}
+              {periodSource === 'Fallback' && fiscalStartMonth !== 1 &&
+                ` The fiscal year starts in month ${fiscalStartMonth}; the period follows it.`}
             </p>
           </div>
           <div />

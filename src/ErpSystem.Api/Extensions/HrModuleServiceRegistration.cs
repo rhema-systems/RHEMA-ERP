@@ -114,8 +114,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IRoomBookingRepository, RoomBookingRepository>();
         services.AddScoped<ICompanyMilestoneRepository, CompanyMilestoneRepository>();
         services.AddScoped<IBusinessClosureRepository, BusinessClosureRepository>();
-        services.AddScoped<IFiscalYearRepository, FiscalYearRepository>();
-        services.AddScoped<IFiscalPeriodRepository, FiscalPeriodRepository>();
+        // Company-schedule final closure lane 4b (D-6): HR's own fiscal years and periods are retired — HR reads Finance's
+        // calendar (IHrFiscalCalendar, below). Their tables stay until a later migration drops them.
         services.AddScoped<IJobDescriptionRepository, JobDescriptionRepository>();
         services.AddScoped<IJobResponsibilityRepository, JobResponsibilityRepository>();
         services.AddScoped<IJobQualificationRepository, JobQualificationRepository>();
@@ -594,7 +594,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IRoomBookingService, RoomBookingService>();
         services.AddScoped<ICompanyMilestoneService, CompanyMilestoneService>();
         services.AddScoped<IBusinessClosureService, BusinessClosureService>();
-        services.AddScoped<IFiscalYearService, FiscalYearService>();
+        // Lane 4b (D-6): Finance's fiscal calendar, read in-process — the card, requisitions and the manpower budget form.
+        services.AddScoped<IHrFiscalCalendar, ErpSystem.Core.Services.HR.CompanySchedule.HrFiscalCalendar>();
         services.AddScoped<IJobDescriptionService, JobDescriptionService>();
         services.AddScoped<IUnionService, UnionService>();
         services.AddScoped<IJobArchitectureService, JobArchitectureService>();

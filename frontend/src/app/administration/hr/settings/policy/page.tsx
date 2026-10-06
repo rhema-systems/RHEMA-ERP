@@ -20,6 +20,7 @@ import {
   FieldRow,
 } from '@/components/hr/employee/tabs/fields';
 import { policySettingsService } from '@/services/hr/policy-settings.service';
+import { fiscalCalendarService } from '@/services/hr/company-schedule.service';
 import {
   ENFORCEMENT_MODES,
   SALARY_STRUCTURE_SOURCES,
@@ -169,6 +170,16 @@ export default function PolicySettingsPage() {
     queryKey: ['hr', 'policy-settings'],
     queryFn: () => policySettingsService.get(),
   });
+
+  // Company-schedule lane 4b (D-6, the user's ruling): while Finance has a fiscal calendar it decides every fiscal year,
+  // so the start month below is shown read-only with Finance's own start. A failed read leaves the field editable.
+  const { data: fiscalCalendar } = useQuery({
+    queryKey: ['hr', 'fiscal-calendar'],
+    queryFn: () => fiscalCalendarService.get(),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const financeNextYear = fiscalCalendar?.years.length ? fiscalCalendar.nextYear : null;
 
   const form = useForm<SettingsForm>({ resolver: zodResolver(schema) as any });
 
@@ -993,14 +1004,27 @@ export default function PolicySettingsPage() {
           <CardContent className="space-y-4">
             <FieldRow>
               <TextField form={form} name="defaultCurrencyCode" label="Default currency (ISO 4217)" required />
+              {/* Company-schedule lane 4b (D-6): Finance's fiscal calendar decides; this month only while Finance has none. */}
               <SelectField
                 form={form}
                 name="fiscalYearStartMonth"
-                label="Fiscal year starts"
+                label="Fiscal year starts (when Finance has no calendar)"
                 options={FISCAL_YEAR_MONTHS}
                 required
+                disabled={!!financeNextYear}
+                description={
+                  financeNextYear
+                    ? `Finance's calendar decides: its years start on ${new Date(`${financeNextYear.startDate.slice(0, 10)}T00:00:00Z`)
+                        .toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' })} (next, FY${financeNextYear.fiscalYear}). `
+                      + 'This month is not used while Finance has fiscal years.'
+                    : undefined
+                }
               />
             </FieldRow>
+            <p className="text-xs text-muted-foreground">
+              Requisitions and manpower budgets take their fiscal year from Finance&apos;s fiscal calendar, and a year Finance
+              has not opened yet continues its sequence. This month is used only while Finance has no fiscal year at all.
+            </p>
             <FieldRow>
               <NumberField form={form} name="minimumWorkingAge" label="Minimum working age" required />
               <TextField
