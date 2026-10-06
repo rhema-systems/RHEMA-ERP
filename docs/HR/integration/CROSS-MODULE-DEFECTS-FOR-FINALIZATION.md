@@ -1957,6 +1957,15 @@ rule needs a daily run, not one every 30 seconds.
   every workflow submit that raises notifications took 11–13 s — five template submits and a PIP
   submit, 6 of 6, in a regression whose other calls answered in well under a second. The monitor had
   caught one such insert waiting on the claim query's range lock for about 10 s (`LCK_M_RIn_NL`).
+- **Seen again in the company-schedule final closure (2026-10-06), with the table nearly three times the size.**
+  UAT's `Notifications` is now **1.1 GB, 418k rows (293k live)**, and is indexed on `Id` (clustered) and
+  `TenantId` only — so the dispatcher's poll and every read filtered on anything else scan the whole table.
+  At lane 7a the blocking monitor's longest wait in three regression passes was **the poll itself, 11.1 s**
+  (`SELECT TOP … maxRetryAttempts …`, a parallel scan). The HR side took its own share out: the review suite
+  (`dev-harness/hr-company-schedule/run-final-review.mjs`) withdraws its notices by `EntityId` first (lane
+  2g-1), and since lane 6a reads `Notifications` `WITH (NOLOCK)`. After that the monitor logged no blocked
+  request and no wait over 3 s in two passes, and a pass took about 5 minutes (≈11 before). The poll's own
+  index is still owed here.
 
 ### What it blocks
 

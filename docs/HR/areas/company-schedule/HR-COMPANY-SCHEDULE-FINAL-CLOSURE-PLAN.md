@@ -22,6 +22,11 @@ the module, with every discovered issue fixed, and ruled that nothing is deferre
 has not started (the user: "don't start the actual development yet").
 
 **START HERE:**
+
+> ✅ **CLOSED 2026-10-06.** Lanes 0–7 are built and proved on UAT, and the guide is rewritten whole. What stays open
+> is at the end of lane 6's *State*: the twelve browser walks (lane 5 items 1–8, lane 7 items 9–12 — the user's),
+> F-59…F-66, and other modules' items. The list below is the record of how the plan got there.
+
 0. **Re-checked against HEAD 1163bbc47 on 2026-10-04** (after the travel final closure and master merge
    #13 landed on hrdev; § 3c). The module's own backend and screens did not change. F-27 is already in
    HEAD — lane 5's item is a browser re-test, not a build. One new finding, F-57 (lane 5). The leave and
@@ -59,9 +64,9 @@ has not started (the user: "don't start the actual development yet").
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
    110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, 6c, its event
    chapters (3, 3a, 4–7, 6a), 6d, its bookings, diaries and staff booking (8–10, 10A–10C), 6e-1, its setup chapters
-   (11–17), and 6e-2, § 18–21 and the appendices, written — the guide is rewritten whole. Next: **6f**, the README, the
-   finish plan, the configuration register, cross-module #33, the demo runbook's aside and memory, which closes the
-   plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   (11–17), and 6e-2, § 18–21 and the appendices, written — the guide is rewritten whole; and 6f, the documents around
+   the module. ✅ **Lane 6 is done (2026-10-06), and with it the plan.** What stays open is listed at the end of lane
+   6's *State*: the twelve browser walks (the user's), F-59…F-66, and other modules' items.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -341,7 +346,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters), 6d (bookings, diaries, staff booking), 6e-1 (setup, 11–17) and 6e-2 (§ 18–21, appendices) written — the guide done; 6f (the docs) to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ✅ 2026-10-06: L6-1…L6-4 settled; 6a (the harness) built and proved (1152/1152 ×2; net 191/191); 6b–6e-2 the guide rewritten whole; 6f the README, finish plan, register, #33, runbook and memory — **the plan is closed** | both suites green twice |
 
 ---
 
@@ -3439,7 +3444,10 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       milestones, the diaries, the company profile; the fiscal chapters replaced by the fiscal calendar
       card; a calendar chapter); Appendix B's permission map gains the new doors; Appendix A's route
       list gains the calendar and loses the fiscal screens.
-- [ ] `docs/HR/README.md`; `docs/HR/programme/HR-FINISH-PLAN.md` (D-02 closed by D-8; F-27 recorded as
+- [x] *✅ 6f (2026-10-06): the README's two rows; the finish plan's D-02 closed and F-27 recorded as HR-wide (lane
+      3d); the register's two stale C-4 lines and its company-schedule survey row; cross-module #33 seen again; the
+      runbook's step 3 and aside (and `runbook-claims.json`); memory. A-92 and the payroll hand-off were done in 1d.*
+      `docs/HR/README.md`; `docs/HR/programme/HR-FINISH-PLAN.md` (D-02 closed by D-8; F-27 recorded as
       HR-wide); `CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` (attendance A-92); the payroll hand-off
       (closures beside holidays, D-15c);
       the configuration register (new endpoints and topics); the demo runbook's closure aside (in
@@ -3709,17 +3717,51 @@ only.* Every claim checked in the code:
   - C, the related documents, with the plan first.
 - **No new finding.**
 
+*6f — what was written (2026-10-06): the documents around the module, and memory. Docs only; this closes lane 6 and the
+plan.*
+- **`docs/HR/README.md`:** the plan's row (it said "No code yet" and "seven pending the user") now says closed, with what
+  is still open; the guide's row describes the rewrite — five menu items, 24 pages over 12 tables, seven rules, 17 live
+  writes, and never rebuilding UAT to reset it.
+- **`HR-FINISH-PLAN.md`:**
+  - **D-02** ticked: closed by D-8, the invitee's own reply door (lane 7a), with its refusals; `participants/respond`
+    stays the desk's;
+  - **F-27** recorded as HR-wide in lane 3d: the shared picker's blank write, fixed in HEAD (`19f20f2f2`), a browser
+    re-test owed.
+- **`HR-CONFIGURATION-REGISTER.md`:** the two lines that still called the room's limits ghosts (§ 0's evidence table,
+  § 4's survey row) corrected; § 4's company-schedule row is now the survey's result — no ghost left, the guide's § 1.4
+  for the forms, § 2.8 for the rest; the header no longer lists the company schedule as still to do.
+- **`CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` #33, seen again:** `Notifications` at 1.1 GB and 418k rows, indexed on
+  `Id` and `TenantId` only; the poll's 11.1 s parallel scan (7a); HR's share taken out by the suite (the `EntityId`
+  withdrawal, 2g-1; `NOLOCK` reads, 6a); the poll's own index still owed.
+- **Outside the repo:** the demo runbook (`book-2-operations-hr.html` § 7) — step 3 says *whole company* and Finance's
+  fiscal year, read-only; the aside no longer says closures feed attendance (A-92), and says what each kind of closure
+  does and that saving one re-counts leave. `runbook-claims.json` carries the same two notes (valid JSON, checked).
+- **Memory:** `hr-company-schedule-guide-findings` (the plan closed, and what stays open), the index line, and the
+  templates count (56 per tenant, 17 of them this module's).
+
+**✅ Lane 6 is done, and the plan is closed (2026-10-06).** Every lane is built and proved on UAT, and the guide is
+rewritten. **What stays open:**
+- **the browser walks** — lane 5 items 1–8 and lane 7 items 9–12, the user's;
+- **F-59…F-66** — small, found while writing the guide; none blocks a demo;
+- **other modules' items** — attendance A-92, the payroll hand-off's § 3 item 4, cross-module #15, #23, #33, #40;
+- **F-61's clean-up**, the recruitment suite's to add;
+- **UAT's data:** the anniversary dated 2026, an offer to re-date it to 1952 not ruled on.
+
 ---
 
 ## 5. Residual register
 
 Every finding from the guide's § 21, with its owner here. Nothing is dropped silently.
 
+> **✅ Closed 2026-10-06.** Every row below was built in its lane or closed by its decision (D-9: nothing deferred), each
+> proved on UAT by `run-final-review.mjs`. What stays open is listed at the end of lane 6's *State* and in the guide's
+> § 21. The *Note* column keeps what each row said when the lanes were planned.
+
 | Finding | Owner | Note |
 |---|---|---|
 | C-1 | Lane 5 | the remaining removes |
 | C-2 | Lane 5 (show) + Lane 2 (Edit through reschedule) | |
-| C-3 | **D-10, pending** | reopened by the review |
+| C-3 | ✅ **D-10, the engine** — lanes 2b (events) and 3b-1 (bookings) | reopened by the review |
 | C-4, C-6, C-17, C-27, C-34 | closed in round 4 | — |
 | C-5 | Lane 1 | leave and the statutory clocks; attendance logged |
 | C-7, C-14, C-18, C-19, C-20, C-23, C-24, C-29 | Lane 2 | C-14's series model settled by D-12 |
@@ -3728,7 +3770,7 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | C-9 | Lane 7 | |
 | C-10, C-11, C-12, C-13, C-25 | Lane 2 (D-9) | search, paging, date filter, CSV export, one dashboard read |
 | C-15 | Lane 2 (D-9) | the clash rule and the warnings |
-| C-16 | Lane 5 | reopened by the review; recommendation to confirm |
+| C-16 | ✅ Lane 5, slice 5a — sites only, on all three forms | reopened by the review; recommendation to confirm |
 | C-21, C-22 | Lane 2 (D-9) | attendance row removable on Write; participant editable and removable on Write; the reply door (D-8) covers the invitee's side |
 | C-26, C-35 | Lane 7 | the calendar's room filter is the room view |
 | C-32 | ✅ Lane 3, slice 3a (D-9) | |
@@ -3746,7 +3788,7 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | R4-10A.1, R4-10B.1…R4-10B.4, R4-10A.3 | Lane 5 | |
 | R4-10A.2 | **Lane 2** (backend) + Lane 5 (screens) | the first draft had it in lane 5 only |
 | R4-10A.4 | Lane 1 | closures and holidays both |
-| R4-10A.5 | Lane 6 | the browser walk |
+| R4-10A.5 | Lane 6 → the user's browser walk (lane 5 item 6) | the browser walk |
 | R4-12.1 | ✅ Lane 3, slice 3a | a typed code is checked against deleted rooms too |
 | R4-13.1 | Lane 1 | |
 | D-02 (finish plan) | Lane 7 | closed by D-8 |
@@ -4352,3 +4394,9 @@ built API, so no web host and no seeders).
 
   Next: 6f — the README, the finish plan, the configuration register, cross-module #33, the demo runbook's aside and
   memory, which closes the plan.
+- **2026-10-06, later** — **6e-2 committed. Slice 6f written, and the plan closed** — the HR README's two rows, the
+  finish plan (D-02 closed by D-8; F-27 recorded as HR-wide), the configuration register (the room limits no longer
+  called ghosts; the company schedule surveyed), cross-module #33 seen again (1.1 GB, 418k rows, the poll's 11.1 s
+  scan), the demo runbook's step 3 and aside (outside the repo), and memory. **Lane 6 done; every lane built and
+  proved.** Open: the twelve browser walks (the user's), F-59…F-66, A-92, the payroll hand-off's item 4, #15, #23,
+  #33, #40, F-61's clean-up, and UAT's anniversary date.

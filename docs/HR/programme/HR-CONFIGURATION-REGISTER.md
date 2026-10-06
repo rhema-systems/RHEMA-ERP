@@ -9,8 +9,8 @@ lane O — § 2.9, the technician-role flag and the person's exception).
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
 certificate switches lane K-b1 made real (§ 2.6: two were ghosts). Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
-appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
-expected to cost.
+appraisal and the rest are still to do — see § 4, which now says what each one is expected to cost. The
+company schedule's were surveyed by its final closure (2026-10-06, § 4's row; § 2.8).
 
 ### ⚠ Corrected 2026-09-25 — every leave-type setting audited (round 5)
 
@@ -74,7 +74,7 @@ believe it binds, and discover months later that it never did. This is not hypot
 | **14 of 50 appraisal settings do not enforce what they claim** — 9 advisory, 2 client-side only, 3 read by nothing at all | `HR-APPRAISAL-SETTINGS-AUDIT.md` |
 | **11 ghost leave settings** — configurable, saved, read by nothing | leave guide § 4.4 |
 | Travel's policy rule register **ships deliberately read-only**, with the argument recorded on the component: an editable control that does nothing creates false assurance | `PolicyRulesPanel` |
-| A room's `MaxBookingDurationHours` and `AdvanceBookingDays` are stored and read by nothing | company schedule C-4 |
+| A room's `MaxBookingDurationHours` and `AdvanceBookingDays` were stored and read by nothing — ✅ enforced on save since round 4 (C-4), and by the availability search since company-schedule final closure lane 3a (R4-9.1) | company schedule C-4 |
 
 **So the Status column is the point of the table, not decoration.**
 
@@ -802,7 +802,7 @@ owed a pass, most cheaply as part of that module's own closure plan.
 | **Appraisal settings** | `HR-APPRAISAL-SETTINGS-AUDIT.md` — 50 fields already classified **by hand**, which is the harder half the tool cannot do. ⚠ **14 do not enforce what they say.** Fold that audit in wholesale rather than re-deriving it |
 | Attendance & time | 35 settings noted in the attendance guide; `LateGracePeriodMinutes` is read by **nothing in the solution** (A-1) |
 | Travel | the policy rule register is read-only by decision (T-4); caps bind only when a policy is approved (T-1) |
-| Company schedule | `MaxBookingDurationHours`, `AdvanceBookingDays` — both ghosts (C-4) |
+| Company schedule | ✅ **Surveyed by the final closure (2026-10-06).** No ghost left: every setting on the room and event forms decides something, listed in the guide's § 1.4 — the room's two limits enforced since round 4 (C-4), the reminders since N-b2. The ones with a tenant-wide or schedule-wide effect are in § 2.8 above (the reminders and the RSVP chase lead, the booking sweep, staff booking, a series' rooms, a milestone's *Repeats every year* and *Show on calendar*, the fiscal start, who reads a team schedule, the retired logo URL). An event's budget, resources and catering are recorded data, not settings |
 | Recruitment, performance, medical, separation, discipline | not looked at |
 | The rest of `CompanyHrPolicySettings` | 35 fields predating this register — retirement ages, notice periods, the FR-HR-092 threshold, the alert lead times, the grievance clocks |
 
