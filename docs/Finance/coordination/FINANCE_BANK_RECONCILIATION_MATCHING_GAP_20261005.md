@@ -24,6 +24,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Classification: confirmed multi-book reconciliation balance defect. The operational bank balance must be calculated once from the authoritative/default book, not once per replicated accounting book.
 - Product-model decision: reconciliation remains anchored to the physical bank account and its operational cash transactions. The tenant's default primary accounting book is the authoritative GL context for the displayed book balance; parallel-book replicas must not be aggregated or reconciled independently against the same bank statement.
 - Industry comparison: Microsoft Dynamics 365 Finance and Business Central reconcile statement lines to bank-account transactions / bank-account ledger entries within the legal-entity context, while Oracle recommends a unique GL cash account per bank account for book-to-bank reconciliation. This supports bank-account-first reconciliation with one authoritative ledger context, not an all-books balance.
+- Follow-up adjustment UX: the reconciliation-adjustment offset account used a plain select over as many as 1,000 active accounts. It now uses the existing Command/Popover searchable-combobox pattern, searches account number and name, and preserves the existing posting-account eligibility filter and selected account ID payload.
 
 ## Changed files
 
@@ -47,6 +48,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - UAT rows inspected read-only: one BASE GHS 2,880 debit and one USD_PARALLEL translated replica with GHS transaction debit 2,880 for the same source document; the current balance query sums both to GHS 5,760.
 - Frontend direction contract: 6 tests passed.
 - Targeted frontend ESLint: passed.
+- Focused ESLint after converting the adjustment offset account to a searchable combobox: passed.
 - Exact backend parallel-book regression `BookBalance_ShouldExcludeParallelBookReplicaOfSameBankMovement`: passed (1/1).
 - Full `BankReconciliationPostingMigrationTests` class: 7 passed and 12 failed before reconciliation assertions because the legacy test fixture does not provide the now-required governed source-book authority (`SOURCE_BOOK_AUTHORITY_MISSING`). The new regression is independent of that fixture failure and passes in isolation.
 - `git diff --check`: passed; Git reported only expected LF-to-CRLF working-copy warnings.

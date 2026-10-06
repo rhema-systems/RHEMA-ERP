@@ -844,6 +844,7 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
     const [adjustmentType, setAdjustmentType] = useState<ReconciliationAdjustmentType>(ReconciliationAdjustmentType.BankCharge);
     const [amount, setAmount] = useState('');
     const [offsetAccountId, setOffsetAccountId] = useState('');
+    const [offsetAccountPickerOpen, setOffsetAccountPickerOpen] = useState(false);
     const [transactionDate, setTransactionDate] = useState(format(new Date(reconciliation.reconciliationDate), 'yyyy-MM-dd'));
     const [referenceNumber, setReferenceNumber] = useState('');
     const [description, setDescription] = useState('');
@@ -931,11 +932,52 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
                         <div className="space-y-2"><Label htmlFor="adjustment-amount">Amount ({currency})</Label><Input id="adjustment-amount" type="number" min="0.01" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} /></div>
                     </div>
                     <div className="space-y-2">
-                        <Label>Offset account</Label>
-                        <Select value={offsetAccountId} onValueChange={setOffsetAccountId} disabled={accountsQuery.isLoading}>
-                            <SelectTrigger><SelectValue placeholder={accountsQuery.isLoading ? 'Loading accounts...' : 'Select a posting account'} /></SelectTrigger>
-                            <SelectContent>{postingAccounts.map((item) => <SelectItem key={item.id} value={item.id}>{item.accountNumber} · {item.accountName}</SelectItem>)}</SelectContent>
-                        </Select>
+                        <Label htmlFor="adjustment-offset-account">Offset account</Label>
+                        <Popover modal open={offsetAccountPickerOpen} onOpenChange={setOffsetAccountPickerOpen}>
+                            <PopoverTrigger asChild>
+                                <Button
+                                    id="adjustment-offset-account"
+                                    type="button"
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={offsetAccountPickerOpen}
+                                    disabled={accountsQuery.isLoading}
+                                    className="w-full justify-between font-normal"
+                                >
+                                    <span className="truncate text-left">
+                                        {accountsQuery.isLoading
+                                            ? 'Loading accounts...'
+                                            : selectedOffsetAccount
+                                                ? `${selectedOffsetAccount.accountNumber} · ${selectedOffsetAccount.accountName}`
+                                                : 'Select a posting account'}
+                                    </span>
+                                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                <Command>
+                                    <CommandInput placeholder="Search account number or name..." />
+                                    <CommandList>
+                                        <CommandEmpty>No eligible posting account found.</CommandEmpty>
+                                        <CommandGroup>
+                                            {postingAccounts.map((item) => (
+                                                <CommandItem
+                                                    key={item.id}
+                                                    value={`${item.accountNumber} ${item.accountName}`}
+                                                    onSelect={() => {
+                                                        setOffsetAccountId(item.id);
+                                                        setOffsetAccountPickerOpen(false);
+                                                    }}
+                                                >
+                                                    <Check className={cn('mr-2 h-4 w-4', item.id === offsetAccountId ? 'opacity-100' : 'opacity-0')} />
+                                                    <span className="truncate">{item.accountNumber} · {item.accountName}</span>
+                                                </CommandItem>
+                                            ))}
+                                        </CommandGroup>
+                                    </CommandList>
+                                </Command>
+                            </PopoverContent>
+                        </Popover>
                     </div>
                     <SourceDocumentDimensionPanel
                         context={{
