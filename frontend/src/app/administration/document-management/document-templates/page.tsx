@@ -2,6 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import {
   BookTemplate,
@@ -70,6 +71,8 @@ const toForm = (template: CentralDocumentGenerationTemplate): TemplateForm => ({
 });
 
 export default function DmsDocumentTemplatesSetupPage() {
+  const searchParams = useSearchParams();
+  const scopedQuery = searchParams.get('q')?.trim() ?? '';
   const [templates, setTemplates] = React.useState<
     CentralDocumentGenerationTemplate[]
   >([]);
@@ -79,7 +82,7 @@ export default function DmsDocumentTemplatesSetupPage() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [isUploadingTemplate, setIsUploadingTemplate] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [templateSearch, setTemplateSearch] = React.useState('');
+  const [templateSearch, setTemplateSearch] = React.useState(scopedQuery);
   const [selectedModule, setSelectedModule] = React.useState<string>('all');
   const uploadInputRef = React.useRef<HTMLInputElement | null>(null);
 
@@ -132,8 +135,20 @@ export default function DmsDocumentTemplatesSetupPage() {
     setError(null);
     const data = await documentManagementService.getGenerationTemplates();
     setTemplates(data);
-    setSelectedCode((current) => current || data[0]?.templateCode || '');
-  }, []);
+    setSelectedCode((current) => {
+      if (current) return current;
+      const query = scopedQuery.toLowerCase();
+      return (
+        data.find((template) =>
+          [template.module, template.title, template.documentType]
+            .filter(Boolean)
+            .some((value) => value.toLowerCase().includes(query))
+        )?.templateCode ||
+        data[0]?.templateCode ||
+        ''
+      );
+    });
+  }, [scopedQuery]);
 
   React.useEffect(() => {
     let mounted = true;
