@@ -89,16 +89,36 @@ Existing indexes are mostly single-column and do not match tenant-first dashboar
 - `frontend/src/app/administration/security/dashboard/page.tsx`
 - active security/session/access-review components and focused tests
 
+## Identity-management extension
+
+The same administration hardening pass now covers the three operational identity pages:
+
+- **Users**: tenant-scoped reads and mutations, active-tenant enforcement during creation, correct role clearing, permission-aware actions, summary counts, retryable error states, and paginated tables.
+- **Roles**: the shared role catalogue remains readable by tenant administrators, while create, update, and delete operations are restricted to SuperAdmin. The page explains the read-only boundary and hides mutation controls when they are unavailable.
+- **User and employee links**: users and employees are resolved inside the active tenant, link and unlink actions are audited, duplicate links return a conflict response, employee lookup is loaded on demand, and the page provides search, status filtering, pagination, retry states, and confirmation before unlinking.
+
 ## Verification tracker
 
-- [ ] Sensitive MFA/CAPTCHA values removed from logs, responses, and audit payloads.
-- [ ] Security log reads/details/cleanup are tenant scoped.
-- [ ] Administrative session reads and mutations are tenant scoped and audited.
-- [ ] Backend policies enforce telemetry reads and administrative mutations.
-- [ ] Operations overview uses direct, bounded, set-based tenant queries.
-- [ ] Health score returns auditable factors and deterministic calculations.
-- [ ] Events, sessions, privileged access, and configuration states have honest empty states.
-- [ ] Composite indexes and migration verified.
-- [ ] Backend tenant-isolation, authorization, redaction, and scoring tests pass.
-- [ ] Frontend data/error/empty/permission states and build pass.
+- [x] Sensitive MFA/CAPTCHA values removed from logs, responses, and audit payloads.
+- [x] Security log reads/details/cleanup are tenant scoped.
+- [x] Administrative session reads and mutations are tenant scoped and audited.
+- [x] Backend policies enforce telemetry reads and administrative mutations.
+- [x] Operations overview uses direct, bounded, set-based tenant queries.
+- [x] Health score returns auditable factors and deterministic calculations.
+- [x] Events, sessions, privileged access, and configuration states have honest empty states.
+- [x] Tenant-leading composite index migration added and verified by the Release solution build; deployment applies it to the target database.
+- [x] Backend tenant-isolation and scoring tests pass, including the identity tenant-scope regression test.
+- [x] Frontend data/error/empty/permission tests, typecheck, lint, and production build pass.
 - [ ] Authenticated browser validation completed for desktop and responsive layouts.
+
+## Verification evidence — 2026-10-06
+
+- `dotnet build ErpSystem.sln -c Release --no-restore`: succeeded with 0 errors.
+- `SecurityHealthScoringTests` and `SecurityLogTenantIsolationTests`: 4 passed.
+- `UserServiceTenantScopeTests`: 1 passed after repairing zero-filled disposable project DLL copies in the test output; no product file was changed by that repair.
+- Identity users, roles, and consolidated security dashboard Vitest suite: 6 passed.
+- Security operations and confirmation-dialog Vitest suite: 5 passed.
+- Focused ESLint on changed administration surfaces: passed.
+- TypeScript `--noEmit --incremental false`: passed.
+- Next.js production build: passed.
+- The three requested VPS routes returned HTTP 200 during unauthenticated reachability checks. Authenticated visual validation remains open because the local browser-control bridge exited during initialization with `CryptUnprotectData failed: 2148073483`.

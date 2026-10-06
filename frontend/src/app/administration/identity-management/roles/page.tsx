@@ -28,11 +28,12 @@ import { Checkbox } from '../../../../components/ui/checkbox';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { adminApiService, Role } from '../../../../services/admin-api.service';
+import { adminApiService, Role, getAdminProblemMessage } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home, Search } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home, Search, AlertCircle, RefreshCw, ShieldCheck, Layers3 } from 'lucide-react';
 import { FACILITIES_PERMISSIONS } from '@/lib/facilities-permissions';
 import { PROPERTY_MANAGEMENT_PERMISSIONS } from '@/lib/property-management-permissions';
+import { useAuth } from '../../../../hooks/use-auth';
 
 const PROTECTED_SYSTEM_ROLE_NAMES = new Set([
   'superadmin',
@@ -169,6 +170,8 @@ const PERMISSION_CATEGORIES = {
 };
 
 export default function RolesPage() {
+  const { hasRole } = useAuth();
+  const canManageRoleCatalogue = hasRole('SuperAdmin');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [deleteRole, setDeleteRole] = useState<Role | null>(null);
@@ -186,7 +189,7 @@ export default function RolesPage() {
   });
 
   // Fetch roles data
-  const { data: roles = [], isLoading } = useQuery({
+  const { data: roles = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-roles'],
     queryFn: () => adminApiService.getRoles(),
   });
@@ -281,10 +284,10 @@ export default function RolesPage() {
         description: `Role ${editingRole ? 'updated' : 'created'} successfully`,
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: 'Error',
-        description: error?.message || `Failed to ${editingRole ? 'update' : 'create'} role`,
+        description: getAdminProblemMessage(error, `Failed to ${editingRole ? 'update' : 'create'} role`),
         variant: 'destructive',
       });
     },
@@ -301,10 +304,10 @@ export default function RolesPage() {
         description: 'Role deleted successfully',
       });
     },
-    onError: (error: any) => {
+    onError: (error: unknown) => {
       toast({
         title: 'Error',
-        description: error?.message || 'Failed to delete role',
+        description: getAdminProblemMessage(error, 'Failed to delete role'),
         variant: 'destructive',
       });
     },
@@ -353,11 +356,11 @@ export default function RolesPage() {
       return;
     }
 
-    createRoleMutation.mutate(isProtectedSystemRole(editingRole)
+    createRoleMutation.mutate(isProtectedSystemRole(editingRole) && editingRole
       ? {
           ...data,
-          name: editingRole!.name,
-          description: editingRole!.description || '',
+          name: editingRole.name,
+          description: editingRole.description || '',
         }
       : data);
   };
@@ -377,6 +380,7 @@ export default function RolesPage() {
             </Badge>
           )}
         </div>
+
       ),
     },
     {
@@ -432,6 +436,40 @@ export default function RolesPage() {
           </div>
         </div>
 
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Role definitions', value: roles.length, icon: Shield, tone: 'text-blue-600 bg-blue-50' },
+            { label: 'System roles', value: roles.filter(role => role.isSystemRole).length, icon: LockKeyhole, tone: 'text-violet-600 bg-violet-50' },
+            { label: 'Custom roles', value: roles.filter(role => !role.isSystemRole).length, icon: Layers3, tone: 'text-emerald-600 bg-emerald-50' },
+            { label: 'Permission assignments', value: roles.reduce((total, role) => total + role.permissions.length, 0), icon: ShieldCheck, tone: 'text-amber-600 bg-amber-50' },
+          ].map(({ label, value, icon: Icon, tone }) => (
+            <div key={label} className="flex items-center justify-between rounded-xl border bg-card p-4 shadow-sm">
+              <div>
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className="mt-1 text-2xl font-semibold">{value}</p>
+              </div>
+              <span className={`rounded-lg p-2.5 ${tone}`}><Icon className="h-5 w-5" /></span>
+            </div>
+          ))}
+        </div>
+
+        {!canManageRoleCatalogue && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/70 p-4 text-sm text-blue-900">
+            Role definitions are shared across tenants. You can review them here; only a SuperAdmin can change the shared catalogue.
+          </div>
+        )}
+
+        {isError && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+            <span className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-4 w-4" /> Role definitions could not be loaded.
+            </span>
+            <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Retry
+            </Button>
+          </div>
+        )}
+
         <DataTable
           title="Roles"
           description="Manage user roles and their associated permissions"
@@ -439,7 +477,8 @@ export default function RolesPage() {
           columns={columns}
           loading={isLoading}
           searchPlaceholder="Search roles..."
-          onAdd={handleAdd}
+          onAdd={canManageRoleCatalogue ? handleAdd : undefined}
+          actions={canManageRoleCatalogue}
           customActions={(role) => (
             <div className="flex items-center gap-1">
               <Button
@@ -477,6 +516,9 @@ export default function RolesPage() {
               )}
             </div>
           )}
+          pageSize={12}
+          getRowId={(role) => role.id}
+          emptyMessage="No roles match the current search."
         />
 
         {/* Add/Edit Role Dialog */}

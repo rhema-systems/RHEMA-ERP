@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DashboardLayout } from '../../../../components/layout/dashboard-layout';
 import { DataTable, Column } from '../../../../components/admin/data-table';
 import { Button } from '../../../../components/ui/button';
 import { Badge } from '../../../../components/ui/badge';
@@ -18,7 +17,6 @@ import {
   DialogTitle,
 } from '../../../../components/ui/dialog';
 import {
-  Form,
   FormControl,
   FormDescription,
   FormField,
@@ -30,7 +28,6 @@ import { Input } from '../../../../components/ui/input';
 import { Checkbox } from '../../../../components/ui/checkbox';
 import { Label } from '../../../../components/ui/label';
 import { Switch } from '../../../../components/ui/switch';
-import { Textarea } from '../../../../components/ui/textarea';
 import {
   Select,
   SelectContent,
@@ -41,10 +38,12 @@ import {
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { adminApiService, User, CreateUserRequest, UpdateUserRequest } from '../../../../services/admin-api.service';
+import { adminApiService, User, CreateUserRequest, UpdateUserRequest, getAdminProblemMessage } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
 import PhoneInput from '../../../../components/ui/phone-input';
 import { useTenant } from '../../../../contexts/TenantContext';
+import { useAuth } from '../../../../hooks/use-auth';
+import { AlertCircle, RefreshCw, ShieldCheck, UserCheck, Users, UserX } from 'lucide-react';
 
 const userSchema = z.object({
   username: z.string().min(3, 'Username must be at least 3 characters'),
@@ -65,6 +64,10 @@ const normalizeRoleName = (value: string) => value.trim().toLocaleLowerCase();
 
 export default function UsersPage() {
   const { currentTenant } = useTenant();
+  const { hasPermission, hasRole } = useAuth();
+  const canCreate = hasPermission('users.create');
+  const canUpdate = hasPermission('users.update');
+  const canDelete = hasRole('SuperAdmin');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
@@ -72,7 +75,7 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [lastLoginFromDate, setLastLoginFromDate] = useState<string>('');
   const [lastLoginToDate, setLastLoginToDate] = useState<string>('');
-  const [phoneNumber, setPhoneNumber] = useState('+233'); // Default to Ghana country code
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<User[]>([]);
   const [viewingUser, setViewingUser] = useState<User | null>(null);
   const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
@@ -101,7 +104,7 @@ export default function UsersPage() {
   }, [phoneNumber, form]);
 
   // Fetch users data
-  const { data: users = [], isLoading } = useQuery({
+  const { data: users = [], isLoading, isError, refetch } = useQuery({
     queryKey: ['admin-users'],
     queryFn: () => adminApiService.getUsers(),
   });
@@ -110,12 +113,6 @@ export default function UsersPage() {
   const { data: roles = [] } = useQuery({
     queryKey: ['admin-roles'],
     queryFn: () => adminApiService.getRoles(),
-  });
-
-  // Fetch tenants for the tenant selector
-  const { data: tenants = [] } = useQuery({
-    queryKey: ['admin-tenants'],
-    queryFn: () => adminApiService.getTenants(),
   });
 
   // Create/Update user mutation
@@ -157,17 +154,17 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ['admin-users'] });
       setIsDialogOpen(false);
       setEditingUser(null);
-      setPhoneNumber('+233'); // Reset phone number state
+      setPhoneNumber('');
       form.reset();
       toast({
         title: 'Success',
         description: `User ${editingUser ? 'updated' : 'created'} successfully`,
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: 'Error',
-        description: `Failed to ${editingUser ? 'update' : 'create'} user`,
+        description: getAdminProblemMessage(error, `Failed to ${editingUser ? 'update' : 'create'} user`),
         variant: 'destructive',
       });
     },
@@ -184,10 +181,10 @@ export default function UsersPage() {
         description: 'User deleted successfully',
       });
     },
-    onError: () => {
+    onError: (error) => {
       toast({
         title: 'Error',
-        description: 'Failed to delete user',
+        description: getAdminProblemMessage(error, 'Failed to delete user'),
         variant: 'destructive',
       });
     },
@@ -195,7 +192,7 @@ export default function UsersPage() {
 
   const handleAdd = () => {
     setEditingUser(null);
-    setPhoneNumber('+233'); // Reset to Ghana default
+    setPhoneNumber('');
     form.reset({
       username: '',
       email: '',
@@ -211,10 +208,7 @@ export default function UsersPage() {
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
-    // Set phone number state from user data, fallback to Ghana default
-    const userPhoneNumber = user.phoneNumber && user.phoneNumber.trim() !== '' 
-      ? user.phoneNumber 
-      : '+233';
+    const userPhoneNumber = user.phoneNumber?.trim() ?? '';
     setPhoneNumber(userPhoneNumber);
     form.reset({
       username: user.username,
@@ -233,7 +227,6 @@ export default function UsersPage() {
   };
 
   const handleSelectionChange = (selectedUsers: User[]) => {
-    console.log('Selected users:', selectedUsers.map(u => u.username));
     setSelectedUsers(selectedUsers);
   };
 
@@ -399,7 +392,7 @@ export default function UsersPage() {
               Manage system users, roles, and permissions
             </p>
           </div>
-          {selectedUsers.length > 0 && (
+          {canUpdate && selectedUsers.length > 0 && (
             <div className="flex items-center gap-2">
               <Badge variant="outline" className="text-sm">
                 {selectedUsers.length} selected
@@ -412,6 +405,34 @@ export default function UsersPage() {
             </div>
           )}
         </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: 'Tenant users', value: users.length, icon: Users, tone: 'text-blue-600 bg-blue-50' },
+            { label: 'Active', value: users.filter(user => user.isActive).length, icon: UserCheck, tone: 'text-emerald-600 bg-emerald-50' },
+            { label: 'Inactive', value: users.filter(user => !user.isActive).length, icon: UserX, tone: 'text-amber-600 bg-amber-50' },
+            { label: 'Assigned roles', value: new Set(users.flatMap(user => user.roles)).size, icon: ShieldCheck, tone: 'text-violet-600 bg-violet-50' },
+          ].map(({ label, value, icon: Icon, tone }) => (
+            <div key={label} className="flex items-center justify-between rounded-xl border bg-card p-4 shadow-sm">
+              <div>
+                <p className="text-sm text-muted-foreground">{label}</p>
+                <p className="mt-1 text-2xl font-semibold">{value}</p>
+              </div>
+              <span className={`rounded-lg p-2.5 ${tone}`}><Icon className="h-5 w-5" /></span>
+            </div>
+          ))}
+        </div>
+
+        {isError && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm">
+            <span className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-4 w-4" /> Tenant users could not be loaded.
+            </span>
+            <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>
+              <RefreshCw className="mr-2 h-4 w-4" /> Retry
+            </Button>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex flex-wrap gap-4 p-4 bg-muted/30 rounded-lg border">
@@ -501,21 +522,24 @@ export default function UsersPage() {
           columns={columns}
           loading={isLoading}
           searchPlaceholder="Search users..."
-          onAdd={handleAdd}
-          onEdit={handleEdit}
-          onDelete={handleDelete}
+          onAdd={canCreate ? handleAdd : undefined}
+          onEdit={canUpdate ? handleEdit : undefined}
+          onDelete={canDelete ? handleDelete : undefined}
           onView={handleViewProfile}
           exportable={true}
           exportFileName="users_export.csv"
-          selectable={true}
+          selectable={canUpdate}
           onSelectionChange={handleSelectionChange}
+          pageSize={12}
+          getRowId={(user) => user.id}
+          emptyMessage="No users match the current tenant and filters."
         />
 
         {/* Add/Edit User Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
           setIsDialogOpen(open);
           if (!open) {
-            setPhoneNumber('+233'); // Reset phone number state when dialog closes
+            setPhoneNumber('');
           }
         }}>
           <DialogContent className="max-w-2xl">
@@ -753,7 +777,7 @@ export default function UsersPage() {
                     variant="outline"
                     onClick={() => {
                       setIsDialogOpen(false);
-                      setPhoneNumber('+233'); // Reset phone number state
+                      setPhoneNumber('');
                     }}
                   >
                     Cancel

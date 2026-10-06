@@ -1,337 +1,324 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace ErpSystem.Api.Controllers
+namespace ErpSystem.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize(Roles = Constants.Roles.SuperAdmin + "," + Constants.Roles.TenantAdmin)]
+public class UserEmployeeLinkController : ControllerBase
 {
-    [ApiController]
-    [Route("api/[controller]")]
-    [Authorize(Roles = "SuperAdmin,Admin")]
-    public class UserEmployeeLinkController : ControllerBase
+    private readonly UserManager<ApplicationUser> _userManager;
+    private readonly IEmployeeRepository _employeeRepository;
+    private readonly Services.IEmployeeLinkResolutionService _linkResolution;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IAuditLogService _auditLogService;
+    private readonly ILogger<UserEmployeeLinkController> _logger;
+
+    public UserEmployeeLinkController(
+        UserManager<ApplicationUser> userManager,
+        IEmployeeRepository employeeRepository,
+        Services.IEmployeeLinkResolutionService linkResolution,
+        ICurrentUserService currentUser,
+        IAuditLogService auditLogService,
+        ILogger<UserEmployeeLinkController> logger)
     {
-        private readonly UserManager<ApplicationUser> _userManager;
-        private readonly IEmployeeRepository _employeeRepository;
-        private readonly ErpSystem.Api.Services.IEmployeeLinkResolutionService _linkResolution;
-        private readonly ILogger<UserEmployeeLinkController> _logger;
+        _userManager = userManager;
+        _employeeRepository = employeeRepository;
+        _linkResolution = linkResolution;
+        _currentUser = currentUser;
+        _auditLogService = auditLogService;
+        _logger = logger;
+    }
 
-        public UserEmployeeLinkController(
-            UserManager<ApplicationUser> userManager,
-            IEmployeeRepository employeeRepository,
-            ErpSystem.Api.Services.IEmployeeLinkResolutionService linkResolution,
-            ILogger<UserEmployeeLinkController> logger)
+    [HttpPost("link-user-to-employee")]
+    public async Task<IActionResult> LinkUserToEmployee([FromBody] LinkUserEmployeeRequest request)
+    {
+        var tenantId = ActiveTenantId();
+        if (!tenantId.HasValue) return MissingTenant();
+
+        var user = await FindTenantUserAsync(request.UserId, tenantId.Value);
+        if (user == null) return NotFound("The user was not found in the active tenant.");
+
+        var employee = await FindTenantEmployeeAsync(request.EmployeeId, tenantId.Value);
+        if (employee == null) return NotFound("The employee was not found in the active tenant.");
+
+        var existingUser = await TenantUsers(tenantId.Value)
+            .FirstOrDefaultAsync(candidate => candidate.EmployeeId == request.EmployeeId && candidate.Id != user.Id);
+        if (existingUser != null)
         {
-            _userManager = userManager;
-            _employeeRepository = employeeRepository;
-            _linkResolution = linkResolution;
-            _logger = logger;
+            return Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Employee already linked",
+                detail: $"{employee.FullName} is already linked to {existingUser.UserName}.");
         }
 
-        /// <summary>
-        /// Links a user account to an employee record
-        /// </summary>
-        [HttpPost("link-user-to-employee")]
-        public async Task<IActionResult> LinkUserToEmployee([FromBody] LinkUserEmployeeRequest request)
+        var previousEmployeeId = user.EmployeeId;
+        user.EmployeeId = request.EmployeeId;
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded) return IdentityFailure(result);
+
+        await AuditAsync("Link", user, previousEmployeeId, request.EmployeeId);
+        return Ok(new
         {
-            try
-            {
-                // Get the user
-                var user = await _userManager.FindByIdAsync(request.UserId.ToString());
-                if (user == null)
-                {
-                    return NotFound($"User with ID {request.UserId} not found");
-                }
+            success = true,
+            message = $"Linked {user.UserName} to {employee.FullName}.",
+            userId = user.Id,
+            employeeId = employee.Id,
+            employeeName = employee.FullName
+        });
+    }
 
-                // Get the employee
-                var employee = await _employeeRepository.GetByIdAsync(request.EmployeeId);
-                if (employee == null)
-                {
-                    return NotFound($"Employee with ID {request.EmployeeId} not found");
-                }
+    [HttpPost("unlink-user-from-employee")]
+    public async Task<IActionResult> UnlinkUserFromEmployee([FromBody] UnlinkUserEmployeeRequest request)
+    {
+        var tenantId = ActiveTenantId();
+        if (!tenantId.HasValue) return MissingTenant();
 
-                // Check if employee is already linked to another user
-                var existingUser = await _userManager.Users
-                    .Where(u => u.EmployeeId == request.EmployeeId)
-                    .FirstOrDefaultAsync();
-
-                if (existingUser != null && existingUser.Id != user.Id)
-                {
-                    return BadRequest($"Employee {employee.FullName} is already linked to user {existingUser.UserName}");
-                }
-
-                // Link the user to the employee
-                user.EmployeeId = request.EmployeeId;
-                var result = await _userManager.UpdateAsync(user);
-
-                if (result.Succeeded)
-                {
-                    _logger.LogInformation("Successfully linked user {UserName} to employee {EmployeeName}",
-                        user.UserName, employee.FullName);
-
-                    return Ok(new
-                    {
-                        Success = true,
-                        Message = $"Successfully linked user {user.UserName} to employee {employee.FullName}",
-                        UserId = user.Id,
-                        EmployeeId = employee.Id,
-                        EmployeeName = employee.FullName
-                    });
-                }
-
-                return BadRequest(result.Errors);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error linking user {UserId} to employee {EmployeeId}", request.UserId, request.EmployeeId);
-                return StatusCode(500, "An error occurred while linking user to employee");
-            }
+        var user = await FindTenantUserAsync(request.UserId, tenantId.Value);
+        if (user == null) return NotFound("The user was not found in the active tenant.");
+        if (!user.EmployeeId.HasValue)
+        {
+            return Ok(new { success = true, message = $"{user.UserName} is already unlinked.", userId = user.Id });
         }
 
-        /// <summary>
-        /// Removes the link between a user and employee
-        /// </summary>
-        [HttpPost("unlink-user-from-employee")]
-        public async Task<IActionResult> UnlinkUserFromEmployee([FromBody] UnlinkUserEmployeeRequest request)
+        var previousEmployeeId = user.EmployeeId;
+        user.EmployeeId = null;
+        var result = await _userManager.UpdateAsync(user);
+        if (!result.Succeeded) return IdentityFailure(result);
+
+        await AuditAsync("Unlink", user, previousEmployeeId, null);
+        return Ok(new { success = true, message = $"Unlinked {user.UserName} from the employee record.", userId = user.Id });
+    }
+
+    [HttpGet("user-employee-links")]
+    public async Task<IActionResult> GetUserEmployeeLinks()
+    {
+        var tenantId = ActiveTenantId();
+        if (!tenantId.HasValue) return MissingTenant();
+
+        var users = await TenantUsers(tenantId.Value)
+            .AsNoTracking()
+            .OrderBy(user => user.UserName)
+            .ToListAsync();
+        var employeeIds = users.Where(user => user.EmployeeId.HasValue)
+            .Select(user => user.EmployeeId!.Value)
+            .Distinct()
+            .ToArray();
+        var employees = employeeIds.Length == 0
+            ? new Dictionary<Guid, Employee>()
+            : await _employeeRepository.GetQueryable(employee =>
+                    employee.TenantId == tenantId.Value && employeeIds.Contains(employee.Id))
+                .AsNoTracking()
+                .ToDictionaryAsync(employee => employee.Id);
+
+        return Ok(users.Select(user =>
         {
-            try
+            employees.TryGetValue(user.EmployeeId ?? Guid.Empty, out var employee);
+            return new UserEmployeeLink
             {
-                var user = await _userManager.FindByIdAsync(request.UserId.ToString());
-                if (user == null)
-                {
-                    return NotFound($"User with ID {request.UserId} not found");
-                }
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                FullName = user.FullName,
+                Email = user.Email ?? string.Empty,
+                EmployeeId = employee?.Id,
+                EmployeeName = employee?.FullName,
+                EmployeeNumber = employee?.EmployeeNumber,
+                IsLinked = employee != null
+            };
+        }));
+    }
 
-                user.EmployeeId = null;
-                var result = await _userManager.UpdateAsync(user);
+    [HttpGet("unlinked-users")]
+    public async Task<IActionResult> GetUnlinkedUsers()
+    {
+        var tenantId = ActiveTenantId();
+        if (!tenantId.HasValue) return MissingTenant();
 
-                if (result.Succeeded)
-                {
-                    _logger.LogInformation("Successfully unlinked user {UserName} from employee", user.UserName);
-
-                    return Ok(new
-                    {
-                        Success = true,
-                        Message = $"Successfully unlinked user {user.UserName} from employee",
-                        UserId = user.Id
-                    });
-                }
-
-                return BadRequest(result.Errors);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error unlinking user {UserId} from employee", request.UserId);
-                return StatusCode(500, "An error occurred while unlinking user from employee");
-            }
-        }
-
-        /// <summary>
-        /// Gets all users and their linked employees
-        /// </summary>
-        [HttpGet("user-employee-links")]
-        public async Task<IActionResult> GetUserEmployeeLinks()
+        var users = await TenantUsers(tenantId.Value)
+            .AsNoTracking()
+            .Where(user => user.EmployeeId == null)
+            .OrderBy(user => user.UserName)
+            .ToListAsync();
+        var rows = new List<UnlinkedUserRow>();
+        foreach (var user in users)
         {
-            try
+            rows.Add(new UnlinkedUserRow
             {
-                var users = await _userManager.Users.ToListAsync();
-                var links = new List<UserEmployeeLink>();
-
-                foreach (var user in users)
-                {
-                    Employee? employee = null;
-                    if (user.EmployeeId.HasValue)
-                    {
-                        employee = await _employeeRepository.GetByIdAsync(user.EmployeeId.Value);
-                    }
-
-                    links.Add(new UserEmployeeLink
-                    {
-                        UserId = user.Id,
-                        UserName = user.UserName!,
-                        FullName = user.FullName,
-                        Email = user.Email!,
-                        EmployeeId = user.EmployeeId,
-                        EmployeeName = employee?.FullName,
-                        EmployeeNumber = employee?.EmployeeNumber,
-                        IsLinked = user.EmployeeId.HasValue
-                    });
-                }
-
-                return Ok(links.OrderBy(l => l.UserName));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving user-employee links");
-                return StatusCode(500, "An error occurred while retrieving user-employee links");
-            }
-        }
-
-        /// <summary>
-        /// The HR unlinked-users queue. Every user with no employee link,
-        /// each carrying the exact-match candidates the auto-link would have used (same
-        /// rules, same service), so HR sees both the suggestion and why auto-link held back
-        /// (IsExact=false marks an ambiguous rule).
-        /// </summary>
-        [HttpGet("unlinked-users")]
-        public async Task<IActionResult> GetUnlinkedUsers()
-        {
-            try
-            {
-                var users = await _userManager.Users
-                    .Where(u => u.EmployeeId == null)
-                    .OrderBy(u => u.UserName)
-                    .ToListAsync();
-
-                var rows = new List<UnlinkedUserRow>();
-                foreach (var user in users)
-                {
-                    rows.Add(new UnlinkedUserRow
-                    {
-                        UserId = user.Id,
-                        UserName = user.UserName!,
-                        FullName = user.FullName,
-                        Email = user.Email ?? string.Empty,
-                        AuthenticationProvider = user.AuthenticationProvider.ToString(),
-                        IsActive = user.IsActive,
-                        LastLoginDate = user.LastLoginDate,
-                        Suggestions = (await _linkResolution.SuggestForUserAsync(user)).ToList()
-                    });
-                }
-
-                return Ok(rows);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving unlinked users");
-                return StatusCode(500, "An error occurred while retrieving unlinked users");
-            }
-        }
-
-        /// <summary>
-        /// Links several users in one submission (the queue's "link all exact matches").
-        /// Each pair passes the same guards as the single link; one failure does not stop
-        /// the rest — the per-pair outcome comes back so the queue can show what happened.
-        /// </summary>
-        [HttpPost("bulk-link")]
-        public async Task<IActionResult> BulkLink([FromBody] BulkLinkRequest request)
-        {
-            if (request.Links.Count == 0)
-            {
-                return BadRequest("No links submitted");
-            }
-
-            var results = new List<BulkLinkResult>();
-            foreach (var pair in request.Links)
-            {
-                try
-                {
-                    var user = await _userManager.FindByIdAsync(pair.UserId.ToString());
-                    if (user == null)
-                    {
-                        results.Add(BulkLinkResult.Fail(pair, "User not found"));
-                        continue;
-                    }
-                    if (user.EmployeeId.HasValue)
-                    {
-                        results.Add(BulkLinkResult.Fail(pair, "User is already linked"));
-                        continue;
-                    }
-
-                    var employee = await _employeeRepository.GetByIdAsync(pair.EmployeeId);
-                    if (employee == null)
-                    {
-                        results.Add(BulkLinkResult.Fail(pair, "Employee not found"));
-                        continue;
-                    }
-
-                    var existingUser = await _userManager.Users
-                        .Where(u => u.EmployeeId == pair.EmployeeId)
-                        .FirstOrDefaultAsync();
-                    if (existingUser != null)
-                    {
-                        results.Add(BulkLinkResult.Fail(pair, $"Employee is already linked to user {existingUser.UserName}"));
-                        continue;
-                    }
-
-                    user.EmployeeId = pair.EmployeeId;
-                    var update = await _userManager.UpdateAsync(user);
-                    if (update.Succeeded)
-                    {
-                        _logger.LogInformation("Bulk-linked user {UserName} to employee {EmployeeName}", user.UserName, employee.FullName);
-                        results.Add(new BulkLinkResult { UserId = pair.UserId, EmployeeId = pair.EmployeeId, Success = true, Message = $"Linked {user.UserName} to {employee.FullName}" });
-                    }
-                    else
-                    {
-                        results.Add(BulkLinkResult.Fail(pair, string.Join(", ", update.Errors.Select(e => e.Description))));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Bulk link failed for user {UserId} -> employee {EmployeeId}", pair.UserId, pair.EmployeeId);
-                    results.Add(BulkLinkResult.Fail(pair, "Unexpected error"));
-                }
-            }
-
-            return Ok(new
-            {
-                Linked = results.Count(r => r.Success),
-                Failed = results.Count(r => !r.Success),
-                Results = results
+                UserId = user.Id,
+                UserName = user.UserName ?? string.Empty,
+                FullName = user.FullName,
+                Email = user.Email ?? string.Empty,
+                AuthenticationProvider = user.AuthenticationProvider.ToString(),
+                IsActive = user.IsActive,
+                LastLoginDate = user.LastLoginDate,
+                Suggestions = (await _linkResolution.SuggestForUserAsync(user)).ToList()
             });
         }
+
+        return Ok(rows);
     }
 
-    public class UnlinkedUserRow
+    [HttpPost("bulk-link")]
+    public async Task<IActionResult> BulkLink([FromBody] BulkLinkRequest request)
     {
-        public Guid UserId { get; set; }
-        public string UserName { get; set; } = string.Empty;
-        public string FullName { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
-        public string AuthenticationProvider { get; set; } = string.Empty;
-        public bool IsActive { get; set; }
-        public DateTime? LastLoginDate { get; set; }
-        public List<ErpSystem.Api.Services.LinkSuggestion> Suggestions { get; set; } = new();
+        if (request.Links.Count == 0) return BadRequest("No links submitted.");
+        var tenantId = ActiveTenantId();
+        if (!tenantId.HasValue) return MissingTenant();
+
+        var results = new List<BulkLinkResult>();
+        foreach (var pair in request.Links.DistinctBy(link => link.UserId))
+        {
+            try
+            {
+                var user = await FindTenantUserAsync(pair.UserId, tenantId.Value);
+                if (user == null) { results.Add(BulkLinkResult.Fail(pair, "User not found in the active tenant.")); continue; }
+                if (user.EmployeeId.HasValue) { results.Add(BulkLinkResult.Fail(pair, "User is already linked.")); continue; }
+
+                var employee = await FindTenantEmployeeAsync(pair.EmployeeId, tenantId.Value);
+                if (employee == null) { results.Add(BulkLinkResult.Fail(pair, "Employee not found in the active tenant.")); continue; }
+                if (await TenantUsers(tenantId.Value).AnyAsync(candidate => candidate.EmployeeId == pair.EmployeeId))
+                {
+                    results.Add(BulkLinkResult.Fail(pair, "Employee is already linked."));
+                    continue;
+                }
+
+                user.EmployeeId = pair.EmployeeId;
+                var update = await _userManager.UpdateAsync(user);
+                if (!update.Succeeded)
+                {
+                    results.Add(BulkLinkResult.Fail(pair, string.Join(", ", update.Errors.Select(error => error.Description))));
+                    continue;
+                }
+
+                await AuditAsync("BulkLink", user, null, pair.EmployeeId);
+                results.Add(new BulkLinkResult
+                {
+                    UserId = pair.UserId,
+                    EmployeeId = pair.EmployeeId,
+                    Success = true,
+                    Message = $"Linked {user.UserName} to {employee.FullName}."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Bulk link failed for user {UserId} and employee {EmployeeId}", pair.UserId, pair.EmployeeId);
+                results.Add(BulkLinkResult.Fail(pair, "Unexpected error."));
+            }
+        }
+
+        return Ok(new
+        {
+            linked = results.Count(result => result.Success),
+            failed = results.Count(result => !result.Success),
+            results
+        });
     }
 
-    public class BulkLinkRequest
+    private Guid? ActiveTenantId() =>
+        _currentUser.TenantId is { } tenantId && tenantId != Guid.Empty ? tenantId : null;
+
+    private IQueryable<ApplicationUser> TenantUsers(Guid tenantId)
     {
-        public List<LinkUserEmployeeRequest> Links { get; set; } = new();
+        var now = DateTime.UtcNow;
+        return _userManager.Users.Where(user => user.TenantId == tenantId || user.UserTenants.Any(link =>
+            !link.IsDeleted && link.TenantId == tenantId && link.Status == UserTenantStatus.Active &&
+            (link.ExpiresAt == null || link.ExpiresAt > now)));
     }
 
-    public class BulkLinkResult
+    private Task<ApplicationUser?> FindTenantUserAsync(Guid userId, Guid tenantId) =>
+        TenantUsers(tenantId).FirstOrDefaultAsync(user => user.Id == userId);
+
+    private Task<Employee?> FindTenantEmployeeAsync(Guid employeeId, Guid tenantId) =>
+        _employeeRepository.GetQueryable(employee => employee.Id == employeeId && employee.TenantId == tenantId)
+            .FirstOrDefaultAsync();
+
+    private async Task AuditAsync(string action, ApplicationUser user, Guid? previousEmployeeId, Guid? employeeId)
     {
-        public Guid UserId { get; set; }
-        public Guid EmployeeId { get; set; }
-        public bool Success { get; set; }
-        public string Message { get; set; } = string.Empty;
-
-        public static BulkLinkResult Fail(LinkUserEmployeeRequest pair, string message) =>
-            new() { UserId = pair.UserId, EmployeeId = pair.EmployeeId, Success = false, Message = message };
+        try
+        {
+            await _auditLogService.LogUserActionAsync(
+                Guid.TryParse(_currentUser.UserId, out var actorId) ? actorId : Guid.Empty,
+                _currentUser.UserName ?? "Unknown",
+                action,
+                "UserEmployeeLink",
+                user.Id.ToString(),
+                new { EmployeeId = previousEmployeeId },
+                new { EmployeeId = employeeId },
+                HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                Request.Headers.UserAgent.ToString());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write audit record for user/employee link {UserId}", user.Id);
+        }
     }
 
-    public class LinkUserEmployeeRequest
-    {
-        public Guid UserId { get; set; }
-        public Guid EmployeeId { get; set; }
-    }
+    private ObjectResult MissingTenant() => Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Active tenant required",
+        detail: "Select an active tenant before managing employee links.");
 
-    public class UnlinkUserEmployeeRequest
-    {
-        public Guid UserId { get; set; }
-    }
+    private ObjectResult IdentityFailure(IdentityResult result) => Problem(
+        statusCode: StatusCodes.Status400BadRequest,
+        title: "Identity update failed",
+        detail: string.Join(" ", result.Errors.Select(error => error.Description)));
+}
+public class UnlinkedUserRow
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string AuthenticationProvider { get; set; } = string.Empty;
+    public bool IsActive { get; set; }
+    public DateTime? LastLoginDate { get; set; }
+    public List<Services.LinkSuggestion> Suggestions { get; set; } = [];
+}
 
-    public class UserEmployeeLink
-    {
-        public Guid UserId { get; set; }
-        public string UserName { get; set; } = string.Empty;
-        public string FullName { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
-        public Guid? EmployeeId { get; set; }
-        public string? EmployeeName { get; set; }
-        public string? EmployeeNumber { get; set; }
-        public bool IsLinked { get; set; }
-    }
+public class BulkLinkRequest
+{
+    public List<LinkUserEmployeeRequest> Links { get; set; } = [];
+}
+
+public class BulkLinkResult
+{
+    public Guid UserId { get; set; }
+    public Guid EmployeeId { get; set; }
+    public bool Success { get; set; }
+    public string Message { get; set; } = string.Empty;
+
+    public static BulkLinkResult Fail(LinkUserEmployeeRequest pair, string message) =>
+        new() { UserId = pair.UserId, EmployeeId = pair.EmployeeId, Success = false, Message = message };
+}
+
+public class LinkUserEmployeeRequest
+{
+    public Guid UserId { get; set; }
+    public Guid EmployeeId { get; set; }
+}
+
+public class UnlinkUserEmployeeRequest
+{
+    public Guid UserId { get; set; }
+}
+
+public class UserEmployeeLink
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public Guid? EmployeeId { get; set; }
+    public string? EmployeeName { get; set; }
+    public string? EmployeeNumber { get; set; }
+    public bool IsLinked { get; set; }
 }

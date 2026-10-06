@@ -56,6 +56,7 @@ export interface User {
   lastLoginAt?: Date;
   createdAt: Date;
   tenantId?: string;
+  employeeId?: string;
 }
 
 export interface CreateUserRequest {
@@ -337,46 +338,21 @@ class AdminApiService {
   }
 
   async createUser(userData: CreateUserRequest): Promise<User> {
-    console.log('Creating user:', userData.username, 'with roles:', userData.roles);
-    try {
-      const result = await apiService.request<User>('/user', {
-        method: 'POST',
-        body: JSON.stringify(userData),
-      });
-      console.log('User created successfully:', result.username, 'ID:', result.id);
-      return result;
-    } catch (error) {
-      console.error('Failed to create user:', userData.username, error);
-      throw error;
-    }
+    return apiService.request<User>('/user', {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
   }
 
   async updateUser(id: string, userData: UpdateUserRequest): Promise<User> {
-    console.log('Updating user:', id, 'with data:', userData);
-    try {
-      const result = await apiService.request<User>(`/user/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(userData),
-      });
-      console.log('User updated successfully:', result.username, 'ID:', result.id);
-      return result;
-    } catch (error) {
-      console.error('Failed to update user:', id, error);
-      throw error;
-    }
+    return apiService.request<User>(`/user/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
   }
 
   async deleteUser(id: string): Promise<void> {
-    console.log('Deleting user:', id);
-    try {
-      await apiService.request(`/user/${id}`, {
-        method: 'DELETE',
-      });
-      console.log('User deleted successfully:', id);
-    } catch (error) {
-      console.error('Failed to delete user:', id, error);
-      throw error;
-    }
+    await apiService.request(`/user/${id}`, { method: 'DELETE' });
   }
 
   async resetUserPassword(
@@ -948,56 +924,31 @@ class AdminApiService {
   }
 
   async createRole(roleData: Partial<Role>): Promise<Role> {
-    console.log('Creating role:', roleData.name, 'with permissions:', roleData.permissions?.length || 0);
     const createRequest = {
       name: roleData.name || '',
       description: roleData.description,
       permissions: roleData.permissions || []
     };
-    try {
-      const result = await apiService.request<Role>('/role', {
-        method: 'POST',
-        body: JSON.stringify(createRequest),
-      });
-      console.log('Role created successfully:', result.name, 'ID:', result.id);
-      return result;
-    } catch (error) {
-      console.error('Failed to create role:', roleData.name, error);
-      throw error;
-    }
+    return apiService.request<Role>('/role', {
+      method: 'POST',
+      body: JSON.stringify(createRequest),
+    });
   }
 
   async updateRole(id: string, roleData: Partial<Role>): Promise<Role> {
-    console.log('Updating role:', id, 'name:', roleData.name, 'permissions:', roleData.permissions?.length || 0);
     const updateRequest = {
       name: roleData.name || '',
       description: roleData.description,
       permissions: roleData.permissions || []
     };
-    try {
-      const result = await apiService.request<Role>(`/role/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(updateRequest),
-      });
-      console.log('Role updated successfully:', result.name, 'ID:', result.id);
-      return result;
-    } catch (error) {
-      console.error('Failed to update role:', id, error);
-      throw error;
-    }
+    return apiService.request<Role>(`/role/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updateRequest),
+    });
   }
 
   async deleteRole(id: string): Promise<void> {
-    console.log('Deleting role:', id);
-    try {
-      await apiService.request(`/role/${id}`, {
-        method: 'DELETE',
-      });
-      console.log('Role deleted successfully:', id);
-    } catch (error) {
-      console.error('Failed to delete role:', id, error);
-      throw error;
-    }
+    await apiService.request(`/role/${id}`, { method: 'DELETE' });
   }
 
   async getSecurityLogs(): Promise<SecurityLog[]> {

@@ -8,7 +8,9 @@ namespace ErpSystem.Core.Services;
 public interface IUserService
 {
     Task<IEnumerable<ApplicationUser>> GetAllUsersAsync();
+    Task<IEnumerable<ApplicationUser>> GetUsersForTenantAsync(Guid tenantId);
     Task<ApplicationUser?> GetUserByIdAsync(Guid userId);
+    Task<ApplicationUser?> GetUserByIdForTenantAsync(Guid userId, Guid tenantId);
     Task<IEnumerable<ApplicationUser>> GetUsersByIdsAsync(IEnumerable<Guid> userIds);
     Task<ApplicationUser?> GetUserByUsernameAsync(string username);
     Task<ApplicationUser?> GetUserByEmailAsync(string email);
@@ -46,12 +48,56 @@ public class UserService : IUserService
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<ApplicationUser>> GetUsersForTenantAsync(Guid tenantId)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            return [];
+        }
+
+        var now = DateTime.UtcNow;
+        return await _userManager.Users
+            .AsNoTracking()
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .Include(u => u.UserTenants.Where(ut => !ut.IsDeleted && ut.TenantId == tenantId))
+            .ThenInclude(ut => ut.Tenant)
+            .Where(u => u.TenantId == tenantId || u.UserTenants.Any(ut =>
+                !ut.IsDeleted &&
+                ut.TenantId == tenantId &&
+                ut.Status == UserTenantStatus.Active &&
+                (ut.ExpiresAt == null || ut.ExpiresAt > now)))
+            .OrderBy(u => u.UserName)
+            .ToListAsync();
+    }
+
     public async Task<ApplicationUser?> GetUserByIdAsync(Guid userId)
     {
         return await _userManager.Users
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Id == userId);
+    }
+
+    public async Task<ApplicationUser?> GetUserByIdForTenantAsync(Guid userId, Guid tenantId)
+    {
+        if (userId == Guid.Empty || tenantId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var now = DateTime.UtcNow;
+        return await _userManager.Users
+            .Include(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
+            .Include(u => u.UserTenants.Where(ut => !ut.IsDeleted && ut.TenantId == tenantId))
+            .ThenInclude(ut => ut.Tenant)
+            .FirstOrDefaultAsync(u => u.Id == userId &&
+                (u.TenantId == tenantId || u.UserTenants.Any(ut =>
+                    !ut.IsDeleted &&
+                    ut.TenantId == tenantId &&
+                    ut.Status == UserTenantStatus.Active &&
+                    (ut.ExpiresAt == null || ut.ExpiresAt > now))));
     }
 
     public async Task<IEnumerable<ApplicationUser>> GetUsersByIdsAsync(IEnumerable<Guid> userIds)

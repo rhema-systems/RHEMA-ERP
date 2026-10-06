@@ -990,7 +990,7 @@ export default function SecurityDashboardPage() {
                 overallHealthScore >= 90 ? 'bg-green-50' :
                 overallHealthScore >= 75 ? 'bg-yellow-50' : 'bg-red-50'
               }`}>
-                {securityHealth?.recommendations && securityHealth.recommendations.length > 0 ? (
+                {(securityHealth?.recommendations?.length ?? 0) > 0 ? (
                   <div className="space-y-2">
                     <p className={`text-sm font-medium ${
                       overallHealthScore >= 90 ? 'text-green-800' :
@@ -998,7 +998,7 @@ export default function SecurityDashboardPage() {
                     }`}>
                       Security Recommendations
                     </p>
-                    {securityHealth.recommendations.slice(0, 2).map((rec, index) => (
+                    {securityHealth?.recommendations?.slice(0, 2).map((rec, index) => (
                       <div key={index} className="flex items-start gap-2">
                         <Badge 
                           variant={rec.priority === 'critical' ? 'destructive' : 

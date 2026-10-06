@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../../services/admin-api.service', () => ({
+  getAdminProblemMessage: (_error: unknown, fallback: string) => fallback,
   adminApiService: {
     getRoles: mocks.getRoles,
     getPermissions: mocks.getPermissions,
@@ -20,6 +21,10 @@ vi.mock('../../../../services/admin-api.service', () => ({
     updateRole: mocks.updateRole,
     deleteRole: mocks.deleteRole,
   },
+}));
+
+vi.mock('../../../../hooks/use-auth', () => ({
+  useAuth: () => ({ hasRole: () => true }),
 }));
 
 vi.mock('../../../../hooks/use-toast', () => ({
