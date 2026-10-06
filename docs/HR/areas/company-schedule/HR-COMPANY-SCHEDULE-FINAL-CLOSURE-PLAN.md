@@ -57,8 +57,8 @@ has not started (the user: "don't start the actual development yet").
    week, the room view, the staff event page, the menus), built and proved. ✅ Lane 7's code is done (2026-10-06); its
    browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
-   110's staff booking), built and proved. Next: **6b**, the guide's front, rules and § 1–2 (L6-1: rewritten whole, the
-   travel guide's way), then 6c–6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, written. Next:
+   **6c**, the guide's event chapters (3, 3a, 4–7, 6a), then 6d–6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -338,7 +338,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b–6f, the guide and the docs, to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2) written; 6c–6f, the rest of the guide and the docs, to do | both suites green twice |
 
 ---
 
@@ -3556,6 +3556,35 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
   - **54 "R4D …" events**, live and a month ahead, from the recruitment suite (two more each run — lane 3a's ruling
     left them), and 10 cancelled "R4NB2 …" events from the templates suite.
 
+*6b — what was written (2026-10-06): the guide's front, its rules, its conventions and chapters 1–2 (L6-1). Docs
+only.* Every statement re-read in the code or on UAT; the walks' database fork set up.
+- **The front:** status (rewritten whole, the plan wins), a banner saying which parts are new until 6e, the scope table
+  with the lettered chapters (3a the calendar, 6a the staff event page, 10C staff room booking; 15 the fiscal calendar,
+  16 retired), 24 pages over 12 tables, the history in one paragraph. The markers gain **UAT / Rebuilt**.
+- **Seven rules** replace round 4's eight (its 1–6 fixed; 7 and 8 folded in):
+  1. a closure is a day off and re-counts leave — on UAT, real staff's; the two *Announce* buttons;
+  2. approval on the engine, nobody approves their own, two personas;
+  3. nothing emailed, the bell, "reached";
+  4. a recurring event is every date at once;
+  5. everybody sees their own calendar;
+  6. the hourly sweep;
+  7. the fiscal year is Finance's.
+- **Conventions:** the retired fiscal tables; the permission ladder from the controller's routes (deletes Admin bar the
+  guest, register-row and file removes; the one-time re-count Admin; five pages with no permission); the organiser
+  chosen (D-11).
+- **§ 1:** the diagram; six points (the audience is new); the twelve tables with what the closure added; every
+  status reached and by what; what each room and event setting decides; the approval comparison; **§ 1.6 who is
+  told** (21 in-app kinds, 17 emails, the calendar file); the site pickers.
+- **§ 2:** which database (UAT vs Rebuilt); what each holds; the numbers to quote; a clash of your own; the two
+  approval beats with two HR windows; four windows; the tabs; the checklist.
+- **Found while writing (recorded for § 21, 6e):**
+  - the reminder sweep's run-now, `POST reminders/run`, has no control on any screen — only the event page's
+    per-event buttons;
+  - `HR.Company.Approve`'s description names events, not bookings, though it is the bookings' fallback tier too;
+  - the recruitment suite (`hr-recruitment/run-round4-d.mjs`) leaves two "R4D" events on UAT each run — 54 now, on
+    the desk's register, landing and calendar; its own clean-up is owed (lane 3a's ruling kept them out of this
+    module's tidy step).
+
 ---
 
 ## 5. Residual register
@@ -4164,3 +4193,9 @@ built API, so no web host and no seeders).
     probe 42/42, `run-lane-n` 109/115 (#40); the blocking watcher logged nothing, and a pass took about 5 minutes.
 
   Next: 6b — the guide's front, its rules and § 1–2.
+- **2026-10-06, later** — **6a committed. Slice 6b written** — the guide's front, seven rules (replacing round 4's eight),
+  conventions and chapters 1–2, every statement re-read in the code or on UAT, the walks forked UAT vs Rebuilt. Three
+  small findings for § 21 (the sweep's run-now has no control; `HR.Company.Approve`'s description omits bookings; the
+  recruitment suite's R4D residue on UAT).
+
+  Next: 6c — the guide's event chapters (3, 3a, 4–7, 6a).

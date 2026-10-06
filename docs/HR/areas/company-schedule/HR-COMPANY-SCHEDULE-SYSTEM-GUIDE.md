@@ -1,88 +1,72 @@
 # HR Company Schedule — System Guide and Demonstration Workbook
 
-**Status:** written 2026-09-17 from the source — page components, forms, the controller, the
-service, the repositories, the EF model, the seeded permission map and the demo scenario. It
-describes what the code is built to do. Where a screen promises something the server does not do,
-the step says so rather than smoothing it over.
+**Status:** written 2026-09-17 from the source; updated 2026-09-24 for round 4 of the demo feedback;
+**rewritten whole in the company-schedule final closure's lane 6 (from 2026-10-06)** against what lanes 0–7
+built. Every chapter is re-read in the code and against UAT's own rows, and the walks fork where UAT differs from
+a database the demo pack builds today (§ 2.1). Where this guide and
+`HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md` disagree, **the plan is right**: its § 5 gives every finding's owner,
+and each lane's *State* says what was built and how it was proved. The guide describes what the code does; where a
+screen offers something the server refuses, the step says so.
 
-> ## Updated 2026-09-24 for round 4 of the demo feedback
+> **⚠ Rewrite in progress (lane 6).** The front matter, the seven rules, the conventions and chapters 1–2 are
+> new (slice 6b, 2026-10-06). Chapters 3–21 and the appendices still describe round 4 until slices 6c–6e
+> replace them. Where an old chapter disagrees with the rules or chapter 1, the rules and chapter 1 are right.
 >
-> Round 4 (`docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-4-PLAN.md`) changed this module in three
-> lanes. **D-2** (2026-09-22) fixed two of the six rules below outright and two in part, made the
-> module send email, and added a personal and a team diary. **D-1** (the same day) made the interview
-> clash check read this module, which makes a fifth rule partly true. **N-b2** (2026-09-23) made the
-> reminders and the RSVP chase send themselves, hourly. These parts were rewritten on 2026-09-24
-> from the code, the round's execution log and the demo database:
->
-> | Part | What changed | Lane |
-> |---|---|---|
-> | **The rules** | Rules 1, 2, 4 and 6 fixed, 1 and 2 only in part; Rule 5 partly true; Rule 3 unchanged. **Two new rules**: nothing is emailed on the demo database, and it must be freshly rebuilt | D-1, D-2, N-b2 |
-> | **§ 1** How it hangs together | The room's seats, longest booking and days ahead are enforced; reminders and the RSVP chase are sent; a fifth point on telling people | D-2, N-b2 |
-> | **§ 2** The prep | The demo database as a rebuild leaves it, what the reminders will have done, and what the harness does to it | — |
-> | **§ 5 – § 7** The event | Delete hidden from HR; invitations, reschedule and cancel notices are emailed; the new **Reminders** card; the approval the walk needs is now switched on in § 5; Edit moves an event without any of it | D-2, N-b2 |
-> | **§ 8 – § 10** Bookings | The room's own rules refuse, with a sentence naming the rule; the seeded booking count corrected | D-2 |
-> | **§ 10A, § 10B** *(new)* | **My schedule** and **Team schedule** — one person's diary and a unit's, from the same seven sources as the interview clash check | D-2 |
-> | **§ 12, § 13** Rooms, closures | Room codes that cannot repeat; closures read by the clash check and the diaries | D-1, D-2 |
-> | **§ 18 – § 21**, the appendices | Where the module now shows up elsewhere, the reset, the short path, what round 4 fixed, and what it found | — |
->
-> **Five statements from 2026-09-17 were wrong before round 4 and are corrected here.** They are
-> about the fiscal tables, the Approve walk, the seeded bookings, and § 19's SQL and command; § 21
-> lists them.
->
-> **Round 4's findings are marked `R4-…`** in each chapter's gap block, above the gaps it inherited,
-> and all 26 are listed in § 21. None is fixed. Four are in the demo data rather than the code, and
-> those are the ones that bite a demonstration; § 2 works round each of them.
->
-> ⚠ **Nothing in round 4 has been walked in a browser.** The two diaries, the Reminders card and
-> the hidden Delete are proved by harness (39 + 36 assertions) and by reading the pages. Chapters
-> not listed above still describe the 2026-09-17 reading.
+> ⚠ **Not yet walked in a browser:** the screens lanes 1–7 changed. The plan lists the walks (lane 5 items
+> 1–8, lane 7 items 9–12); every server rule behind them is proved by the review suite on UAT (1152 assertions,
+> two clean passes).
 
-**Scope:** the whole **Company Schedule** group of the HR sidebar — all four menu items, two of them
-added in round 4 — plus the six screens that hang off them without a menu entry, the **four setup
-areas** under
-Administration → HR → Company Schedule, and the **Company Profile** screen, which is a different
-menu but the same permission family and the one place the Admin tier genuinely earns its keep.
+**Scope:** the whole **Company Schedule** group of the HR sidebar (*Human Resources → Company Schedule*) —
+**five menu items** — plus the screens that hang off them without a menu entry; the **four setup areas** under
+Administration → HR → Company Schedule; the **Company Profile** screen, which is another menu but the same
+permission family and the one place the Admin tier genuinely earns its keep; and the **three self-service
+screens** in the employee portal (*Company → Calendar* and *Company → Room Bookings*).
 
 | # | Menu item | Route | Chapter |
 |---|---|---|---|
 | — | *(group landing)* Company Schedule | `/hr/company-schedule` | 3 |
-| 1 | Events | `/hr/company-schedule/events` | 4 |
+| 1 | Company Calendar — every employee; the server decides what each one sees | `/hr/company-schedule/calendar`, and in the portal `/me/calendar` | 3a |
+| 2 | Events | `/hr/company-schedule/events` | 4 |
 | — | *(no menu entry)* New event | `/hr/company-schedule/events/new` | 5 |
 | — | *(no menu entry)* The event | `/hr/company-schedule/events/[id]` | 6 |
+| — | *(portal, no menu entry)* The event as staff see it | `/me/calendar/events/[id]` | 6a |
 | — | *(no menu entry)* Edit an event | `/hr/company-schedule/events/[id]/edit` | 7 |
-| 2 | Room Bookings | `/hr/company-schedule/bookings` | 8 |
+| 3 | Room Bookings | `/hr/company-schedule/bookings` | 8 |
 | — | *(no menu entry)* Book a room | `/hr/company-schedule/bookings/new` | 9 |
 | — | *(no menu entry)* The booking | `/hr/company-schedule/bookings/[id]` | 10 |
-| 3 | My Schedule *(round 4)* | `/hr/company-schedule/my-schedule` | 10A |
-| 4 | Team Schedule *(round 4)* | `/hr/company-schedule/team` | 10B |
+| 4 | My Schedule — every employee | `/hr/company-schedule/my-schedule` | 10A |
+| 5 | Team Schedule — the HR desk and unit heads | `/hr/company-schedule/team` | 10B |
+| — | *(portal)* Room Bookings — staff book for themselves | `/me/room-bookings` (+ `new`, `[id]`) | 10C |
 | — | *(Administration)* setup hub | `/administration/hr/company-schedule` | 11 |
 | — | *(Administration)* Meeting Rooms | `…/company-schedule/rooms` (+ `new`, `[id]/edit`) | 12 |
 | — | *(Administration)* Business Closures | `…/company-schedule/closures` | 13 |
 | — | *(Administration)* Milestones | `…/company-schedule/milestones` | 14 |
-| — | *(Administration)* Fiscal Years | `…/company-schedule/fiscal-years` | 15 |
-| — | *(Administration)* The fiscal year | `…/company-schedule/fiscal-years/[id]` | 16 |
+| — | *(Administration)* Fiscal Calendar — Finance's, read-only | `…/company-schedule/fiscal-calendar` | 15 |
+| — | *(retired)* HR's own fiscal years | — the screens were removed in lane 4b | 16 |
 | — | *(Administration → Settings)* Company Profile | `/administration/hr/settings/company-profile` | 17 |
 
-**Nineteen screens** over **thirteen tables**, with four collections nested inside a single event.
-The two diaries added in round 4 have no table of their own. They read seven sources, four of them
-in other modules: interviews, leave, travel and training.
+**Twenty-four pages** over **twelve tables of the module's own**: four collections nested inside a single event,
+and a file store for milestones. Two retired fiscal tables stay in the database, read by nothing, and Finance's
+fiscal calendar is read and never written. The diaries and the calendar have no table of their own. They read
+each person's commitments from seven sources, four of them in other modules: interviews, leave, travel and
+training. New chapters are lettered (3a, 6a, 10C) so that no chapter number used elsewhere moved.
 
 > **A word about this module's history, because it explains its shape.** Until 2026-08-28 the
 > backend carried **ninety endpoints and no screen had ever called one of them** — the whole
-> surface was dormant from the original port. All forty write endpoints are wired now, and the
-> screens were written against a harness of 162 assertions. Two things had to be fixed before a
-> single form could exist: five actor ids (`organizerId`, `approvedById`, `markedById`,
-> `bookedById`, `announcedById`) arrived as **query parameters**, which would have made every one
-> of them act-as-anyone the moment a screen existed; and `MeetingRoom.StationId` was a **required
-> foreign key to an empty table with no endpoint**, which makes its own form unfillable. The first
-> moved to the token. The second was repointed to the live `Location` tree. Both of those are
-> worth a sentence in the demo — see § 1.6.
+> surface was dormant from the original port. Before a single form could exist, five actor ids
+> arrived as **query parameters** (act-as-anyone the moment a screen existed) and moved to the token, and the
+> room's site was a **required foreign key to an empty table** and was repointed to the live `Location` tree.
+> Round 4 (2026-09-24) made it send email and gave it two diaries. **The final closure (2026-10-01 to 10-06)**
+> then re-read every file, added 58 findings (F-1…F-58) to the 77 that the guide's first two editions listed, and
+> built all of them in seven lanes, deferring nothing (decision D-9): closures that move leave, events on the
+> workflow engine, recurring series, real files, staff booking, a company calendar, Finance's fiscal year. What
+> is still open is other modules' work and the browser walks — § 21.
 
 ---
 
 ## This document is two things at once
 
-Like the recruitment, employees, leave and attendance guides, this is a **reference** and a
+Like the recruitment, employees, leave, attendance and travel guides, this is a **reference** and a
 **script you can perform**. Every chapter has the same five parts, and you can read only the ones
 you need:
 
@@ -94,200 +78,200 @@ you need:
 | **Walk it** | ▶ | numbered steps: click this, expect that, say this |
 | **Behind the page** | ⚙ | endpoint → service → table, and the permission that gates it |
 
-Three more markers appear inside the walks:
+Four more markers appear inside the walks:
 
-- **🔴 LIVE WRITE** — this step changes real data. Every one is numbered
-  (`LIVE WRITE 1` … `14`), and chapter 19 tells you how to undo each.
+- **🔴 LIVE WRITE** — this step changes real data. Every one is numbered, and chapter 19 tells you how
+  to undo each.
 - **⚠ CAREFUL** — a way this step goes wrong in front of people, and what to do instead.
-- **🚫 DO NOT PRESS** — a control that renders for your persona and returns 403, or one that
-  writes something you cannot undo inside a demo.
+- **🚫 DO NOT PRESS** — a control that writes something you cannot undo inside a demo, or that reaches
+  people who are not in the room (Rule 1). Since lane 5a every remove and delete is shown only to the tier its
+  route needs, so the old "renders and answers 403" kind is gone; a refusal that remains — an organiser
+  approving their own event, say — is a sentence saying why, and safe to press.
+- **UAT / Rebuilt** — where a step depends on the database, it says what each one shows (§ 2.1).
 
 **Say-lines are in quotation marks and indented.** They are written to be read aloud more or less
 as they stand. Change the names, keep the order of the ideas — the order is doing the work.
 
 ---
 
-## Before anything else: the rules that decide whether this demo works
+## Before anything else: the seven rules that decide whether this demo works
 
-This is the friendliest module in HR to demonstrate — everybody understands a calendar and a
-meeting room. On 2026-09-17 it had six behaviours that would catch you out live, four of them
-screens promising something the server did not do. Round 4 fixed two of the six outright and three
-in part, and the demo database has added two of its own. Read these twice.
+This is still the friendliest module in HR to demonstrate — everybody understands a calendar and a meeting
+room — and since the final closure it is also one of the most connected. A closure moves leave, an event goes
+through the workflow engine, and the calendar decides what each person may see. Seven behaviours will catch you
+out live. Read them twice.
 
-| Rule | After round 4 |
+They replace round 4's eight. That edition's Rules 1–6 are fixed: every remove is shown only to whoever may use it,
+a moved event shows where it was, approval is a real chain, the availability search applies every room rule,
+closures reach leave, and numbers cannot repeat. Its Rule 7 (no mail server) is Rule 3 below, and its Rule 8 (rebuild
+first) is now § 2.1, because the module's own suites tidy up after themselves.
+
+| Rule | In one line |
 |---|---|
-| **1** · the Admin-only deletes | ◐ **partly fixed** — hidden on the event page and the bookings register; still offered, and still 403, on eight other controls |
-| **2** · reschedule history | ◐ **partly fixed** — kept and emailed, but not shown on the event page, and Edit still overwrites |
-| **3** · approval is a flag | unchanged |
-| **4** · the room's rules | ✅ **fixed** — enforced, though the availability search does not know two of them |
-| **5** · closures reach nothing | ◐ **partly fixed** — the interview clash check and the diaries read them; leave and attendance still do not |
-| **6** · numbers repeat | ✅ **fixed** |
-| **7** · *new* | **nothing is emailed on the demo database** |
-| **8** · *new* | **the demo database must be freshly rebuilt** |
+| **1** | A closure is a day off now: saving one re-counts people's leave, and on UAT those are TDC's own staff |
+| **2** | Approval runs on the workflow engine, and nobody approves their own: you need two HR personas |
+| **3** | Nothing is emailed on either demo database: show the bell, and read "reached" |
+| **4** | A recurring event is every one of its dates at once |
+| **5** | Everybody sees their own calendar, so show it in two windows |
+| **6** | The hourly sweep sends reminders and settles bookings by itself |
+| **7** | The fiscal year is Finance's |
 
-### Rule 1 — Every delete is Admin-only, and eight of them are still offered to `hr.head`
+### Rule 1 — A closure is a day off now, and saving one re-counts people's leave — on UAT, real people's
 
-The `HR` role holds `HR.Company.Read`, `HR.Company.Write` and `HR.Company.Approve`. It does **not**
-hold `HR.Company.Admin` — and **every delete in this module is Admin-gated**. Round 4 hid the two
-worst buttons from anybody without Admin. The other eight still render, and still answer 403:
+Since lane 1 a business closure is no longer a note on a calendar. What it does depends on its kind (chapter 13):
 
-| Where | Control | For `hr.head` |
+| Kind on the form | Who is off | What it changes |
 |---|---|---|
-| **The event page** | the **Delete** button in the header | ✅ **hidden** since round 4 |
-| Bookings register | ⋯ → **Delete** | ✅ **hidden** since round 4 |
-| Event → Participants | ⋯ → **Remove participant** | 🚫 still offered · 403 |
-| Event → Attachments | ⋯ → **Remove attachment** | 🚫 still offered · 403 |
-| Event → Tasks | ⋯ → **Remove task** | 🚫 still offered · 403 |
-| Meeting rooms | ⋯ → **Delete** | 🚫 still offered · 403 |
-| Closures / Milestones | ⋯ → **Remove closure** / **Remove milestone** | 🚫 still offered · 403 |
-| Fiscal years | ⋯ → **Delete**, and **Remove period** | 🚫 still offered · 403 |
+| **Whole company** | everybody | a day off for **leave** (not charged), for the **discipline** deadlines (a five-working-day appeal window steps over it), and for **travel** (a trip day on it is not posted to attendance as on duty) — exactly as a public holiday |
+| **One site** | the staff placed at that site | a day off in **their** leave |
+| **One organisation unit** | the unit and every unit beneath it, wherever its staff sit | a day off in **their** leave |
+| **Reduced operations** | nobody | nothing — it is still a working day |
 
-The event's Delete was the dangerous one: the only red button in the module, in the header of the
-screen you spend ten minutes on. It is gone for `hr.head`. The endpoint was **not** loosened:
-whether HR may delete a company event is for TDC to decide in role setup, and the harness asserts
-the 403 is still there. The eight left over are row-menu items, and the shared table they sit in
-already has the switch that would hide them (**R4-6.6**). **Cancel is still the action you want, and it
-works.** This is finding **C-1**.
+**Saving one re-counts leave already granted** (decision D-15a). Every approved, under-way or finished leave request
+over its days, for the people it covers, is counted again; the balance and the attendance days are re-posted; and
+each person whose count changes is told, in the app and by email. The screen lists them: *"Leave recounted (N) —
+balances and attendance updated, and each employee told"*. Moving or deleting the closure does the same in reverse,
+and so does a public holiday added to the holiday calendar (D-15b).
 
-### Rule 2 — The reschedule dialog says the original dates are kept. Now they are — but you cannot show them.
+**On UAT that is TDC's staff list:** 4,949 people numbered `TDC/…` beside the demo personas. A whole-company closure
+saved live over a day when anybody has leave changes those people's balances and sends each of them a notice. So:
 
-*"The original dates are kept on the record as history"* has been **true since round 4**. The first
-reschedule stores the original start and end, date and time, and a second move keeps the first
-original. Every participant is emailed the new date, the reason, and *"Previously:"* with the old
-date struck through.
+- **UAT:** make the live closure a **Reduced operations** one. It is still a working day, so it re-counts nothing
+  and tells nobody, and the form, the scope and the register are all there to show. Explain the day-off half from
+  the seeded *Year-end stocktake*.
+- **Rebuilt:** every employee belongs to the demo pack, so a whole-company closure over somebody's leave is safe,
+  and it is the strongest beat in chapter 13.
+- 🚫 **Two buttons publish to everybody they cover, and their notices cannot be unsent:** *Announce to the N staff
+  it covers* on a closure, and *Announce on the intranet* on an event. The announcement itself can be archived
+  afterwards under HR → Announcements; the notices it sent stay sent. On UAT a whole-company announcement reaches
+  4,978 people. Press them only for a unit or a scope you know, or on a rebuilt database.
 
-Two things have not caught up:
+Two things still do not read closures, and both are someone's open item: **attendance**, which has no working-day
+builder at all (attendance guide A-92, HR's own), and **payroll**, which can read the days and their *Staff are
+paid* flag through HR but does not yet act on an unpaid one (the payroll hand-off, § 3 item 4).
 
-- **The event page does not show the original.** The Overview still reads *"Rescheduled
-  2026-09-17 — Board papers not ready"*, and that date is **when the button was pressed**, not where
-  the event was (**R4-6.1**). So still **do not say "and you can see what it was before"**. Say what is
-  true, which is now better: *"the record keeps where it was, when it moved and why — and everybody
-  invited is told what it moved from."*
-- **Edit moves an event without any of that.** The edit form's date fields write the new dates
-  straight onto the event: nothing kept, no reason, no email (**R4-7.1**). Move an event with
-  **Reschedule**, never with Edit.
+### Rule 2 — Approval runs on the workflow engine, and nobody approves their own
 
-This is finding **C-2**.
+Since lanes 2b and 3b-1 (decision D-10), an event marked **Requires approval**, and a booking of a room marked
+**Bookings need approval**, go through the corporation's workflow engine like every other approval in HR.
 
-### Rule 3 — "Approve" here is a flag, not an approval chain
+- **It waits.** The event stays *Scheduled*, the booking *Tentative*, each marked as awaiting approval. The event's
+  invitations are held (*Not sent*) and go out the moment it is approved; its reminders and its chase wait too;
+  and the company calendar shows it to nobody but the HR desk and its organiser until then.
+- **The engine asks the HR desk.** Both databases carry the two definitions, *Company Event Approval* and *Room
+  Booking Approval*, each addressed to the HR role, which on both is **`hr.head` and `hr.officer`**. Each is asked
+  in the inbox and in the app, with a link to the record's page.
+- **Nobody approves their own.** The event's organiser, the booking's booker and whoever created it are refused,
+  with the reason. So the beat takes **two personas**: `hr.head` creates the event, `hr.officer` approves it.
+- **Decide on the record's own page** — *Approve* and *Reject* on the event, *Approve* and *Not approve* on the
+  booking. The generic inbox (`/workflow/inbox`) lists the request and opens the page, but a decision taken there
+  does not reach the record; that is true of every HR approval (cross-module #15).
+- **Reject cancels.** A rejected event is cancelled with its rooms; a booking not approved is cancelled. Both
+  tell the organiser or the booker.
+- **A move asks again.** An approved event that is rescheduled, or an approved booking whose time changes on a room
+  that needs approval, goes back to the approver.
+- **A series is approved once.** The first date carries the request, and deciding it decides every date still
+  waiting (Rule 4).
+- **Nothing is approved by default.** With no definition published, the record still waits, and anyone holding
+  `HR.Company.Approve` decides. Neither demo database is in that state.
 
-Every other request in HR — leave, overtime, regularisations, travel, requisitions — runs on the
-corporation's workflow engine. **Nothing in this module does.** Approving an event and approving a
-booking are single-click fields:
+### Rule 3 — Nothing is emailed on either demo database: show the bell, and read "reached"
 
-- no workflow instance, no definition, no step, no assignee check;
-- **no entry in `/workflow/inbox`** — the approver is never told;
-- anybody holding `HR.Company.Write` can approve anything, including their own;
-- `ApproveEventAsync` sets the status to *Confirmed* whether or not the event was marked as
-  requiring approval.
+**No mail server is set up on UAT or on a rebuilt database** (`EmailSettings` is empty). The module's seventeen
+emails — invitations, reminders, chases, moves, cancellations, a task given or overdue, a booking approved,
+cancelled or marked a no-show, and more (§ 1.6) — are each attempted and go nowhere. Even where a mail server is set
+up, an email sent with nobody signed in finds none until Platform fixes **cross-module #40**. That covers
+everything the hourly sweep sends.
 
-This is a defensible design for a room booking and a weaker one for a board meeting, and either
-way it is **not** what the rest of the product does. Say it plainly — § 1.5 has the sentence. This
-is finding **C-3**.
+**But the app tells people.** Since lane 2e-1 every company-schedule notice also goes **in the app** — the bell —
+to everybody it is for who has a login. That is your demonstration: a second window, signed in as the person told.
 
-Round 4 changed one thing about it. An event marked *Requires approval* is **not reminded until it
-is approved**, because the reminder sweep skips it, so approving one now also releases its
-reminders. And ⚠ **none of the four seeded events requires approval, so none of them shows an
-Approve button.** Chapter 5 creates an event that does, and chapter 6 approves that one.
+**And the screens count truthfully** (lane 2e-2). Every send reports how many people it was **for** and how many it
+**reached** — by an email a mail server accepted, or by the bell. On a demo database an internal guest with a login
+is reached through the bell, and an outside guest is never reached. An invitation is marked *Sent*, and a reminder
+or a chase stamped, only once it has reached somebody. One that reached nobody stays due, for the button and for the
+next sweep.
 
-### Rule 4 — The room's own rules are enforced now, but the search does not know two of them
+> *"Everybody invited is told — in the app straight away, and by email wherever a mail server is set up. This
+> database has none, so here is what they see."* Then open the bell in the second window, or the wording under
+> **Letter & Email Templates** (§ 18).
 
-Round 4 turned the three rules a room recorded and ignored into refusals, on **create and on edit**.
-Each refusal is a sentence naming the rule:
+### Rule 4 — A recurring event is every one of its dates at once
 
-| Rule on the room | What a booking that breaks it is told |
+Since lane 2f (decisions D-2 and D-12), saving an event that repeats creates **every occurrence** at once, up to
+fifty-two, ending on a date or after a count. Each is a full event with its own number (`EVT-…`), guest list,
+answers, attendance register, tasks and papers, and reads *"Occurrence 3 of 10"*. A weekly meeting for a year is
+fifty-two rows in the register the moment you press Save.
+
+- **Every series action asks how far:** *this date only*, *this and following dates* or *every date in the series* —
+  for adding or removing a guest, editing, rescheduling, cancelling and booking a room. It never changes a date that
+  has passed or is completed.
+- **A date on a public holiday or a whole-company closure** is made anyway, and flagged on its page and in the
+  series list.
+- **Keep a live series short** (three dates), and clean it up with **Cancel → every date in the series**. Cancel is
+  on the HR desk's tier; delete is an administrator's.
+
+### Rule 5 — Everybody sees their own calendar, so show it in two windows
+
+The **Company Calendar** (lane 7, decision D-7) is one page in two places: the HR menu, and *Company → Calendar*
+in the portal. The server decides what each person sees.
+
+| Who | Sees |
 |---|---|
-| **Longest booking (hours)** | *"Boardroom may be booked for at most 2 hour(s) at a time; this booking is 3. Shorten it, or book a room without that limit."* |
-| **Book up to (days ahead)** | *"Boardroom can only be booked up to 30 day(s) ahead; this booking is 45 day(s) out."* |
-| **Seats** | *"Boardroom seats 18; this booking expects 40."* |
+| **The HR desk** (`HR.Company.Read`) | every live event — a private one too, and one awaiting approval, marked so — every closure, and every booking in full |
+| **Anybody else** | the events they organise, are invited to (once the invitation has gone) or are the **audience** of — an event marked *Show on company calendar*, read through its scope and visibility, never a private or confidential one, never one awaiting approval; the closures that cover them; their own bookings, and anybody else's only as *"booked"* |
+| **Everybody** | the milestones marked *Show on calendar*, the public holidays, and their own leave, travel, interview panels and training |
 
-A blank rule means no limit. Bookable and the time clash are enforced as before, and the clash is
-still the best beat in the module — see chapter 9.
+So the same week looks different to `hr.head` and to `staff`. That is the point of the feature, and two windows make
+it in ten seconds. A member of staff who opens an event lands on the staff event page (chapter 6a): no budget, no
+other guest's answer, and the meeting password only for its guests and organiser. Their own invitation is answered
+from it.
 
-⚠ **The availability search still applies only the seats.** Ask it for a three-hour window and it
-offers a room limited to two hours. The refusal then arrives when you press **Book room**, not in the
-picker (**R4-9.1**). None of the three seeded rooms sets either limit, so the demo meets this only if you
-set one. This was finding **C-4**, with **C-27**.
+### Rule 6 — The hourly sweep sends reminders and settles bookings by itself
 
-### Rule 5 — Business closures reach the interview panel and the diaries, and still not leave or attendance
+Twenty-three minutes after the API starts, and every hour after that, one pass:
 
-The screen says a closure *"Affects leave and attendance calculations"*, the runbook aside says
-closures *"feed leave day-counting and attendance the same as public holidays"*, and there is a
-purpose-built `GET closures/is-closure-date` endpoint.
+- sends each event's **reminder**, *Days before* its start, once;
+- **chases unanswered invitations** once, two days before the reply-by date (the policy's setting, chapter 18);
+- **chases an overdue task** once, to whoever it is assigned to;
+- cancels a booking **still Tentative when its start comes** — *"Not approved before it started."* — and tells its
+  booker;
+- marks a **confirmed booking Completed** once its end has passed, silently.
 
-Since round 4, two things read closures:
-- the **interview clash check**, which warns a recruiter that the day is a closure;
-- the **two diaries** (§ 10A, § 10B).
+So a database days after its build has moved on its own: the seeded booking is *Completed*, and the seeded events'
+reminders have gone (§ 2.2). A booking left awaiting approval past its start vanishes from the queue by itself — the
+right answer, but say so before somebody asks where it went. The event page's **Send reminder now** and **Chase
+unanswered now** do the same for one event, and count as the sweep's send.
 
-Both treat a closure as a soft warning. ⚠ Both attribute **every** closure to **everybody**, so a
-one-site closure warns every interview panel and appears in every diary (**R4-13.1**).
+### Rule 7 — The fiscal year is Finance's
 
-**Leave and attendance still read nothing.** No leave code path and no attendance code path reads
-`BusinessClosures`, no screen calls `is-closure-date`, and the switch's wording and the runbook's
-aside are still false. Chapter 13 turns that into an honest sentence. This is finding **C-5**.
+Nothing in this module creates, closes or edits a fiscal year any more (lane 4b, decision D-6). *Administration → HR
+→ Company Schedule → Fiscal Calendar* shows **Finance's** years and periods read-only, with each accounting book's
+year-end close, and *Set up and closed in Finance* opens Finance's own screen. On UAT that is FY2025 (closed) and
+FY2026 (open); a date after FY2026 is labelled by continuing Finance's sequence — FY2027 from 1 January 2027, the
+year Finance must open next. The HR policy setting *Fiscal year starts* is read-only while Finance has a year.
 
-### Rule 6 — Event and booking numbers can repeat. ✅ Fixed in round 4.
-
-`EVT-…`, `BK-…` and generated room codes (`RM-…`) are issued from the shared number sequence, which
-counts deleted rows too. Each is **unique per tenant** in the database. Delete an event and create
-another, and the new one takes the next number. This was finding **C-6**, and **C-34** for room codes.
-
-One edge the unique index opened: a room code **typed** by hand is checked only against live rooms.
-Reusing the code of a deleted room passes that check, and the database then refuses it with a bare
-*"Something went wrong"* (**R4-12.1**). Deleting a room needs Admin, so a demo will not meet it.
-
-### Rule 7 — *(new)* Nothing is emailed on the demo database
-
-Round 4 made this module send email:
-- an **invitation** when somebody is added to an event;
-- a **reschedule** notice and a **cancellation** notice to everybody invited;
-- the **reminder** before the event and the **RSVP chase**, from an hourly sweep.
-
-The demo database has **no mail server configured**: `EmailSettings` is empty. Every one of those
-emails is attempted, logged (*"No email settings configured in database. Please configure SMTP
-settings first."*) and not delivered.
-
-The screens cannot tell. The Reminders card reads *"Sent"* with a date and time, and the toast says
-how many participants were *"reminded"*, whether or not anything left the building (**R4-6.3**). So:
-
-- **Do not say "she will have it in her inbox now."** Say *"that goes to everybody invited — this
-  database has no mail server, so let me show you what it says"*, and open **Letter & Email
-  Templates** (§ 18).
-- The stamps are real, and they stop a second send. A reminder "sent" here will not go again.
-
-### Rule 8 — *(new)* The demo database must be freshly rebuilt, with none of this module's suites run since
-
-The harness suites for this module run against the same database, and two of them leave their
-fixtures behind. Measured on UAT on 2026-09-24:
-
-| What | Left by | Where it shows |
-|---|---|---|
-| **60 events** named *R4D …*, live and in the future — 43 of them within 30 days | the lane D-1 and D-2 suites | the events register (102 rows, not 4), the landing's **Next 30 days**, the linked-event dropdown, the reminder sweep |
-| **15 rooms** named *R4D …* | the same | the rooms register, and every **Find free rooms** answer |
-| **32 bookings** besides the seeded one | the same | the bookings register |
-| **FY 2026 no longer current** | the company-schedule slice suites create a fiscal year as current and then delete it, which leaves no current year at all | chapter 15's *Current* badge |
-
-A rebuild clears all of it (**R4-2.1**, **R4-2.2**). § 2.1 describes what a rebuild leaves, and § 2.2 is a
-thirty-second check that nothing has run since.
+> *"HR does not keep its own year. It reads the one Finance keeps, so a requisition's budget year and the accounts'
+> year cannot disagree."*
 
 ---
 
 ## Conventions
 
 **Routes.** `/hr/company-schedule/events/[id]` is the file
-`frontend/src/app/hr/company-schedule/events/[id]/page.tsx`. A segment in square brackets is a
-parameter.
+`frontend/src/app/hr/company-schedule/events/[id]/page.tsx`, and a portal route such as `/me/calendar` is under
+`frontend/src/app/me/`. A segment in square brackets is a parameter. Every server route in this guide is under
+`api/CompanySchedule` unless it says otherwise; the staff doors are under `api/CompanySchedule/me`.
 
 **Table names.** There is no `HR_` prefix and no `ToTable()` mapping in this module. A table is
 named after its `DbSet<>` property in `ApplicationDbContext.HR.cs` — `CompanyEvent` lives in
 `CompanyEvents`, `RoomBooking` in `RoomBookings`.
 
-> ⚠ **The two fiscal tables are the exception, and a trap.** *(Corrected 2026-09-24: this note used
-> to say they were declared on the main `ApplicationDbContext`.)* HR's `FiscalYear` and
-> `FiscalPeriod` are configured in the HR partial with **no** `DbSet<>`, so each table is named after
-> its class: **`FiscalYear`** and **`FiscalPeriod`**, singular. The plural **`FiscalYears`** and
-> **`FiscalPeriods`** are **Finance's** tables, with Finance's columns, and hold Finance's own two
-> seeded years with twelve months each. A query against the plural pair reads the wrong module.
+> ⚠ **HR's two fiscal tables are retired, and their names are still a trap.** HR's `FiscalYear` and `FiscalPeriod`
+> are configured with **no** `DbSet<>`, so each table is named after its class, singular: **`FiscalYear`** and
+> **`FiscalPeriod`**. Since lane 4b nothing reads or writes them; they stay in the model until a later migration
+> drops them, and UAT's one row (*FY 2026*) is left there, unused. The plural **`FiscalYears`** and
+> **`FiscalPeriods`** are **Finance's**, and they are now the calendar this module reads (Rule 7, chapter 15).
 
 **Columns every table here carries.** Every entity in this guide derives from `TenantEntity`:
 
@@ -299,30 +283,32 @@ named after its `DbSet<>` property in `ApplicationDbContext.HR.cs` — `CompanyE
 | `UpdatedAt`, `UpdatedBy`, `LastModifiedById` | last change |
 | `IsDeleted`, `DeletedAt`, `DeletedBy` | soft delete — rows are hidden, never removed |
 
-**The permission ladder.** Three permissions gate this module, plus one interim tier that belongs
-to a different feature entirely:
+**The permission ladder.** Four permissions gate this module, and five of its pages need none:
 
 | Permission | Grants | Held by the `HR` role? |
 |---|---|---|
-| `HR.Company.Read` | every read — the company profile with its statutory numbers, the HR policy settings, the external-associate register, and the whole company schedule: events, rooms, bookings, milestones, closures and fiscal years | **yes** |
-| `HR.Company.Write` | maintain the company profile; run the company schedule — events with their participants, attendance and tasks, rooms and bookings, milestones, closures, fiscal years and their periods. **Changing the HR policy settings is deliberately NOT this permission** | **yes** |
-| `HR.Company.Admin` | **change the HR policy settings** — the procedural-absence threshold (FR-HR-092) and the budget/establishment enforcement modes (FR-HR-136) — **replace or retire the company seal**, and **delete** every company-schedule record | **no** |
-| `HR.Company.Approve` | interim authority over **team objectives and terms of reference** where no workflow definition is published. It has nothing to do with the company schedule, despite the name | **yes** |
+| `HR.Company.Read` | every read of the desk — the landing's summary, both registers and their CSV exports, every event, room, booking, milestone and closure with their collections and files, the whole company calendar, Finance's fiscal calendar (read for HR in the server), payroll's read of closure days; also the company profile with its statutory numbers, the HR policy settings and the external-associate register | **yes** |
+| `HR.Company.Write` | run the company schedule — create, edit, reschedule, cancel and complete events; guests, answers at the desk, the register, files and tasks, and **removing a guest, a register row or a file**; reminders and chases now; announcing an event or a closure; rooms, bookings (cancel, mark a no-show), a booking for every date of a series; milestones and their files; closures; any unit's team schedule; the company profile. **Changing the HR policy settings is deliberately NOT this permission** | **yes** |
+| `HR.Company.Admin` | **change the HR policy settings** — the procedural-absence threshold (FR-HR-092) and the budget/establishment enforcement modes (FR-HR-136); **replace or retire the logo, the seal and the signature**; **delete** an event, a task, a booking, a room (only one with no booking history), a closure or a milestone; and run the one-time leave re-count for closures that existed before lane 1 | **no** |
+| `HR.Company.Approve` | decide an event or a booking that needs approval **where no workflow definition is published** — the fallback tier (Rule 2); and the same for team objectives and terms of reference. Its description still names events only, not bookings | **yes** |
+| *(none — any internal login)* | the **Company Calendar**, **My Schedule**, **Team Schedule** (the server allows the HR desk any unit and a unit's head their own), the **staff event page** and the invitee's own answer, and **staff room booking** in the portal. The server decides, per person, what each one may see or do | — |
 
 > The Admin tier's shape is worth reading twice, because it is the clearest statement of intent in
 > the HR permission map. It is not "the senior version of Write". It is three specific things: the
 > knobs that move a trust boundary, the corporation's seal, and destruction. An HR officer runs the
 > calendar; an administrator decides what the calendar is allowed to mean.
 
-**The actor is always the token.** The organiser of an event, the approver of a booking, the
-person who marked attendance, the booker and the announcer of a closure are all taken from
-`CurrentUser.EmployeeId`. **None of those fields is on any form**, and that is the point — they
-used to be query parameters. One consequence:
+**The actor is the token, and the organiser is chosen.** The booker, the person who marked attendance, the
+uploader, the announcer, the creator of an event and the approver are all taken from the signed-in person's
+employee record. None of those is on a form — they used to arrive as query parameters. Since lane 2a (decision
+D-11) **the organiser** is the one exception: the event form has an *Organiser* picker, defaulting to you, so an HR
+officer can file the board meeting under the Managing Director. The creator is stamped beside them. One
+consequence stands:
 
-> **A signed-in user whose account is not linked to an employee record cannot organise an event,
-> book a room, mark attendance or announce a closure.** They get a clean `400` that writes nothing.
-> The `admin` account is unlinked on this database, so this is load-bearing rather than
-> theoretical — chapter 17 is the only place `admin` is used, and it is used for the seal.
+> **A signed-in user whose account is not linked to an employee record cannot create an event, book a room, mark
+> attendance or announce a closure.** They get a clean refusal that writes nothing. The `admin` account is unlinked
+> on both demo databases, so this is load-bearing rather than theoretical: chapter 17 is the only place `admin` is
+> used, for the logo, the seal and the signature.
 
 ---
 
@@ -334,54 +320,56 @@ Recruitment is a chain, employees is a hub, leave is a ledger, attendance is a p
 **The company schedule is two registers that share a calendar.**
 
 ```
- ┌─────────────── THE CALENDAR HALF ────────────────────────────────────┐
- │                                                                       │
- │   CompanyEvent   EVT-2026-00001                                      │
- │   name · category · type · priority · when · where · audience         │
- │   visibility · budget · resources · catering · reminders              │
- │   Scheduled → Confirmed → InProgress → Completed                      │
- │            ↘ Cancelled  ↘ Postponed  ↘ Rescheduled                    │
- │                                                                       │
- │     ├── EventParticipant  — who is invited (employee OR external)     │
- │     │     NotSent → Sent → Accepted / Declined / Tentative            │
- │     ├── EventAttendance   — who actually turned up, in and out        │
- │     ├── EventTask         — before / during / after, assigned & due   │
- │     └── EventAttachment   — agenda, minutes, presentation, handout    │
- │                                                                       │
- │   Beside the events, three reference registers:                       │
- │     • CompanyMilestone  — anniversaries and achievements              │
- │     • BusinessClosure   — days the organisation is shut               │
- │     • FiscalYear → FiscalPeriod — the reporting windows               │
- └───────────────────────────────┬───────────────────────────────────────┘
-                                 │  an event MAY be linked to a booking
+ ┌─────────────── THE CALENDAR HALF ─────────────────────────────────────┐
+ │                                                                        │
+ │   CompanyEvent   EVT-2026-00001                                        │
+ │   name · category · type · priority · when · where (site, venue, link) │
+ │   organiser · who it is for (scope, unit, visibility) · budget ·       │
+ │   resources · catering · replies asked · reminders                     │
+ │   Scheduled → Confirmed → Completed      (needs approval? it waits)    │
+ │       ↘ Rescheduled  ↘ Postponed  ↘ In progress (by hand) ↘ Cancelled  │
+ │   one of a SERIES?  occurrence 3 of 10, linked by a series id          │
+ │                                                                        │
+ │     ├── EventParticipant  — who is invited (employee OR outside guest) │
+ │     │     Not sent → Sent → Accepted / Declined / Tentative            │
+ │     ├── EventAttendance   — who actually came, in and out              │
+ │     ├── EventTask         — before / during / after, owner and due date│
+ │     └── EventAttachment   — agenda, minutes, papers: real files        │
+ │                                                                        │
+ │   Beside the events, three reference registers:                        │
+ │     • CompanyMilestone (+ its files) — anniversaries, achievements     │
+ │     • BusinessClosure  — days off for everybody, a site or a unit      │
+ │     • the fiscal calendar — FINANCE's years and periods, read-only     │
+ └───────────────────────────────┬────────────────────────────────────────┘
+                                 │  an event's rooms are bookings linked to it
                                  ▼
- ┌─────────────── THE ROOMS HALF ───────────────────────────────────────┐
- │                                                                       │
- │   MeetingRoom  RM-0001 · Boardroom · 18 seats · Tema Head Office      │
- │   facilities: projector · whiteboard · VC · audio · A/C               │
- │   rules: active? bookable? needs approval? max hours? days ahead?     │
- │                                                                       │
- │            ↓  is held for a window by                                 │
- │                                                                       │
- │   RoomBooking  BK-2026-00001                                          │
- │   room · from · to · purpose · seats · requirements · catering        │
- │   Tentative → Confirmed → Completed                                   │
- │            ↘ Cancelled  ↘ NoShow                                      │
- │                                                                       │
- │   ⛔ THE HARD RULES IN THE MODULE:                                     │
- │      a room cannot be double-booked. Overlap is refused on            │
- │      create AND on edit, and the booking form asks the server         │
- │      which rooms are free before it offers you one. Since round 4     │
- │      the room's seats, longest booking and days-ahead limit           │
- │      refuse too — though the search applies only the seats.           │
- └───────────────────────────────────────────────────────────────────────┘
+ ┌─────────────── THE ROOMS HALF ────────────────────────────────────────┐
+ │                                                                        │
+ │   MeetingRoom  BRD · Boardroom · 18 seats · Tema Head Office           │
+ │   facilities: projector · whiteboard · VC · audio · A/C                │
+ │   rules: active? bookable? needs approval? longest booking? days ahead?│
+ │                                                                        │
+ │            ↓  is held for a window by                                  │
+ │                                                                        │
+ │   RoomBooking  BK-2026-00001   — by the HR desk, or by staff (portal)  │
+ │   room · from · to · purpose · seats · requirements · catering         │
+ │   Tentative (waiting for approval) → Confirmed → Completed             │
+ │            ↘ Cancelled  ↘ No show                                      │
+ │                                                                        │
+ │   ⛔ A room cannot be double-booked: the clash is checked under a lock │
+ │      on create AND edit, and the search offers only rooms whose own    │
+ │      rules — seats, longest booking, days ahead — the booking meets.   │
+ └────────────────────────────────────────────────────────────────────────┘
 
- Everything on the left is HR's day-to-day work → /hr/company-schedule
- Everything set up once — rooms, closures, milestones, fiscal years —
-                                                → /administration/hr/company-schedule
+ Above both: the COMPANY CALENDAR and the two DIARIES, which hold nothing of their own —
+ they draw each person's events, bookings, closures, holidays, milestones, leave, travel,
+ interview panels and training, and show each person only what is theirs to see.
+
+ Day-to-day work → /hr/company-schedule        Set up once a year → /administration/hr/company-schedule
+ Every employee   → /me/calendar, /me/room-bookings, and the HR menu's calendar and diaries
 ```
 
-Five points follow, and they are the five worth landing in a room:
+Six points follow, and they are the six worth landing in a room:
 
 **1. An event is a project, not a diary entry.** It carries a budget and a budget code, the
 resources and the catering it needs, a task list split into before / during / after with owners and
@@ -391,317 +379,391 @@ company durbar for a hundred and forty people is a small project, and this is th
 **2. The invitation list and the attendance register are two different lists, deliberately.** Who
 was asked is not who came. Both are kept, and the gap between them is the useful number.
 
-**3. The room clash is enforced by the database, not by the calendar being polite.** The booking
-form asks *"which rooms are free between these two times"* and only offers those. Try it anyway
-and the server refuses. That was the one rule in this module you could demonstrate by failing on
-purpose. Since round 4 the room's own limits refuse as well — its seats, its longest booking and how
-far ahead it may be booked (Rule 4).
+**3. An event knows who it is for, and that decides who sees it.** Its *scope* (all staff, one organisation unit
+and everything beneath it, management, or its guest list), its *visibility* (public, a unit, management, private,
+confidential) and *Show on company calendar* together make one audience. That audience is what the calendar and
+the diaries show it to, what the clash rule compares, and what *Announce on the intranet* reaches. The form says
+how many people that is before you save. "Management" means unit heads and anybody named as a line manager — the
+same rule orientation uses (decision D-16).
 
-**4. The split between HR and Administration is the same split as everywhere else in this
-product.** Events and bookings change every day and live under Human Resources. Rooms, closures,
-milestones and fiscal years are decided once a year and live under Administration. Same permission
-tier, different rhythm.
+**4. The room clash is enforced by the database, not by the calendar being polite.** The booking form asks *"which
+rooms are free between these two times, for this many people"* and offers only rooms whose own rules the booking
+meets. Try it anyway and the server refuses — also for two people pressing *Book* at the same moment, because the
+check and the write are taken under one lock. Two whole-company events at the same time in the same place are
+refused the same way (chapter 5); any other overlap is a warning.
 
-**5. Since round 4 it tells people, and it can say what anybody is committed to.** Adding somebody
-to an event emails them the invitation. Moving or cancelling the event emails everybody invited. An
-hourly sweep sends each event's reminder, and chases unanswered invitations, once each. And two
-diaries, *My schedule* and *Team schedule*, assemble one person's or one unit's weeks. They draw on
-the same seven sources the interview clash check reads: events, room bookings, interview panels,
-training, leave, travel, and closures with public holidays. ⚠ On the demo database none of those
-emails is delivered (Rule 7).
+**5. The split between HR, Administration and the portal is the same split as everywhere else in this product.**
+Events and bookings change every day and live under Human Resources. Rooms, closures and milestones are decided
+once a year and live under Administration, beside the fiscal calendar Finance keeps. Every employee has the
+calendar, the two diaries, the staff event page and room booking, and sees only what is theirs.
+
+**6. It tells people, and it can say what anybody is committed to.** Inviting, moving, postponing, changing,
+cancelling, uninviting, a task given or overdue, a booking decided or lapsed, an answer to the organiser: each is
+told in the app and by email (§ 1.6), and an invitation carries a calendar file. An hourly sweep sends the
+reminders and chases (Rule 6). And the calendar and the two diaries, *My Schedule* and *Team Schedule*, assemble
+anybody's weeks from the same seven sources the interview clash check reads: events, room bookings, interview
+panels, training, leave, travel, and closures with public holidays. ⚠ On both demo databases the emails go nowhere
+and the bell is the demonstration (Rule 3).
 
 ### 1.2 The tables
 
-Thirteen, in the order the module uses them.
+Twelve of the module's own, in the order it uses them, then the ones it reads or has retired.
 
 | # | Table | One line |
 |---|---|---|
-| 1 | `CompanyEvents` | The event itself — 72 columns, from priority to catering. Round 4 added five: the original window (four) and when the RSVP chase went |
-| 2 | `EventParticipants` | Who is invited: an employee **or** an external guest, with their RSVP |
-| 3 | `EventAttendances` | Who actually attended, with check-in, check-out and who marked it |
-| 4 | `EventTasks` | What has to happen before, during and after — owner, due date, priority |
-| 5 | `EventAttachments` | Agenda, minutes, presentation, handout, resource — by **reference** |
+| 1 | `CompanyEvents` | The event itself — 78 columns, from priority to catering. The final closure added the organisation unit (replacing the department, D-5), the series id and occurrence number (D-12), the event it came from (an emergency drill, C-51), and the calendar-file sequence (D-14) |
+| 2 | `EventParticipants` | Who is invited: an employee **or** an outside guest, with their answer. One row per person per event — a unique index refuses a second |
+| 3 | `EventAttendances` | Who actually attended, with check-in, check-out and who marked it. One row per person per event |
+| 4 | `EventTasks` | What has to happen before, during and after — owner, due date, priority, and when its overdue chase went |
+| 5 | `EventAttachments` | Agenda, minutes, presentation, handout, resource — **real files** through the upload gate since lane 2h (scanned, filed in the document store); an older row that only named a path reads *"reference only"* |
 | 6 | `MeetingRooms` | A bookable room: site, placement, seats, facilities, booking rules |
-| 7 | `RoomBookings` | A room held for a window, with a purpose and an optional linked event |
-| 8 | `CompanyMilestones` | Anniversaries, achievements, launches, targets, certifications |
-| 9 | `BusinessClosures` | Days the organisation is shut, company-wide or per site/department |
-| 10 | `FiscalYear` | The reporting window, with exactly one marked current. ⚠ Singular — `FiscalYears` is Finance's (Conventions) |
-| 11 | `FiscalPeriod` | Quarters or months inside a year, each openable and closable. ⚠ Singular — `FiscalPeriods` is Finance's |
-| 12 | `CompanyProfiles` | The legal identity — statutory numbers, addresses, the letterhead |
-| 13 | `CompanySealAssets` | The seal and specimen signature every generated HR letter is stamped with |
+| 7 | `RoomBookings` | A room held for a window, with a purpose and, from the desk, an optional linked event |
+| 8 | `CompanyMilestones` | Anniversaries, achievements, launches, targets, certifications — a yearly one falls every year |
+| 9 | `CompanyMilestoneDocuments` | A milestone's files — the certificate, the citation — through the same upload gate *(new in the final closure, D-3)* |
+| 10 | `BusinessClosures` | Days off: for the whole company, one site or one organisation unit, or reduced operations; once or every year |
+| 11 | `CompanyProfiles` | The legal identity — statutory numbers, addresses, the letterhead's text |
+| 12 | `CompanySealAssets` | The logo, the seal and the specimen signature every generated HR letter carries — each versioned, PNG or JPEG |
+
+**Read, never written:** Finance's `FiscalYears`, `FiscalPeriods` and `YearEndBookCloseCycles` — the fiscal
+calendar (chapter 15). **Retired:** HR's own `FiscalYear` and `FiscalPeriod`, read by nothing since lane 4b
+(Conventions). **Written beside the module's own:** `Notifications` (the bell), the workflow engine's instances (an
+approval), `HrAnnouncements` (an announced closure or event), and the leave and attendance rows a closure re-counts
+(Rule 1).
 
 ### 1.3 The vocabularies
 
-Seven enum families. Two matter; the rest are look-ups.
+Two families matter, and every value in them is now reached by something; the rest are look-ups.
 
-**Event status** — seven values: *Scheduled* (where every event starts) · *Confirmed* (what
-Approve sets) · *In progress* · *Completed* (what Complete sets) · *Cancelled* (what Cancel sets) ·
-*Postponed* · *Rescheduled*. ⚠ **Rescheduling does not set *Rescheduled***, and nothing sets
-*In progress* or *Postponed* — all three are reachable only by choosing them by hand in the edit
-form's Status dropdown (**C-7**).
+**Event status** — seven values, and *awaiting approval* is not one of them: it is an event that needs approval
+and has not had it (Rule 2), whatever its status.
 
-**Booking status** — five: *Tentative* (a room that needs approval starts here) · *Confirmed* (a
-room that does not, and what Approve sets) · *Completed* · *Cancelled* · *No show*. ⚠ *Completed*
-and *No show* are set by nothing (**C-8**).
+| Status | Set by |
+|---|---|
+| *Scheduled* | where every event starts |
+| *Confirmed* | approval, on an event that needs it; or the edit form, on one that does not |
+| *Rescheduled* | **Reschedule** — and an edit that moves the dates, which goes the same way and asks for a reason |
+| *Postponed* | the edit form; the guests are told, and their calendar entry is withdrawn until a new date |
+| *In progress* | the edit form only — nothing sets it by itself |
+| *Completed* | **Complete**, never before the event has started |
+| *Cancelled* | **Cancel**, **Reject**, or a series cancelled from an earlier date; its rooms are released |
 
-The other five, for reference:
+**Booking status** — five, every one reached since lane 3:
+
+| Status | Set by |
+|---|---|
+| *Tentative* | a booking of a room that needs approval, while it waits |
+| *Confirmed* | a booking of a room that does not, or an approved one |
+| *Completed* | the hourly sweep, once a confirmed booking's end has passed (Rule 6) |
+| *Cancelled* | **Cancel** (with a reason); **Not approve**; the sweep, for one still Tentative at its start; retiring its room; cancelling or deleting its event |
+| *No show* | **Mark no-show**, by the desk, after the start — for good |
+
+The rest, for reference:
 
 | Family | Values |
 |---|---|
-| **Event category** | Meeting · Training · Company Event · Deadline · Holiday · Conference · Social Event · Milestone |
+| **Event category** | Meeting · Training · Company Event · Deadline · Conference · Social Event. *Holiday* and *Milestone* are refused for a new event, because each has its own register — public holidays in the holiday calendar, milestones in chapter 14; older rows keep them |
 | **Event type** | Internal · External · Client Meeting · Statutory · Board Meeting |
+| **Priority** | Critical · High · Medium · Low — a label only, and the form says so |
 | **Location type** | On-site · Off-site · Virtual/Online · Hybrid |
-| **Audience (scope)** | All Staff · Department · Selected Individuals · Management Only · External Only |
+| **Audience (scope)** | All Staff · Department (an organisation unit and everything beneath it) · Selected Individuals · Management Only · External Only |
 | **Visibility** | Public · Private · Department · Management · Confidential |
+| **Repeats** | Daily · Weekdays *(Monday to Friday, new)* · Weekly · Bi-weekly · Monthly · Quarterly · Annually |
+| **Series scope** | This date only · This and following dates · Every date in the series |
 | **Participant role** | Organizer · Presenter · Attendee · Optional Attendee · Facilitator |
-| **Invitation status** | Not Sent · Sent · Accepted · Declined · Tentative · No Response |
+| **Invitation status** | Not Sent · Sent · Accepted · Declined · Tentative · No Response. An answer is one of Accepted, Declined or Tentative — *"May attend"* on the staff screens |
+| **Attachment type** | Agenda · Minutes · Presentation · Handout · Resource Material |
+| **Task category** / **status** | Pre-event · During · Follow-up / Not Started · In Progress · Completed · Cancelled. *Overdue* is worked out from the due date when the task is read, never set |
 | **Room type** | Conference Room · Boardroom · Training Room · Huddle Room · Auditorium |
-| **Closure type** | Full Closure · Partial Closure · Department Closure · Station Closure |
+| **Closure kind** | Whole company · One site · One organisation unit · Reduced operations *(on the wire: Full, Station, Department, Partial)* |
 | **Milestone category** | Company Anniversary · Achievement · Product Launch · Target/Goal · Certification |
-| **Fiscal year status** | Active · Closed · Archived |
+| **Company image** | Logo · Seal · Signature |
 
-### 1.4 What the room rules decide, and what they do not
+### 1.4 What the settings decide
 
-Have this ready. Somebody in a facilities role *will* ask.
+Have this ready. Somebody in a facilities role *will* ask about the rooms, and somebody from the executive office
+about the events. **Every setting on both forms now does what it says**; the four ghosts round 4 listed are gone.
 
-| Setting on a room | Stored | Shown | **Enforced when a room is booked** |
-|---|---|---|---|
-| **Can be booked** (`IsBookable`) | ✅ | ✅ | ✅ — *"This room is not available for booking"* |
-| **Active** (`IsActive`) | ✅ | ✅ | ✅ — an inactive room is left out of the availability list |
-| *(the time slot)* | — | — | ✅ — *"There is a conflicting booking for this time slot"*, on create **and** on edit |
-| **Bookings need approval** | ✅ | ✅ | ✅ — the booking is created *Tentative* instead of *Confirmed* |
-| **Seats** (`Capacity`) | ✅ | ✅ | ✅ **since round 4** — the availability search filters on it, and create **and** edit refuse a booking that expects more people |
-| **Longest booking (hours)** | ✅ | ✅ | ✅ **since round 4**, on create and edit — ⚠ but the availability search still offers the room (**R4-9.1**) |
-| **Book up to (days ahead)** | ✅ | ✅ | ✅ **since round 4**, on create and edit — ⚠ the same |
-
-And the same table for an event:
-
-| Setting on an event | Enforced |
+| Setting on a room | **What it decides** |
 |---|---|
-| **Requires approval** | ◐ the event is usable whether or not it has been approved, and Approve works either way — but **since round 4 it is not reminded until it is approved** |
-| **Requires RSVP** / **RSVP deadline** | ✅ **since round 4**: everybody who has not answered is chased **once**, the policy's lead time before the deadline (2 days unless changed — an administrator's setting, § 18). Nothing closes the list at the deadline |
-| **Send reminders** / **Days before** | ✅ **since round 4**: everybody who has not declined is emailed **once**, that many days before. An hourly sweep sends it and stamps `ReminderSentDate`; moving the date lets it go again. ⚠ With *Days before* left blank, nothing is ever sent (**R4-5.1**) |
-| **Audience (scope)** | ❌ — it does not populate or restrict the participant list |
-| **Visibility** | ❌ — every event is visible to everyone with the read permission |
-| **Show on company calendar** / **Show on intranet** | ❌ — there is no company calendar screen and no intranet feed |
-| **Recurrence** | ❌ — the pattern is stored and **no second occurrence is ever generated** |
+| **Can be booked** | a room that cannot is not offered by the search, and is refused on save |
+| **Active** | an inactive room is not offered and cannot be booked. Making a room inactive, or deleting it, with bookings still to come **lists them and offers to cancel them and tell their bookers** (D-18) |
+| *(the time slot)* | *"There is a conflicting booking for this time slot"* — on create **and** on edit, under one lock, so two people pressing *Book* at once cannot both get it |
+| **Bookings need approval** | the booking waits *Tentative* and the engine asks the HR desk; the booker may not approve it; an approved booking moved to another time asks again (Rule 2) |
+| **Seats** | the search offers only rooms that seat the party, and the save refuses more people — counting the larger of the booking's expected attendees and its event's estimate |
+| **Longest booking (hours)** | the search leaves the room out for a longer window, and the save refuses it, with a sentence naming the limit |
+| **Book up to (days ahead)** | the same, for a booking too far ahead |
+
+A room with **any booking on record** cannot be deleted, only made inactive, so its history stays readable.
+
+| Setting on an event | **What it decides** |
+|---|---|
+| **Organiser** | whose event it is: committed in their diary and the clash check, reminded with the guests, told in the app when an invitee answers for themselves — and refused as its approver |
+| **Requires approval** | the event waits on the engine (Rule 2); its invitations, reminders and calendar audience wait with it |
+| **Who it is for** — scope, unit, visibility, **Show on company calendar** | who sees it on the calendar and in the diaries, what the clash rule compares, and whom *Announce on the intranet* reaches (§ 1.1, point 3). The form shows the count before you save, and warns of a unit nobody is in |
+| **Show on intranet** | marks it to announce: *Announce on the intranet* appears on its page, and HR presses it — never on save (L1-1) |
+| **Replies asked** / **Reply by** | a reply-by date is required, on or before the start; everybody unanswered is chased **once**, two days before it by default (Rule 6); an invitee answers until then |
+| **Send reminders** / **Days before** | *Days before* is required when reminders are on; everybody not declined is reminded **once**, that many days before, and again after a move |
+| **Repeats** | every date is made at once, up to 52 (Rule 4) |
+| **Site** | where it is: the clash rule's "same place", the calendar file's location. Only sites where staff can be placed are offered (§ 1.7) |
+| **Estimated attendees** | counted against a linked room's seats |
+| **Priority** | a label for the registers, and the form says so |
+| **Budget**, **budget code**, **resources**, **catering** | recorded and shown on the event page; nothing in Finance or Procurement reads them |
 
 > **Say it like this, once, in chapter 5, and you will not have to defend it later:**
 >
-> *"An event here is a complete record of an occasion — what it is, who is coming, what it costs,
-> what has to be done and by whom. And it tells people: whoever you invite gets the invitation, the
-> reminder goes out the days before, and anybody who has not answered is chased before the RSVP
-> deadline — each once. What it does not yet do is repeat itself: a recurring event does not spawn
-> its occurrences. That is a scheduling job on top of a record that already carries the pattern."*
+> *"An event here is a complete record of an occasion — what it is, who it is for, who is coming, what it costs,
+> what has to be done and by whom. And it looks after itself: it is approved where it must be, the people invited
+> are told and reminded, anybody who has not answered is chased before the reply-by date, and a meeting that
+> repeats is every one of its dates, each with its own register."*
 >
-> ⚠ Keep the tense honest on the demo database: the emails are **sent** by the system and
-> **delivered** by a mail server, and this database has none (Rule 7).
+> ⚠ Keep the tense honest on a demo database: the system **sends** the emails, a mail server **delivers** them,
+> and neither demo database has one (Rule 3). The bell is delivered.
 
-### 1.5 Where the approval happens — and why it is different here
+### 1.5 Where the approval happens
 
-**It does not.** This is the only approvable thing in HR that is not on the workflow engine.
+**On the workflow engine, like every other approval in HR** (lanes 2b and 3b-1, decision D-10). Rule 2 has the
+behaviour; this is the comparison a technical buyer asks for.
 
-| | Everywhere else in HR | Here |
+| | Before the final closure | Now |
 |---|---|---|
-| Who approves | the engine's assignee, per record | anyone with `HR.Company.Write` |
-| How they know | `/workflow/inbox` | they do not |
-| What is kept | definition, step, assignee, decision, timestamp, comments | an approver id and a date |
-| Self-approval | blocked where the definition says so | always allowed |
+| Who approves | anyone with `HR.Company.Write` | whoever the engine names — the HR desk, on both definitions |
+| How they know | they did not | the workflow inbox, and a notice in the app that opens the record |
+| What is kept | an approver id and a date | the engine's record — definition, step, approver, decision, time and comment; an event shows it on its *Workflow* tab |
+| Self-approval | always allowed | refused to the organiser or booker and to whoever created it, with the reason |
+| An event that needs none | Approve still worked | nothing to approve; *Confirmed* is the edit form's to set |
+| A move after approval | kept its approval | asks again |
 
-Two honest ways to present it, and the second is better:
+> *"An event or a room that needs a decision goes to the same approval engine as leave, travel and requisitions.
+> The HR desk is asked, in its inbox and in the app; nobody can approve something they organised, booked or
+> raised; and the record keeps who decided, when and why. Until it is approved, nobody is invited and nobody is
+> reminded."*
 
-> *"Room bookings and internal events are approved in place rather than routed — a facilities
-> approval is a two-second decision by whoever owns the room, and putting it through a
-> multi-step engine would make it slower without making it safer. Where TDC decides an occasion
-> does need a routed approval — a board meeting, an event with a fifty-thousand-cedi budget — the
-> engine is already in the product and already approves leave, travel and requisitions. Wiring a
-> company event onto it is the same four-step change we made for every other module."*
+Approve on the record's own page; the generic inbox opens that page but cannot apply the decision to it
+(cross-module #15).
 
-Do not claim there is a chain and then open a tab that shows a flag.
+### 1.6 Who is told, and how
 
-### 1.6 Two design decisions worth a sentence each
+Every notice in this module goes **two ways**: **in the app** (the bell) to everybody with a login, and **by
+email** where a mail server is set up. Neither demo database has one (Rule 3). Nobody is told of their own act —
+except a reminder or a chase, which goes to the sender too. A notice never makes the act fail.
 
-Both were made when the screens were built, and both answer a question a technical buyer asks.
+| Who | Is told when | In the app | Email |
+|---|---|---|---|
+| **A guest** | invited (one date, or several dates of a series at once) · reminded · chased for an answer · the event moved, postponed, cancelled, or its venue, site or joining link changed · taken off the list | ✅ | ✅ with a **calendar file** on every one but the reminder and the chase |
+| **The organiser** | reminded, with the guests · the event approved, or not approved · **a guest answers for themselves** (in the app only) | ✅ | ✅ (not the answer) |
+| **A task's assignee** | given the task, or passed it · the task is overdue (once) | ✅ | ✅ |
+| **A booker** | approved · not approved · cancelled — by the desk, with its event, by retiring the room, or unapproved at its start · marked a no-show · several of theirs changed together (one notice listing them) | ✅ | ✅ |
+| **An approver** | an event or booking waits for them | ✅ the engine's own | the engine's |
+| **Everybody a closure covers** | the closure is announced — on HR's click only (L1-1) · their own leave is re-counted (Rule 1) | ✅ | the re-count, always; the announcement, where its topic is set to email |
 
-**"Who is recorded as the organiser?"** — Every actor field in this module comes from the signed-in
-user's token, and none of them is on a form. They used to arrive as query parameters, which would
-have let any caller file an event under somebody else's name the moment a screen existed. They were
-moved before the first form was written. *"You are recorded as the organiser"* on the new-event page
-is the whole feature, said in five words.
+**The calendar file** (decision D-14) puts the event in the guest's own calendar — Outlook, Google, a phone —
+and keeps it there. It carries one stable identity per event and a sequence number raised with each change, so a
+move **updates** the guest's entry instead of adding a second, and a cancellation, a postponement or a removal
+**withdraws** it. An outside guest answers from their mail client to the organiser, and HR records the answer at
+the desk.
 
-**"What is the difference between Site and Location on a room?"** — They are two different fields
-and both are required. **Site** is the entry in the corporation's location tree — Tema Head Office,
-Ashaiman, Ho. **Location** is free text saying where in that site the room is — *"East wing, past
-reception"*. The room's site FK originally pointed at a vestigial table that was empty, had no
-endpoint and no repository, which made the room form unfillable; it was repointed to the live
-location tree the rest of HR uses.
+Each email is a template the tenant can reword (*Letter & Email Templates*, § 18) — seventeen of them are this
+module's.
 
-> ⚠ **The Site dropdown lists the whole location tree, not just sites** — Ghana (Country) and
-> Greater Accra (Region) appear alongside Tema Head Office. Every option is suffixed with its level
-> (`Tema Head Office · Site`) precisely so nobody files a boardroom under "Ghana", and the deepest
-> levels sort to the bottom, nearest the cursor. Say *"pick the one that says Site"* and move on.
+### 1.7 Two design decisions worth a sentence each
+
+Both answer a question a technical buyer asks.
+
+**"Who is recorded as the organiser?"** — Whoever the form names. Every other actor in this module comes from the
+signed-in person, and none is on a form: they used to arrive as query parameters, which would have let any caller
+file a record under somebody else's name. The organiser is the one exception, on purpose (decision D-11). An HR
+officer keys in the board meeting, and the Managing Director is its organiser. The creator is stamped beside them,
+and neither may approve it.
+
+**"What is the difference between Site and Location on a room?"** — They are two different fields, and both are
+required. **Site** is the entry in the corporation's location tree — Tema Head Office, Ashaiman, Ho. **Location**
+is free text saying where in that site the room is — *"East wing, past reception"*. The room's site originally
+pointed at an empty table nothing could fill, which made the form unusable; it was repointed to the live location
+tree the rest of HR uses.
+
+> **The site pickers list sites only** (lane 5a, C-16). Every site picker in the module — on rooms, events and
+> closures — offers the active locations at a level where staff can be placed. On TDC's tree that is the eight
+> sites and offices, not *Ghana* or *Greater Accra*. It matters more than tidiness: a closure "at" a region would
+> reach nobody, because staff are placed at a site, not at a region. A record saved on another level before the
+> change still shows it when edited.
 
 ---
 
 ## 2. Before the room fills — the prep
 
-**Time needed: 15 minutes the evening before.** This is still one of the lightest preps in HR, but
-round 4 added two things to check. Nothing here is stamped to the minute the way attendance's
-punches are, yet every date is **relative to the day the database was built**. The seeded booking
-(§ 2.4) and the reminders (the end of § 2.1) move with it.
+**Time needed: 20 minutes the evening before.** Two things decide how this module demonstrates: **which database
+you are on** (§ 2.1), and whether you have **a second HR window** for the approval beat (§ 2.5). Every seeded date is
+relative to the day the database was built, and the hourly sweep has been working on it since (Rule 6).
 
-### 2.1 What the demo database holds after a rebuild
+### 2.1 Which database are you on?
 
-`scenarios/110-company-schedule.mjs` builds all of it through the real API, as the real personas.
-⚠ **This is what a fresh rebuild holds.** Every run of this module's harness suites since then adds to
-it (Rule 8); § 2.2 checks.
+The walks fork on it. Find out first: the events register tells you in a second, because on UAT its first pages
+carry the *R4D* rows below.
+
+| | **UAT** (`ErpSystemDB_UAT`, read on 2026-10-06) | **Rebuilt** — a database the demo pack builds today |
+|---|---|---|
+| **Staff** | **TDC's staff list** — 4,949 people numbered `TDC/…` beside the personas | the demo pack's workforce and personas only |
+| **A closure saved live** | re-counts real people's leave and tells them — make it *Reduced operations* (Rule 1) | safe to show in full |
+| **The two *Announce* buttons** | 🚫 reach real staff | reach the demo's people |
+| **Approval definitions** | live, asking `hr.head` and `hr.officer` | seeded, asking the same two |
+| **Mail server** | none | none |
+| **Test leftovers** | **54 *R4D …* events** a month ahead (*Board meeting* and *Declined meeting*, two per run of the recruitment suite, whose interview panels point at them), and **10 cancelled *R4NB2 …*** events from the templates suite | none, until a suite is run against it |
+| **The anniversary** | *TDC 74th Anniversary* dated 18 October **2026**, so it reads as its first year — no "74th" | dated from the founding, 1952: *"74th anniversary"* |
+| **The second booking** | never existed (R4-2.3) | `head.dev`'s, made from the portal |
+| **The seeded booking** | 1 October — past, and *Completed* by the sweep | two days after the build (moved to a weekday) |
+
+> ⚠ **On UAT the 54 *R4D* events are on the HR desk's register, landing and calendar.** They belong to the
+> recruitment suite, which still owes its own clean-up; lane 3a's ruling left them, and this module may not
+> delete them. Narrow the register to the next fortnight, or say what they are: *"those are the test suite's — a
+> real register would not carry them."* Re-dating UAT's anniversary to 1952 is a one-row data edit nobody has
+> ruled on yet.
+
+### 2.2 What a rebuilt database holds
+
+`scenarios/110-company-schedule.mjs` builds it through the real API, as the real personas; the drill's event comes
+from `170-she.mjs`, and the two approval definitions from the database seeder.
 
 | Table | What is there |
 |---|---|
-| `FiscalYear` | **1** — *FY 2026*, 1 Jan – 31 Dec, marked **Current**. ⚠ Only until a company-schedule harness suite runs: they take the flag away (**R4-2.2**) |
-| `MeetingRooms` | **3** — *Boardroom* (BRD, 18 seats, floor 4, VC + audio), *Conference Room A* (CONF-A, 30 seats, floor 2), *Huddle Room 1* (HUD-1, 6 seats, floor 3). All at Tema Head Office, all with projector, whiteboard and A/C. **None sets a longest booking or a days-ahead limit** |
-| `RoomBookings` | **1** — *Management Committee — September* in the Boardroom, 09:00–12:00 on the second weekday after the build, video link for Ho, booked by `hr.head`. ⚠ The scenario also tries *Community 25 design review with the consultants*, booked **as `head.dev`** — and `head.dev` holds no company-schedule permission, so it is refused and the refusal swallowed. **It has never existed** on a built database (**R4-2.3**) |
-| `CompanyEvents` | **4** — see below. **All four have Send reminders on** |
-| `EventParticipants` | **17** across the four events, including one **external** guest: *Nana Kwame Baffoe, Board Secretariat*, as a Facilitator. The organiser, `hr.head`, is a participant of all four |
+| `MeetingRooms` | **3** — *Boardroom* (BRD, 18 seats, floor 4, video and audio), *Conference Room A* (CONF-A, 30 seats, floor 2), *Huddle Room 1* (HUD-1, 6 seats, floor 3). All at Tema Head Office, all with projector, whiteboard and A/C. **None needs approval, and none sets a longest booking or a days-ahead limit** |
+| `RoomBookings` | **2** — *Management Committee — September*, the Boardroom, 09:00–12:00 two days after the build, video link for Ho, booked at the desk by `hr.head`; and *Community 25 design review with the consultants*, Conference Room A, 14:00–16:00 four days after the build, 20 people, booked **from the portal by `head.dev`** (fixed in lane 6 — it never existed before). Both *Confirmed*, and *Completed* by the sweep once they end |
+| `CompanyEvents` | **5** — scenario 110's four below, and *Emergency drill: Fire Emergency Response Plan*, all-day 75 days after the build, made by Safety's own drill record (chapter 6 shows where it came from). **All have reminders on; none needs approval** |
+| `EventParticipants` | **17** across scenario 110's four, including one **outside** guest — *Nana Kwame Baffoe, Board Secretariat*, a Facilitator. `hr.head` is the organiser of all four and a guest of each |
 | `EventAttendances` | **5** on the retreat — four present, one absent with a reason |
-| `EventTasks` | **8** across the durbar, the board meeting and the fire drill — one already completed |
-| `EventAttachments` | **4** — two board papers, the durbar programme, the retreat communiqué |
-| `BusinessClosures` | **1** — *Year-end stocktake*, 29–30 December, whole company, **paid**, does not count as a working day |
-| `CompanyMilestones` | **1** — *TDC 74th Anniversary*, 18 October, recurring annually |
+| `EventTasks` | **8** — four on the durbar (one completed), two on the board meeting, two on the fire drill |
+| `EventAttachments` | **4** real PDF files — the board's agenda and its Q2 minutes, the durbar's programme, the retreat's communiqué — each downloadable |
+| `BusinessClosures` | **1** — *Year-end stocktake*, 29–30 December, whole company, staff paid, once |
+| `CompanyMilestones` | **1** — *TDC 74th Anniversary*, 18 October, founded 1952, yearly, on the calendar |
 | `CompanyProfiles` | **1** — the full legal identity: CS-1952-000118, TIN, VAT, SSNIT employer number, TDC House Community 1, the signatory and the letter footer |
-| `CompanySealAssets` | **2** — a seal and a specimen signature, uploaded as **admin** |
+| `CompanySealAssets` | **2** — a seal and a specimen signature, uploaded as **admin**. No logo: letters carry the tenant's own logo, if it has one (chapter 17) |
+| Workflow definitions | *Company Event Approval* and *Room Booking Approval*, each asking the HR desk |
 
-**The four events, and why each is there:**
+**The four events of scenario 110, and why each is there:**
 
 | Event | Shape | What it demonstrates |
 |---|---|---|
-| **Board of Directors — Q3 meeting** *(next fortnight)* | Board Meeting · Management Only · Management visibility · RSVP required, **with no deadline**, so it is never chased · Boardroom · 14 expected | participants incl. an external, **two RSVPs already answered**, two board papers attached, two tasks |
-| **Annual Staff Durbar** *(45 days out)* | Company Event · All Staff · **all-day** · GHS 48,000 budget, code HRA/EVT/2026/03 · 120 expected | the **budget and logistics** half — canopies, PA, staging, catering for 140 — and a four-task plan across all three stages |
-| **Fire drill — Head Office** *(next week)* | Training · 10:00–11:00 · Medium priority | the cross-module link — this is the SHE emergency plan's next drill |
+| **Board of Directors — Q3 meeting** *(about twelve days out)* | Board Meeting · Management Only · Management visibility · replies asked, **reply by three days before, 17:00** · Boardroom · 14 expected | six guests including the outside one, **two answers already in**, two board papers, two tasks — and an audience of **management**, so it is on a unit head's calendar and not on `staff`'s (Rule 5) |
+| **Annual Staff Durbar** *(45 days out)* | Company Event · All Staff · **all-day** · GHS 48,000, code HRA/EVT/2026/03 · 120 expected | the **budget and logistics** half — canopies, PA, staging, catering for 140 — a four-task plan across all three stages, and **on everybody's calendar** |
+| **Fire drill — Head Office** *(about nine days out)* | Training · 10:00–11:00 · Medium priority | the drill as HR keyed it, with its marshals' tasks; Safety's own drill made the all-day *Emergency drill* event beside it |
 | **Management retreat — 2026 budget preparation** *(38 days ago)* | Meeting · Management Only · Volta Serene Hotel, Ho · GHS 62,000 | the **only completed event**: an attendance register, an actual attendance of 4, and a real outcome summary |
 
-> **The retreat is the most valuable record on this database** and the easiest to miss, because the
-> register sorts newest first and it is in the past. It is the only place the attendance tab and the
+> **The retreat is the most valuable record on either database** and the easiest to miss, because the register
+> lists the latest dates first and the retreat is past. It is the only place the attendance register and the
 > outcome summary have anything on them. Chapter 6 opens it deliberately.
 
-**What the reminders will have done by demo day.** Each seeded event reminds its participants a few
-days before it, so the hourly sweep sends them as the days pass after the build:
+**What the sweep will have done by demo day** (Rule 6). Each reminder reaches every guest with a login through the
+bell; the outside guest is never reached (Rule 3).
 
-| Event | Reminder goes | Its Reminders card then reads |
+| Event | What goes, and when | Its *Invitations and reminders* card then reads |
 |---|---|---|
-| Fire drill | 3 days before — about **6 days after the build** | *Sent* and the date |
-| Board meeting | 3 days before — about **9 days after the build** | *Sent* and the date |
-| Durbar | 7 days before — about **38 days after the build** | *Sent* and the date |
-| Retreat | never — it was over before the build | ⚠ *"Goes 3 days before the event, automatically"* — a promise on a finished event (**R4-6.2**) |
+| Fire drill | the reminder, 3 days before — about **6 days after the build** | sent, with the date, and how many it reached |
+| Board meeting | the **chase** of the unanswered, 2 days before the reply-by date — about **7 days after the build**; the reminder, 3 days before — about **9 days after** | each, sent and reached |
+| Durbar | the reminder, 7 days before — about **38 days after the build** | sent and reached |
+| Retreat | nothing — it was over before the build | that no reminder will go, because it is over |
 
-None of these is delivered (Rule 7). The board meeting is never chased, because it has no RSVP
-deadline.
+The board pack's task, due five days after the build, is **chased once** when it is overdue, to `md.tdc`.
 
-### 2.2 Check the database is clean, and the numbers you will quote
+**UAT on 2026-10-06**, for comparison: the four events were built on about 2026-09-29. The fire drill is 8 October, the
+board meeting 12 October, the durbar 13 November, the drill's own event 13 December, and the retreat was 22–23 August.
+The board pack's task was due on 4 October and has been chased.
 
-**First, thirty seconds on Rule 8.** Open these three and compare:
+### 2.3 Write down the numbers you will quote
 
-| Screen | A clean rebuild shows | If it shows more |
-|---|---|---|
-| `/hr/company-schedule/events` | **4** events | *R4D …* rows: a lane D suite has run since the build |
-| `/administration/hr/company-schedule/rooms` | **3** rooms | *R4D Room …* / *R4D Interview room …*: the same |
-| `/administration/hr/company-schedule/fiscal-years` | *FY 2026* with a **Current** badge | no badge: a company-schedule slice suite has run |
-
-A missing **Current** badge alone is a one-click repair: ⋯ → **Set as current** on FY 2026 (chapter 15).
-Fixture events and rooms are not. `hr.head` cannot delete them, and a cancelled event still sits in
-the register, so **rebuild**.
-
-**Then write these in.** They are the only figures you will say out loud.
+They are the only figures you will say out loud.
 
 | Screen | What to write down |
 |---|---|
 | `/hr/company-schedule` | Next 30 days: ____ events · Bookings awaiting approval: ____ |
-| `/hr/company-schedule/events` | total events: ____ |
+| `/hr/company-schedule/events` | events in the next fortnight: ____ *(on UAT, narrow the dates, or the R4D rows count too)* |
 | `/administration/hr/company-schedule/rooms` | bookable rooms: ____ |
+| `/administration/hr/company-schedule/fiscal-calendar` | the current year: ____ · the next one Finance must open: ____ |
 
-⚠ **"Bookings awaiting approval" will almost certainly read 0**, and that is correct rather than
-broken: none of the three seeded rooms has *Bookings need approval* switched on, so the seeded
-booking was created **Confirmed**. Chapter 12 turns one room on and chapter 9 then produces a
-Tentative booking live, which is a much better demonstration than a pre-baked queue. Decide now
-whether you are doing that, because it changes the order of chapters 9 and 12.
-
-### 2.3 Decide whether you want the Tentative-booking beat
-
-The strongest five minutes in this module is:
-
-1. turn *Bookings need approval* on for the **Boardroom** *(chapter 12, LIVE WRITE 9)*;
-2. book it live and watch the toast say *"It needs approval before it is confirmed."* *(chapter 9)*;
-3. approve it *(chapter 10)*.
-
-That needs chapter 12 **before** chapter 9. If you would rather run the book in order, do the
-switch now, tonight, as part of prep — then chapter 9 works unchanged and chapter 12 just shows the
-setting already on.
-
-> Tonight I set *Bookings need approval* on: ☐ Boardroom  ☐ nothing — running in book order
-
-**An optional second beat, new in round 4: a room that refuses on its own terms.** Set **Longest
-booking (hours)** to **2** on the Huddle Room in chapter 12, then in chapter 9 search a three-hour
-window for four people. The picker still offers the room — say so, because it is true (**R4-9.1**) —
-and **Book room** is refused with *"Huddle Room 1 may be booked for at most 2 hour(s) at a time; this
-booking is 3. Shorten it, or book a room without that limit."* Clear the field afterwards (§ 19,
-row 14). ⚠ Not browser-walked.
+⚠ **"Bookings awaiting approval" reads 0 on both databases**, and that is right: no seeded room needs approval,
+so every booking was confirmed as it was made. § 2.5 makes one wait, live — a much better demonstration than a
+queue prepared in advance.
 
 ### 2.4 Pick your clash
 
-Chapter 9's best moment is a booking the server refuses. You need a room and a window that is
-**already taken**. A rebuild seeds **one**:
+Chapter 9's best moment is a booking the server refuses because the room is taken. You need a room and a window
+that is **already booked**.
 
-| Room | Taken from | To |
-|---|---|---|
-| Boardroom | the second weekday after the build, 09:00 | the same day, 12:00 |
+- **Rebuilt:** the Boardroom, 09:00–12:00 two days after the build, and Conference Room A, 14:00–16:00 two days
+  later — each in the past by a demo a week after the build.
+- **UAT:** the only booking was on 1 October.
 
-⚠ **It is relative to the build, so on demo day it may already be in the past.** A clash in the past
-still demonstrates the rule, but it is an odd thing to book. If it has passed, make a clash of your
-own tonight: book the Boardroom as `hr.head` for tomorrow 09:00–12:00 through chapter 9's own form.
-That is a live write; cancel it afterwards (§ 19, row 15).
-
-Open `/hr/company-schedule/bookings` now and write the real window in:
+So, on either, **make your own tonight**: book the Boardroom as `hr.head` for the morning after the demo, 09:00–12:00,
+through chapter 9's own form. It is a live write; cancel it afterwards (§ 19).
 
 > Boardroom busy: ______________  ☐ seeded  ☐ my own, booked tonight
 
-### 2.5 One window, one persona — and an optional second for the diary
+### 2.5 Decide about the two approval beats
 
-**This book runs as `hr.head` in a single window.** There is no approval routing to demonstrate. The
-one exception is **chapter 17's seal replacement**, which is `HR.Company.Admin`. If you want that
-beat, open a second window as **`admin`**; if not, chapter 17 says exactly which step to skip.
+Both need **two HR windows**, because nobody approves their own (Rule 2). They are the strongest five minutes in
+the module, and each has a choice to make tonight.
 
-Round 4 added the module's first self-service screen, **My schedule** (§ 10A), which every employee
-can open. `hr.head`'s own diary is the better demonstration — on UAT on 2026-09-24 it held interview
-panels, a leave day, the drill and the board meeting. If you want to show an ordinary employee's
-instead, use a window as
-**`staff`**. ⚠ Keep that window on My schedule. Its sidebar group header opens the landing page,
-which answers "Nothing scheduled" to a person who is not allowed to read it (**R4-3.1**).
+**Beat A — an event that waits for approval** *(chapters 5 and 6)*. `hr.head` creates an event with *Requires
+approval* on and invites `staff`. It waits; nothing reaches `staff` (the bell is quiet, the portal calendar does
+not show it). `hr.officer` approves it on its page, and in that moment the invitation goes out: `staff`'s bell has
+it, and the portal calendar draws it, dashed, waiting for an answer. No preparation beyond the windows.
 
-### 2.6 Pre-open every screen
+**Beat B — a booking that waits** *(chapters 12, 9 and 10)*.
 
-Seven tabs, left to right:
+1. turn *Bookings need approval* on for the **Boardroom** *(chapter 12, a live write)*;
+2. book it live — at the desk, where the toast says *"It needs approval before it is confirmed."* *(chapter 9)*, or
+   as `staff` from the portal, where it says *"It waits for approval; you will be told either way."* *(chapter 10C)*;
+3. `hr.officer` approves it on the booking's page, and the booker's bell says so *(chapter 10)*.
 
-| Tab | Route | Used in |
+That needs chapter 12 **before** chapter 9. To run the book in order instead, set the switch now, tonight; chapter 12
+then shows it already on. Either way, **approve or cancel the booking before its start**, or the sweep cancels it
+for you (Rule 6).
+
+> Tonight I set *Bookings need approval* on: ☐ Boardroom  ☐ nothing — running in book order
+
+**An optional third beat: a room that refuses on its own terms.** Set **Longest booking (hours)** to **2** on the
+Huddle Room in chapter 12, then in chapter 9 search a three-hour window for four people. **The Huddle Room is not
+offered**: since lane 3a the search applies every rule the room has, not only its seats. Clear the field
+afterwards (§ 19).
+
+### 2.6 Windows and personas
+
+| Window | Persona | For |
 |---|---|---|
-| 1 | `/hr/company-schedule` | ch. 3 |
-| 2 | `/hr/company-schedule/events` | ch. 4–7 |
-| 3 | `/hr/company-schedule/bookings` | ch. 8–10 |
-| 4 | `/hr/company-schedule/my-schedule` | ch. 10A–10B |
-| 5 | `/administration/hr/company-schedule` | ch. 11–16 |
-| 6 | `/administration/hr/settings/company-profile` | ch. 17 |
-| 7 | *(second window, as `admin`)* the same profile page | ch. 17 — **only if** doing the seal |
+| **A** | `hr.head` — the HR desk, a unit head, an organiser | every desk chapter |
+| **B** | `hr.officer` — the second HR desk login | approving what `hr.head` raised (§ 2.5), and a second bell |
+| **C** | `staff` — an ordinary employee in the Development Department | the portal: the calendar (Rule 5), the staff event page and an answer, booking a room; a guest's bell |
+| **D** *(only for chapter 17)* | `admin` | replacing the logo, the seal or the signature (`HR.Company.Admin`; `admin` has no employee record) |
+| *(optional)* | `head.dev` — head of the Development Department, `staff`'s unit | Team Schedule as a unit head who is not on the HR desk (chapter 10B) |
 
-### 2.7 Prep checklist
+The same personas exist on both databases. On UAT `head.dev` heads the Development Department and `hr.head` heads HR
+/ Administration. A rebuild's seeder appoints a head for each unit, so before relying on `head.dev` there, check that
+Team Schedule opens on their unit (chapter 10B).
 
-- [ ] The database is clean: 4 events, 3 rooms, FY 2026 current *(§ 2.2, Rule 8)*
-- [ ] The three numbers from § 2.2 are written down
-- [ ] You have decided about the Tentative-booking beat *(§ 2.3)* and done the switch if so
-- [ ] The Boardroom's busy window from § 2.4 is written down — and it is in the future
-- [ ] Window B open as `admin` — **only if** you are doing chapter 17's seal
-- [ ] Seven tabs open in the order above *(§ 2.6)*
-- [ ] You have read **Rules 1–8**. You know that **no email leaves this database** (Rule 7), and
-  that the Delete button is hidden from `hr.head` on the event page but eight Remove/Delete items
-  elsewhere still 403 (Rule 1)
+### 2.7 Pre-open every screen
+
+| Window | Tab | Route | Used in |
+|---|---|---|---|
+| A | 1 | `/hr/company-schedule` | ch. 3 |
+| A | 2 | `/hr/company-schedule/calendar` | ch. 3a |
+| A | 3 | `/hr/company-schedule/events` | ch. 4–7 |
+| A | 4 | `/hr/company-schedule/bookings` | ch. 8–10 |
+| A | 5 | `/hr/company-schedule/my-schedule` | ch. 10A–10B |
+| A | 6 | `/administration/hr/company-schedule` | ch. 11–15 |
+| A | 7 | `/administration/hr/settings/company-profile` | ch. 17 |
+| B | 1 | `/hr/company-schedule/events` | the approvals |
+| C | 1 | `/me/calendar` | ch. 3a, 6a |
+| C | 2 | `/me/room-bookings` | ch. 10C |
+| D | 1 | `/administration/hr/settings/company-profile` | ch. 17 — **only if** replacing an image |
+
+### 2.8 Prep checklist
+
+- [ ] You know which database you are on, and which column of § 2.1 applies
+- [ ] **UAT:** you will make the live closure *Reduced operations*, and press neither *Announce* button (Rule 1)
+- [ ] The numbers from § 2.3 are written down
+- [ ] A Boardroom booking of your own for the morning after the demo, written down *(§ 2.4)*
+- [ ] Windows A, B and C signed in *(§ 2.6)*; D only for chapter 17
+- [ ] You have decided about Beat B *(§ 2.5)*, and set the switch if running in book order
+- [ ] You have read **Rules 1–7**. You know that **no email leaves either database** and the bell is the
+  demonstration (Rule 3), and that **approving takes the second window** (Rule 2)
 
 ---
 
