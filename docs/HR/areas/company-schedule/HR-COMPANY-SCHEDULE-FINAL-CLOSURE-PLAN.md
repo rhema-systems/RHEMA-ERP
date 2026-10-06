@@ -41,9 +41,9 @@ has not started (the user: "don't start the actual development yet").
    export and dashboard (2g-1) and the event-against-event clash rule (2g-2), and 2h, files through the upload gate
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
    **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
-   rules and guards, 3b-1, approval on the engine and the booker told, and 3b-2, the hourly lapse and completion and
-   no-show, built and proved (no migration; UAT has the real Room Booking Approval). Next 3c: staff booking from `/me`
-   (D-13).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   rules and guards, 3b-1, approval on the engine and the booker told, 3b-2, the hourly lapse and completion and
+   no-show, and 3c, staff booking from `/me` (D-13), built and proved (no migration; UAT has the real Room Booking
+   Approval). Next 3d: "book this room for every date" of a series (D-12), which closes lane 3.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -319,7 +319,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1 and 3b-2 built and proved (876/876 ×2; round-4 net 212/212); 3c next | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1, 3b-2 and 3c built and proved (938/938 ×2; round-4 net 212/212); 3d next | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2433,7 +2433,8 @@ closes lane 2.*
       told when it is approved, cancelled, lapsed or marked no-show — in-app and email.
 - [x] *✅ 3a (`RoomBookingRules.AsUtc`, on the way in and out).* **(F-50)** Booking instants read back as UTC (`DateTime.SpecifyKind`), as the reminder stamps
       already are.
-- [ ] **Staff booking per D-13**: a self-service door for the signed-in employee's own bookings.
+- [x] *✅ 3c: `api/CompanySchedule/me` and three portal pages; others' bookings as busy times only; no event link, no
+      past start (the user's rulings).* **Staff booking per D-13**: a self-service door for the signed-in employee's own bookings.
 - [x] *✅ 3a.* Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
 - [x] *✅ 3a.* (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
       register's.
@@ -2509,6 +2510,75 @@ beyond 2a's linked bookings moving and cancelling with their event and 2g-1's bo
   publishes it on UAT once. No UAT room needs approval yet.
 - **Two slices:** 3b-1, approval on the engine (approve, a new Reject, re-approval after a move) and the booker notices
   on every path; 3b-2, the hourly lapse and completion, and no-show.
+
+*3c source check (2026-10-06, at HEAD 381eaf78d):* the booking service needs almost nothing — create, update and cancel take
+the tenant from the token, apply every room rule under the room's lock, start the approval on the engine and tell the booker
+(never of their own act); the engine's withdrawal checks no caller, so a staff booker cancelling a waiting booking ends its
+approval. What is missing is the door: every room and booking route is on `HR.Company.*`; there is no staff read of the
+rooms, their availability or their busy times; and the booker's in-app notices link to the HR booking page, which staff
+cannot open. **Found:** nothing refuses a booking whose start has already passed, on either door.
+
+*3c rulings by the user (2026-10-06, all as recommended):*
+- **No event link from `/me`:** a staff booking stands alone; a room for a company event stays the desk's (3d books series).
+- **The booker's notices open the portal page** (`/me/room-bookings/{id}`) for every booker, HR officers included; the
+  approver's inbox link stays on the HR page.
+- **No past start from `/me`:** a new booking, or a changed start, may not be in the past; an unchanged start on a booking
+  already under way is fine (it can be extended). The HR desk may still record a booking after the fact.
+- **A reason to cancel**, as at the desk.
+
+*3c — what was built (2026-10-06): staff book rooms from the portal (D-13).*
+- **No migration**, no template, no in-app topic.
+- **`CompanyScheduleMeController`** (`api/CompanySchedule/me`, `InternalOnly`, no `HR.Company.*`; the travel portal's
+  pattern — the booker is the token, anyone else's booking is a 404, the desk's acts have no route):
+  - `GET rooms` — in use and open for booking, with their rules (`IMeetingRoomService.GetBookableRoomsAsync`);
+  - `GET rooms/available` — the desk's availability read; the room summary now says `requiresApproval`;
+  - `GET rooms/busy?from&to` — whole days, at most 31: each live booking's room and time; the caller's own marked with
+    their id; nobody else's purpose, booker or number (`IRoomBookingService.GetBusyTimesAsync`);
+  - `GET/POST room-bookings`, `GET/PUT room-bookings/{id}`, `POST room-bookings/{id}/cancel` (a reason, as at the desk).
+- **The portal's own rules** (the user's rulings): the payload's `eventId` is dropped; the start may not be past —
+  `RoomBookingRules.RefuseSelfServiceStart`, with **15 minutes' grace** so a room taken "from 10:00" at five past still
+  books, and an unchanged start (to the minute) allowed so a booking under way can run on. Everything else is the desk's
+  service, unchanged: the room's limits, the seats, the lock, the approval on the engine, the booker told.
+- **The booker's notices** open `/me/room-bookings/{id}` (`CompanyScheduleNotices.BookingLink`), for every booker; the
+  approver's inbox link stays on the HR page.
+- **Screens:** `/me/room-bookings` (a day board of when the rooms are held, and the caller's bookings, upcoming and past),
+  `/me/room-bookings/new` (the desk's form without the event, the board with the time being booked drawn green or red,
+  the chosen room's rules), `/me/room-bookings/[id]` (change, cancel with a reason; the room's day). `RoomDayBoard`
+  (`components/hr/company-schedule`) draws others' bookings grey and the caller's own as links. "Room Bookings" in the
+  portal's Company menu and on its landing page.
+- **Seen in the proof, not changed:** a clash refusal names the booking that holds the slot ("already booked then:
+  BK-2026-…, 09:00–10:00") — to staff too. It is neither purpose nor booker, and the time is on the board anyway.
+
+*Proof (UAT, API in Staging; the real Room Booking Approval live):*
+- `run-final-review.mjs` blocks 1a–3c: **938/938 on two clean passes**, first time. 3c has **62 assertions**, as a login
+  holding the Employee role only, linked to fixture A:
+  - **the control:** the HR register and the desk's booking door refuse that login (403);
+  - **the rooms:** only those in use and open for booking, with their rules; free rooms, which need approval, not a held,
+    too long or too full one;
+  - **busy times:** the desk's booking as its room and time only — no purpose, booker or number anywhere in the answer;
+    a cancelled one not held; more than 31 days and a backwards span refused;
+  - **booking:** Confirmed and theirs; the event in the payload dropped; on the board as theirs; a past start, too many
+    people, a held time and a closed room refused; one from ten minutes ago taken;
+  - **their own only:** the list holds theirs and not the desk's; the desk's booking a 404 to read, change and cancel; an
+    unknown id a 404; approve, not approve, no-show and delete absent (404/405);
+  - **changing:** moved and re-worded; not to a past start; a booking under way extended with its start unchanged, but its
+    start not moved back;
+  - **approval:** staff refused at the desk's door; Tentative with the approval under way on the engine; B approves; the
+    booker told, the notice opening the portal page; moved — waiting again;
+  - **cancelling:** a reason needed; cancelled with it; the approval withdrawn; nobody told of their own act; not again,
+    not changed;
+  - **the desk:** sees the staff booking, booked by A; an HR officer's own notice opens the portal page too; a login linked
+    to nobody is told so (400).
+- **Regression:** the round-4 net **212/212**; recruitment **59/59**; the templates probe **39/39**; `run-lane-n`
+  **109/115**, the six section-J failures of #40, its TOTAL 55.
+- **The API log:** no request answered 500; the portal's 422s are each an intended refusal; no approval failed to start
+  or withdraw, and no booker notice failed. The ERR lines are the known kinds (payroll's foreign key on minted fixtures,
+  #23; 2d's unique-index race proofs; notices with no mail server; the sinks' bounce addresses; identity reconciliation
+  catching fixture logins mid-teardown). The blocking watcher's first pass logged eight sub-second lock waits on
+  notification inserts in block 2b, and its second pass nothing.
+- **After the runs:** every RoomBooking approval the runs started is finished (6 completed, 10 cancelled); no
+  company-schedule notice to a real login is live; every harness login is off (28); the R4D requisition's notices
+  withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 *3b-2 — what was built (2026-10-06): the sweep's booking half, and no-show (F-48, F-34).*
 - **No migration.** One email (55 templates), one in-app topic (19).
@@ -3326,3 +3396,14 @@ built API, so no web host and no seeders).
     `run-lane-n` 109/115 (section J, #40). No request answered 500.
 
   Next: 3c — staff booking from `/me` (D-13): their own bookings, others' as busy times only.
+- **2026-10-06** — **3b-2 committed** (`381eaf78d`). **Lane 3, slice 3c source-checked, its four questions settled by the
+  user as recommended (lane 3 State), built and proved**: staff book rooms from the portal.
+  - **Built:** `api/CompanySchedule/me` (the rooms, what is free, busy times, their own bookings); the portal's past-start
+    rule; the booker's notices opening `/me/room-bookings/{id}`; three portal pages with a day board. No migration, no
+    template, no topic.
+  - **Results:** `run-final-review.mjs` scored 938/938 on two clean passes, with 62 checks in 3c, first time. The
+    watcher's second pass was silent; its first logged eight sub-second lock waits in block 2b, none in 3c. The round-4
+    net was 212/212, recruitment 59/59, the templates probe 39/39 and `run-lane-n` 109/115 (section J, #40). No request
+    answered 500.
+
+  Next: 3d — "book this room for every date" of a series (D-12), which closes lane 3.

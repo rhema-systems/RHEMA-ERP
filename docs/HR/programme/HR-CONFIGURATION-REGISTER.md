@@ -425,6 +425,15 @@ comes is cancelled, "Not approved before it started.", its approval withdrawn an
 booking whose end has passed is **Completed**, silently. No setting governs either — they follow the booking's own
 times. The run-now answer lists them (`bookingsLapsed`, `bookingsCompleted`).
 
+**Staff booking from the portal (company-schedule final closure lane 3c, D-13) — no setting.** `api/CompanySchedule/me`
+(any linked internal login; no `HR.Company.*` needed): the rooms in use and open for booking, what is free, busy times
+(others' bookings as room and time only, at most 31 days a read), and the caller's own bookings — book, change, cancel
+with a reason. The room's own rules apply as at the desk. Two rules are the portal's alone, **fixed in code, not
+configurable**: a booking from the portal is never linked to an event, and its start may not be more than **15 minutes**
+past (`RoomBookingRules.SelfServiceStartGrace`; an unchanged start on a booking under way is allowed, so it can be
+extended). Every booker's in-app notice (approved, not approved, cancelled, no-show) now opens `/me/room-bookings/{id}`.
+Proof: `hr-company-schedule/run-final-review.mjs` block 3c, both positions.
+
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|
 | `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |

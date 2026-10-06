@@ -29,6 +29,7 @@ import {
   ClipboardList,
   Clock,
   Compass,
+  DoorClosed,
   FileWarning,
   Gauge,
   GraduationCap,
@@ -103,6 +104,8 @@ const TILE_SECTIONS: { title: string; tiles: Tile[] }[] = [
     tiles: [
       { label: 'Staff Directory', hint: 'Find a colleague, browse the org chart', href: '/me/directory', icon: Building2 },
       { label: 'My Team', hint: 'Who you report to, and who reports to you', href: '/me/team', icon: Network },
+      // Company schedule lane 3c (D-13).
+      { label: 'Room Bookings', hint: 'Book a meeting room, see when rooms are free', href: '/me/room-bookings', icon: DoorClosed },
     ],
   },
 ];

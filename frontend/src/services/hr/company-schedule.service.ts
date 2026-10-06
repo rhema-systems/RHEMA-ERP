@@ -65,6 +65,7 @@ import type {
   RespondToEventInvitation,
   RoomBooking,
   RoomBookingSummary,
+  RoomBusyTime,
   TeamSchedule,
   UpdateBusinessClosure,
   UpdateCompanyEvent,
@@ -511,6 +512,56 @@ class RoomBookingService {
   }
 }
 
+/**
+ * The portal's room bookings (lane 3c, D-13): `api/CompanySchedule/me`, open to every linked employee. The booker is the
+ * token; someone else's booking answers 404; approving, no-show and delete have no route here. Others' bookings come back
+ * only as busy times.
+ */
+class MyRoomBookingService {
+  private readonly baseUrl = '/CompanySchedule/me';
+
+  /** The rooms anyone may book — in use and open for booking — with their rules. */
+  getRooms(): Promise<MeetingRoom[]> {
+    return apiService.get<MeetingRoom[]>(`${this.baseUrl}/rooms`);
+  }
+
+  /** Rooms free for the whole window, inside each room's own limits. */
+  getAvailable(startDateTime: string, endDateTime: string, minCapacity?: number): Promise<MeetingRoomSummary[]> {
+    return apiService.get<MeetingRoomSummary[]>(`${this.baseUrl}/rooms/available`, {
+      startDateTime,
+      endDateTime,
+      ...(minCapacity ? { minCapacity } : {}),
+    });
+  }
+
+  /** When the rooms are held, whole days `from`–`to` (yyyy-MM-dd, at most 31). */
+  getBusy(from: string, to: string): Promise<RoomBusyTime[]> {
+    return apiService.get<RoomBusyTime[]>(`${this.baseUrl}/rooms/busy`, { from, to });
+  }
+
+  getMine(): Promise<RoomBookingSummary[]> {
+    return apiService.get<RoomBookingSummary[]>(`${this.baseUrl}/room-bookings`);
+  }
+
+  getById(id: string): Promise<RoomBooking> {
+    return apiService.get<RoomBooking>(`${this.baseUrl}/room-bookings/${id}`);
+  }
+
+  /** Never linked to an event from here — the server drops `eventId`. A start in the past is refused. */
+  create(data: Omit<CreateRoomBooking, 'eventId'>): Promise<RoomBooking> {
+    return apiService.post<RoomBooking>(`${this.baseUrl}/room-bookings`, data);
+  }
+
+  update(id: string, data: UpdateRoomBooking): Promise<RoomBooking> {
+    return apiService.put<RoomBooking>(`${this.baseUrl}/room-bookings/${id}`, { ...data, id });
+  }
+
+  /** A reason is required, as at the desk. Answers the cancelled booking. */
+  cancel(id: string, cancellationReason: string): Promise<RoomBooking> {
+    return apiService.post<RoomBooking>(`${this.baseUrl}/room-bookings/${id}/cancel`, { cancellationReason });
+  }
+}
+
 class CompanyMilestoneService {
   private readonly baseUrl = '/CompanySchedule';
 
@@ -739,6 +790,7 @@ class PersonalScheduleService {
 export const companyEventService = new CompanyEventService();
 export const meetingRoomService = new MeetingRoomService();
 export const roomBookingService = new RoomBookingService();
+export const myRoomBookingService = new MyRoomBookingService();
 export const companyMilestoneService = new CompanyMilestoneService();
 export const businessClosureService = new BusinessClosureService();
 export const fiscalYearService = new FiscalYearService();

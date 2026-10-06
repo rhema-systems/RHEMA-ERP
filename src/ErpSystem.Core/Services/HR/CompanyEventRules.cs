@@ -506,6 +506,30 @@ public static class RoomBookingRules
     public const string LapsedReason = "Not approved before it started.";
 
     /// <summary>
+    /// How far back a portal booking may start (lane 3c): a room taken "from 10:00" at five past still books — the form
+    /// takes whole minutes, and booking a free room for the meeting about to begin is the commonest case.
+    /// </summary>
+    public static readonly TimeSpan SelfServiceStartGrace = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// The portal's own rule (lane 3c, the user's ruling): staff book what is still to come — a new start, or a changed
+    /// one, may not be in the past. An unchanged start on a booking already under way is fine, so it can be extended. The
+    /// HR desk may still record a booking after the fact. A missing start is left to <see cref="RefuseWindow"/>.
+    /// "Unchanged" is to the minute: the portal's form sends whole minutes.
+    /// </summary>
+    public static string? RefuseSelfServiceStart(DateTime start, DateTime? currentStart, DateTime nowUtc)
+    {
+        if (start == default) return null;
+        var when = AsUtc(start);
+        static long Minute(DateTime t) => t.Ticks / TimeSpan.TicksPerMinute;
+        if (currentStart is { } current && Minute(AsUtc(current)) == Minute(when)) return null;
+        return when < nowUtc - SelfServiceStartGrace
+            ? $"{when.ToString("dddd d MMMM yyyy, HH:mm", CultureInfo.InvariantCulture)} has passed — a booking made here starts from now on. "
+              + "The HR desk can record one after the fact."
+            : null;
+    }
+
+    /// <summary>
     /// A no-show (lane 3b-2, the user's ruling): a confirmed booking whose start has passed — including one the sweep has
     /// completed — and never undone.
     /// </summary>

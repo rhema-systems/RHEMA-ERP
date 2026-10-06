@@ -178,6 +178,9 @@ public interface IMeetingRoomService
     Task<IEnumerable<MeetingRoomSummaryDto>> GetByLocationAsync(Guid locationId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomSummaryDto>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null, CancellationToken cancellationToken = default);
     Task<IEnumerable<MeetingRoomSummaryDto>> GetActiveRoomsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>The rooms anyone may book — in use and open for booking — with their rules (lane 3c, the portal's list).</summary>
+    Task<IEnumerable<MeetingRoomDto>> GetBookableRoomsAsync(CancellationToken cancellationToken = default);
     Task<MeetingRoomDto> CreateAsync(CreateMeetingRoomDto createDto, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -207,6 +210,13 @@ public interface IRoomBookingService
     Task<IEnumerable<RoomBookingSummaryDto>> GetByDateRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken = default);
     Task<IEnumerable<RoomBookingSummaryDto>> GetByStatusAsync(BookingStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<RoomBookingSummaryDto>> GetPendingApprovalsAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// When the bookable rooms are held over whole days, <paramref name="from"/> to <paramref name="to"/> (lane 3c, D-13):
+    /// the room and the time of every live booking — the viewer's own marked, with their id; nobody else's purpose, booker
+    /// or number. At most <c>31</c> days.
+    /// </summary>
+    Task<IReadOnlyList<RoomBusyTimeDto>> GetBusyTimesAsync(DateOnly from, DateOnly to, Guid viewerEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>The bookings register: filtered, sorted and paged on the server (lane 2g-1, C-25).</summary>
     Task<PagedResult<RoomBookingDto>> SearchAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default);

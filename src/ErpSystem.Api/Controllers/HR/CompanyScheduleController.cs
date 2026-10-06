@@ -795,10 +795,6 @@ public class CompanyScheduleController : HrControllerBase
     }
 
     /// <summary>
-    /// Not approved (lane 3b-1, D-10): the booking is cancelled, "Not approved: …", and its booker told why. Decided through
-    /// the engine when an approval is under way, the approve tier otherwise; never by the booker.
-    /// </summary>
-    /// <summary>
     /// Marks a confirmed booking whose start has passed a no-show — held and not used — for good; its booker told (lane
     /// 3b-2, the user's ruling).
     /// </summary>
@@ -807,6 +803,10 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<RoomBookingDto>> MarkBookingNoShow(Guid id, CancellationToken ct)
         => Ok(await _bookingService.MarkNoShowAsync(id, ct));
 
+    /// <summary>
+    /// Not approved (lane 3b-1, D-10): the booking is cancelled, "Not approved: …", and its booker told why. Decided through
+    /// the engine when an approval is under way, the approve tier otherwise; never by the booker.
+    /// </summary>
     [HttpPost("bookings/{id:guid}/reject")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<RoomBookingDto>> RejectBooking(Guid id, [FromBody] EventDecisionDto dto)

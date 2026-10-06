@@ -4304,6 +4304,16 @@ public class MeetingRoomService : IMeetingRoomService
         return entities.ToSummaryDtoList();
     }
 
+    /// <inheritdoc />
+    public async Task<IEnumerable<MeetingRoomDto>> GetBookableRoomsAsync(CancellationToken cancellationToken = default)
+    {
+        var entities = await TenantRooms(GetTenantId()).AsNoTracking()
+            .Where(r => r.IsActive && r.IsBookable)
+            .OrderBy(r => r.RoomName)
+            .ToListAsync(cancellationToken);
+        return entities.ToDtoList();
+    }
+
     public async Task<MeetingRoomDto> CreateAsync(CreateMeetingRoomDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
@@ -4782,6 +4792,48 @@ public class RoomBookingService : IRoomBookingService
             .OrderBy(b => b.StartDateTime)
             .ToListAsync(cancellationToken);
         return entities.ToSummaryDtoList();
+    }
+
+    private const int MaxBusyDays = 31;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Live bookings only — Tentative or Confirmed, as the clash check counts them: a completed or no-show booking no
+    /// longer holds its room. Rooms out of use or closed to booking are left out, as the portal does not offer them.
+    /// </remarks>
+    public async Task<IReadOnlyList<RoomBusyTimeDto>> GetBusyTimesAsync(DateOnly from, DateOnly to, Guid viewerEmployeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (from == default || to == default)
+            throw new InvalidOperationException("Say which days to show.");
+        if (to < from)
+            throw new InvalidOperationException("The last day is before the first.");
+        if (to.DayNumber - from.DayNumber + 1 > MaxBusyDays)
+            throw new InvalidOperationException($"Ask for at most {MaxBusyDays} days at a time.");
+
+        var start = from.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var end = to.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        var rows = await _bookingRepository.GetQueryable().AsNoTracking()
+            .Where(b => b.TenantId == tenantId && !b.IsCancelled
+                        && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed)
+                        && b.Room.IsActive && b.Room.IsBookable
+                        && b.StartDateTime < end && b.EndDateTime > start)
+            .OrderBy(b => b.StartDateTime)
+            .Select(b => new { b.Id, b.RoomId, b.StartDateTime, b.EndDateTime, b.BookedById })
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(r =>
+        {
+            var mine = r.BookedById == viewerEmployeeId;
+            return new RoomBusyTimeDto
+            {
+                RoomId = r.RoomId,
+                StartDateTime = RoomBookingRules.AsUtc(r.StartDateTime),
+                EndDateTime = RoomBookingRules.AsUtc(r.EndDateTime),
+                IsMine = mine,
+                BookingId = mine ? r.Id : null,
+            };
+        }).ToList();
     }
 
     /// <remarks>

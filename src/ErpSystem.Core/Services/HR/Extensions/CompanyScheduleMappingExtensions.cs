@@ -466,7 +466,8 @@ public static class CompanyScheduleMappingExtensions
             Capacity = entity.Capacity,
             Type = entity.Type,
             IsActive = entity.IsActive,
-            IsBookable = entity.IsBookable
+            IsBookable = entity.IsBookable,
+            RequiresApproval = entity.RequiresApproval
         };
     }
 

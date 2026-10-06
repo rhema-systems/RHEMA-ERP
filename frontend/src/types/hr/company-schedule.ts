@@ -853,6 +853,8 @@ export interface MeetingRoomSummary {
   typeName: string;
   isActive: boolean;
   isBookable: boolean;
+  /** A booking of it waits for approval (lane 3c). */
+  requiresApproval: boolean;
 }
 
 export interface CreateMeetingRoom {
@@ -968,6 +970,18 @@ export interface UpdateRoomBooking {
 export interface CancelRoomBooking {
   bookingId: string;
   cancellationReason: string;
+}
+
+/**
+ * When a room is held (lane 3c, D-13): all staff see of a booking that is not theirs — the room and the time. Their own
+ * carry `bookingId`.
+ */
+export interface RoomBusyTime {
+  roomId: string;
+  startDateTime: string;
+  endDateTime: string;
+  isMine: boolean;
+  bookingId?: string | null;
 }
 
 // ── Milestones ────────────────────────────────────────────────────────────────

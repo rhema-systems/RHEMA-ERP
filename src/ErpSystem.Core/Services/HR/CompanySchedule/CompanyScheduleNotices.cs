@@ -160,8 +160,12 @@ public sealed class CompanyScheduleNotices
             ["ActionPath"] = BookingLink(b),
         }, data, actorToo: false, cancellationToken);
 
-    /// <summary>The booking's page.</summary>
-    public static string BookingLink(RoomBooking b) => $"/hr/company-schedule/bookings/{b.Id}";
+    /// <summary>
+    /// The booking's page in the portal (lane 3c, the user's ruling): every booker notice goes to the booker, and that page
+    /// opens for any booker, HR officers included — the HR page answers 403 to staff. The approver's inbox link stays on the
+    /// HR page (<c>WorkflowEntityDisplayService</c>).
+    /// </summary>
+    public static string BookingLink(RoomBooking b) => $"/me/room-bookings/{b.Id}";
 
     private async Task<IReadOnlySet<Guid>> RaiseAsync(
         Guid tenantId, Guid entityId, string reference, string notice, string audience, IEnumerable<Guid> employeeIds,

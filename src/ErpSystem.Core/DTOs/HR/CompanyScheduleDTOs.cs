@@ -1211,6 +1211,9 @@ public class MeetingRoomSummaryDto
     public string TypeName => Type.ToString();
     public bool IsActive { get; set; }
     public bool IsBookable { get; set; }
+
+    /// <summary>A booking of it waits for approval (lane 3c: the portal says so before staff book it).</summary>
+    public bool RequiresApproval { get; set; }
 }
 
 /// <summary>
@@ -1463,6 +1466,31 @@ public class CancelRoomBookingDto
     [Required]
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A window a room is held (lane 3c, D-13): all staff see of a booking that is not theirs — the room and the time, never
+/// the purpose, the booker or the number. Their own carry the booking's id, to open it.
+/// </summary>
+public class RoomBusyTimeDto
+{
+    public Guid RoomId { get; set; }
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
+    public bool IsMine { get; set; }
+
+    /// <summary>Only on the caller's own bookings.</summary>
+    public Guid? BookingId { get; set; }
+}
+
+/// <summary>
+/// Cancelling one's own booking from the portal (lane 3c): the booking is the route's, and a reason is needed, as at the
+/// desk. Nullable so a blank one reaches the service's sentence rather than a bare validation error.
+/// </summary>
+public class CancelMyRoomBookingDto
+{
+    [MaxLength(1000)]
+    public string? CancellationReason { get; set; }
 }
 
 #endregion
