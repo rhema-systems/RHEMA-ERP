@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -19,7 +19,7 @@ import {
 } from '../ui/dropdown-menu';
 import { Badge } from '../ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Search, MoreHorizontal, Plus, Trash2, Edit, Eye, Download } from 'lucide-react';
+import { Search, MoreHorizontal, Plus, Trash2, Edit, Eye, Download, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export interface Column<T> {
   key: keyof T | string;
@@ -46,6 +46,9 @@ export interface DataTableProps<T> {
   exportFileName?: string;
   selectable?: boolean;
   onSelectionChange?: (selectedRows: T[]) => void;
+  pageSize?: number;
+  getRowId?: (row: T) => string;
+  emptyMessage?: string;
 }
 
 export function DataTable<T extends Record<string, any>>({
@@ -66,11 +69,15 @@ export function DataTable<T extends Record<string, any>>({
   exportFileName,
   selectable = false,
   onSelectionChange,
+  pageSize,
+  getRowId,
+  emptyMessage = 'No data found.',
 }: DataTableProps<T>) {
   const [searchTerm, setSearchTerm] = useState('');
   const [sortColumn, setSortColumn] = useState<string | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
-  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Filter data based on search term
   const filteredData = data.filter((row) =>
@@ -91,6 +98,25 @@ export function DataTable<T extends Record<string, any>>({
     return 0;
   });
 
+  const effectivePageSize = pageSize && pageSize > 0 ? pageSize : sortedData.length || 1;
+  const totalPages = Math.max(1, Math.ceil(sortedData.length / effectivePageSize));
+  const pagedData = pageSize
+    ? sortedData.slice((currentPage - 1) * effectivePageSize, currentPage * effectivePageSize)
+    : sortedData;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, data, pageSize]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const rowKey = useMemo(
+    () => (row: T, index: number) => getRowId?.(row) ?? String(row.id ?? index),
+    [getRowId]
+  );
+
   const handleSort = (columnKey: string) => {
     if (sortColumn === columnKey) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -101,17 +127,17 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   // Selection handlers
-  const handleRowSelect = (index: number, checked: boolean) => {
+  const handleRowSelect = (key: string, checked: boolean) => {
     const newSelectedRows = new Set(selectedRows);
     if (checked) {
-      newSelectedRows.add(index);
+      newSelectedRows.add(key);
     } else {
-      newSelectedRows.delete(index);
+      newSelectedRows.delete(key);
     }
     setSelectedRows(newSelectedRows);
     
     // Call selection change callback
-    const selectedData = sortedData.filter((_, idx) => newSelectedRows.has(idx));
+    const selectedData = sortedData.filter((row, index) => newSelectedRows.has(rowKey(row, index)));
     onSelectionChange?.(selectedData);
   };
 
@@ -270,21 +296,24 @@ export function DataTable<T extends Record<string, any>>({
                       colSpan={columns.length + (actions ? 1 : 0)}
                       className="h-14 text-center text-muted-foreground text-sm py-3"
                     >
-                      No data found.
+                      {emptyMessage}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  sortedData.map((row, index) => (
+                  pagedData.map((row, index) => {
+                    const absoluteIndex = pageSize ? (currentPage - 1) * effectivePageSize + index : index;
+                    const key = rowKey(row, absoluteIndex);
+                    return (
                     <TableRow 
-                      key={index} 
+                      key={key}
                       className={`h-9 transition-colors hover:bg-blue-50 dark:hover:bg-blue-900/20 cursor-pointer ${
-                        selectedRows.has(index) 
+                        selectedRows.has(key)
                           ? 'bg-blue-100 dark:bg-blue-900/30' 
                           : index % 2 === 0
                             ? 'bg-white dark:bg-slate-950'
                             : 'bg-slate-50/80 dark:bg-slate-900/35'
                       } border-b border-border/40`}
-                      onClick={() => selectable && handleRowSelect(index, !selectedRows.has(index))}
+                      onClick={() => selectable && handleRowSelect(key, !selectedRows.has(key))}
                     >
                       {columns.map((column) => (
                         <TableCell key={String(column.key)} className="py-1.5 text-[13px] border-r border-border/30 last:border-r-0">
@@ -330,10 +359,41 @@ export function DataTable<T extends Record<string, any>>({
                         </TableCell>
                       )}
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
+          </div>
+        )}
+        {!loading && pageSize && sortedData.length > 0 && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+            <span className="text-muted-foreground">
+              Showing {(currentPage - 1) * effectivePageSize + 1}–{Math.min(currentPage * effectivePageSize, sortedData.length)} of {sortedData.length}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" /> Previous
+              </Button>
+              <span className="min-w-20 text-center text-muted-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Next <ChevronRight className="ml-1 h-4 w-4" />
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>

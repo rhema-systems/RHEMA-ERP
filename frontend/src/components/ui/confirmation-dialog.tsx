@@ -10,6 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from './dialog';
+import { EnvironmentBadge } from '../environment/EnvironmentBadge';
+import { useApplicationEnvironment } from '../../contexts/ApplicationEnvironmentContext';
 
 export interface ConfirmationDialogProps {
   open: boolean;
@@ -47,6 +49,7 @@ export function ConfirmationDialog({
   maxWidth = '425px',
   children,
 }: ConfirmationDialogProps) {
+  const { environment } = useApplicationEnvironment();
   const confirmInFlight = React.useRef(false);
   const [isConfirming, setIsConfirming] = React.useState(false);
 
@@ -97,6 +100,13 @@ export function ConfirmationDialog({
               </DialogDescription>
             ))}
         </DialogHeader>
+        {variant === 'destructive' && (
+          <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-neutral-700 dark:bg-neutral-900/70">
+            <span className="font-medium text-slate-600 dark:text-neutral-300">Environment</span>
+            <EnvironmentBadge compact />
+            <span className="sr-only">{environment.message}</span>
+          </div>
+        )}
         {children && <div className="py-4">{children}</div>}
         <DialogFooter>
           <Button

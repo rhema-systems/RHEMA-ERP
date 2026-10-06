@@ -71,6 +71,9 @@ vi.mock('../../../../components/security/TwoFactorAuth', () => ({ TwoFactorAuth:
 vi.mock('../../../../components/security/AuditLog', () => ({ AuditLog: () => null }));
 vi.mock('../../../../components/security/DeviceManagement', () => ({ DeviceManagement: () => null }));
 vi.mock('../../../../components/security/SecurityPolicies', () => ({ SecurityPolicies: () => null }));
+vi.mock('../../../../components/security/SecurityOperationsOverview', () => ({
+  SecurityOperationsOverview: () => <div>Security operations evidence</div>,
+}));
 vi.mock('@/components/admin/SessionManagementTab', () => ({ SessionManagementTab: () => null }));
 vi.mock('../../../../components/ui/client-only', () => ({
   ClientOnly: ({ children }: { children: React.ReactNode }) => <>{children}</>,

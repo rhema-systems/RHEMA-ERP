@@ -293,6 +293,119 @@ export interface SecuritySettings {
   privacyPolicyUrl?: string
 }
 
+export type SecurityRange = '24h' | '7d' | '30d'
+
+export interface SecurityOperationsOverview {
+  range: { key: string; startUtc: string; endUtc: string }
+  snapshot: {
+    eligibleUsers: number
+    activeUsers: number
+    mfaEnabledUsers: number
+    mfaAdoptionPercent: number
+    privilegedUsers: number
+    privilegedUsersWithoutMfa: number
+    lockedAccounts: number
+    activeSessions: number
+    staleSessions: number
+    disabledUsersWithActiveSessions: number
+    sessionIdleThresholdMinutes: number
+  }
+  activity: {
+    successfulLogins: number
+    failedLogins: number
+    loginFailureRatePercent: number
+    passwordChanges: number
+    securityEvents: number
+    auditEvents: number
+  }
+  health: {
+    score: number
+    maximumScore: number
+    modelVersion: string
+    factors: Array<{
+      key: string
+      name: string
+      earnedPoints: number
+      maximumPoints: number
+      status: 'healthy' | 'attention' | 'action-required' | 'unavailable'
+      evidence: string
+    }>
+  }
+  alerts: {
+    openTotal: number
+    critical: number
+    high: number
+    medium: number
+    items: Array<{
+      id: string
+      source: string
+      severity: string
+      status: string
+      title: string
+      description: string
+      timestampUtc: string
+      userName?: string
+      ipAddress?: string
+    }>
+  }
+  recentEvents: SecurityOperationsEvent[]
+  privilegedUsers: Array<{
+    userId: string
+    displayName: string
+    userName: string
+    email: string
+    roles: string[]
+    privilegeLevel: string
+    isActive: boolean
+    mfaEnabled: boolean
+    isLocked: boolean
+    lastLoginUtc?: string
+    createdAtUtc: string
+    findings: string[]
+  }>
+  authenticationTrend: Array<{
+    periodStartUtc: string
+    label: string
+    successful: number
+    failed: number
+  }>
+  configuration: {
+    persisted: boolean
+    passwordMinimumLength?: number
+    failedAttemptThreshold?: number
+    lockoutMinutes?: number
+    sessionTimeoutMinutes?: number
+    accessTokenLifetimeMinutes?: number
+    concurrentLoginPolicy: string
+    loginRateLimitingConfigured: boolean
+    captchaEnabled: boolean
+    captchaConfigured: boolean
+  }
+  retention: {
+    configured: boolean
+    enabled: boolean
+    auditLogRetentionDays?: number
+    securityLogRetentionDays?: number
+    lastRunStartedAtUtc?: string
+    lastRunCompletedAtUtc?: string
+    lastRunSucceeded?: boolean
+  }
+  generatedAtUtc: string
+}
+
+export interface SecurityOperationsEvent {
+  id: string
+  timestampUtc: string
+  source: string
+  eventType: string
+  severity: string
+  title: string
+  userName?: string
+  ipAddress?: string
+  success?: boolean
+  evidence: string
+}
+
 class SecurityService {
   private alertHandlers: Set<(alert: SecurityAlert) => void> = new Set()
   private metricsHandlers: Set<(metrics: SecurityMetrics) => void> = new Set()
@@ -411,6 +524,10 @@ class SecurityService {
   }
 
   // API Methods
+  async getOperationsOverview(range: SecurityRange = '24h'): Promise<SecurityOperationsOverview> {
+    return apiService.request<SecurityOperationsOverview>(`/security/operations/overview?range=${range}`)
+  }
+
   async getSecurityMetrics(): Promise<SecurityMetrics> {
     return await apiService.request<SecurityMetrics>('/security/metrics')
   }

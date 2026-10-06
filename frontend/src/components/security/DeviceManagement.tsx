@@ -21,15 +21,10 @@ import {
   MapPin, 
   Calendar, 
   CheckCircle, 
-  XCircle,
   AlertTriangle,
   Search,
   Eye,
   LogOut,
-  Lock,
-  Unlock,
-  ShieldCheck,
-  ShieldX,
   RefreshCw,
   Loader2
 } from 'lucide-react'
@@ -116,28 +111,6 @@ export function DeviceManagement() {
     }
   }
 
-  const formatRiskLevel = (riskScore: number) => {
-    if (riskScore < 30) {
-      return (
-        <Badge variant="outline" className="text-green-600 border-green-200 flex items-center gap-1">
-          <ShieldCheck className="h-3 w-3" /> Low Risk
-        </Badge>
-      )
-    } else if (riskScore < 60) {
-      return (
-        <Badge variant="outline" className="text-yellow-600 border-yellow-200 flex items-center gap-1">
-          <AlertTriangle className="h-3 w-3" /> Medium Risk
-        </Badge>
-      )
-    } else {
-      return (
-        <Badge variant="outline" className="text-red-600 border-red-200 flex items-center gap-1">
-          <ShieldX className="h-3 w-3" /> High Risk
-        </Badge>
-      )
-    }
-  }
-
   const handleTerminateSession = async (sessionId: string) => {
     try {
       setActionLoading(sessionId)
@@ -180,27 +153,6 @@ export function DeviceManagement() {
     }
   }
 
-  const handleTrustDevice = async (deviceId: string, isTrusted: boolean) => {
-    try {
-      setActionLoading(deviceId)
-      await deviceService.updateDeviceTrust(deviceId, isTrusted)
-      // In a real implementation, you'd refresh the data to show updated trust status
-      toast({
-        title: "Success",
-        description: `Device ${isTrusted ? 'trusted' : 'untrusted'} successfully`,
-      })
-    } catch (error) {
-      console.error('Failed to update device trust:', error)
-      toast({
-        title: "Error",
-        description: "Failed to update device trust. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
   // Create devices list from sessions (group by device fingerprint or similar identifier)
   const getDevicesFromSessions = () => {
     if (!deviceData) return []
@@ -227,8 +179,6 @@ export function DeviceManagement() {
       device.location.country.toLowerCase().includes(searchTerm.toLowerCase())
     
     if (deviceFilter === 'all') return matchesSearch
-    if (deviceFilter === 'trusted') return matchesSearch && device.security.isTrusted
-    if (deviceFilter === 'untrusted') return matchesSearch && !device.security.isTrusted
     if (deviceFilter === 'active') return matchesSearch && device.session.isActive
     return matchesSearch
   })
@@ -348,8 +298,6 @@ export function DeviceManagement() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Devices</SelectItem>
-                      <SelectItem value="trusted">Trusted</SelectItem>
-                      <SelectItem value="untrusted">Untrusted</SelectItem>
                       <SelectItem value="active">Active Now</SelectItem>
                     </SelectContent>
                   </Select>
@@ -384,9 +332,6 @@ export function DeviceManagement() {
                           <div>
                             <div className="flex items-center gap-2">
                               <h3 className="font-medium">{device.deviceInfo.browser} on {device.deviceInfo.os}</h3>
-                              {device.security.isTrusted && (
-                                <Badge variant="secondary" className="text-xs">Trusted</Badge>
-                              )}
                               {device.session.isActive && (
                                 <Badge variant="outline" className="text-green-600 border-green-200 text-xs">Active Now</Badge>
                               )}
@@ -409,33 +354,7 @@ export function DeviceManagement() {
                           </div>
                         </div>
                         
-                        <div className="flex flex-col items-end gap-2">
-                          {formatRiskLevel(device.security.riskScore)}
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            className="h-7"
-                            disabled={actionLoading === device.id}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleTrustDevice(device.id, !device.security.isTrusted)
-                            }}
-                          >
-                            {actionLoading === device.id ? (
-                              <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                            ) : device.security.isTrusted ? (
-                              <>
-                                <XCircle className="h-3.5 w-3.5 mr-1" />
-                                Revoke
-                              </>
-                            ) : (
-                              <>
-                                <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                                Trust
-                              </>
-                            )}
-                          </Button>
-                        </div>
+                        <Badge variant="outline">Session evidence</Badge>
                       </div>
                     </div>
                   ))
@@ -613,17 +532,7 @@ export function DeviceManagement() {
                   </div>
                   <div>
                     <Label className="text-xs text-muted-foreground">TRUST STATUS</Label>
-                    <p>
-                      {selectedDevice.security.isTrusted ? (
-                        <span className="flex items-center text-green-600 gap-1">
-                          <CheckCircle className="h-3.5 w-3.5" /> Trusted
-                        </span>
-                      ) : (
-                        <span className="flex items-center text-amber-600 gap-1">
-                          <AlertTriangle className="h-3.5 w-3.5" /> Not Trusted
-                        </span>
-                      )}
-                    </p>
+                    <p className="text-sm text-muted-foreground">Unavailable — no persisted device trust store is configured.</p>
                   </div>
                 </div>
 
@@ -639,54 +548,13 @@ export function DeviceManagement() {
 
                 <div>
                   <Label className="text-xs text-muted-foreground">RISK ASSESSMENT</Label>
-                  <div className="flex items-center gap-2 mt-1">
-                    {formatRiskLevel(selectedDevice.security.riskScore)}
-                    <span className="text-sm">
-                      {selectedDevice.security.riskScore < 30 && 'Normal usage patterns detected'}
-                      {selectedDevice.security.riskScore >= 30 && selectedDevice.security.riskScore < 60 && 'Some unusual activities detected'}
-                      {selectedDevice.security.riskScore >= 60 && 'Suspicious login location or behavior'}
-                    </span>
-                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Unavailable — this session has device, IP, location, and activity evidence, but no persisted risk assessment.
+                  </p>
                 </div>
               </div>
 
               <DialogFooter>
-                {selectedDevice.security.isTrusted ? (
-                  <Button 
-                    variant="outline" 
-                    className="border-red-200 text-red-600 hover:bg-red-50"
-                    disabled={actionLoading === selectedDevice.id}
-                    onClick={() => {
-                      handleTrustDevice(selectedDevice.id, false)
-                      setShowDeviceDetails(false)
-                    }}
-                  >
-                    {actionLoading === selectedDevice.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Lock className="h-4 w-4 mr-2" />
-                    )}
-                    Revoke Device
-                  </Button>
-                ) : (
-                  <Button 
-                    variant="outline"
-                    className="border-green-200 text-green-600 hover:bg-green-50"
-                    disabled={actionLoading === selectedDevice.id}
-                    onClick={() => {
-                      handleTrustDevice(selectedDevice.id, true)
-                      setShowDeviceDetails(false)
-                    }}
-                  >
-                    {actionLoading === selectedDevice.id ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Unlock className="h-4 w-4 mr-2" />
-                    )}
-                    Trust Device
-                  </Button>
-                )}
-
                 <Button 
                   variant="destructive"
                   disabled={actionLoading === 'terminate-all'}

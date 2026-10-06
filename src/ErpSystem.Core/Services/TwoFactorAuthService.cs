@@ -90,7 +90,11 @@ public class TwoFactorAuthService : ITwoFactorAuthService
                 return Task.FromResult(false);
             }
 
-            _logger.LogInformation("Validating TOTP for user {UserId}, code = '{Code}', secret key = '{SecretKey}'", user.Id, totpCode, user.AuthenticatorKey);
+            _logger.LogInformation(
+                "Validating TOTP for user {UserId}. Code supplied: {HasCode}; authenticator configured: {HasAuthenticator}",
+                user.Id,
+                !string.IsNullOrWhiteSpace(totpCode),
+                !string.IsNullOrWhiteSpace(user.AuthenticatorKey));
 
             var secretKeyBytes = Base32Encoding.ToBytes(user.AuthenticatorKey);
             var totp = new Totp(secretKeyBytes);

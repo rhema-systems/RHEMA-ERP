@@ -1061,7 +1061,8 @@ public class SecurityService : ISecurityService
                 IsEnabled = user.TwoFactorEnabled,
                 RecoveryCodes = new List<string>(), // Don't expose recovery codes in get
                 AuthenticatorKey = null, // Don't expose key in get
-                EnabledAt = user.TwoFactorEnabled ? user.CreatedAt : null,
+                // The current schema does not persist the actual enrollment timestamp.
+                EnabledAt = null,
                 BackupCodesGeneratedAt = null,
                 RecoveryCodesRemaining = 0 // TODO: Implement recovery codes
             };
@@ -1084,8 +1085,11 @@ public class SecurityService : ISecurityService
             }
 
             var user = await _userService.GetUserByIdAsync(userId.Value) ?? throw new InvalidOperationException("User not found");
-            _logger.LogInformation("EnableTwoFactorAsync called for user {UserId}. User has AuthenticatorKey: {HasKey}, VerificationCode provided: '{Code}'",
-                userId.Value, !string.IsNullOrEmpty(user.AuthenticatorKey), request.VerificationCode);
+            _logger.LogInformation(
+                "EnableTwoFactorAsync called for user {UserId}. User has AuthenticatorKey: {HasKey}, VerificationCode provided: {HasCode}",
+                userId.Value,
+                !string.IsNullOrEmpty(user.AuthenticatorKey),
+                !string.IsNullOrWhiteSpace(request.VerificationCode));
 
             // ALWAYS verify the password first before doing anything
             await VerifyTwoFactorConfirmationPasswordAsync(user, request.Password, "2FA setup");
@@ -1126,8 +1130,7 @@ public class SecurityService : ISecurityService
                 // Save the authenticator key to the user
                 await _userService.UpdateUserAsync(user);
 
-                _logger.LogInformation("2FA setup completed for user {UserId}. Generated secret key: {SecretKey}",
-                    userId.Value, setupResult.SecretKey);
+                _logger.LogInformation("2FA setup material generated for user {UserId}", userId.Value);
 
                 return new TwoFactorSetupDto
                 {

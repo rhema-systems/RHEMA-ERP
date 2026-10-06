@@ -880,7 +880,10 @@ namespace ErpSystem.Api.Controllers
                     // Validate the provided 2FA code format first
                     if (request.TwoFactorCode.Length != 6 || !request.TwoFactorCode.All(char.IsDigit))
                     {
-                        _logger.LogWarning("Invalid 2FA code format for user {Username}: length={Length}, code='{Code}'", request.Username, request.TwoFactorCode.Length, request.TwoFactorCode);
+                        _logger.LogWarning(
+                            "Invalid 2FA code format for user {Username}: length={Length}",
+                            request.Username,
+                            request.TwoFactorCode.Length);
                         return BadRequest(new { message = "Two-factor authentication code must be exactly 6 digits" });
                     }
 

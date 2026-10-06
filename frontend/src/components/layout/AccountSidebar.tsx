@@ -9,6 +9,7 @@ import {
   LogOut,
   Monitor,
   Moon,
+  Info,
   Settings,
   ShieldCheck,
   Sun,
@@ -20,6 +21,8 @@ import type { Tenant, User } from '../../types';
 import { useTheme } from '../../contexts/ThemeContext';
 import { cn, getInitials } from '../../lib/utils';
 import { Button } from '../ui/button';
+import { EnvironmentBadge } from '../environment/EnvironmentBadge';
+import { useApplicationEnvironment } from '../../contexts/ApplicationEnvironmentContext';
 
 interface AccountSidebarProps {
   open: boolean;
@@ -50,6 +53,7 @@ export function AccountSidebar({
 }: AccountSidebarProps) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const { theme, setTheme, actualTheme } = useTheme();
+  const { environment } = useApplicationEnvironment();
   const displayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim()
     || user?.username
     || 'User';
@@ -210,6 +214,41 @@ export function AccountSidebar({
               </div>
             </section>
           )}
+
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
+            <div className="mb-3 flex items-center gap-2">
+              <Info className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+              <h3 className="text-sm font-semibold text-slate-950 dark:text-neutral-100">System context</h3>
+            </div>
+            <dl className="space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-slate-500 dark:text-neutral-400">Environment</dt>
+                <dd><EnvironmentBadge compact /></dd>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <dt className="text-slate-500 dark:text-neutral-400">Version</dt>
+                <dd className="font-medium text-slate-800 dark:text-neutral-200">{environment.applicationVersion}</dd>
+              </div>
+              {environment.buildId && (
+                <div className="flex items-center justify-between gap-3">
+                  <dt className="text-slate-500 dark:text-neutral-400">Build</dt>
+                  <dd className="font-mono font-medium text-slate-800 dark:text-neutral-200">{environment.buildId}</dd>
+                </div>
+              )}
+            </dl>
+            <p className="mt-3 text-[11px] leading-4 text-slate-500 dark:text-neutral-400">
+              {environment.message}
+            </p>
+            {showSettingsLink && (
+              <Link
+                href="/administration/system"
+                onClick={onClose}
+                className="mt-3 inline-flex text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                View system information
+              </Link>
+            )}
+          </section>
         </div>
 
         <div className="shrink-0 border-t border-slate-200 bg-white p-3 dark:border-neutral-700 dark:bg-[#1b1b1b]">

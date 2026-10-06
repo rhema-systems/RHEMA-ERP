@@ -136,7 +136,7 @@ public class RoleController : ControllerBase
     /// Create a new role
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<RoleDto>> CreateRole([FromBody] CreateRoleRequest request)
     {
         try
@@ -223,7 +223,7 @@ public class RoleController : ControllerBase
     /// Update role
     /// </summary>
     [HttpPut("{id}")]
-    [Authorize(Roles = Constants.Roles.TenantAdmin + "," + Constants.Roles.SuperAdmin)]
+    [Authorize(Roles = Constants.Roles.SuperAdmin)]
     public async Task<ActionResult<RoleDto>> UpdateRole(Guid id, [FromBody] UpdateRoleRequest request)
     {
         try

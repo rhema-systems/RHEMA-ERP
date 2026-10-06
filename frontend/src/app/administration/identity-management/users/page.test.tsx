@@ -28,7 +28,15 @@ vi.mock('../../../../contexts/TenantContext', () => ({
   useTenant: () => ({ currentTenant: { id: 'tenant-qs-test' } }),
 }));
 
+vi.mock('../../../../hooks/use-auth', () => ({
+  useAuth: () => ({
+    hasPermission: () => true,
+    hasRole: () => true,
+  }),
+}));
+
 vi.mock('../../../../services/admin-api.service', () => ({
+  getAdminProblemMessage: (_error: unknown, fallback: string) => fallback,
   adminApiService: {
     getUsers: mocks.getUsers,
     getRoles: mocks.getRoles,

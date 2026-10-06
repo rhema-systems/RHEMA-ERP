@@ -12,11 +12,7 @@ import {
   Search, 
   Filter, 
   Download, 
-  Shield,
   User,
-  Settings,
-  Database,
-  Lock,
   AlertTriangle,
   CheckCircle,
   XCircle,
@@ -32,26 +28,20 @@ interface AuditLogProps {
 export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedAction, setSelectedAction] = useState('all')
-  const [selectedRiskLevel, setSelectedRiskLevel] = useState('all')
-  const [selectedUser, setSelectedUser] = useState('all')
-  const [selectedResult, setSelectedResult] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize] = useState(20)
-  const [sortBy, setSortBy] = useState('timestamp')
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+  const sortBy = 'timestamp'
+  const sortOrder = 'desc' as const
 
   // Build filter for API call
   const filter: AuditLogFilter = useMemo(() => ({
     searchTerm: searchTerm || undefined,
     action: selectedAction !== 'all' ? selectedAction : undefined,
-    risk: selectedRiskLevel !== 'all' ? selectedRiskLevel as 'low' | 'medium' | 'high' | 'critical' : undefined,
-    userName: selectedUser !== 'all' ? selectedUser : undefined,
-    result: selectedResult !== 'all' ? selectedResult as 'success' | 'failure' | 'warning' : undefined,
     page: currentPage,
     pageSize,
     sortBy,
     sortOrder
-  }), [searchTerm, selectedAction, selectedRiskLevel, selectedUser, selectedResult, currentPage, pageSize, sortBy, sortOrder])
+  }), [searchTerm, selectedAction, currentPage, pageSize, sortBy, sortOrder])
 
   // Fetch audit logs with real-time updates
   const { data: auditData, isLoading, error, refetch } = useQuery({
@@ -66,12 +56,7 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
   const hasNext = auditData?.hasNext || false
   const hasPrevious = auditData?.hasPrevious || false
   
-  // Get unique values for filters from current data
-  const uniqueUsers = useMemo(() => {
-    const users = new Set(entries.map(e => e.userName))
-    return Array.from(users)
-  }, [entries])
-
+  // Action options reflect the currently loaded page. Search remains server-side.
   const uniqueActions = useMemo(() => {
     const actions = new Set(entries.map(e => e.action))
     return Array.from(actions)
@@ -107,7 +92,7 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
 
   const exportAuditLog = () => {
     const csvContent = [
-      'Timestamp,User,Email,Action,Resource,Risk Level,Result,IP Address,Location,Details',
+      'Timestamp,User,Email,Action,Resource,Derived Risk,Derived Result,IP Address,Location,Details',
       ...entries.map(entry => 
         `"${entry.timestamp.toISOString()}","${entry.userName}","${entry.userEmail}","${entry.action}","${entry.resource}","${entry.risk}","${entry.result}","${entry.ipAddress}","${entry.location || ''}","${entry.details}"`
       )
@@ -187,7 +172,7 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             
             {/* Search */}
             <div className="space-y-2">
@@ -197,7 +182,10 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
                 <Input
                   placeholder="Search actions, users, or details..."
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value)
+                    setCurrentPage(1)
+                  }}
                   className="pl-10"
                 />
               </div>
@@ -206,7 +194,10 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
             {/* Action Filter */}
             <div className="space-y-2">
               <label className="text-sm font-medium">Action</label>
-              <Select value={selectedAction} onValueChange={setSelectedAction}>
+              <Select value={selectedAction} onValueChange={(value) => {
+                setSelectedAction(value)
+                setCurrentPage(1)
+              }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -219,39 +210,10 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
               </Select>
             </div>
 
-            {/* Risk Level Filter */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Risk Level</label>
-              <Select value={selectedRiskLevel} onValueChange={setSelectedRiskLevel}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Risk Levels</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="critical">Critical</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Result Filter */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Result</label>
-              <Select value={selectedResult} onValueChange={setSelectedResult}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Results</SelectItem>
-                  <SelectItem value="success">Success</SelectItem>
-                  <SelectItem value="failure">Failure</SelectItem>
-                  <SelectItem value="warning">Warning</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Result and risk labels shown below are derived presentation classifications; they are not persisted audit fields and are therefore not offered as filters.
+          </p>
         </CardContent>
       </Card>
 
@@ -291,10 +253,10 @@ export const AuditLog: React.FC<AuditLogProps> = ({ className }) => {
                         <div className="flex items-center gap-2 mb-1">
                           <h4 className="font-medium">{entry.action}</h4>
                           <Badge className={`text-xs ${getRiskLevelColor(entry.risk)}`}>
-                            {entry.risk.toUpperCase()}
+                            Derived risk: {entry.risk.toUpperCase()}
                           </Badge>
                           <Badge variant={entry.result === 'success' ? 'outline' : 'destructive'} className="text-xs">
-                            {entry.result.toUpperCase()}
+                            Derived result: {entry.result.toUpperCase()}
                           </Badge>
                         </div>
                         <p className="text-sm text-muted-foreground mb-2">{entry.details}</p>

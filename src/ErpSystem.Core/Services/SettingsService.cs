@@ -110,7 +110,10 @@ public class SettingsService : ISettingsService
                 existingSettings.SmtpHost = settings.SmtpHost;
                 existingSettings.SmtpPort = settings.SmtpPort;
                 existingSettings.SmtpUsername = settings.SmtpUsername;
-                existingSettings.SmtpPassword = !string.IsNullOrEmpty(settings.SmtpPassword) ? _cryptoService.Encrypt(settings.SmtpPassword) : settings.SmtpPassword;
+                if (!string.IsNullOrEmpty(settings.SmtpPassword))
+                {
+                    existingSettings.SmtpPassword = _cryptoService.Encrypt(settings.SmtpPassword);
+                }
                 existingSettings.UseTLS = settings.UseTLS;
                 existingSettings.FromAddress = settings.FromAddress;
                 existingSettings.FromName = settings.FromName;
@@ -375,9 +378,13 @@ public class SettingsService : ISettingsService
                 existingSettings.CaptchaEnabled = settings.CaptchaEnabled;
                 existingSettings.CaptchaProvider = settings.CaptchaProvider;
                 existingSettings.RecaptchaSiteKey = settings.RecaptchaSiteKey;
-                existingSettings.RecaptchaSecretKey = settings.RecaptchaSecretKey;
+                existingSettings.RecaptchaSecretKey = !string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey)
+                    ? _cryptoService.Encrypt(settings.RecaptchaSecretKey)
+                    : EnsureEncrypted(existingSettings.RecaptchaSecretKey);
                 existingSettings.HCaptchaSiteKey = settings.HCaptchaSiteKey;
-                existingSettings.HCaptchaSecretKey = settings.HCaptchaSecretKey;
+                existingSettings.HCaptchaSecretKey = !string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey)
+                    ? _cryptoService.Encrypt(settings.HCaptchaSecretKey)
+                    : EnsureEncrypted(existingSettings.HCaptchaSecretKey);
 
                 // Session and Token Settings
                 existingSettings.SessionTimeoutMinutes = settings.SessionTimeoutMinutes;
@@ -409,6 +416,16 @@ public class SettingsService : ISettingsService
             else
             {
                 // Create new settings
+                if (!string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey))
+                {
+                    settings.RecaptchaSecretKey = _cryptoService.Encrypt(settings.RecaptchaSecretKey);
+                }
+
+                if (!string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey))
+                {
+                    settings.HCaptchaSecretKey = _cryptoService.Encrypt(settings.HCaptchaSecretKey);
+                }
+
                 settings.Id = Guid.NewGuid();
                 settings.TenantId = tenantId;
                 settings.CreatedAt = DateTime.UtcNow;
@@ -424,6 +441,24 @@ public class SettingsService : ISettingsService
         {
             _logger.LogError(ex, "Error updating security settings");
             throw;
+        }
+    }
+
+    private string? EnsureEncrypted(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        try
+        {
+            _ = _cryptoService.Decrypt(value);
+            return value;
+        }
+        catch
+        {
+            return _cryptoService.Encrypt(value);
         }
     }
 

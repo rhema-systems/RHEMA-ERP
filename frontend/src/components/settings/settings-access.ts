@@ -245,6 +245,7 @@ const SETTINGS_ACCESS_RULES: SettingsAccessRule[] = [
     WORKFLOW_ADMINISTRATION_ROLES
   ),
   anyAccess(exactPath('/administration/security/dashboard'), [
+    'audit.read',
     'settings.read',
     'settings.update',
   ]),

@@ -27,8 +27,10 @@ export interface SecuritySettings {
   captchaProvider: 'recaptcha' | 'hcaptcha';
   recaptchaSiteKey: string | null;
   recaptchaSecretKey: string | null;
+  recaptchaSecretConfigured?: boolean;
   hCaptchaSiteKey: string | null;
   hCaptchaSecretKey: string | null;
+  hCaptchaSecretConfigured?: boolean;
 
   // Legal URLs
   termsOfServiceUrl: string | null;
@@ -76,8 +78,10 @@ interface AdminSecuritySettingsApiDto {
   CaptchaProvider: string; // 'recaptcha' | 'hcaptcha'
   RecaptchaSiteKey: string | null;
   RecaptchaSecretKey: string | null;
+  RecaptchaSecretConfigured?: boolean;
   HCaptchaSiteKey: string | null;
   HCaptchaSecretKey: string | null;
+  HCaptchaSecretConfigured?: boolean;
 
   // Legal URLs
   TermsOfServiceUrl: string | null;
@@ -139,8 +143,10 @@ const mapAdminSecuritySettings = (response: AdminSecuritySettingsApiDto | Record
     captchaProvider: (data.CaptchaProvider ?? data.captchaProvider ?? 'recaptcha') as 'recaptcha' | 'hcaptcha',
     recaptchaSiteKey: (data.RecaptchaSiteKey ?? data.recaptchaSiteKey ?? null) as string | null,
     recaptchaSecretKey: (data.RecaptchaSecretKey ?? data.recaptchaSecretKey ?? null) as string | null,
+    recaptchaSecretConfigured: Boolean(data.RecaptchaSecretConfigured ?? data.recaptchaSecretConfigured ?? false),
     hCaptchaSiteKey: (data.HCaptchaSiteKey ?? data.hCaptchaSiteKey ?? null) as string | null,
     hCaptchaSecretKey: (data.HCaptchaSecretKey ?? data.hCaptchaSecretKey ?? null) as string | null,
+    hCaptchaSecretConfigured: Boolean(data.HCaptchaSecretConfigured ?? data.hCaptchaSecretConfigured ?? false),
     termsOfServiceUrl: (data.TermsOfServiceUrl ?? data.termsOfServiceUrl ?? null) as string | null,
     privacyPolicyUrl: (data.PrivacyPolicyUrl ?? data.privacyPolicyUrl ?? null) as string | null,
   };
@@ -214,8 +220,10 @@ class SettingsService {
       CaptchaProvider: settings.captchaProvider,
       RecaptchaSiteKey: settings.recaptchaSiteKey || null,
       RecaptchaSecretKey: settings.recaptchaSecretKey || null,
+      RecaptchaSecretConfigured: settings.recaptchaSecretConfigured,
       HCaptchaSiteKey: settings.hCaptchaSiteKey || null,
       HCaptchaSecretKey: settings.hCaptchaSecretKey || null,
+      HCaptchaSecretConfigured: settings.hCaptchaSecretConfigured,
       TermsOfServiceUrl: settings.termsOfServiceUrl || null,
       PrivacyPolicyUrl: settings.privacyPolicyUrl || null,
     };

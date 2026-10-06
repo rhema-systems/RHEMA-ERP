@@ -17,15 +17,18 @@ public interface ICaptchaVerificationService
 public sealed class CaptchaVerificationService : ICaptchaVerificationService
 {
     private readonly ISettingsService _settingsService;
+    private readonly ICryptoService _cryptoService;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<CaptchaVerificationService> _logger;
 
     public CaptchaVerificationService(
         ISettingsService settingsService,
+        ICryptoService cryptoService,
         IHttpClientFactory httpClientFactory,
         ILogger<CaptchaVerificationService> logger)
     {
         _settingsService = settingsService;
+        _cryptoService = cryptoService;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
@@ -49,11 +52,13 @@ public sealed class CaptchaVerificationService : ICaptchaVerificationService
         }
 
         var provider = (settings.CaptchaProvider ?? "recaptcha").Trim().ToLowerInvariant();
-        var (endpoint, secret) = provider switch
+        var (endpoint, storedSecret) = provider switch
         {
             "hcaptcha" => ("https://hcaptcha.com/siteverify", settings.HCaptchaSecretKey),
             _ => ("https://www.google.com/recaptcha/api/siteverify", settings.RecaptchaSecretKey)
         };
+
+        var secret = DecryptSecretOrLegacyPlaintext(storedSecret);
 
         if (string.IsNullOrWhiteSpace(secret))
         {
@@ -91,6 +96,25 @@ public sealed class CaptchaVerificationService : ICaptchaVerificationService
         {
             _logger.LogInformation("CAPTCHA hostname mismatch for tenant {TenantId}: expected={Expected} actual={Actual}", tenantId, expectedHostname, payload.Hostname);
             throw new CaptchaVerificationException("CAPTCHA verification failed.");
+        }
+    }
+
+    private string? DecryptSecretOrLegacyPlaintext(string? storedSecret)
+    {
+        if (string.IsNullOrWhiteSpace(storedSecret))
+        {
+            return storedSecret;
+        }
+
+        try
+        {
+            return _cryptoService.Decrypt(storedSecret);
+        }
+        catch
+        {
+            // Existing deployments may have pre-hardening plaintext values. They are
+            // upgraded to encrypted storage on the next security-settings update.
+            return storedSecret;
         }
     }
 

@@ -615,6 +615,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Api.Services.IEmployeeLinkResolutionService, ErpSystem.Api.Services.EmployeeLinkResolutionService>();
 
             services.AddScoped<ISecurityService, SecurityService>();
+            services.AddScoped<ErpSystem.Api.Services.ISecurityOperationsService, ErpSystem.Api.Services.SecurityOperationsService>();
             // User context services
             services.AddHttpContextAccessor();
             services.AddScoped<ICurrentUserService, ErpSystem.Api.Services.CurrentUserService>();
@@ -1641,6 +1642,8 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                         !ctx.User.IsInRole(Constants.Roles.ConsultantClient)))
                 .AddPolicy("AuditGovernanceRead", policy =>
                     policy.Requirements.Add(new PermissionRequirement("audit.read", "procurement.audit.read")))
+                .AddPolicy("SecurityManagementRead", policy =>
+                    policy.Requirements.Add(new PermissionRequirement("audit.read", "settings.read", "settings.update")))
                 .AddPolicy("AuditGovernanceManage", policy =>
                     policy.Requirements.Add(new PermissionRequirement("settings.update")))
                 .AddPolicy("HrIdentityReconciliationRead", policy =>
