@@ -887,6 +887,14 @@ pair (`HrIdentificationExpirySweep`). Both are applied.
       they arrive first. The guard, `if (next === '') return;`, is in the one shared component, so it
       covers every HR form that uses it. **Owed:** a browser re-test, not a build — a cold load of an
       edit page whose picker loads its options (the company-schedule plan's lane 5 walk, item 1).
+- [x] **Every HR collection tab could open an empty ⋯ menu — HR-wide (company-schedule F-67, 2026-10-06)** —
+      ✅ **fixed 2026-10-06**, found by the user's browser walk. `ResourceCollectionTab`
+      (`frontend/src/components/hr/common/ResourceCollectionTab.tsx`, 86 files use it) decided whether rows get a ⋯
+      for the whole table, then filtered each row's items (`canEditItem`, `canRemoveItem`, an action's `visible`).
+      A row whose items were all hidden opened an empty menu — every guest row of a closed company event, for one.
+      Each row now works out its own items, and a row with none has no ⋯. Proved by
+      `ResourceCollectionTab.test.tsx` (4 tests; 3 fail against the old file). **Owed:** nothing but the
+      company-schedule browser re-check; any other HR tab that showed an empty menu is fixed by the same change.
 - [ ] No labour-law checklist.
 - [ ] No mass application of benefits to dependents. ⚠ This is a **bulk operation**, which is the
       excluded `docs/HR/` programme — build the single-record path here and record the bulk need

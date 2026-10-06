@@ -1344,7 +1344,8 @@ event that needs approval.
   sent the invitation), **Remove** (they are told), **Record accepted / declined / tentative** (the desk records an
   answer that came back another way — no notice), and on a series **Answer for several dates…** and **Take off
   several dates…**.
-- A cancelled or completed event's list is its record: nothing can be added, changed, removed or answered.
+- A cancelled or completed event's list is its record: nothing can be added, changed, removed or answered, and its rows
+  have no ⋯ (fixed 2026-10-06 — each opened an empty menu, **F-67**).
 
 **Attendance** — the register, taken **once the event has started** and never on a cancelled one (before then:
 *"Attendance is marked once the event has started."*). *Employee · Attended (Present / Absent) · Checked in · Checked
@@ -1721,12 +1722,14 @@ overlap the dates), and a search, *"Number, room, purpose or booker…"*.
 time) · **Purpose** · **Seats** · **Booked by** · **Status** · ⋯. 25 to a page, *"N bookings · page 1 of 2"* under
 the table. Each row opens the booking.
 
-**The ⋯ menu:**
+**The ⋯ menu** — the booking page's own rules (chapter 10). A row with nothing on offer has no ⋯ at all: for
+`hr.head`, every *Completed*, *Cancelled* and *No show* booking (fixed 2026-10-06 — it used to open an empty menu).
+*Not approve* and *Mark no-show* are on the booking page, which the row opens.
 
 | Item | Shown when | Does |
 |---|---|---|
-| **Approve** | *Tentative* | as the booking page's Approve (chapter 10) — ⚠ offered to the booker too, who is then refused: *"You booked BK-…, so somebody else must approve it."* (**F-66**) |
-| **Cancel** | not cancelled and not completed | a dialog — *"\<room\> — the slot is released for someone else."* — with a required **Reason**; the booker is told |
+| **Approve** | *Tentative*, and **not to its own booker** | as the booking page's Approve (chapter 10). The booker sees no Approve, as on the booking page (**F-66**, fixed 2026-10-06) |
+| **Cancel** | the booking holds its room — *Tentative* or *Confirmed* | a dialog — *"\<room\> — the slot is released for someone else."* — with a required **Reason**; the booker is told |
 | **Delete** | **`HR.Company.Admin` only** | *"Cancelling keeps the record and the reason. Deleting removes it entirely."* |
 
 **Export CSV** — the bookings the filters find: *Number · Room · Purpose · Event · Booked by · Starts · Ends ·
@@ -1777,7 +1780,8 @@ back marked as UTC, so a browser outside Ghana shows them right (F-50).
 | ✅ ~~**C-25** · unpaged, filtered in the browser~~ | **Fixed in lane 2g-1** |
 | ✅ ~~**C-26** · no room view~~ | **Fixed in lane 7** — the calendar's room picker (chapter 3a), and the portal's day board (chapter 10C) |
 | ✅ ~~**R4-2.3** · the second seeded booking never existed~~ | **Fixed in lane 6a** — `head.dev`'s, from the portal |
-| **F-66** · the row menu's **Approve** is offered to the booker | The booking page hides it from them; the server refuses them either way, with the reason. Found while rewriting (lane 6) |
+| ✅ ~~**F-66** · the row menu's **Approve** is offered to the booker~~ | **Fixed 2026-10-06**, with **F-67** |
+| ✅ ~~**F-67** · the row menu opens empty on a completed, cancelled or no-show booking, and offers Cancel on a no-show~~ | **Fixed 2026-10-06** (the user's report) — no ⋯ where nothing applies; Cancel only while the booking holds its room |
 
 ---
 
@@ -3002,7 +3006,8 @@ Each is small, none stops a demonstration, and each is said where it bites:
 | **F-63** | The new-event header says *"You are recorded as the organiser"*, though the *Organiser* field may name somebody else | 5 |
 | **F-64** | An event awaiting approval reads *Scheduled* on the landing and in the register's Status column | 3, 4 |
 | **F-65** | The engine offers **Approve** to an organiser on the HR desk who did not create the event; the server then refuses them | 6 |
-| **F-66** | The bookings register's row menu offers **Approve** to the booking's own booker; the booking page hides it, and the server refuses them | 8 |
+| ✅ ~~**F-66**~~ | ~~The bookings register's row menu offers **Approve** to the booking's own booker~~ — **fixed 2026-10-06**, with F-67 | 8 |
+| ✅ ~~**F-67**~~ | ~~A row's ⋯ opens an empty menu when nothing applies to it — the bookings register on a completed, cancelled or no-show booking (which was also offered Cancel), and every HR collection tab whose items are hidden for a row, such as a closed event's guest list~~ — **fixed 2026-10-06** (found by the user's browser walk): such a row has no ⋯. The shared tab is HR-wide | 6, 8 |
 
 ### Open — other modules' work
 

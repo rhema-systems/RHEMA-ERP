@@ -25,7 +25,8 @@ has not started (the user: "don't start the actual development yet").
 
 > ✅ **CLOSED 2026-10-06.** Lanes 0–7 are built and proved on UAT, and the guide is rewritten whole. What stays open
 > is at the end of lane 6's *State*: the twelve browser walks (lane 5 items 1–8, lane 7 items 9–12 — the user's),
-> F-59…F-66, and other modules' items. The list below is the record of how the plan got there.
+> F-59…F-65, and other modules' items. **After the close:** F-66 and F-67 (an empty row menu, the user's walk) fixed
+> the same day — the post-close record under lane 6's *State*. The list below is the record of how the plan got there.
 
 0. **Re-checked against HEAD 1163bbc47 on 2026-10-04** (after the travel final closure and master merge
    #13 landed on hrdev; § 3c). The module's own backend and screens did not change. F-27 is already in
@@ -66,7 +67,7 @@ has not started (the user: "don't start the actual development yet").
    chapters (3, 3a, 4–7, 6a), 6d, its bookings, diaries and staff booking (8–10, 10A–10C), 6e-1, its setup chapters
    (11–17), and 6e-2, § 18–21 and the appendices, written — the guide is rewritten whole; and 6f, the documents around
    the module. ✅ **Lane 6 is done (2026-10-06), and with it the plan.** What stays open is listed at the end of lane
-   6's *State*: the twelve browser walks (the user's), F-59…F-66, and other modules' items.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   6's *State*: the twelve browser walks (the user's), F-59…F-65, and other modules' items.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -3742,10 +3743,39 @@ plan.*
 **✅ Lane 6 is done, and the plan is closed (2026-10-06).** Every lane is built and proved on UAT, and the guide is
 rewritten. **What stays open:**
 - **the browser walks** — lane 5 items 1–8 and lane 7 items 9–12, the user's;
-- **F-59…F-66** — small, found while writing the guide; none blocks a demo;
+- **F-59…F-65** — small, found while writing the guide; none blocks a demo (F-66 was fixed after the close, below);
 - **other modules' items** — attendance A-92, the payroll hand-off's § 3 item 4, cross-module #15, #23, #33, #40;
 - **F-61's clean-up**, the recruitment suite's to add;
 - **UAT's data:** the anniversary dated 2026, an offer to re-date it to 1952 not ruled on.
+
+*After the close — F-67, from the user's browser walk (2026-10-06): an empty row menu.* **Frontend only; no server
+change, no migration, no build of the API.**
+- **Found:** on the bookings register, the ⋯ of BK-2026-00001 (*Completed*) opened an empty menu for `hr.head`. Its three
+  items were each conditional, and a completed, cancelled or no-show booking meets none without Admin. The same menu
+  offered **Cancel** on a *No show* booking, which the server refuses (`RefuseCancelling`: only Tentative or Confirmed),
+  and **Approve** to the booker (F-66). **The source check found the same shape HR-wide:** `ResourceCollectionTab`, the
+  shared table every HR collection tab uses (86 files), decides "has a menu" for the whole table and then filters each
+  row's items. So a row whose items are all hidden opens an empty menu — every guest row of a cancelled or completed
+  event, the retreat's included.
+- **The user's rulings (2026-10-06, all as recommended):**
+  - a row with nothing to offer has **no ⋯**;
+  - the fix covers the register **and** the shared tab, HR-wide;
+  - the register's menu is **corrected, not extended**: Approve on Tentative and never to the booker; Cancel only while
+    the booking holds its room; Delete for Admin. Not approve and Mark no-show stay on the booking page.
+- **Built:**
+  - `ResourceCollectionTab.tsx` works out each row's items first and renders no ⋯ when there are none; the separator
+    above Remove only when something is above it.
+  - `hr/company-schedule/bookings/page.tsx` uses the booking page's rules and hides an empty ⋯.
+- **Proof** (vitest; the API is not involved):
+  - `ResourceCollectionTab.test.tsx` **4/4** and `bookings/page.test.tsx` **8/8**, both positions. Run against HEAD's
+    two files, the defect tests fail — 3 of 4, and 5 of 8 — and the unchanged-behaviour tests pass.
+  - The scoped type-check is clean (`tsconfig.company-schedule.json`, and the tests with the setup file), and lint has no
+    errors (one warning already in HEAD).
+  - **The whole frontend suite:** 563 files — 13 failed, the same 11 files and 23 tests failing on HEAD's code alone.
+    The other 2 (`header`, `crm/global-search`) failed only under the full parallel run's load and pass alone either
+    way. None is HR's.
+- **Owed:** the user's browser re-check — the register as `hr.head` (no ⋯ on BK-2026-00001), and a completed event's
+  Participants tab.
 
 ---
 
@@ -4400,3 +4430,8 @@ built API, so no web host and no seeders).
   scan), the demo runbook's step 3 and aside (outside the repo), and memory. **Lane 6 done; every lane built and
   proved.** Open: the twelve browser walks (the user's), F-59…F-66, A-92, the payroll hand-off's item 4, #15, #23,
   #33, #40, F-61's clean-up, and UAT's anniversary date.
+- **2026-10-06, later** — **6f committed; after the close, F-67 fixed** (the user's browser walk): the bookings
+  register's ⋯ opened an empty menu on a completed booking. The shared `ResourceCollectionTab` had the same shape
+  HR-wide. Per the user's rulings, a row with nothing to offer has no ⋯, in both; the register's menu follows the
+  booking page's rules (F-66 fixed with it). vitest 4/4 + 8/8, failing against HEAD's code; the full suite's 13
+  failures are other modules', the same on HEAD.

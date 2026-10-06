@@ -69,8 +69,9 @@ export default function RoomBookingsPage() {
   // ⚠ The button is hidden; the endpoint is NOT weakened. Whether HR may delete a company event is a
   // permission decision for TDC to make in role setup, not one to make by loosening a policy. The
   // two only have to agree about what is on offer.
-  const { hasPermission } = useAuth();
+  const { user, hasPermission } = useAuth();
   const canDelete = hasPermission('HR.Company.Admin');
+  const myEmployeeId = ((user?.employeeId as string | undefined) ?? '').toLowerCase();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<string>(ALL);
   const [from, setFrom] = useState('');
@@ -245,7 +246,16 @@ export default function RoomBookingsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  bookings.map((b) => (
+                  bookings.map((b) => {
+                    // The booking page's rules (chapter 10), so the row offers only what the server allows. Cancel only
+                    // while the booking holds its room — Tentative or Confirmed; Approve on a Tentative one, never to its
+                    // own booker (F-66). A completed, cancelled or no-show booking has nothing here for a desk without
+                    // Admin, so that row gets no ⋯ — it used to open an empty menu (2026-10-06). Not approve and Mark
+                    // no-show stay on the booking page, which the row opens.
+                    const holdsRoom = !b.isCancelled && (b.status === 'Tentative' || b.status === 'Confirmed');
+                    const mine = !!myEmployeeId && b.bookedById?.toLowerCase() === myEmployeeId;
+                    const canApprove = holdsRoom && b.status === 'Tentative' && !mine;
+                    return (
                     <TableRow
                       key={b.id}
                       className="cursor-pointer hover:bg-muted/50"
@@ -260,6 +270,7 @@ export default function RoomBookingsPage() {
                       <TableCell>{b.bookedByName}</TableCell>
                       <TableCell><StatusBadge status={spaced(b.status)} /></TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
+                        {(holdsRoom || canDelete) && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="icon">
@@ -268,19 +279,19 @@ export default function RoomBookingsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {b.status === 'Tentative' && !b.isCancelled && (
+                            {canApprove && (
                               <DropdownMenuItem onClick={() => approve(b)}>
                                 <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
                               </DropdownMenuItem>
                             )}
-                            {!b.isCancelled && b.status !== 'Completed' && (
+                            {holdsRoom && (
                               <DropdownMenuItem onClick={() => setCancelTarget(b)}>
                                 <XCircle className="mr-2 h-4 w-4" /> Cancel
                               </DropdownMenuItem>
                             )}
                             {canDelete && (
                               <>
-                                <DropdownMenuSeparator />
+                                {holdsRoom && <DropdownMenuSeparator />}
                                 <DropdownMenuItem className="text-destructive" onClick={() => setDeleteTarget(b)}>
                                   <Trash2 className="mr-2 h-4 w-4" /> Delete
                                 </DropdownMenuItem>
@@ -288,9 +299,11 @@ export default function RoomBookingsPage() {
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
+                        )}
                       </TableCell>
                     </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
