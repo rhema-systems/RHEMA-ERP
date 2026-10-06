@@ -311,7 +311,7 @@ export default function CreateSalesAgreementPage() {
             salesAgreementId: result.id,
             allocationType: form.agreementType === 'LeaseAgreement' ? 'Lease' : 'Reservation',
             status: 'Reserved',
-            estimatedValue: linkedSourceContext.estimatedValue,
+            estimatedValue: linkedSourceContext.estimatedValue ?? undefined,
             agreedValue: form.agreedValue,
             currency: form.currency,
             notes: `Reserved from Sales Agreement ${result.documentNumber || result.id}`,

@@ -7,7 +7,7 @@ const segment = (id: string, position: number, natural: boolean, separator?: str
     dataType: natural ? 'Numeric' : 'Alphanumeric', separatorCharacter: separator,
     lookupTableRequired: !natural, isRequired: true, isReportingDimension: false,
     isNaturalAccount: natural, isActive: true, lifecycleStatus: 'Active', rowVersion: 'fixture',
-    accountUsageCount: 0, canActivate: false, canFreeze: true, isSystemDefined: true,
+    accountUsageCount: 0, totalAccountCount: 0, canActivate: false, canFreeze: true, isSystemDefined: true,
     createdAt: '2026-01-01', updatedAt: '2026-01-01',
 });
 

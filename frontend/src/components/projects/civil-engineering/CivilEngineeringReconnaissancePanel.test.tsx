@@ -38,6 +38,7 @@ const designCase = {
   stage: 'SceInformationGathering' as const,
   status: 'InProgress',
   approvalStatus: 'Draft',
+  requirePlanningGisValidation: false,
   hodUserId: 'hod-1',
   supervisingCivilEngineerUserId: 'sce-1',
   rowVersion: 'version',
@@ -54,6 +55,16 @@ const lookups = {
       label: 'Development / Geodetic Engineering',
     },
   ],
+  workClassifications: [],
+  engineeringCategories: [],
+  estateManagedAssets: [],
+  approvedCapitalProjects: [],
+  maintenanceEscalations: [],
+  propertyDevelopmentNeeds: [],
+  planningConditions: [],
+  managementDirectives: [],
+  defectMonitoringCases: [],
+  infrastructureImprovementRequests: [],
 };
 
 describe('CivilEngineeringReconnaissancePanel', () => {
