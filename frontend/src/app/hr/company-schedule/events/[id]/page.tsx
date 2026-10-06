@@ -52,7 +52,7 @@ import { EventRoomsCard } from '@/components/hr/company-schedule/EventRoomsCard'
 import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
 import { describeReach, describeSeriesChange } from '@/components/hr/company-schedule/noticeReach';
 import { SeriesScopeField } from '@/components/hr/company-schedule/SeriesScopeField';
-import type { CompanyEventChange, CompanyEventNoticeResult, SeriesScope } from '@/types/hr/company-schedule';
+import type { CompanyEvent, CompanyEventChange, CompanyEventNoticeResult, SeriesScope } from '@/types/hr/company-schedule';
 
 /**
  * What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a) — and who was
@@ -81,6 +81,20 @@ const day = (s?: string | null) =>
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const hhmm = (t?: string | null) => (t ? t.slice(0, 5) : null);
+
+/**
+ * The window an event had before its first move (lane 5a, R4-6.1) — the server keeps it from the first move on
+ * (`MoveAsync`); null when it was moved before that was recorded.
+ */
+function originalWindow(e: CompanyEvent): string | null {
+  if (!e.originalStartDate) return null;
+  const from = e.originalStartDate.slice(0, 10);
+  const to = (e.originalEndDate ?? e.originalStartDate).slice(0, 10);
+  const start = e.isAllDayEvent ? null : hhmm(e.originalStartTime);
+  const end = e.isAllDayEvent ? null : hhmm(e.originalEndTime);
+  if (from === to) return `${from}${start ? ` · ${start}${end ? `–${end}` : ''}` : e.isAllDayEvent ? ' · all day' : ''}`;
+  return `${from}${start ? ` · ${start}` : ''} to ${to}${end ? ` · ${end}` : ''}`;
+}
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -495,10 +509,16 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               {event.cancellationDate?.slice(0, 10)} — {event.cancellationReason}
             </Detail>
           )}
+          {/* Lane 5a (R4-6.1, F-21): the window it had before its first move, and when it was moved — the press, not a
+              date it was moved to (the dates above are where it is now). */}
           {event.isRescheduled && (
-            <Detail label="Rescheduled">
-              {event.rescheduledDate?.slice(0, 10)} — {event.rescheduleReason}
-            </Detail>
+            <>
+              <Detail label="Originally">{originalWindow(event) ?? 'Not recorded'}</Detail>
+              <Detail label="Moved on">
+                {event.rescheduledDate?.slice(0, 10) ?? '—'}
+                {event.rescheduleReason ? ` — ${event.rescheduleReason}` : ''}
+              </Detail>
+            </>
           )}
         </CardContent>
       </Card>

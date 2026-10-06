@@ -1,12 +1,14 @@
 'use client';
 
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ordinal } from '@/components/hr/company-schedule/milestoneWords';
-import { CalendarCheck, CalendarDays, CalendarClock, DoorOpen, Flag } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CalendarClock, CalendarRange, DoorOpen, Flag, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { useAuth } from '@/hooks/use-auth';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
@@ -14,17 +16,56 @@ const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2')
 /**
  * The company schedule landing page. Operational screens live here; the things that get set up
  * once — rooms, milestones, closures, fiscal years — live under Administration.
+ *
+ * ⚠ Lane 5a (R4-3.1, the user's ruling): the summary is the HR desk's (`HR.Company.Read`). Anyone else used to see all four
+ * cards say "Nothing scheduled" — the server had refused them, and the page read the refusal as an empty diary. They
+ * now see one line saying whose the summary is, and the pages that are theirs.
  */
 export default function CompanySchedulePage() {
+  const { user, isLoading: authLoading, hasPermission } = useAuth();
+  const canRead = !!user && hasPermission('HR.Company.Read');
   // Lane 2g-1 (D-9): the four lists in one read — it made four.
-  const { data: dashboard } = useQuery({
+  const { data: dashboard, isLoading, isError, error } = useQuery({
     queryKey: ['hr', 'company-schedule', 'dashboard'],
     queryFn: () => companyEventService.getDashboard(),
+    enabled: canRead,
+    retry: (count, e: any) => e?.status !== 403 && count < 2,
   });
+  const refused = (!authLoading && !!user && !canRead) || (error as any)?.status === 403;
   const events = dashboard?.upcomingEvents;
   const pending = dashboard?.pendingBookings;
   const closures = dashboard?.upcomingClosures;
   const milestones = dashboard?.upcomingMilestones;
+
+  if (refused) {
+    return (
+      <div className="space-y-6 p-6">
+        <PageHeader title="Company schedule" description="Events, room bookings, closures and milestones." />
+        <Card>
+          <CardContent className="space-y-3 p-6 text-sm">
+            <p>
+              This summary of the company&apos;s events, room bookings, closures and milestones is for the HR desk.
+            </p>
+            <p className="text-muted-foreground">What is yours to see:</p>
+            <Link
+              href="/hr/company-schedule/my-schedule"
+              className="inline-flex items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <CalendarRange className="h-4 w-4" /> My Schedule — your meetings, events, bookings, leave and closures
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (authLoading || (canRead && isLoading)) {
+    return (
+      <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading the company schedule…
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -32,6 +73,12 @@ export default function CompanySchedulePage() {
         title="Company schedule"
         description="Events, room bookings, closures and the milestones on the company calendar."
       />
+
+      {isError && (
+        <p className="rounded-md border border-destructive/40 p-3 text-sm text-destructive">
+          The summary could not be loaded — that is not an empty schedule. Reload the page to try again.
+        </p>
+      )}
 
       <NavCardGrid
         items={[
@@ -68,6 +115,7 @@ export default function CompanySchedulePage() {
         ]}
       />
 
+      {!isError && (
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -178,6 +226,7 @@ export default function CompanySchedulePage() {
           </CardContent>
         </Card>
       </div>
+      )}
     </div>
   );
 }

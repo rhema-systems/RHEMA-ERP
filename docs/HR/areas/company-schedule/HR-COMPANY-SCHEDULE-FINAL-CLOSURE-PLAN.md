@@ -48,8 +48,10 @@ has not started (the user: "don't start the actual development yet").
    walk. **Lane 4** is source-checked and its five questions settled (lane 4 State), in three slices; 4a, milestone files
    and a yearly milestone's dates, 4b, HR reads Finance's fiscal calendar (D-6; a year Finance has not opened continues
    its sequence), and 4c, the company profile (the logo a versioned image, the Logo URL retired, PNG/JPEG of at most
-   2 MB, the image buttons gated), built and proved. ✅ Lane 4 is done (2026-10-06). Next: lane 5, the screens —
-   source-check first; its decisions to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   2 MB, the image buttons gated), built and proved. ✅ Lane 4 is done (2026-10-06). **Lane 5** (the screens) is
+   source-checked and its four questions settled (lane 5 State), in two slices; 5a, the screens' removes, dates, landing,
+   site pickers and sidebar test, built and proved (no server change). Next 5b: the diaries and the team schedule; then
+   lane 5's browser walk (the user's).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -3106,7 +3108,90 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       employee assignment, keeping the level suffix — the audience resolver matches a location exactly
       (lane 1).
 
-**State:** *(filled when it lands)*
+**State:**
+
+*Source check (2026-10-06, at HEAD f62293f53; two read-only surveys, the key points re-read by hand):*
+- **Already done by earlier lanes:** the event edit's status select offers only what Update accepts (Scheduled, In
+  progress, Postponed, Confirmed when no approval is pending, and the current status — lane 2); the rooms register's
+  failure toast says "needs Company Admin" on a 403 (F-26); Delete on the event page, the bookings register and page, the
+  rooms register and the milestones tab is Admin-only. `CompanyEventRules.EditableStatuses` is dead code.
+- **F-27:** the guard is in HEAD (`fields.tsx:336-342`). The room edit page seeds its form before the locations load on a
+  cold cache (`rooms/[id]/edit/page.tsx:35-37`), which is the case the guard covers — the browser re-test is the user's.
+- **F-57:** `KEEP_OPEN` lacks `/hr/company-schedule/my-schedule` and `/hr/leave/calendar`; the test fails on both.
+- **Removes (R4-6.6, F-20):** event tasks (`DELETE tasks/{id}`, Admin) and closures (`DELETE closures/{id}`, Admin) are
+  offered to everyone; participants, attendance and attachments (Write routes) are offered without a check. On UAT no
+  role holds `HR.Company.Read` without Write (HR, TenantAdmin, SuperAdmin hold both).
+- **Event page (R4-6.1, F-21):** the four `Original*` fields reach the DTO and are rendered nowhere; "Rescheduled" prints
+  the press timestamp as if it were the new date.
+- **Diaries (F-23):** both pages bucket an entry on its start day only; the team page drops one that began before the
+  range. The server splits events per day (lane 2, R4-10A.2); leave, travel, holidays and training come as one spanning
+  entry, closures end at midnight of their last day, and the training source picks an arbitrary session
+  (`FirstOrDefault` without an order).
+- **R4-10A.3:** no `incompleteSources`; each source's failure is logged and swallowed — cancellation too.
+- **Team schedule (R4-10B.1/3/4):** `team-schedule/{unitId}` is `HR.Company.Write` only, always the subtree; the unit list
+  is every unit; no "schedule for this unit"; the event form reads no query. UAT: 39 of 451 active units have a head.
+- **R4-3.1:** the landing's one dashboard read has no error branch — on a 403 all four cards print their empty sentence.
+- **C-16:** the three site pickers list the whole tree (`GET /Location`). UAT: Country (1) and Region (2) levels do not
+  allow employee assignment and hold nobody; Site / Office (8) allows it and holds all 4,998 placed staff. Matching is by
+  exact location (`HrAudienceResolver`, `HrClosureCalendar`).
+
+*Rulings by the user (2026-10-06, all as recommended):*
+- **C-16 confirmed:** the closure, event and room site pickers offer only active locations whose level allows staff to be
+  placed there; a record keeps showing its current location even if it no longer qualifies.
+- **Team schedule:** unit heads only (the head of a unit sees it and every unit beneath it), beside the HR desk; not line
+  managers.
+- **The landing without the permission:** the cards hidden; one line saying the summary is for the HR desk, with links
+  to My Schedule and — for a unit head — Team Schedule.
+- **F-57:** the Leave Calendar joins `KEEP_OPEN` too (its own reason); its default "Everyone" view refusing staff is
+  logged in the leave workstream's ledger, not fixed here.
+- **Two slices:** 5a — removes, the event page's dates, the landing, the site pickers, the sidebar test; 5b — the diaries
+  (every day an entry covers, the failed-source banner, the training source's session) and the team schedule (unit
+  heads, the readable units, sub-units and direct members, "Schedule for this unit").
+
+*5a — what was built (2026-10-06): screens only — no server change, no migration.*
+- **Removes (R4-6.6, F-20):** an event task's Remove only for `HR.Company.Admin` (its route's tier); a closure's likewise;
+  participants, the register and files added, changed and removed only with `HR.Company.Write` (their routes'), the
+  upload box too. Every remove in the module now matches its route.
+- **The event page (R4-6.1, F-21):** "Originally" — the window before the first move, from the four `Original*` fields
+  ("Not recorded" for a move before they were kept) — and "Moved on (date) — reason" in place of "Rescheduled", which
+  printed the press as if it were a date.
+- **The landing (R4-3.1, the user's ruling):** without `HR.Company.Read` the dashboard is not asked for; one card says the
+  summary is the HR desk's and links to My Schedule (5b adds Team Schedule for a unit head). A failed read says so and
+  shows no cards — never "Nothing scheduled" on a failure.
+- **The site pickers (C-16, the user's ruling):** `useSiteOptions` (`siteOptions.ts`) — active locations at levels that
+  allow employee assignment (from `GET api/LocationLevel`), the record's own location always kept, the whole tree when a
+  tenant marks no level; on the closure, event and room forms.
+- **The sidebar test (F-57):** `KEEP_OPEN` gains My Schedule and the Leave Calendar, each with its reason; the committed
+  test failed on exactly those two, and passes (4/4). The Leave Calendar's "Everyone" default refusing staff is **L-97**
+  in the leave guide's § 23 ledger.
+- **Already done before 5a, recorded here:** the status select (lane 2), the rooms toast (F-26), the Admin-only deletes on
+  the event page, bookings, rooms and milestones.
+- **Suites:** `run-final-review.mjs` block 5a — the screens' premises on the server (staff refused the dashboard; the
+  desk refused a task's and a closure's delete, Admin deleting the task; the levels readable by the desk; nobody placed
+  where the picker hides). The screens themselves are the browser walk's:
+
+*5a — proof (UAT, the 4c build — no server change, so no build was needed):*
+- `run-final-review.mjs` blocks 1a–5a: **1101/1101 on two clean passes**, first time; 5a has **7 assertions**. The run now
+  takes over ten minutes (run it in the background).
+- The sidebar test: the committed version fails on exactly My Schedule and the Leave Calendar; the new one passes, 4/4.
+  The scoped type-check and lint pass.
+- **Regression:** the round-4 net **191/191**, recruitment **59/59**, the templates probe **42/42**, `run-lane-n`
+  **109/115** (section J, #40). No request answered 500; the ERR kinds are the known ones.
+- **The blocking watcher:** 84 waits, 60 of 2 s or more (longest 7.0 s), all the notification service's poll, 90-day
+  clean-up and inserts and the suite's own `Notifications` counts — as at 4b and 4c; the table grows with every run.
+- **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
+  running; the R4D requisition's notices withdrawn. The API and the scanner stub are stopped.
+
+*5a — the browser walk (the user's; frontend `npm run dev` against UAT):*
+1. **F-27:** a room's edit page opened cold (a fresh tab) shows its site; Save keeps it. An event edit with "Not tied to a
+   site" survives a cold load and a Save.
+2. As **hr.head**: an event's Tasks rows offer no Remove; Participants, Attendance and Files do. The closures list offers
+   no Remove. As an **admin**: Remove on both.
+3. A **moved event**: "Originally …" with its first window, and "Moved on (date) — reason".
+4. The **landing** as a plain employee: one card, "for the HR desk", linking My Schedule — no "Nothing scheduled". As
+   hr.head: the four cards.
+5. The **site picker** on the closure, event and room forms: the eight sites only (no Ghana, no regions). A record saved
+   on a region (if any) still shows it when edited.
 
 ### Lane 7 — The company calendar (D-7, D-8, D-13, D-16; C-9, C-26, C-35, R4-6.4)
 
@@ -3756,3 +3841,11 @@ built API, so no web host and no seeders).
     suite 68/68. No request answered 500. **Lane 4 is done.**
 
   Next: lane 5 — the screens (C-1, C-16, R4-3.1, R4-6.x, R4-10A/B, F-19…F-27, F-57). Source-check first.
+- **2026-10-06** — **4c committed** (`f62293f53`). **Lane 5 source-checked** (two read-only surveys; four rulings, all as
+  recommended). **Slice 5a built and proved** — screens only: every remove matches its route's tier; the event page's
+  original window and "Moved on"; the landing without the permission; sites-only pickers; the sidebar test's
+  `KEEP_OPEN` (and L-97 logged for leave).
+  - **Results:** `run-final-review.mjs` 1094 + 7 = 1101/1101 on two clean passes; the round-4 net 191/191, recruitment
+    59/59, the probe 42/42, `run-lane-n` 109/115 (#40); the sidebar test 4/4 (the committed one fails on the two).
+
+  Next: 5b — the diaries and the team schedule. Then the browser walk of lane 5's screens (the user's).

@@ -21,8 +21,7 @@ import {
   fromIsoInstant,
   toIsoInstant,
 } from '@/components/hr/employee/tabs/fields';
-import { locationService } from '@/services/hr/location.service';
-import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
+import { useSiteOptions } from '@/components/hr/company-schedule/siteOptions';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import { companyEventService } from '@/services/hr/company-schedule.service';
@@ -384,10 +383,8 @@ export function EventFormFields({
   /** The event being edited — for its organiser's name, its status, and whether the dates moved. */
   event?: CompanyEvent;
 }) {
-  const { data: locations } = useQuery({
-    queryKey: ['hr', 'locations', 'all'],
-    queryFn: () => locationService.getAll(),
-  });
+  // Lane 5a (C-16): the places staff can be placed, not the whole location tree.
+  const sites = useSiteOptions();
 
   const locationType = form.watch('locationType');
   const isVirtual = locationType === 'Virtual' || locationType === 'Hybrid';
@@ -530,7 +527,7 @@ export function EventFormFields({
                   label="Site"
                   allowEmpty
                   emptyLabel="Not tied to a site"
-                  options={siteOptions(locations)}
+                  options={sites.optionsFor(form.watch('locationId'))}
                 />
                 <TextField form={form} name="venueName" label="Venue" />
               </FieldRow>

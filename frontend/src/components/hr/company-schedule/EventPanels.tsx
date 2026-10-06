@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { companyEventService } from '@/services/hr/company-schedule.service';
 import {
   EVENT_ATTACHMENT_TYPES,
@@ -118,6 +119,8 @@ export function ParticipantsPanel({
   inSeries?: boolean;
 }) {
   const queryClient = useQueryClient();
+  // Lane 5a (R4-6.6): guests are added, changed and removed on Write — offered to nobody else.
+  const canWrite = useAuth().hasPermission('HR.Company.Write');
   const [seriesAction, setSeriesAction] = useState<SeriesGuestAction | null>(null);
   const key = ['hr', 'company-schedule', 'events', eventId, 'participants'];
   // Lane 2e-2 (R4-6.3): an invitation is Sent only once it reached the guest — by an email the mail server took,
@@ -139,7 +142,7 @@ export function ParticipantsPanel({
           ? [['hr', 'company-schedule', 'events']]
           : [['hr', 'company-schedule', 'events', eventId, 'detail']]
       }
-      readOnly={!open}
+      readOnly={!open || !canWrite}
       dialogHint={
         awaitingApproval
           ? 'The event awaits approval: the invitation goes when it is approved, not now.'
@@ -339,6 +342,8 @@ export function AttendancePanel({
   notMarkable?: string;
 }) {
   const queryClient = useQueryClient();
+  // Lane 5a (R4-6.6): the register is marked and corrected on Write.
+  const canWrite = useAuth().hasPermission('HR.Company.Write');
   const key = ['hr', 'company-schedule', 'events', eventId, 'attendance'];
   const mark = (id: string, v: AttendanceForm) =>
     companyEventService.markAttendance(id, {
@@ -358,8 +363,9 @@ export function AttendancePanel({
       invalidateKeys={[['hr', 'company-schedule', 'events', eventId, 'detail']]}
       dialogHint="You are recorded as the person who marked it. Leave the check-in blank for now, or give the time they arrived."
       emptyDescription={markable ? 'No attendance has been marked for this event.' : notMarkable}
-      allowCreate={markable}
-      allowUpdate={markable}
+      allowCreate={markable && canWrite}
+      allowUpdate={markable && canWrite}
+      allowRemove={canWrite}
       list={(id) => companyEventService.getAttendance(id)}
       create={mark}
       update={(id, _attendanceId, v) => mark(id, v)}
@@ -435,13 +441,15 @@ const size = (bytes?: number | null) =>
 export function AttachmentsPanel({ eventId, cancelled = false }: { eventId: string; cancelled?: boolean }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Lane 5a (R4-6.6): files are added and removed on Write.
+  const canWrite = useAuth().hasPermission('HR.Company.Write');
   const key = ['hr', 'company-schedule', 'events', eventId, 'attachments'];
   const [type, setType] = useState<string>('Agenda');
   const [description, setDescription] = useState('');
 
   return (
     <div className="space-y-4">
-      {!cancelled && (
+      {!cancelled && canWrite && (
         <div className="space-y-3 rounded-md border p-4">
           <p className="text-sm font-medium">Add a file</p>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -486,6 +494,7 @@ export function AttachmentsPanel({ eventId, cancelled = false }: { eventId: stri
         create={async () => undefined}
         allowUpdate={false}
         update={async () => undefined}
+        allowRemove={canWrite}
         remove={(_id, attachmentId) => companyEventService.removeAttachment(attachmentId)}
         getId={(a) => a.id}
         columns={[
@@ -546,6 +555,11 @@ const emptyTask: TaskForm = {
 
 export function TasksPanel({ eventId }: { eventId: string }) {
   const queryClient = useQueryClient();
+  // Lane 5a (R4-6.6, F-20): tasks are raised and updated on Write; deleting one is Admin (`DELETE tasks/{id}`), so the
+  // HR desk is not offered a Remove the server refuses.
+  const { hasPermission } = useAuth();
+  const canWrite = hasPermission('HR.Company.Write');
+  const canDelete = hasPermission('HR.Company.Admin');
   const key = ['hr', 'company-schedule', 'events', eventId, 'tasks'];
 
   return (
@@ -554,6 +568,8 @@ export function TasksPanel({ eventId }: { eventId: string }) {
       title="tasks"
       singular="task"
       queryKey={key}
+      readOnly={!canWrite}
+      allowRemove={canDelete}
       dialogHint="Everything that has to happen before, during and after the event."
       emptyDescription="No tasks have been raised for this event."
       list={(id) => companyEventService.getTasks(id)}

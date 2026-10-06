@@ -4581,6 +4581,9 @@ below so that nobody promises a stakeholder a button.
 > ten open doors, and slice C closed **L-87 to L-96**, labels and small behaviours. All twenty-four are
 > closed; the four above are still the **four open**.
 
+> **2026-10-06 — one more, L-97, found outside leave** (the company-schedule final closure, lane 5a): the HR leave
+> calendar opens on the *Organisation* scope, which staff are refused. **Five are open** now.
+
 ⚠ **2026-09-25: a settings audit opened eleven more — L-38 to L-48**, listed after L-30 below. They
 are scheduled in the round 5 plan; until then, read chapter 4's settings with that table beside you.
 **Round 5 lane E found and closed six more the same day, L-49 to L-54**, all in the plans chapter;
@@ -4814,6 +4817,7 @@ Slice A is proved by `dev-harness/hr-leave/run-audit2-a.mjs` (145 assertions, gr
 | **L-94** | ch. 4 | Eligibility rules were not validated on the server (a Position rule with no position matched nobody) | ✅ **Closed** by slice C: a rule names what it admits, and only that. ⚠ The save answered every refusal with a 500 and a generic sentence — it now says why (400) |
 | **L-95** | ch. 4b, 13 | Six desk leave screens opened on the calendar year; the leave-year change guard skipped a tenant with no settings row and did not count plans | ✅ **Closed** by slice C: the six open on the leave year; the guard holds against the default when there is no row, and counts plans |
 | **L-96** | — | Two code comments said the opposite of the code (sub-type allocations take precedence; "no entitlement keyed on grade") | ✅ **Closed**: the first by slice A, with the column; the second by slice C, with L-91 — and a third of the kind found and corrected (the entitlement snapshot's *"subtype/allocation/default"*) |
+| **L-97** | ch. 9 | **The HR leave calendar opens on the *Organisation* ("Everyone") scope** (`app/hr/leave/calendar/page.tsx:36`), which the server refuses without `HR.Leave.Read` (`LeavesController.cs:1086`, 403). The sidebar leaf is open to all staff on purpose — *Mine* and *My team* are theirs — so a plain employee's first view is a refusal, not their own leave. Found 2026-10-06 by the company-schedule final closure (lane 5a, F-57), which added the leaf to the sidebar test's `KEEP_OPEN` with the user's ruling and left this here | Open — the page should open on *Mine* (or *My team* for a line manager) for a caller without `HR.Leave.Read` |
 
 **Found in passing by slice A, and fixed:** a settlement Internal Audit **returns** keeps its
 finalised date as history, and the statement read that date — so it said *"finalised and with

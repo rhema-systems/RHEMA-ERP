@@ -25,8 +25,8 @@ import {
   closureAnnouncementKey,
 } from '@/components/hr/company-schedule/ClosureAnnounceDialog';
 import { businessClosureService } from '@/services/hr/company-schedule.service';
-import { locationService } from '@/services/hr/location.service';
-import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
+import { useSiteOptions } from '@/components/hr/company-schedule/siteOptions';
+import { useAuth } from '@/hooks/use-auth';
 import { CLOSURE_TYPE_OPTIONS } from '@/types/hr/company-schedule';
 import type {
   BusinessClosure,
@@ -155,10 +155,10 @@ interface LastResult {
  * ⚠ **No recorded-by field** — the API records whoever saves it from the token.
  */
 export default function BusinessClosuresPage() {
-  const { data: locations } = useQuery({
-    queryKey: ['hr', 'locations', 'all'],
-    queryFn: () => locationService.getAll(),
-  });
+  // Lane 5a (C-16): the places staff can be placed, not the whole location tree.
+  const sites = useSiteOptions();
+  // Lane 5a (R4-6.6, F-20): removing a closure is Admin (`DELETE closures/{id}`) — not offered to the HR desk.
+  const canDelete = useAuth().hasPermission('HR.Company.Admin');
 
   const [last, setLast] = useState<LastResult | null>(null);
   const [announcing, setAnnouncing] = useState<BusinessClosure | null>(null);
@@ -202,6 +202,7 @@ export default function BusinessClosuresPage() {
         update={async (_p, id, v) =>
           remember('updated', await businessClosureService.update(id, { ...toPayload(v), id }))
         }
+        allowRemove={canDelete}
         remove={async (_p, id) => {
           const removed = await businessClosureService.remove(id);
           setLast({ verb: 'removed', title: 'The closure', warnings: [], recharge: removed });
@@ -296,8 +297,9 @@ export default function BusinessClosuresPage() {
                   name="locationId"
                   label="Site"
                   required
-                  options={siteOptions(locations)}
-                  description="Covers the staff based at exactly this location — a region does not include the sites in it."
+                  options={sites.optionsFor(form.watch('locationId'))}
+                  placeholder={sites.isLoading ? 'Loading sites…' : 'Select…'}
+                  description="Covers the staff based at exactly this site. Only the places staff are assigned to are offered."
                 />
               )}
               {showUnit && (
