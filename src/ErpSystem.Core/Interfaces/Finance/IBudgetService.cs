@@ -9,7 +9,7 @@ public interface IBudgetService
     Task<BudgetScenarioDto> UpdateScenarioAsync(UpdateBudgetScenarioDto dto);
     Task<BudgetScenarioDto> GetScenarioAsync(Guid id);
     Task<IEnumerable<BudgetScenarioDto>> GetScenariosForYearAsync(Guid fiscalYearId);
-    Task<bool> DeleteScenarioAsync(Guid id);
+    Task<bool> DeleteScenarioAsync(Guid id, string rowVersion);
     Task<BudgetScenarioDto> OpenScenarioAsync(Guid id, string rowVersion);
     Task<BudgetScenarioDto> SubmitScenarioAsync(Guid id, string rowVersion);
     Task<BudgetScenarioDto> AdoptScenarioAsync(Guid id, AdoptBudgetScenarioDto dto);

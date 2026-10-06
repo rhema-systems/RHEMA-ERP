@@ -361,42 +361,45 @@ public sealed class BankingSettlementReleaseGateTests
         await makerApproval.Should().ThrowAsync<UnauthorizedAccessException>()
             .WithMessage("*submitted this banking document cannot approve*");
 
-        var posted = await approver.ApproveDepositAsync(deposit.Id, "Deposit slip verified");
+        var approved = await approver.ApproveDepositAsync(deposit.Id, "Deposit slip verified");
 
-        posted.Status.Should().Be(BankDepositStatus.Posted);
-        posted.TotalReceipts.Should().Be(1_000m);
-        posted.TotalDeductions.Should().Be(150m);
-        posted.NetAmount.Should().Be(850m);
-        posted.Attachments.Should().ContainSingle(attachment => attachment.IsPrimaryEvidence);
+        approved.Status.Should().Be(BankDepositStatus.Approved);
+        approved.ConfirmationStatus.Should().Be(BankDepositConfirmationStatus.Pending);
+        approved.JournalEntryId.Should().BeNull();
+        approved.TotalReceipts.Should().Be(1_000m);
+        approved.TotalDeductions.Should().Be(150m);
+        approved.NetAmount.Should().Be(850m);
+        approved.Attachments.Should().ContainSingle(attachment => attachment.IsPrimaryEvidence);
 
-        var makerConfirmation = () => maker.ConfirmDepositAsync(posted.Id, new ConfirmBankDepositDto
+        var makerConfirmation = () => maker.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
         {
             BankConfirmationReference = "BANK-ACK-001",
-            BankConfirmationDate = posted.DepositDate,
+            BankConfirmationDate = approved.DepositDate,
             ConfirmationEvidenceFileId = evidence.Id,
-            RowVersion = posted.RowVersion
+            RowVersion = approved.RowVersion
         });
         await makerConfirmation.Should().ThrowAsync<UnauthorizedAccessException>()
             .WithMessage("*submitted this banking document cannot confirm*");
 
-        var confirmed = await approver.ConfirmDepositAsync(posted.Id, new ConfirmBankDepositDto
+        var confirmed = await approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
         {
             BankConfirmationReference = "BANK-ACK-001",
-            BankConfirmationDate = posted.DepositDate,
+            BankConfirmationDate = approved.DepositDate,
             ConfirmationEvidenceFileId = evidence.Id,
             Notes = "Bank-stamped deposit advice verified.",
-            RowVersion = posted.RowVersion
+            RowVersion = approved.RowVersion
         });
+        confirmed.Status.Should().Be(BankDepositStatus.Posted);
         confirmed.ConfirmationStatus.Should().Be(BankDepositConfirmationStatus.Confirmed);
         confirmed.BankConfirmationReference.Should().Be("BANK-ACK-001");
         confirmed.BankConfirmationEvidence.Should().NotBeNull();
         confirmed.IsReconciled.Should().BeFalse();
         (await db.AuditLogs.SingleAsync(log =>
-            log.ResourceId == posted.Id.ToString() &&
+            log.ResourceId == approved.Id.ToString() &&
             log.Action == FinanceAuditEvents.BankDepositConfirmed)).NewValues.Should().Contain("BANK-ACK-001");
 
         var cashTransaction = await db.Set<CashTransaction>().SingleAsync(transaction =>
-            transaction.Id == posted.CashTransactionId);
+            transaction.Id == confirmed.CashTransactionId);
         cashTransaction.TransactionType.Should().Be(CashTransactionType.Deposit);
         cashTransaction.Amount.Should().Be(850m);
         cashTransaction.IsPosted.Should().BeTrue();
@@ -405,7 +408,7 @@ public sealed class BankingSettlementReleaseGateTests
             transaction.TransactionType == CashTransactionType.Deposit)).Should().Be(1);
         var journal = await db.JournalEntries
             .Include(entry => entry.Transactions)
-            .SingleAsync(entry => entry.Id == posted.JournalEntryId);
+            .SingleAsync(entry => entry.Id == confirmed.JournalEntryId);
         journal.PostingStatus.Should().Be("Posted");
         journal.TotalDebitAmount.Should().Be(1_000m);
         journal.TotalCreditAmount.Should().Be(1_000m);
@@ -437,7 +440,13 @@ public sealed class BankingSettlementReleaseGateTests
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
         await maker.SubmitDepositAsync(deposit.Id);
 
-        var posted = await approver.ApproveDepositAsync(deposit.Id);
+        var approved = await approver.ApproveDepositAsync(deposit.Id);
+        var posted = await approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-24000",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
         var retried = await approver.PostDepositAsync(deposit.Id);
         var journal = await db.JournalEntries.Include(item => item.Transactions)
             .SingleAsync(item => item.Id == posted.JournalEntryId);
@@ -450,17 +459,72 @@ public sealed class BankingSettlementReleaseGateTests
         journal.Transactions.Single(item => item.AccountId == setup.HoldingGlAccount.Id)
             .CreditAmount.Should().Be(24_000m);
 
-        await approver.ConfirmDepositAsync(posted.Id, new ConfirmBankDepositDto
+        var persisted = await db.BankDepositBatches.SingleAsync(item => item.Id == posted.Id);
+        persisted.ConfirmationStatus = BankDepositConfirmationStatus.Pending;
+        persisted.BankConfirmationReference = null;
+        persisted.BankConfirmationDate = null;
+        persisted.BankConfirmedAt = null;
+        persisted.BankConfirmedById = null;
+        persisted.RowVersion = Guid.NewGuid().ToByteArray();
+        await db.SaveChangesAsync();
+        var legacyConfirmed = await approver.ConfirmDepositAsync(posted.Id, new ConfirmBankDepositDto
         {
-            BankConfirmationReference = "ACK-24000",
+            BankConfirmationReference = "ACK-24000-LEGACY",
             BankConfirmationDate = posted.DepositDate,
-            RowVersion = posted.RowVersion
+            RowVersion = Convert.ToBase64String(persisted.RowVersion)
         });
+        legacyConfirmed.Status.Should().Be(BankDepositStatus.Posted);
         (await db.JournalEntries.CountAsync(item =>
             item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == posted.Id)).Should().Be(1);
         (await db.Set<CashTransaction>().CountAsync(item =>
             item.TransactionType == CashTransactionType.Deposit && item.BankAccountId == setup.BankAccount.Id))
             .Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank")]
+    public async Task Deposit_WhenAutoPostIsDisabled_ShouldRequireConfirmationBeforeManualPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var confirmerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        setup.Settings.AutoPostBankDepositAfterConfirmation = false;
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            1_250m);
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var workflow = CreateWorkflow();
+        var maker = CreateBankingService(db, tenantId, makerId, workflow);
+        var confirmer = CreateBankingService(db, tenantId, confirmerId, workflow);
+        var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        await maker.SubmitDepositAsync(deposit.Id);
+        var approved = await confirmer.ApproveDepositAsync(deposit.Id);
+
+        var prematurePost = () => confirmer.PostDepositAsync(approved.Id);
+        await prematurePost.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Bank acknowledgement must be recorded before*");
+
+        var confirmed = await confirmer.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-MANUAL-POST",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
+        confirmed.Status.Should().Be(BankDepositStatus.Approved);
+        confirmed.ConfirmationStatus.Should().Be(BankDepositConfirmationStatus.Confirmed);
+        confirmed.JournalEntryId.Should().BeNull();
+
+        var posted = await confirmer.PostDepositAsync(confirmed.Id);
+        posted.Status.Should().Be(BankDepositStatus.Posted);
+        posted.JournalEntryId.Should().NotBeNull();
+        (await db.JournalEntries.CountAsync(item =>
+            item.SourceDocumentType == "BankDepositBatch" && item.SourceDocumentId == posted.Id)).Should().Be(1);
     }
 
     [Theory]
@@ -492,7 +556,15 @@ public sealed class BankingSettlementReleaseGateTests
 
         if (!shouldPost)
         {
-            var rejected = () => approver.ApproveDepositAsync(deposit.Id);
+            var approvedWithRejectedEvidence = await approver.ApproveDepositAsync(deposit.Id);
+            var rejected = () => approver.ConfirmDepositAsync(
+                approvedWithRejectedEvidence.Id,
+                new ConfirmBankDepositDto
+                {
+                    BankConfirmationReference = "ACK-FX-REJECTED",
+                    BankConfirmationDate = approvedWithRejectedEvidence.DepositDate,
+                    RowVersion = approvedWithRejectedEvidence.RowVersion
+                });
             await rejected.Should().ThrowAsync<InvalidOperationException>()
                 .WithMessage("*rejected or inconsistent foreign-exchange evidence*");
             (await db.JournalEntries.CountAsync(item =>
@@ -500,7 +572,13 @@ public sealed class BankingSettlementReleaseGateTests
             return;
         }
 
-        var posted = await approver.ApproveDepositAsync(deposit.Id);
+        var approved = await approver.ApproveDepositAsync(deposit.Id);
+        var posted = await approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = $"ACK-FX-{approvalStatus}",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
         var journal = await db.JournalEntries.Include(item => item.Transactions)
             .SingleAsync(item => item.Id == posted.JournalEntryId);
         journal.BookClassification.Should().Be("BASE");
@@ -565,7 +643,13 @@ public sealed class BankingSettlementReleaseGateTests
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
         await maker.SubmitDepositAsync(deposit.Id);
 
-        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        var approved = await approver.ApproveDepositAsync(deposit.Id);
+        var act = () => approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = $"ACK-FX-POLICY-{duplicatePolicy}",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage(duplicatePolicy
                 ? "*multiple active currency policies*"
@@ -610,7 +694,13 @@ public sealed class BankingSettlementReleaseGateTests
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
         await maker.SubmitDepositAsync(deposit.Id);
 
-        var act = () => approver.ApproveDepositAsync(deposit.Id);
+        var approved = await approver.ApproveDepositAsync(deposit.Id);
+        var act = () => approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-FX-UNDEFINED",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*No active approved exchange rate exists*");
         (await db.JournalEntries.CountAsync(item =>
@@ -717,7 +807,13 @@ public sealed class BankingSettlementReleaseGateTests
         var approver = CreateBankingService(db, tenantId, approverId, workflow);
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, liquidity));
         await maker.SubmitDepositAsync(deposit.Id);
-        var postedDeposit = await approver.ApproveDepositAsync(deposit.Id);
+        var approvedDeposit = await approver.ApproveDepositAsync(deposit.Id);
+        var postedDeposit = await approver.ConfirmDepositAsync(approvedDeposit.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-RETURN-FX",
+            BankConfirmationDate = approvedDeposit.DepositDate,
+            RowVersion = approvedDeposit.RowVersion
+        });
         var returned = await maker.CreateReturnedChequeAsync(new CreateReturnedChequeCaseDto
         {
             CustomerPaymentId = receipt.Payment.Id,
@@ -775,7 +871,7 @@ public sealed class BankingSettlementReleaseGateTests
             RowVersion = firstDraft.RowVersion
         });
         await draftConfirmation.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Only a posted bank deposit*");
+            .WithMessage("Only an approved deposit awaiting posting, or a legacy posted deposit*");
 
         await maker.SubmitDepositAsync(firstDraft.Id);
         var firstPosted = await confirmer.ApproveDepositAsync(firstDraft.Id);
@@ -826,7 +922,13 @@ public sealed class BankingSettlementReleaseGateTests
         var approver = CreateBankingService(db, tenantId, Guid.NewGuid(), workflow);
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, receipt));
         await maker.SubmitDepositAsync(deposit.Id);
-        var posted = await approver.ApproveDepositAsync(deposit.Id);
+        var approved = await approver.ApproveDepositAsync(deposit.Id);
+        var posted = await approver.ConfirmDepositAsync(approved.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-RECONCILE-850",
+            BankConfirmationDate = approved.DepositDate,
+            RowVersion = approved.RowVersion
+        });
         var statementLine = SeedStatementLine(
             db,
             tenantId,
@@ -918,7 +1020,13 @@ public sealed class BankingSettlementReleaseGateTests
         var approver = CreateBankingService(db, tenantId, approverId, workflow);
         var deposit = await maker.CreateDepositAsync(CreateDepositRequest(setup, queueEntry));
         await maker.SubmitDepositAsync(deposit.Id);
-        var postedDeposit = await approver.ApproveDepositAsync(deposit.Id);
+        var approvedDeposit = await approver.ApproveDepositAsync(deposit.Id);
+        var postedDeposit = await approver.ConfirmDepositAsync(approvedDeposit.Id, new ConfirmBankDepositDto
+        {
+            BankConfirmationReference = "ACK-RETURN-001",
+            BankConfirmationDate = approvedDeposit.DepositDate,
+            RowVersion = approvedDeposit.RowVersion
+        });
 
         var returned = await maker.CreateReturnedChequeAsync(new CreateReturnedChequeCaseDto
         {
@@ -1079,7 +1187,7 @@ public sealed class BankingSettlementReleaseGateTests
             BaseCurrency = "GHS",
             BankDepositPolicy = DepositPolicy.ControlledNetBanking,
             RequireBankDepositPrimaryEvidence = requireEvidence,
-            AutoPostBankDepositAfterApproval = true,
+            AutoPostBankDepositAfterConfirmation = true,
             ControlAccountArId = arControl.Id,
             ReturnedChequeBankChargeAccountId = expense.Id
         };

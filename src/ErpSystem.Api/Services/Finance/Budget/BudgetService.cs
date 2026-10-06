@@ -71,6 +71,8 @@ public partial class BudgetService : IBudgetService
         var tenantId = TenantId;
         var controlDimensions = await ResolveControlDimensionsAsync(
             tenantId, dto.ControlDimensionDefinitionIds);
+        var controlSegments = await ResolveControlSegmentsAsync(
+            tenantId, dto.ControlSegmentStructureIds);
         var fiscalYearExists = await _context.FiscalYears
             .AnyAsync(fy => fy.TenantId == tenantId && fy.Id == dto.FiscalYearId && !fy.IsDeleted);
         if (!fiscalYearExists)
@@ -121,6 +123,18 @@ public partial class BudgetService : IBudgetService
                 CreatedById = CurrentUserId
             });
         }
+        foreach (var (structure, index) in controlSegments.Select((structure, index) => (structure, index)))
+        {
+            scenario.ControlSegments.Add(new BudgetScenarioControlSegment
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                AccountSegmentStructureId = structure.Id,
+                DisplayOrder = index,
+                CreatedAt = DateTime.UtcNow,
+                CreatedById = CurrentUserId
+            });
+        }
         await _context.SaveChangesAsync();
         await RecordAuditAsync(
             FinanceAuditEvents.BudgetScenarioCreated,
@@ -138,18 +152,60 @@ public partial class BudgetService : IBudgetService
             .Include(s => s.FiscalYear)
             .Include(s => s.BudgetReturns)
             .Include(s => s.ControlDimensions)
+            .Include(s => s.ControlSegments)
             .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == dto.Id);
 
         if (scenario == null)
             throw new KeyNotFoundException("Budget scenario not found.");
         EnsureScenarioEditable(scenario);
         ApplyRowVersion(scenario, dto.RowVersion);
-        var before = new { scenario.Name, scenario.Description, scenario.IsActive, scenario.Status };
+        var before = new
+        {
+            scenario.Name,
+            scenario.Description,
+            scenario.FiscalYearId,
+            scenario.BaseCurrencyCode,
+            scenario.IsActive,
+            scenario.Status,
+            ControlDimensionDefinitionIds = scenario.ControlDimensions
+                .Where(item => !item.IsDeleted)
+                .OrderBy(item => item.DisplayOrder)
+                .Select(item => item.FinanceDimensionDefinitionId)
+                .ToArray(),
+            ControlSegmentStructureIds = scenario.ControlSegments
+                .Where(item => !item.IsDeleted)
+                .OrderBy(item => item.DisplayOrder)
+                .Select(item => item.AccountSegmentStructureId)
+                .ToArray()
+        };
+
+        var requestedFiscalYearId = dto.FiscalYearId ?? scenario.FiscalYearId;
+        var requestedCurrencyCode = dto.BaseCurrencyCode is null
+            ? scenario.BaseCurrencyCode
+            : NormalizeCurrency(dto.BaseCurrencyCode);
+        var structuralChangeRequested = requestedFiscalYearId != scenario.FiscalYearId
+            || !string.Equals(requestedCurrencyCode, scenario.BaseCurrencyCode, StringComparison.OrdinalIgnoreCase)
+            || dto.ControlDimensionDefinitionIds is not null
+            || dto.ControlSegmentStructureIds is not null;
+        if (structuralChangeRequested)
+            await EnsureUnusedDraftScenarioAsync(scenario, tenantId);
+
+        var fiscalYearExists = await _context.FiscalYears.AnyAsync(fiscalYear =>
+            fiscalYear.TenantId == tenantId && fiscalYear.Id == requestedFiscalYearId && !fiscalYear.IsDeleted);
+        if (!fiscalYearExists)
+            throw new InvalidOperationException("Fiscal year not found for the current tenant.");
+        var currencyExists = await _context.Currencies.AnyAsync(currency =>
+            currency.TenantId == tenantId
+            && currency.CurrencyCode == requestedCurrencyCode
+            && currency.IsActive
+            && !currency.IsDeleted);
+        if (!currencyExists)
+            throw new InvalidOperationException("Base currency is not active for the current tenant.");
 
         var normalizedName = dto.Name.Trim();
         var duplicateName = await _context.BudgetScenarios.AnyAsync(candidate =>
             candidate.TenantId == tenantId
-            && candidate.FiscalYearId == scenario.FiscalYearId
+            && candidate.FiscalYearId == requestedFiscalYearId
             && candidate.Id != scenario.Id
             && candidate.Name == normalizedName
             && !candidate.IsDeleted);
@@ -181,19 +237,53 @@ public partial class BudgetService : IBudgetService
                 scenario.ControlDimensions.Clear();
                 foreach (var (definition, index) in controlDimensions.Select((definition, index) => (definition, index)))
                 {
-                    scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+                    var control = new BudgetScenarioControlDimension
                     {
                         Id = Guid.NewGuid(), TenantId = tenantId,
+                        BudgetScenarioId = scenario.Id,
                         FinanceDimensionDefinitionId = definition.Id,
                         DisplayOrder = index, CreatedAt = DateTime.UtcNow,
                         CreatedById = CurrentUserId
-                    });
+                    };
+                    _context.BudgetScenarioControlDimensions.Add(control);
+                    scenario.ControlDimensions.Add(control);
+                }
+            }
+        }
+
+        if (dto.ControlSegmentStructureIds is not null)
+        {
+            var controlSegments = await ResolveControlSegmentsAsync(
+                tenantId, dto.ControlSegmentStructureIds);
+            var requestedControlIds = controlSegments.Select(item => item.Id).ToHashSet();
+            var currentControlIds = scenario.ControlSegments
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.AccountSegmentStructureId)
+                .ToHashSet();
+            if (!requestedControlIds.SetEquals(currentControlIds))
+            {
+                _context.BudgetScenarioControlSegments.RemoveRange(scenario.ControlSegments);
+                scenario.ControlSegments.Clear();
+                foreach (var (structure, index) in controlSegments.Select((structure, index) => (structure, index)))
+                {
+                    var control = new BudgetScenarioControlSegment
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId,
+                        BudgetScenarioId = scenario.Id,
+                        AccountSegmentStructureId = structure.Id,
+                        DisplayOrder = index, CreatedAt = DateTime.UtcNow,
+                        CreatedById = CurrentUserId
+                    };
+                    _context.BudgetScenarioControlSegments.Add(control);
+                    scenario.ControlSegments.Add(control);
                 }
             }
         }
 
         scenario.Name = normalizedName;
         scenario.Description = NormalizeOptionalText(dto.Description);
+        scenario.FiscalYearId = requestedFiscalYearId;
+        scenario.BaseCurrencyCode = requestedCurrencyCode;
         scenario.UpdatedAt = DateTime.UtcNow;
         scenario.LastModifiedById = CurrentUserId;
 
@@ -203,7 +293,25 @@ public partial class BudgetService : IBudgetService
             "BudgetScenario",
             scenario.Id,
             before,
-            new { scenario.Name, scenario.Description, scenario.IsActive, scenario.Status });
+            new
+            {
+                scenario.Name,
+                scenario.Description,
+                scenario.FiscalYearId,
+                scenario.BaseCurrencyCode,
+                scenario.IsActive,
+                scenario.Status,
+                ControlDimensionDefinitionIds = scenario.ControlDimensions
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DisplayOrder)
+                    .Select(item => item.FinanceDimensionDefinitionId)
+                    .ToArray(),
+                ControlSegmentStructureIds = scenario.ControlSegments
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DisplayOrder)
+                    .Select(item => item.AccountSegmentStructureId)
+                    .ToArray()
+            });
         return await MapToDtoAsync(scenario);
     }
 
@@ -238,26 +346,46 @@ public partial class BudgetService : IBudgetService
         return result;
     }
 
-    public async Task<bool> DeleteScenarioAsync(Guid id)
+    public async Task<bool> DeleteScenarioAsync(Guid id, string rowVersion)
     {
         var tenantId = TenantId;
         var scenario = await _context.BudgetScenarios
             .Include(s => s.BudgetReturns)
-            .ThenInclude(r => r.BudgetEntries)
-            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id);
+            .Include(s => s.ControlDimensions)
+            .Include(s => s.ControlSegments)
+            .FirstOrDefaultAsync(s => s.TenantId == tenantId && s.Id == id && !s.IsDeleted);
 
         if (scenario == null)
             return false;
-        EnsureScenarioEditable(scenario);
+        ApplyRowVersion(scenario, rowVersion);
+        await EnsureUnusedDraftScenarioAsync(scenario, tenantId);
 
-        var entries = scenario.BudgetReturns.SelectMany(budgetReturn => budgetReturn.BudgetEntries).ToList();
-        if (entries.Count > 0)
-            _context.BudgetEntries.RemoveRange(entries);
-        if (scenario.BudgetReturns.Count > 0)
-            _context.BudgetReturns.RemoveRange(scenario.BudgetReturns);
-
-        _context.BudgetScenarios.Remove(scenario);
+        var deletedAt = DateTime.UtcNow;
+        var deletedBy = CurrentUserId;
+        foreach (var control in scenario.ControlDimensions.Where(item => !item.IsDeleted))
+        {
+            control.IsDeleted = true;
+            control.DeletedAt = deletedAt;
+            control.DeletedBy = deletedBy.ToString();
+        }
+        foreach (var control in scenario.ControlSegments.Where(item => !item.IsDeleted))
+        {
+            control.IsDeleted = true;
+            control.DeletedAt = deletedAt;
+            control.DeletedBy = deletedBy.ToString();
+        }
+        scenario.IsDeleted = true;
+        scenario.IsActive = false;
+        scenario.DeletedAt = deletedAt;
+        scenario.DeletedBy = deletedBy.ToString();
+        scenario.LastModifiedById = deletedBy;
         await _context.SaveChangesAsync();
+        await RecordAuditAsync(
+            FinanceAuditEvents.BudgetScenarioDeleted,
+            "BudgetScenario",
+            scenario.Id,
+            new { scenario.Name, scenario.Status, scenario.FiscalYearId },
+            new { scenario.IsDeleted, scenario.DeletedAt, scenario.DeletedBy });
         return true;
     }
 
@@ -414,6 +542,12 @@ public partial class BudgetService : IBudgetService
                 && item.BudgetScenarioId == scenario.Id)
             .Select(item => item.FinanceDimensionDefinitionId)
             .ToListAsync();
+        var controlSegmentIds = await _context.BudgetScenarioControlSegments
+            .AsNoTracking()
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && item.BudgetScenarioId == scenario.Id)
+            .Select(item => item.AccountSegmentStructureId)
+            .ToListAsync();
         FinanceDimensionValue? distributionValue = null;
         if (controlDimensionIds.Count > 0 && !dto.DistributionDimensionValueId.HasValue)
             throw new InvalidOperationException(
@@ -434,17 +568,25 @@ public partial class BudgetService : IBudgetService
                     "The selected distribution value does not belong to this scenario's budget-control dimensions.");
         }
 
+        if (controlSegmentIds.Count > 0 && !dto.SegmentValueId.HasValue)
+            throw new InvalidOperationException(
+                "Select a segment value from one of this scenario's budget-control segment structures.");
         if (dto.SegmentValueId.HasValue)
         {
-            var segmentExists = await _context.SegmentLookupValues
-                .AnyAsync(s => s.TenantId == tenantId
+            var segmentValue = await _context.SegmentLookupValues
+                .AsNoTracking()
+                .Include(value => value.SegmentStructure)
+                .SingleOrDefaultAsync(s => s.TenantId == tenantId
                     && s.Id == dto.SegmentValueId.Value
                     && s.IsActive
                     && !s.IsDeleted);
-            if (!segmentExists)
-                throw new InvalidOperationException("Segment value not found for the current tenant.");
+            if (segmentValue == null
+                || !controlSegmentIds.Contains(segmentValue.SegmentStructureId)
+                || !segmentValue.SegmentStructure.IsActive
+                || segmentValue.SegmentStructure.IsDeleted)
+                throw new InvalidOperationException(
+                    "The selected segment value does not belong to this scenario's budget-control segment structures.");
         }
-
         var duplicateReturn = await _context.BudgetReturns.AnyAsync(budgetReturn =>
             budgetReturn.TenantId == tenantId
             && budgetReturn.BudgetScenarioId == dto.BudgetScenarioId
@@ -566,9 +708,9 @@ public partial class BudgetService : IBudgetService
         var returns = await _context.BudgetReturns
             .AsNoTracking()
             .Include(r => r.BudgetScenario)
-            .Include(r => r.SegmentValue)
+            .Include(r => r.SegmentValue).ThenInclude(value => value!.SegmentStructure)
             .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
-            .Where(r => r.TenantId == tenantId && r.AssignedToUserId == userId)
+            .Where(r => r.TenantId == tenantId && r.AssignedToUserId == userId && !r.IsDeleted)
             .OrderByDescending(r => r.UpdatedAt ?? r.CreatedAt)
             .ToListAsync();
 
@@ -579,16 +721,16 @@ public partial class BudgetService : IBudgetService
     {
         var tenantId = TenantId;
         var scenarioExists = await _context.BudgetScenarios
-            .AnyAsync(scenario => scenario.TenantId == tenantId && scenario.Id == scenarioId);
+            .AnyAsync(scenario => scenario.TenantId == tenantId && scenario.Id == scenarioId && !scenario.IsDeleted);
         if (!scenarioExists)
             throw new KeyNotFoundException("Budget scenario not found.");
 
         var returns = await _context.BudgetReturns
             .AsNoTracking()
             .Include(r => r.BudgetScenario)
-            .Include(r => r.SegmentValue)
+            .Include(r => r.SegmentValue).ThenInclude(value => value!.SegmentStructure)
             .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
-            .Where(r => r.TenantId == tenantId && r.BudgetScenarioId == scenarioId)
+            .Where(r => r.TenantId == tenantId && r.BudgetScenarioId == scenarioId && !r.IsDeleted)
             .OrderBy(r => r.DistributionDimensionValue != null ? r.DistributionDimensionValue.Code : r.SegmentValue!.SegmentValue)
             .ToListAsync();
 
@@ -1033,9 +1175,9 @@ public partial class BudgetService : IBudgetService
         var tenantId = TenantId;
         var budgetReturn = await _context.BudgetReturns
             .Include(r => r.BudgetScenario)
-            .Include(r => r.SegmentValue)
+            .Include(r => r.SegmentValue).ThenInclude(value => value!.SegmentStructure)
             .Include(r => r.DistributionDimensionValue).ThenInclude(value => value!.FinanceDimensionDefinition)
-            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id);
+            .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == id && !r.IsDeleted);
 
         if (budgetReturn == null)
             throw new KeyNotFoundException("Budget return not found.");
@@ -1142,6 +1284,14 @@ public partial class BudgetService : IBudgetService
             .OrderBy(item => item.DisplayOrder)
             .ThenBy(item => item.FinanceDimensionDefinition.Code)
             .ToListAsync();
+        var controlSegments = await _context.BudgetScenarioControlSegments
+            .AsNoTracking()
+            .Include(item => item.AccountSegmentStructure)
+            .Where(item => item.TenantId == scenario.TenantId
+                && item.BudgetScenarioId == scenario.Id && !item.IsDeleted)
+            .OrderBy(item => item.DisplayOrder)
+            .ThenBy(item => item.AccountSegmentStructure.SegmentPosition)
+            .ToListAsync();
         var userIds = new[]
             {
                 scenario.LockedByUserId,
@@ -1212,8 +1362,46 @@ public partial class BudgetService : IBudgetService
                 DimensionName = item.FinanceDimensionDefinition.Name,
                 DisplayOrder = item.DisplayOrder
             }).ToList(),
+            ControlSegments = controlSegments.Select(item => new BudgetControlSegmentDto
+            {
+                AccountSegmentStructureId = item.AccountSegmentStructureId,
+                SegmentCode = item.AccountSegmentStructure.SegmentCode,
+                SegmentName = item.AccountSegmentStructure.SegmentName,
+                DisplayOrder = item.DisplayOrder
+            }).ToList(),
             RowVersion = Convert.ToBase64String(scenario.RowVersion)
         };
+    }
+
+    private async Task EnsureUnusedDraftScenarioAsync(BudgetScenario scenario, Guid tenantId)
+    {
+        if (scenario.Status != DraftStatus)
+            throw new InvalidOperationException(
+                "Only an unused Draft budget scenario can change structural setup or be deleted.");
+
+        var hasReturns = scenario.BudgetReturns.Any(item => !item.IsDeleted)
+            || await _context.BudgetReturns.AnyAsync(item =>
+                item.TenantId == tenantId && item.BudgetScenarioId == scenario.Id && !item.IsDeleted);
+        if (hasReturns)
+            throw new InvalidOperationException(
+                "This Draft scenario already has budget returns and can no longer change structural setup or be deleted.");
+
+        var hasDerivedScenario = await _context.BudgetScenarios.AnyAsync(item =>
+            item.TenantId == tenantId && item.ParentScenarioId == scenario.Id && !item.IsDeleted);
+        var hasRevision = await _context.BudgetRevisions.AnyAsync(item =>
+            item.TenantId == tenantId && !item.IsDeleted
+            && (item.SourceScenarioId == scenario.Id || item.ResultScenarioId == scenario.Id));
+        var hasReservation = await _context.FinanceBudgetReservations.AnyAsync(item =>
+            item.TenantId == tenantId && item.BudgetScenarioId == scenario.Id && !item.IsDeleted);
+        var hasWorkflow = await _context.WorkflowInstances
+            .Include(item => item.EntityType)
+            .AnyAsync(item => item.TenantId == tenantId && item.EntityId == scenario.Id && !item.IsDeleted
+                && (item.EntityType.Code == "BudgetScenario"
+                    || item.EntityType.Code == "BUDGET_SCENARIO"
+                    || item.EntityType.Name == "Budget Scenario"));
+        if (hasDerivedScenario || hasRevision || hasReservation || hasWorkflow)
+            throw new InvalidOperationException(
+                "This Draft scenario has dependent version, revision, reservation, or workflow evidence and cannot change structural setup or be deleted.");
     }
 
     private async Task<IReadOnlyList<FinanceDimensionDefinition>> ResolveControlDimensionsAsync(
@@ -1234,6 +1422,31 @@ public partial class BudgetService : IBudgetService
             throw new InvalidOperationException(
                 "One or more budget-control dimensions are missing, inactive, derived, or outside the current tenant.");
         var byId = definitions.ToDictionary(item => item.Id);
+        return ids.Select(id => byId[id]).ToList();
+    }
+
+    private async Task<IReadOnlyList<AccountSegmentStructure>> ResolveControlSegmentsAsync(
+        Guid tenantId,
+        IEnumerable<Guid>? requestedIds)
+    {
+        var ids = (requestedIds ?? Array.Empty<Guid>()).ToList();
+        if (ids.Any(id => id == Guid.Empty) || ids.Distinct().Count() != ids.Count)
+            throw new InvalidOperationException("Budget-control segments must contain unique account segment structure IDs.");
+        if (ids.Count == 0)
+            return Array.Empty<AccountSegmentStructure>();
+
+        var structures = await _context.AccountSegmentStructures.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && ids.Contains(item.Id)
+                && !item.IsDeleted && item.IsActive
+                && item.LookupTableRequired
+                && !item.IsNaturalAccount
+                && (item.LifecycleStatus == AccountSegmentLifecycleStatus.Active
+                    || item.LifecycleStatus == AccountSegmentLifecycleStatus.Frozen))
+            .ToListAsync();
+        if (structures.Count != ids.Count)
+            throw new InvalidOperationException(
+                "One or more budget-control segments are missing, inactive, natural-account, free-form, or outside the current tenant.");
+        var byId = structures.ToDictionary(item => item.Id);
         return ids.Select(id => byId[id]).ToList();
     }
 
@@ -1382,10 +1595,11 @@ public partial class BudgetService : IBudgetService
             BudgetScenarioId = budgetReturn.BudgetScenarioId,
             BudgetScenarioName = budgetReturn.BudgetScenario?.Name ?? string.Empty,
             SegmentValueId = budgetReturn.SegmentValueId,
-            SegmentValueName = budgetReturn.DistributionDimensionValue?.Name
-                ?? budgetReturn.SegmentValue?.Description,
-            SegmentValueCode = budgetReturn.DistributionDimensionValue?.Code
-                ?? budgetReturn.SegmentValue?.SegmentValue,
+            SegmentStructureId = budgetReturn.SegmentValue?.SegmentStructureId,
+            SegmentStructureCode = budgetReturn.SegmentValue?.SegmentStructure?.SegmentCode,
+            SegmentStructureName = budgetReturn.SegmentValue?.SegmentStructure?.SegmentName,
+            SegmentValueName = budgetReturn.SegmentValue?.Description,
+            SegmentValueCode = budgetReturn.SegmentValue?.SegmentValue,
             DistributionDimensionValueId = budgetReturn.DistributionDimensionValueId,
             DistributionDimensionDefinitionId = budgetReturn.DistributionDimensionValue?.FinanceDimensionDefinitionId,
             DistributionDimensionCode = budgetReturn.DistributionDimensionValue?.Code,

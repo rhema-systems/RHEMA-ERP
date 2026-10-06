@@ -32,6 +32,7 @@ public class BudgetScenarioDto
     public DateTime? UpdatedAt { get; set; }
     public int ReturnCount { get; set; }
     public IReadOnlyList<BudgetControlDimensionDto> ControlDimensions { get; set; } = Array.Empty<BudgetControlDimensionDto>();
+    public IReadOnlyList<BudgetControlSegmentDto> ControlSegments { get; set; } = Array.Empty<BudgetControlSegmentDto>();
     public string RowVersion { get; set; } = string.Empty;
 }
 
@@ -40,6 +41,14 @@ public sealed class BudgetControlDimensionDto
     public Guid FinanceDimensionDefinitionId { get; set; }
     public string DimensionCode { get; set; } = string.Empty;
     public string DimensionName { get; set; } = string.Empty;
+    public int DisplayOrder { get; set; }
+}
+
+public sealed class BudgetControlSegmentDto
+{
+    public Guid AccountSegmentStructureId { get; set; }
+    public string SegmentCode { get; set; } = string.Empty;
+    public string SegmentName { get; set; } = string.Empty;
     public int DisplayOrder { get; set; }
 }
 
@@ -74,6 +83,8 @@ public class CreateBudgetScenarioDto
     public string BaseCurrencyCode { get; set; } = "GHS";
 
     public List<Guid> ControlDimensionDefinitionIds { get; set; } = new();
+
+    public List<Guid> ControlSegmentStructureIds { get; set; } = new();
 }
 
 public class UpdateBudgetScenarioDto
@@ -89,7 +100,14 @@ public class UpdateBudgetScenarioDto
     
     public bool IsActive { get; set; }
 
+    public Guid? FiscalYearId { get; set; }
+
+    [MaxLength(3)]
+    public string? BaseCurrencyCode { get; set; }
+
     public List<Guid>? ControlDimensionDefinitionIds { get; set; }
+
+    public List<Guid>? ControlSegmentStructureIds { get; set; }
 
     [Required]
     public string RowVersion { get; set; } = string.Empty;
@@ -108,6 +126,9 @@ public class BudgetReturnDto
     public Guid BudgetScenarioId { get; set; }
     public string BudgetScenarioName { get; set; } = string.Empty;
     public Guid? SegmentValueId { get; set; }
+    public Guid? SegmentStructureId { get; set; }
+    public string? SegmentStructureCode { get; set; }
+    public string? SegmentStructureName { get; set; }
     public string? SegmentValueName { get; set; }
     public string? SegmentValueCode { get; set; }
     public Guid? DistributionDimensionValueId { get; set; }

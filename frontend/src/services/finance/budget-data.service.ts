@@ -58,8 +58,8 @@ class BudgetDataService {
         return apiService.put<BudgetScenario>(`/budget/scenarios/${id}`, { ...dto, id });
     }
 
-    async deleteScenario(id: string): Promise<void> {
-        return apiService.delete(`/budget/scenarios/${id}`);
+    async deleteScenario(id: string, rowVersion: string): Promise<void> {
+        return apiService.delete(`/budget/scenarios/${id}?rowVersion=${encodeURIComponent(rowVersion)}`);
     }
 
     async openScenario(id: string, rowVersion: string): Promise<BudgetScenario> {

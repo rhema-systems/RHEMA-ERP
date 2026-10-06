@@ -104,6 +104,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly ILeaseAccountingService? _leaseAccountingService;
     private readonly IBankingSettlementService? _bankingSettlementService;
+    private readonly IBankReconciliationService? _bankReconciliationService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -122,7 +123,8 @@ public class FinanceApprovalsController : ControllerBase
         IVendorPaymentService? vendorPaymentService = null,
         IFinanceBudgetControlService? budgetControl = null,
         ILeaseAccountingService? leaseAccountingService = null,
-        IBankingSettlementService? bankingSettlementService = null)
+        IBankingSettlementService? bankingSettlementService = null,
+        IBankReconciliationService? bankReconciliationService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -141,6 +143,7 @@ public class FinanceApprovalsController : ControllerBase
         _budgetControl = budgetControl;
         _leaseAccountingService = leaseAccountingService;
         _bankingSettlementService = bankingSettlementService;
+        _bankReconciliationService = bankReconciliationService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -175,6 +178,8 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
         var canApproveBankDeposits = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveBankDeposits)).Succeeded;
+        var canApproveBankReconciliations = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveBankReconciliation)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
         var canApproveBookTransitions = (await _authorizationService
@@ -514,23 +519,28 @@ public class FinanceApprovalsController : ControllerBase
             var bankDepositPermissionReason = bankDepositPermissionBlocked
                 ? $"Your roles do not include {FinancePermissions.ApproveBankDeposits}."
                 : null;
+            var isBankReconciliationApproval = Normalize(entityType) == Normalize("BankReconciliation");
+            var bankReconciliationPermissionBlocked = isBankReconciliationApproval && !canApproveBankReconciliations;
+            var bankReconciliationPermissionReason = bankReconciliationPermissionBlocked
+                ? $"Your roles do not include {FinancePermissions.ApproveBankReconciliation}."
+                : null;
             var approveDisabledReason = GetActionDisabledReason(
                 "approve",
                 FinancePermissions.WorkflowApprove,
                 canApproveByPermission,
-                submitterApprovalBlocked || paymentSodBlocked || bankDepositPermissionBlocked,
-                paymentSodReason ?? bankDepositPermissionReason);
+                submitterApprovalBlocked || paymentSodBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
+                paymentSodReason ?? bankDepositPermissionReason ?? bankReconciliationPermissionReason);
             var rejectDisabledReason = GetActionDisabledReason(
                 "reject",
                 FinancePermissions.WorkflowReject,
                 canRejectByPermission,
-                submitterApprovalBlocked || bankDepositPermissionBlocked,
-                bankDepositPermissionReason);
+                submitterApprovalBlocked || bankDepositPermissionBlocked || bankReconciliationPermissionBlocked,
+                bankDepositPermissionReason ?? bankReconciliationPermissionReason);
 
             results.Add(await MapApprovalAsync(
                 approval,
-                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked && !bankDepositPermissionBlocked,
-                canRejectByPermission && !submitterApprovalBlocked && !bankDepositPermissionBlocked,
+                canApproveByPermission && !submitterApprovalBlocked && !paymentSodBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
+                canRejectByPermission && !submitterApprovalBlocked && !bankDepositPermissionBlocked && !bankReconciliationPermissionBlocked,
                 approveDisabledReason,
                 rejectDisabledReason,
                 cancellationToken));
@@ -646,6 +656,15 @@ public class FinanceApprovalsController : ControllerBase
                 statusCode: StatusCodes.Status403Forbidden,
                 title: "Bank deposit approval not permitted",
                 detail: $"Your roles do not include {FinancePermissions.ApproveBankDeposits}.");
+        }
+
+        if (Normalize(entityType) == Normalize("BankReconciliation") &&
+            !(await _authorizationService.AuthorizeAsync(User, FinancePermissions.ApproveBankReconciliation)).Succeeded)
+        {
+            return Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Bank reconciliation decision not permitted",
+                detail: $"Your roles do not include {FinancePermissions.ApproveBankReconciliation}.");
         }
 
         if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
@@ -823,15 +842,32 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
-        var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
-            tenantId,
-            entityType,
-            instance.EntityId,
-            currentUserId.Value,
-            action,
-            comments,
-            invoicePaymentSodControlEventId,
-            cancellationToken);
+        WorkflowExecutionResult workflowResult;
+        try
+        {
+            workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
+                tenantId,
+                entityType,
+                instance.EntityId,
+                currentUserId.Value,
+                action,
+                comments,
+                invoicePaymentSodControlEventId,
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (
+            string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("BankReconciliation"))
+        {
+            return BadRequest(new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = instance.CurrentStepId,
+                Message = exception.Message
+            });
+        }
 
         if (!workflowResult.Success)
         {
@@ -1044,6 +1080,15 @@ public class FinanceApprovalsController : ControllerBase
     {
         async Task<WorkflowExecutionResult> ProcessAndApplyAsync()
         {
+            if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+                Normalize(entityType) == Normalize("BankReconciliation"))
+            {
+                if (_bankReconciliationService == null)
+                    throw new InvalidOperationException(
+                        "The authoritative bank reconciliation service is unavailable.");
+                await _bankReconciliationService.ValidateApprovalBalanceAsync(entityId, cancellationToken);
+            }
+
             var result = await _workflowService.ProcessApprovalStepAsync(
                 entityType,
                 entityId,
@@ -1108,7 +1153,7 @@ public class FinanceApprovalsController : ControllerBase
     }
 
     internal static bool RequiresSerializableOutcomeTransaction(string entityType)
-        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE";
+        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE" or "BANKRECONCILIATION";
 
     internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
         string entityType,
@@ -2597,7 +2642,11 @@ public class FinanceApprovalsController : ControllerBase
                 return;
             }
 
-            reconciliation.Status = ReconciliationStatus.Rejected;
+            reconciliation.Status = ReconciliationStatus.InProgress;
+            reconciliation.ReconciledAt = null;
+            reconciliation.ReconciledBy = null;
+            reconciliation.ApprovedAt = null;
+            reconciliation.ApprovedBy = null;
             reconciliation.UpdatedAt = now;
             reconciliation.UpdatedBy = _currentUserService.UserName ?? "system";
             reconciliation.Notes = AppendReason(reconciliation.Notes, reason);
@@ -2605,7 +2654,7 @@ public class FinanceApprovalsController : ControllerBase
             await RecordBankReconciliationAuditAsync(
                 tenantId,
                 reconciliation,
-                FinanceAuditEvents.BankReconciliationRejected,
+                FinanceAuditEvents.BankReconciliationReturnedForCorrection,
                 new
                 {
                     reconciliation.Status,
@@ -3115,7 +3164,7 @@ public class FinanceApprovalsController : ControllerBase
             SourceDocumentId = reconciliation.Id,
             AfterValues = afterValues,
             Comment = comment,
-            Reason = eventType == FinanceAuditEvents.BankReconciliationRejected ? comment : null,
+            Reason = eventType is FinanceAuditEvents.BankReconciliationRejected or FinanceAuditEvents.BankReconciliationReturnedForCorrection ? comment : null,
             Resource = "Finance.BankReconciliation",
             ResourceId = reconciliation.Id.ToString()
         }, cancellationToken);
@@ -3217,6 +3266,7 @@ public class FinanceApprovalsController : ControllerBase
             "JOURNALBATCH" => $"/finance/journal-batches/{entityId:D}",
             "EXCHANGERATE" => "/finance/exchange-rates",
             "BANKDEPOSITBATCH" => $"/finance/cash/deposits/{entityId:D}",
+            "BANKRECONCILIATION" => $"/finance/cash/reconciliation?reconciliation={entityId:D}",
             _ => "/finance/approvals"
         };
     }
@@ -3236,6 +3286,7 @@ public class FinanceApprovalsController : ControllerBase
             or "ASSETVALUATION"
             or "CAPITALPROJECT"
             or "BANKDEPOSITBATCH"
+            or "BANKRECONCILIATION"
             or "RECURRINGJOURNALTEMPLATE"
             or "RECURRINGJOURNALOCCURRENCE"
             or "RECURRINGJOURNALOCCURRENCEWAIVER";

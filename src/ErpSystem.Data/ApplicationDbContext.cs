@@ -223,6 +223,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
     public DbSet<BudgetScenarioControlDimension> BudgetScenarioControlDimensions { get; set; }
+    public DbSet<BudgetScenarioControlSegment> BudgetScenarioControlSegments { get; set; }
     public DbSet<BudgetEntry> BudgetEntries { get; set; }
     public DbSet<BudgetReturn> BudgetReturns { get; set; }
     public DbSet<BudgetRevision> BudgetRevisions { get; set; }
@@ -6263,6 +6264,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.ReconciliationId });
+            entity.HasIndex(e => e.CashTransactionId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => e.BankStatementLineId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             entity.HasOne(rm => rm.BankStatementLine)
                 .WithOne(bsl => bsl.ReconciliationMatch)
@@ -9625,6 +9632,27 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
+        builder.Entity<BudgetScenarioControlSegment>(entity =>
+        {
+            entity.ToTable("BudgetScenarioControlSegments");
+            entity.HasIndex(item => new
+                {
+                    item.TenantId,
+                    item.BudgetScenarioId,
+                    item.AccountSegmentStructureId
+                })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasOne(item => item.BudgetScenario)
+                .WithMany(scenario => scenario.ControlSegments)
+                .HasForeignKey(item => item.BudgetScenarioId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountSegmentStructure)
+                .WithMany()
+                .HasForeignKey(item => item.AccountSegmentStructureId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<BudgetReturn>(entity =>
         {
             entity.Property(budgetReturn => budgetReturn.RowVersion).IsRowVersion().IsConcurrencyToken();
@@ -9632,18 +9660,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 {
                     budgetReturn.TenantId,
                     budgetReturn.BudgetScenarioId,
-                    budgetReturn.SegmentValueId
-                })
-                .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [SegmentValueId] IS NOT NULL");
-            entity.HasIndex(budgetReturn => new
-                {
-                    budgetReturn.TenantId,
-                    budgetReturn.BudgetScenarioId,
+                    budgetReturn.SegmentValueId,
                     budgetReturn.DistributionDimensionValueId
                 })
                 .IsUnique()
-                .HasFilter("[IsDeleted] = 0 AND [DistributionDimensionValueId] IS NOT NULL");
+                .HasFilter("[IsDeleted] = 0");
             entity.HasOne(budgetReturn => budgetReturn.DistributionDimensionValue)
                 .WithMany()
                 .HasForeignKey(budgetReturn => budgetReturn.DistributionDimensionValueId)

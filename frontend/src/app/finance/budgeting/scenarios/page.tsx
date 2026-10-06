@@ -17,7 +17,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { BudgetScenario, CreateBudgetScenarioDto } from '@/types/budget';
-import type { FinanceDimensionDefinition, FiscalYear } from '@/types/finance';
+import type { FinanceDimensionDefinition, FiscalYear, SegmentStructure } from '@/types/finance';
 
 export default function BudgetScenariosPage() {
     const { toast } = useToast();
@@ -26,6 +26,7 @@ export default function BudgetScenariosPage() {
     const [scenarios, setScenarios] = useState<BudgetScenario[]>([]);
     const [fiscalYears, setFiscalYears] = useState<FiscalYear[]>([]);
     const [financeDimensions, setFinanceDimensions] = useState<FinanceDimensionDefinition[]>([]);
+    const [segmentStructures, setSegmentStructures] = useState<SegmentStructure[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [formData, setFormData] = useState<CreateBudgetScenarioDto>({
@@ -34,6 +35,7 @@ export default function BudgetScenariosPage() {
         fiscalYearId: '',
         baseCurrencyCode: 'GHS',
         controlDimensionDefinitionIds: [],
+        controlSegmentStructureIds: [],
     });
 
     useEffect(() => {
@@ -43,13 +45,19 @@ export default function BudgetScenariosPage() {
     const loadData = async () => {
         try {
             setIsLoading(true);
-            const [fiscalYearsData, dimensionsData] = await Promise.all([
+            const [fiscalYearsData, dimensionsData, segmentsData] = await Promise.all([
                 financeDataService.getFiscalYears(),
                 financeDataService.getFinanceDimensions(true),
+                financeDataService.getSegmentStructures(),
             ]);
             setFiscalYears(fiscalYearsData);
             setFinanceDimensions(dimensionsData.filter(dimension =>
                 dimension.isActive && dimension.classification !== 'Derived'));
+            setSegmentStructures(segmentsData.filter(segment =>
+                segment.isActive
+                && segment.lookupTableRequired
+                && !segment.isNaturalAccount
+                && (segment.lifecycleStatus === 'Active' || segment.lifecycleStatus === 'Frozen')));
 
             const scenariosData = await budgetDataService.getScenarios(fiscalYearsData);
             setScenarios(scenariosData);
@@ -97,6 +105,7 @@ export default function BudgetScenariosPage() {
                 fiscalYearId: '',
                 baseCurrencyCode: 'GHS',
                 controlDimensionDefinitionIds: [],
+                controlSegmentStructureIds: [],
             });
             loadData();
         } catch (error) {
@@ -213,6 +222,42 @@ export default function BudgetScenariosPage() {
                                             className="bg-muted"
                                         />
                                         <p className="text-xs text-muted-foreground">Budgeting always uses the system base currency for consolidation.</p>
+                                    </div>
+                                    <div className="space-y-3 rounded-md border p-3">
+                                        <div>
+                                            <Label>Budget-control account segments</Label>
+                                            <p className="text-xs text-muted-foreground">
+                                                Optional. Returns may select one lookup value from the enabled account segment structures.
+                                            </p>
+                                        </div>
+                                        {segmentStructures.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No active lookup-backed account segments are available.
+                                            </p>
+                                        ) : [...segmentStructures]
+                                            .sort((left, right) => left.segmentPosition - right.segmentPosition)
+                                            .map(segment => {
+                                                const selected = formData.controlSegmentStructureIds.includes(segment.id);
+                                                return (
+                                                    <label key={segment.id} className="flex items-start gap-3 rounded border p-2">
+                                                        <Checkbox
+                                                            checked={selected}
+                                                            onCheckedChange={(checked) => setFormData(current => ({
+                                                                ...current,
+                                                                controlSegmentStructureIds: checked
+                                                                    ? [...current.controlSegmentStructureIds, segment.id]
+                                                                    : current.controlSegmentStructureIds.filter(id => id !== segment.id),
+                                                            }))}
+                                                        />
+                                                        <span className="text-sm">
+                                                            <span className="font-medium">{segment.segmentCode} — {segment.segmentName}</span>
+                                                            <span className="block text-xs text-muted-foreground">
+                                                                Position {segment.segmentPosition} · {segment.lookupValueCount ?? segment.lookupValues?.filter(value => value.isActive).length ?? 0} active values
+                                                            </span>
+                                                        </span>
+                                                    </label>
+                                                );
+                                            })}
                                     </div>
                                     <div className="space-y-3 rounded-md border p-3">
                                         <div>

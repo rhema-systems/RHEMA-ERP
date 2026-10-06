@@ -5,8 +5,11 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Moq;
 using Xunit;
 
@@ -16,6 +19,21 @@ public class BudgetServiceHardeningTests
 {
     private static readonly Guid TenantId = Guid.NewGuid();
     private static readonly Guid CurrentUserId = Guid.NewGuid();
+
+    [Fact]
+    public void BudgetSegmentMigration_UsesSqlServerCompatibleCombinedScopeFilter()
+    {
+        var operation = new ExposedBudgetSegmentMigration().BuildOperations()
+            .OfType<CreateIndexOperation>()
+            .Single(item => item.Name ==
+                "IX_BudgetReturns_TenantId_BudgetScenarioId_SegmentValueId_DistributionDimensionValueId");
+
+        operation.IsUnique.Should().BeTrue();
+        operation.Columns.Should().Equal(
+            "TenantId", "BudgetScenarioId", "SegmentValueId", "DistributionDimensionValueId");
+        operation.Filter.Should().Be("[IsDeleted] = 0");
+        operation.Filter.Should().NotContain(" OR ");
+    }
 
     [Fact]
     public async Task UpdateScenarioAsync_OmittedDimensionPolicyPreservesExistingControls()
@@ -45,6 +63,115 @@ public class BudgetServiceHardeningTests
 
         result.ControlDimensions.Should().ContainSingle(item => item.DimensionCode == "DEPT");
         (await db.BudgetScenarioControlDimensions.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UpdateScenarioAsync_UnusedDraftCanChangeStructuralBudgetGrain()
+    {
+        await using var db = CreateContext();
+        var originalYear = CreateFiscalYear();
+        var replacementYear = CreateFiscalYear();
+        replacementYear.Year = 2027;
+        replacementYear.FiscalYearCode = "FY2027";
+        replacementYear.FiscalYearName = "FY2027";
+        replacementYear.StartDate = new DateTime(2027, 1, 1);
+        replacementYear.EndDate = new DateTime(2027, 12, 31);
+        var scenario = CreateScenario("Draft");
+        scenario.FiscalYearId = originalYear.Id;
+        var dimension = CreateDimensionDefinition();
+        var segment = CreateSegmentStructure();
+        db.AddRange(originalYear, replacementYear, scenario, dimension, segment);
+        await db.SaveChangesAsync();
+        var rowVersion = Convert.ToBase64String(scenario.RowVersion);
+        db.ChangeTracker.Clear();
+
+        var result = await CreateService(db).UpdateScenarioAsync(new UpdateBudgetScenarioDto
+        {
+            Id = scenario.Id,
+            Name = "FY2027 Department Budget",
+            Description = "Updated before distribution",
+            FiscalYearId = replacementYear.Id,
+            BaseCurrencyCode = "USD",
+            ControlDimensionDefinitionIds = new List<Guid> { dimension.Id },
+            ControlSegmentStructureIds = new List<Guid> { segment.Id },
+            RowVersion = rowVersion
+        });
+
+        result.FiscalYearId.Should().Be(replacementYear.Id);
+        result.BaseCurrencyCode.Should().Be("USD");
+        result.ControlDimensions.Should().ContainSingle(item =>
+            item.FinanceDimensionDefinitionId == dimension.Id);
+        result.ControlSegments.Should().ContainSingle(item =>
+            item.AccountSegmentStructureId == segment.Id);
+    }
+
+    [Fact]
+    public async Task UpdateScenarioAsync_StructuralChangeIsBlockedAfterAReturnExists()
+    {
+        await using var db = CreateContext();
+        var fiscalYear = CreateFiscalYear();
+        var scenario = CreateScenario("Draft");
+        scenario.FiscalYearId = fiscalYear.Id;
+        db.AddRange(fiscalYear, scenario, CreateReturn(scenario.Id, CurrentUserId));
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db).UpdateScenarioAsync(new UpdateBudgetScenarioDto
+        {
+            Id = scenario.Id,
+            Name = scenario.Name,
+            BaseCurrencyCode = "USD",
+            RowVersion = Convert.ToBase64String(scenario.RowVersion)
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already has budget returns*");
+    }
+
+    [Fact]
+    public async Task DeleteScenarioAsync_SoftDeletesAnUnusedDraftAndItsGrainControls()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario("Draft");
+        var dimension = CreateDimensionDefinition();
+        var segment = CreateSegmentStructure();
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id
+        });
+        scenario.ControlSegments.Add(new BudgetScenarioControlSegment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            AccountSegmentStructureId = segment.Id
+        });
+        db.AddRange(scenario, dimension, segment);
+        await db.SaveChangesAsync();
+
+        var deleted = await CreateService(db).DeleteScenarioAsync(
+            scenario.Id, Convert.ToBase64String(scenario.RowVersion));
+
+        deleted.Should().BeTrue();
+        (await db.BudgetScenarios.IgnoreQueryFilters().SingleAsync(item => item.Id == scenario.Id))
+            .IsDeleted.Should().BeTrue();
+        (await db.BudgetScenarioControlDimensions.IgnoreQueryFilters().SingleAsync())
+            .IsDeleted.Should().BeTrue();
+        (await db.BudgetScenarioControlSegments.IgnoreQueryFilters().SingleAsync())
+            .IsDeleted.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DeleteScenarioAsync_RejectsADraftWithReturns()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario("Draft");
+        db.AddRange(scenario, CreateReturn(scenario.Id, CurrentUserId));
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db).DeleteScenarioAsync(
+            scenario.Id, Convert.ToBase64String(scenario.RowVersion));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already has budget returns*");
     }
 
     [Fact]
@@ -368,6 +495,122 @@ public class BudgetServiceHardeningTests
         result.DistributionDimensionCode.Should().Be("FIN");
         result.DistributionDimensionName.Should().Be("Finance Department");
         (await db.BudgetReturns.SingleAsync()).DistributionDimensionValueId.Should().Be(value.Id);
+    }
+
+    [Fact]
+    public async Task CreateReturnAsync_RequiresAValueFromTheScenarioControlSegments()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var segment = CreateSegmentStructure();
+        scenario.ControlSegments.Add(new BudgetScenarioControlSegment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            AccountSegmentStructureId = segment.Id
+        });
+        db.AddRange(scenario, segment);
+        await db.SaveChangesAsync();
+
+        var act = () => CreateService(db).CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*segment value*");
+    }
+
+    [Fact]
+    public async Task CreateReturnAsync_PersistsIndependentSegmentAndDimensionScope()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var segment = CreateSegmentStructure();
+        var segmentValue = CreateSegmentValue(segment.Id);
+        var dimension = CreateDimensionDefinition();
+        var dimensionValue = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id,
+            Code = "FIN", Name = "Finance Department",
+            EffectiveDate = new DateTime(2026, 1, 1), IsActive = true
+        };
+        scenario.ControlSegments.Add(new BudgetScenarioControlSegment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            AccountSegmentStructureId = segment.Id
+        });
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id
+        });
+        db.AddRange(scenario, segment, segmentValue, dimension, dimensionValue);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db).CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id,
+            SegmentValueId = segmentValue.Id,
+            DistributionDimensionValueId = dimensionValue.Id
+        });
+
+        result.SegmentValueId.Should().Be(segmentValue.Id);
+        result.SegmentStructureId.Should().Be(segment.Id);
+        result.SegmentStructureCode.Should().Be("COMPANY");
+        result.SegmentValueCode.Should().Be("DEFAULT");
+        result.DistributionDimensionValueId.Should().Be(dimensionValue.Id);
+        result.DistributionDimensionDefinitionId.Should().Be(dimension.Id);
+    }
+
+    [Fact]
+    public async Task CreateReturnAsync_AllowsOneSegmentValueAcrossDifferentDimensions()
+    {
+        await using var db = CreateContext();
+        var scenario = CreateScenario();
+        var segment = CreateSegmentStructure();
+        var segmentValue = CreateSegmentValue(segment.Id);
+        var dimension = CreateDimensionDefinition();
+        var finance = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id,
+            Code = "FIN", Name = "Finance", EffectiveDate = new DateTime(2026, 1, 1), IsActive = true
+        };
+        var operations = new FinanceDimensionValue
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id,
+            Code = "OPS", Name = "Operations", EffectiveDate = new DateTime(2026, 1, 1), IsActive = true
+        };
+        scenario.ControlSegments.Add(new BudgetScenarioControlSegment
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            AccountSegmentStructureId = segment.Id
+        });
+        scenario.ControlDimensions.Add(new BudgetScenarioControlDimension
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            FinanceDimensionDefinitionId = dimension.Id
+        });
+        db.AddRange(scenario, segment, segmentValue, dimension, finance, operations);
+        await db.SaveChangesAsync();
+        var service = CreateService(db);
+
+        await service.CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id,
+            SegmentValueId = segmentValue.Id,
+            DistributionDimensionValueId = finance.Id
+        });
+        await service.CreateReturnAsync(new CreateBudgetReturnDto
+        {
+            BudgetScenarioId = scenario.Id,
+            SegmentValueId = segmentValue.Id,
+            DistributionDimensionValueId = operations.Id
+        });
+
+        (await db.BudgetReturns.CountAsync()).Should().Be(2);
     }
 
     [Fact]
@@ -909,6 +1152,9 @@ public class BudgetServiceHardeningTests
             BookType = AccountingBookType.PrimaryFull,
             IsDefault = true, IsActive = true, AllowsPosting = true
         });
+        db.Currencies.AddRange(
+            CreateCurrency("GHS", "936", "Ghana Cedi", true),
+            CreateCurrency("USD", "840", "United States Dollar", false));
         return db;
     }
 
@@ -1000,6 +1246,34 @@ public class BudgetServiceHardeningTests
             Classification = "Analytical", ValueSourceType = "Lookup", IsActive = true
         };
 
+    private AccountSegmentStructure CreateSegmentStructure() =>
+        new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SegmentCode = "COMPANY", SegmentName = "Company",
+            SegmentPosition = 1, SegmentLength = 7,
+            LookupTableRequired = true, IsNaturalAccount = false,
+            IsActive = true, LifecycleStatus = AccountSegmentLifecycleStatus.Active
+        };
+
+    private SegmentLookupValue CreateSegmentValue(Guid structureId) =>
+        new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SegmentStructureId = structureId,
+            SegmentValue = "DEFAULT", Description = "Default company",
+            EffectiveDate = new DateTime(2026, 1, 1), IsActive = true
+        };
+
+    private Currency CreateCurrency(string code, string numericCode, string name, bool isBase) =>
+        new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            CurrencyCode = code, NumericCode = numericCode,
+            CurrencyName = name, DecimalPlaces = 2,
+            IsBaseCurrency = isBase, IsActive = true
+        };
+
     private BudgetEntry CreateEntry(
         Guid returnId,
         Guid accountId,
@@ -1050,4 +1324,14 @@ public class BudgetServiceHardeningTests
             FiscalPeriodId = periodId,
             AdjustmentAmountBase = adjustment
         };
+
+    private sealed class ExposedBudgetSegmentMigration : AddBudgetScenarioSegmentControls
+    {
+        public IReadOnlyList<MigrationOperation> BuildOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+    }
 }

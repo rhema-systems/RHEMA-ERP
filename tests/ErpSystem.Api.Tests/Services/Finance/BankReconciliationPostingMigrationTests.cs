@@ -11,11 +11,14 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -24,6 +27,23 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class BankReconciliationPostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public void RematchMigration_ShouldLimitUniquenessToActiveMatches()
+    {
+        var operations = new ExposedRematchMigration().BuildOperations();
+        var indexes = operations.OfType<CreateIndexOperation>()
+            .Where(operation => operation.Table == "ReconciliationMatch")
+            .ToDictionary(operation => operation.Name);
+
+        indexes.Should().ContainKeys(
+            "IX_ReconciliationMatch_BankStatementLineId",
+            "IX_ReconciliationMatch_CashTransactionId");
+        indexes.Values.Should().OnlyContain(operation =>
+            operation.IsUnique && operation.Filter == "[IsDeleted] = 0");
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
@@ -162,6 +182,136 @@ public sealed class BankReconciliationPostingMigrationTests
             });
 
         reconciliation.BookBalance.Should().Be(50_000m);
+        reconciliation.Difference.Should().Be(0m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task BookBalance_ShouldExcludeParallelBookReplicaOfSameBankMovement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-MULTIBOOK", 0m);
+        var period = db.FiscalPeriods.Local.Single(p => p.TenantId == tenantId);
+        var primaryBook = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
+        var parallelBook = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "USD_PARALLEL",
+            Name = "USD Parallel",
+            Purpose = "Parallel reporting",
+            BookType = AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "USD",
+            IsDefault = false,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(parallelBook);
+
+        var sourceDocumentId = Guid.NewGuid();
+        var primaryJournalId = Guid.NewGuid();
+        var replicaJournalId = Guid.NewGuid();
+        db.JournalEntries.AddRange(
+            new JournalEntry
+            {
+                Id = primaryJournalId,
+                TenantId = tenantId,
+                JournalEntryNumber = "JE-BASE-DEPOSIT-001",
+                JournalType = "Bank Deposit",
+                EntryDate = new DateTime(2026, 7, 6),
+                PostingDate = new DateTime(2026, 7, 6),
+                Description = "Primary bank deposit",
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch",
+                TotalDebitAmount = 2880m,
+                TotalCreditAmount = 2880m,
+                IsBalanced = true,
+                FiscalPeriodId = period.Id,
+                AccountingBookId = primaryBook.Id,
+                BookClassification = primaryBook.Code,
+                PostingStatus = "Posted"
+            },
+            new JournalEntry
+            {
+                Id = replicaJournalId,
+                TenantId = tenantId,
+                JournalEntryNumber = "JE-USD-DEPOSIT-001",
+                JournalType = "Bank Deposit",
+                EntryDate = new DateTime(2026, 7, 6),
+                PostingDate = new DateTime(2026, 7, 6),
+                Description = "Parallel bank deposit replica",
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch",
+                TotalDebitAmount = 230.40m,
+                TotalCreditAmount = 230.40m,
+                IsBalanced = true,
+                FiscalPeriodId = period.Id,
+                AccountingBookId = parallelBook.Id,
+                BookClassification = parallelBook.Code,
+                PostingStatus = "Posted",
+                ReplicatedFromJournalEntryId = primaryJournalId
+            });
+        db.AccountTransactions.AddRange(
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = primaryJournalId,
+                AccountingBookId = primaryBook.Id,
+                AccountId = setup.BankGlAccount.Id,
+                FiscalPeriodId = period.Id,
+                TransactionDate = new DateTime(2026, 7, 6),
+                DebitAmount = 2880m,
+                CreditAmount = 0m,
+                FunctionalCurrencyCode = "GHS",
+                TransactionCurrency = "GHS",
+                TransactionDebitAmount = 2880m,
+                TransactionCreditAmount = 0m,
+                PostingStatus = "Posted",
+                BookClassification = primaryBook.Code,
+                LineNumber = 1,
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch"
+            },
+            new AccountTransaction
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                JournalEntryId = replicaJournalId,
+                AccountingBookId = parallelBook.Id,
+                AccountId = setup.BankGlAccount.Id,
+                FiscalPeriodId = period.Id,
+                TransactionDate = new DateTime(2026, 7, 6),
+                DebitAmount = 230.40m,
+                CreditAmount = 0m,
+                FunctionalCurrencyCode = "USD",
+                TransactionCurrency = "GHS",
+                TransactionDebitAmount = 2880m,
+                TransactionCreditAmount = 0m,
+                PostingStatus = "Posted",
+                BookClassification = parallelBook.Code,
+                LineNumber = 1,
+                SourceModule = "CASHBANK",
+                SourceDocumentId = sourceDocumentId,
+                SourceDocumentType = "BankDepositBatch"
+            });
+        await db.SaveChangesAsync();
+
+        var reconciliation = await CreateReconciliationService(db, tenantId)
+            .StartReconciliationAsync(new StartReconciliationDto
+            {
+                BankAccountId = setup.BankAccount.Id,
+                ReconciliationDate = new DateTime(2026, 7, 6),
+                StatementBalance = 2880m
+            });
+
+        reconciliation.BookBalance.Should().Be(2880m);
         reconciliation.Difference.Should().Be(0m);
     }
 
@@ -845,6 +995,160 @@ public sealed class BankReconciliationPostingMigrationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
+    public async Task Finalizer_ShouldNotApproveOwnReconciliation()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-001", 0m);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.Completed,
+            ReconciledBy = makerId,
+            ReconciledAt = DateTime.UtcNow
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId, currentUserId: makerId);
+
+        var act = () => service.ApproveReconciliationAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Maker-checker control: the user who finalized this bank reconciliation cannot approve it.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task ApprovalBalanceValidation_ShouldRejectPostFinalizationBookMovement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-DRIFT", 0m);
+        var period = db.FiscalPeriods.Local.Single(item => item.TenantId == tenantId);
+        var primaryBook = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.Completed,
+            ReconciledBy = Guid.NewGuid(),
+            ReconciledAt = DateTime.UtcNow
+        };
+        var journal = new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryNumber = "JE-POST-FINAL-001",
+            JournalType = "Bank Deposit",
+            EntryDate = new DateTime(2026, 7, 6),
+            PostingDate = new DateTime(2026, 7, 6),
+            Description = "Movement posted after reconciliation finalization",
+            SourceModule = "CASHBANK",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentType = "BankDepositBatch",
+            TotalDebitAmount = 100m,
+            TotalCreditAmount = 100m,
+            IsBalanced = true,
+            FiscalPeriodId = period.Id,
+            AccountingBookId = primaryBook.Id,
+            BookClassification = primaryBook.Code,
+            PostingStatus = "Posted"
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        db.JournalEntries.Add(journal);
+        db.AccountTransactions.Add(new AccountTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryId = journal.Id,
+            AccountingBookId = primaryBook.Id,
+            AccountId = setup.BankGlAccount.Id,
+            FiscalPeriodId = period.Id,
+            TransactionDate = new DateTime(2026, 7, 6),
+            DebitAmount = 100m,
+            CreditAmount = 0m,
+            FunctionalCurrencyCode = "GHS",
+            TransactionCurrency = "GHS",
+            TransactionDebitAmount = 100m,
+            TransactionCreditAmount = 0m,
+            PostingStatus = "Posted",
+            BookClassification = primaryBook.Code,
+            LineNumber = 1,
+            SourceModule = "CASHBANK",
+            SourceDocumentId = journal.SourceDocumentId,
+            SourceDocumentType = journal.SourceDocumentType
+        });
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+
+        var act = () => service.ValidateApprovalBalanceAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*statement and posted GL book balance differ*");
+        (await db.Set<BankReconciliation>().AsNoTracking().SingleAsync(item => item.Id == reconciliation.Id))
+            .Status.Should().Be(ReconciliationStatus.Completed);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task Finalization_ShouldRequireActionableApprovalWorkflow(bool autoCompleted)
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-001", 0m);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.InProgress
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(
+            db,
+            tenantId,
+            currentUserId: makerId,
+            workflowStartResult: new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = autoCompleted ? WorkflowInstanceStatus.Completed : WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid(),
+                CurrentStepId = autoCompleted ? Guid.NewGuid() : null
+            });
+
+        var act = () => service.FinalizeReconciliationAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*actionable independent approval step*");
+        (await db.Set<BankReconciliation>().AsNoTracking().SingleAsync(item => item.Id == reconciliation.Id))
+            .Status.Should().Be(ReconciliationStatus.InProgress);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
     public async Task MatchesAndSummary_ShouldReturnWorkspaceDetailsForSelectedStatementOnly()
     {
         var tenantId = Guid.NewGuid();
@@ -932,13 +1236,25 @@ public sealed class BankReconciliationPostingMigrationTests
         return new ApplicationDbContext(options);
     }
 
+    private sealed class ExposedRematchMigration : AllowBankReconciliationRematchAfterUnmatch
+    {
+        public IReadOnlyList<MigrationOperation> BuildOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
+    }
+
     private static BankReconciliationService CreateReconciliationService(
         ApplicationDbContext db,
         Guid tenantId,
         string documentPrefix = "BRC",
-        bool withDimensions = false)
+        bool withDimensions = false,
+        Guid? currentUserId = null,
+        WorkflowExecutionResult? workflowStartResult = null)
     {
-        var currentUser = CreateCurrentUserService(tenantId);
+        var currentUser = CreateCurrentUserService(tenantId, currentUserId);
         var auditService = new FinanceAuditService(
             db,
             currentUser.Object,
@@ -959,7 +1275,13 @@ public sealed class BankReconciliationPostingMigrationTests
             db, currentUser.Object, auditService, documentPrefix, sourceDimensions);
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(x => x.StartApprovalWorkflowAsync("BankReconciliation", It.IsAny<Guid>()))
-            .ReturnsAsync(new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed });
+            .ReturnsAsync(workflowStartResult ?? new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid(),
+                CurrentStepId = Guid.NewGuid()
+            });
         workflow.Setup(x => x.CanUserApproveAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>()))
             .ReturnsAsync(true);
         workflow.Setup(x => x.ProcessApprovalStepAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>(), "Approve", It.IsAny<string?>()))
@@ -1025,12 +1347,12 @@ public sealed class BankReconciliationPostingMigrationTests
         return scope;
     }
 
-    private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId)
+    private static Mock<ICurrentUserService> CreateCurrentUserService(Guid tenantId, Guid? userId = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
         currentUser.SetupGet(x => x.Claims).Returns(new Dictionary<string, string>());
-        currentUser.SetupGet(x => x.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(x => x.UserId).Returns((userId ?? Guid.NewGuid()).ToString());
         currentUser.SetupGet(x => x.UserName).Returns("bank.reconciliation.tests");
         currentUser.SetupGet(x => x.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(x => x.UserAgent).Returns("bank-reconciliation-tests");

@@ -35,6 +35,25 @@ public sealed class BankAccountTenantIsolationTests
     }
 
     [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task GetActiveAccountsAsync_ShouldIncludeLinkedGlAccountForReconciliationPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        var glAccountId = Guid.NewGuid();
+        var bankAccount = CreateBankAccount(tenantId, "BANK-001", "Current Account");
+        bankAccount.GLAccountId = glAccountId;
+        await using var db = CreateContext();
+        db.BankAccounts.Add(bankAccount);
+        await db.SaveChangesAsync();
+
+        var accounts = (await CreateService(db, tenantId).GetActiveAccountsAsync()).ToList();
+
+        accounts.Should().ContainSingle();
+        accounts[0].GLAccountId.Should().Be(glAccountId);
+    }
+
+    [Fact]
     [Trait("Batch", "FinanceGoLive-3")]
     [Trait("Category", "TenantIsolation")]
     public async Task GetByIdAsync_ShouldReturnNull_ForOtherTenantBankAccount()

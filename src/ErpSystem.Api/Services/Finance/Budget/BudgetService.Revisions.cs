@@ -362,6 +362,7 @@ public partial class BudgetService
         var scenario = await _context.BudgetScenarios
             .Include(item => item.FiscalYear)
             .Include(item => item.ControlDimensions.Where(control => !control.IsDeleted))
+            .Include(item => item.ControlSegments.Where(control => !control.IsDeleted))
             .Include(item => item.BudgetReturns.Where(budgetReturn => !budgetReturn.IsDeleted))
                 .ThenInclude(budgetReturn => budgetReturn.BudgetEntries.Where(entry => !entry.IsDeleted))
                     .ThenInclude(entry => entry.FinanceDimensionSet)!
@@ -556,6 +557,19 @@ public partial class BudgetService
                 Id = Guid.NewGuid(), TenantId = TenantId,
                 BudgetScenarioId = successor.Id,
                 FinanceDimensionDefinitionId = control.FinanceDimensionDefinitionId,
+                DisplayOrder = control.DisplayOrder,
+                CreatedAt = now, CreatedBy = _currentUserService.UserName,
+                CreatedById = userId
+            });
+        }
+
+        foreach (var control in source.ControlSegments.Where(item => !item.IsDeleted))
+        {
+            successor.ControlSegments.Add(new BudgetScenarioControlSegment
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId,
+                BudgetScenarioId = successor.Id,
+                AccountSegmentStructureId = control.AccountSegmentStructureId,
                 DisplayOrder = control.DisplayOrder,
                 CreatedAt = now, CreatedBy = _currentUserService.UserName,
                 CreatedById = userId
