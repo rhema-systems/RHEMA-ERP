@@ -1013,6 +1013,7 @@ public class ProjectBoqItem : TenantEntity
 {
     public Guid ProjectId { get; set; }
     public Guid ProjectPackageId { get; set; }
+    public Guid? ProjectWorkItemId { get; set; }
 
     /// <summary>
     /// Stable identity carried into every BoQ snapshot so a line can be compared
@@ -1112,6 +1113,9 @@ public class ProjectBoqItem : TenantEntity
 
     [ForeignKey(nameof(ProjectPackageId))]
     public virtual ProjectPackage ProjectPackage { get; set; } = null!;
+
+    [ForeignKey(nameof(ProjectWorkItemId))]
+    public virtual ProjectWorkItem? ProjectWorkItem { get; set; }
 
     [ForeignKey(nameof(SectionCatalogEntryId))]
     public virtual ProjectCatalogEntry? SectionCatalogEntry { get; set; }
