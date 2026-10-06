@@ -4,6 +4,7 @@ import type { User } from '../types';
 import {
   hasAllPermissionsAccess,
   hasAnyPermissionAccess,
+  hasAnyRoleAccess,
   hasPermissionAccess,
 } from './permissions';
 
@@ -65,5 +66,12 @@ describe('permission access', () => {
         'estate.land.project-readiness'
       )
     ).toBe(true);
+  });
+
+  it('matches route roles without casing differences', () => {
+    const user = userWith(['Records Officer']);
+
+    expect(hasAnyRoleAccess(user, ['records officer'])).toBe(true);
+    expect(hasAnyRoleAccess(user, ['Head of Legal'])).toBe(false);
   });
 });

@@ -624,6 +624,19 @@ class DocumentManagementService {
     return response.data;
   }
 
+  async updateMetadataTemplate(
+    id: string,
+    payload: UpsertCentralDocumentMetadataTemplate
+  ): Promise<CentralDocumentMetadataTemplate> {
+    const response = await apiService.put<
+      ApiResponse<CentralDocumentMetadataTemplate>
+    >(
+      `/document-management/metadata-templates/${encodeURIComponent(id)}`,
+      payload
+    );
+    return response.data;
+  }
+
   async getRegister(): Promise<CentralDocumentRegisterItem[]> {
     const response = await apiService.get<
       ApiResponse<CentralDocumentRegisterItem[]>
@@ -649,7 +662,11 @@ class DocumentManagementService {
     return response.data || [];
   }
 
-  async attachRecordToCase(recordId: string, caseId: string, documentId: string): Promise<ProcedureCaseDetail> {
+  async attachRecordToCase(
+    recordId: string,
+    caseId: string,
+    documentId: string
+  ): Promise<ProcedureCaseDetail> {
     const response = await apiService.post<ApiResponse<ProcedureCaseDetail>>(
       `/document-management/records/${recordId}/attach-to-case`,
       { caseId, documentId }
@@ -867,6 +884,16 @@ class DocumentManagementService {
     return response.data;
   }
 
+  async updateAccessRule(
+    id: string,
+    payload: UpsertCentralDocumentAccessRule
+  ): Promise<CentralDocumentAccessRule> {
+    const response = await apiService.put<
+      ApiResponse<CentralDocumentAccessRule>
+    >(`/document-management/access-rules/${encodeURIComponent(id)}`, payload);
+    return response.data;
+  }
+
   async getRetentionPolicies(): Promise<CentralDocumentRetentionPolicy[]> {
     const response = await apiService.get<
       ApiResponse<CentralDocumentRetentionPolicy[]>
@@ -880,6 +907,19 @@ class DocumentManagementService {
     const response = await apiService.post<
       ApiResponse<CentralDocumentRetentionPolicy>
     >('/document-management/retention-policies', payload);
+    return response.data;
+  }
+
+  async updateRetentionPolicy(
+    id: string,
+    payload: UpsertCentralDocumentRetentionPolicy
+  ): Promise<CentralDocumentRetentionPolicy> {
+    const response = await apiService.put<
+      ApiResponse<CentralDocumentRetentionPolicy>
+    >(
+      `/document-management/retention-policies/${encodeURIComponent(id)}`,
+      payload
+    );
     return response.data;
   }
 }
