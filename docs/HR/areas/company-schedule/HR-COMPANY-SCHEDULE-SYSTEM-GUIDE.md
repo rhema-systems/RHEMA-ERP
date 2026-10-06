@@ -9,10 +9,10 @@ and each lane's *State* says what was built and how it was proved. The guide des
 screen offers something the server refuses, the step says so.
 
 > **⚠ Rewrite in progress (lane 6).** The front matter, the seven rules, the conventions and chapters 1–2 are
-> new (slice 6b, 2026-10-06), and so are chapters 3–7 with the new 3a and 6a (slice 6c), and chapters 8–10B with the
-> new 10C (slice 6d). Chapters 11–21 and the appendices still describe round 4 until slice 6e replaces them; their
-> live-write numbers will follow on from chapter 10C's 13. Where an old chapter disagrees with the rules or chapter 1,
-> the rules and chapter 1 are right.
+> new (slice 6b, 2026-10-06), and so are chapters 3–7 with the new 3a and 6a (slice 6c), chapters 8–10B with the new
+> 10C (slice 6d), and chapters 11–17 (slice 6e-1). Chapters 18–21 and the appendices still describe round 4 until slice
+> 6e-2 replaces them — chapter 19's reset in particular still lists the old live writes; the new ones run 1–17. Where an
+> old chapter disagrees with the rules or chapter 1, the rules and chapter 1 are right.
 >
 > ⚠ **Not yet walked in a browser:** the screens lanes 1–7 changed. The plan lists the walks (lane 5 items
 > 1–8, lane 7 items 9–12); every server rule behind them is proved by the review suite on UAT (1152 assertions,
@@ -2317,36 +2317,35 @@ the same lock, the same approval on the engine, and the same notices to the book
 
 ### 📖 What it is
 
-> *"Four things the corporation decides once a year and then lives with: which rooms exist, which
-> days it is shut, which dates it marks, and what its financial year is."*
+> *"What the corporation decides once and then lives with: which rooms exist, which days it is shut, which dates it
+> marks — and, read from Finance, what its financial year is."*
 
 ### 👁 On the page
 
-A header (*Company Schedule* — *"Meeting rooms, closures, milestones and fiscal years."*, back-link
-to the HR Administration hub) above **four navigation cards**:
+A header (*Company Schedule* — *"Meeting rooms, closures, milestones and fiscal years."*, back-link to the HR
+Administration hub) above **four navigation cards**:
 
 | Card | Route | Chapter |
 |---|---|---|
 | **Meeting Rooms** — *Rooms, their facilities, and the rules for booking them.* | `…/rooms` | 12 |
 | **Business Closures** — *Days the organisation is shut, company-wide or per site.* | `…/closures` | 13 |
 | **Milestones** — *Anniversaries, achievements and other calendar dates.* | `…/milestones` | 14 |
-| **Fiscal Years** — *Reporting windows and the periods inside them.* | `…/fiscal-years` | 15 |
+| **Fiscal Calendar** — *Finance's fiscal years and periods, read-only.* | `…/fiscal-calendar` | 15 |
 
 ### ▶ Walk it
 
 **1 — Open the hub.** Read the four titles.
 
-> *"Four cards, and the sentence that explains why they are over here rather than with the events:
-> an HR officer touches an event every week and a fiscal year once a year. Same permission, very
-> different rhythm — so the daily work is under Human Resources and the annual decisions are under
-> Administration."*
+> *"An HR officer touches an event every week and a room's rules once a year. Same permission, very different rhythm
+> — so the daily work is under Human Resources and the standing decisions are under Administration. And the fourth
+> card is not HR's at all: it is Finance's calendar, which HR reads rather than keeping a copy."*
 
 **2 — Click *Meeting Rooms*.**
 
 ### ⚙ Behind the page
 
-No API call — the cards are hard-coded on the page, mirroring the group in
-`frontend/src/config/hr-setup-nav.ts`. Each target enforces its own permission.
+No API call — the cards are written into the page, mirroring the group in `frontend/src/config/hr-setup-nav.ts`. Each
+target enforces its own permission.
 
 ---
 
@@ -2364,157 +2363,98 @@ No API call — the cards are hard-coded on the page, mirroring the group in
 
 ### 👁 Screen 1 — the register
 
-**Header:** *Meeting rooms* — *"The rooms people can book, and the rules for booking them."*,
-back-link, **+ New room**, and a **Search** box in the card header (over **room name, room code,
-site and placement**). Sorted by room name.
+**Header:** *Meeting rooms* — *"The rooms people can book, and the rules for booking them."*, back-link, **+ New room**,
+and a **Search rooms…** box (room name, code, site and placement). Sorted by name.
 
-**Ten columns:**
+**Ten columns:** **Code** (`BRD`) · **Room** · **Site** · **Where** (*"Main · 4 · …"* — building, floor, placement) ·
+**Seats** · **Type** · **Facilities** (badges: *Projector · Whiteboard · VC · Audio · A/C*) · **Bookable** (**Yes** ·
+**With approval** · **No**) · **Status** (Active / Inactive) · ⋯ — **Edit**, **Deactivate** (an active room), and
+**Delete** for `HR.Company.Admin` only.
 
-| Column | Shows |
-|---|---|
-| **Code** | `BRD`, monospaced, or an em dash |
-| **Room** | the name, bold |
-| **Site** | the location-tree entry |
-| **Where** | `Main · 4 · Tema Head Office` — building, floor and placement joined |
-| **Seats** | capacity |
-| **Type** | Conference · Boardroom · Training · Huddle · Auditorium |
-| **Facilities** | small badges: *Projector · Whiteboard · VC · Audio · A/C* |
-| **Bookable** | **Yes** · **With approval** · **No** |
-| **Status** | Active / Inactive |
-| ⋯ | **Edit**, 🚫 **Delete** |
+**Retiring a room** (lane 3a, decision D-18) opens one dialog, which first reads the room's bookings:
+- **Deactivate** — *"Nobody will be able to book it."* With bookings still to come it lists them (number, when, booker,
+  purpose) and says they *"will be cancelled — the reason, that the room was taken out of use — and their bookers
+  told"*; the button reads **Cancel N bookings and deactivate**, beside **Keep it in use**. Switching **Active** off on
+  the edit page goes through the same dialog.
+- **Delete** — only for a room with **no booking on record**: *"It has no bookings on record, so nothing is lost by
+  deleting it."* A room with history: *"\<room\> cannot be deleted — It has N bookings on record, and the bookings
+  register would lose them. Deactivate it instead: nobody can book it, and its history stays."* with **Deactivate
+  instead**.
+- A refusal for want of the permission says so: *"You do not have permission to delete rooms — it needs Company
+  Admin."*
 
-**Rows are not clickable** — only the ⋯ menu moves you on.
+**New / edit** (`…/rooms/new` — *"Rooms belong to a site, and only bookable rooms appear when someone books."* — and
+`…/rooms/[id]/edit`), three cards:
+- **The room** — **Room name** *(required)* · **Room code** (*"Generated if left blank"*, as `RM-0001`) · **Site**
+  *(required — the sites only, each with its level: "Tema Head Office · Site / Office")* · **Room type** *(required)* ·
+  **Where in the site** *(required — "e.g. East wing, past reception")* · **Building** · **Floor** · **Seats**
+  *(required)* · **Description**.
+- **Facilities** — **Projector** · **Whiteboard** · **Video conferencing** · **Audio system** · **Air conditioning** ·
+  **Anything else**.
+- **Booking rules** — **Active** · **Can be booked**; when bookable, **Bookings need approval** (*"A booking stays
+  Tentative until somebody approves it."*), **Longest booking (hours)** and **Book up to (days ahead)**, both *"No
+  limit"* when blank.
 
-Delete's confirmation is the best-written one in the module: *"\<room\> will be removed. Deactivate
-it instead if it has booking history worth keeping."* ⚠ Its failure toast says *"It may have
-bookings against it"*, which is misleading — for `hr.head` the failure is always a 403, never a
-constraint (**C-33**).
-
-### 👁 Screen 2 — new / edit (`…/rooms/new`, `…/rooms/[id]/edit`)
-
-One form, three cards.
-
-**Card 1 — The room**
-- **Room name** *(required, ≤100)* · **Room code** *("Generated if left blank")*
-- **Site** *(required — the location tree, with each option suffixed by its level)* ·
-  **Room type** *(required)*
-- **Where in the site** *(required, ≤200, "e.g. East wing, past reception")*
-- **Building** · **Floor**
-- **Seats** *(required, ≥1)*
-- **Description**
-
-**Card 2 — Facilities** — five switches: **Projector** · **Whiteboard** · **Video conferencing** ·
-**Audio system** · **Air conditioning**, plus **Anything else** *(free text)*.
-
-**Card 3 — Booking rules**
-- **Active** switch · **Can be booked** switch
-- *When bookable:* **Bookings need approval** switch — *"A booking stays Tentative until somebody
-  approves it."* — and **Longest booking (hours)** and **Book up to (days ahead)**, both
-  placeholdered *"No limit"*
-
-**Footer:** **Cancel** · **Add room** / **Save changes**.
-
-> **Room code is generated when blank** as `RM-0001`. *(Round 4.)* It comes from the shared number
-> sequence, which skips any code a room has ever held, deleted rooms included, and room codes are
-> unique per tenant in the database. So a generated code can no longer collide (**C-34**, fixed). A
-> code you **type** is still checked against live rooms only, and reusing a deleted room's code gets a
-> bare *"Something went wrong"* from the database (**R4-12.1**).
+A code — typed or generated — is checked against every room the tenant has had, deleted ones included, and a typed
+code that is taken is refused in words (R4-12.1). The edit checks the site and the code as the create does (F-6), and
+answers with what it saved (F-46).
 
 ### ▶ Walk it
 
-**1 — Open the register.** Three rows.
+**1 — Open the register.** Three rows on both databases.
 
-> *"Three rooms, all at head office. The Boardroom on the fourth floor, eighteen seats, with video
-> conferencing and an audio system. Conference Room A on the second, thirty seats. And Huddle Room
-> 1 on the third, six seats — for the meetings that do not need a table."*
+> *"Three rooms, all at head office. The Boardroom on the fourth floor, eighteen seats, with video conferencing and
+> audio. Conference Room A on the second, thirty seats. Huddle Room 1 on the third, six seats — for the meetings that
+> do not need a table."*
 
-**2 — Point at the *Facilities* column.**
+**2 — ⋯ → *Edit* on the Boardroom.** Stop at **Site** and **Where in the site** — § 1.7's second sentence:
 
-> *"Projector, whiteboard, video conferencing, audio, air conditioning — because 'which room' is
-> usually decided by 'can we get the Ho office on the screen', not by how many chairs there are."*
+> *"Two fields that sound the same and are not. The site is the corporation's own list of places — only places where
+> staff can be posted, so nobody files a boardroom under 'Ghana'. 'Where in the site' is what you would say to a
+> visitor: east wing, past reception."*
 
-**3 — Point at *Bookable*.** All three read **Yes**.
+**3 — 🔴 LIVE WRITE 14 — *Booking rules*: turn *Bookings need approval* on** and **Save changes** — Beat B (§ 2.5), if
+you did not set it last night. The register's **Bookable** now reads **With approval**.
 
-> *"All three bookable, none requiring approval. Watch what the third value does."*
+> *"Nothing else changed — same room, same seats. But the next booking of it waits, and the HR desk is asked on the
+> approval engine. The rule lives on the room, not on the person — because 'the boardroom needs approval and the huddle
+> room does not' is how a real organisation works."*
 
-**4 — ⋯ → *Edit* on the Boardroom.** Walk the three cards.
+*Undo:* chapter 19 — turn it off again. **Optional:** set the Huddle Room's **Longest booking (hours)** to **2** for
+chapter 9's room-rule beat; the search then leaves it out of any longer window.
 
-**5 — On Card 1, stop at *Site* and *Where in the site*** — this is § 1.6's second sentence:
+**4 — ⋯ → *Deactivate* on the Boardroom, and read the dialog.** It lists the Boardroom's bookings still to come — your
+§ 2.4 booking and chapter 9's.
 
-> *"Two fields that sound the same and are not. The site is the entry in the corporation's location
-> tree — the same tree the employee register uses, and the same one the attendance geofences hang
-> off. 'Where in the site' is what you would say to a visitor: east wing, past reception. Both are
-> required, because a room with a site and no placement is a room nobody can find."*
+> *"Taking a room out of use does not strand the people who booked it. It shows them to me, cancels them, and tells
+> each booker why. And a room with any history cannot be deleted at all — only deactivated — so the bookings register
+> never loses a booking because its room went."*
 
-**6 — Point at the level suffix in the Site dropdown.**
-
-> *"And every option says what level it is, because that list is the whole tree — Ghana and Greater
-> Accra are in there alongside Tema Head Office. Rather than guess which level counts as a site for
-> every tenant, it tells you and lets you choose."*
-
-**7 — Card 3 — 🔴 LIVE WRITE 9 — turn *Bookings need approval* on** and press **Save changes**.
-The register's **Bookable** column now reads **With approval**.
-
-> *"And that is the third value. Nothing else changed — same room, same capacity, same facilities.
-> But the next person who books it gets a Tentative booking instead of a confirmed one, and
-> somebody has to say yes. The rule lives on the room, not on the person booking and not on a
-> global setting, because 'the boardroom needs approval and the huddle room does not' is exactly
-> how a real organisation works."*
-
-*Undo:* chapter 19 — turn it back off.
-
-**8 — Point at the two numeric fields underneath it.** *(Round 4: both are enforced now.)*
-
-> *"Two more rules sitting beside it — the longest a single booking may be, and how far ahead
-> people may book. Leave them blank and there is no limit. Set them, and a booking that breaks one
-> is refused with a sentence naming the rule — and so is a booking for more people than the room
-> seats. On a new booking and on every change to one."*
-
-If you are doing § 2.3's optional second beat, this is where you set the Huddle Room's longest
-booking to **2**. Be ready for the honest follow-up: the availability search does not yet apply
-these two limits, so the refusal comes when the booking is made, not in the picker (**R4-9.1**).
-
-**9 — 🚫 DO NOT PRESS ⋯ → *Delete*.** Admin. Use its own dialog line:
-
-> *"'Deactivate it instead if it has booking history worth keeping' — which is the right answer
-> almost always. A room that is gone is not a room that never existed."*
+Press **Keep it in use**.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Register | `GET api/CompanySchedule/rooms` | `HR.Company.Read` |
-| Load one | `GET …/rooms/{id}` | `HR.Company.Read` |
-| Create | `POST …/rooms` | `HR.Company.Write` |
-| Update | `PUT …/rooms/{id}` | `HR.Company.Write` |
-| Delete | `DELETE …/rooms/{id}` | **`HR.Company.Admin`** |
-| Site dropdown | `GET api/Location` | location read |
+| Register · one room | `GET api/CompanySchedule/rooms` · `GET …/rooms/{id}` | `HR.Company.Read` |
+| The retirement dialog | `GET …/rooms/{id}/retirement` — bookings still to come, bookings on record, whether it can be deleted | `HR.Company.Read` |
+| Create · Update | `POST …/rooms` · `PUT …/rooms/{id}` (with `cancelFutureBookings` when retiring) | `HR.Company.Write` |
+| Delete | `DELETE …/rooms/{id}` — refused once the room has any booking on record | **`HR.Company.Admin`** |
+| Site picker | `GET api/Location`, `GET api/LocationLevel` | location read |
 
-Table: `MeetingRooms`. Create **validates the site exists in this tenant before saving** — without
-that check a bad id reached SaveChanges and came back as an unhandled FK violation reading
-*"Something went wrong while processing your request"*, which looks like an outage rather than a
-bad selection. Found by the harness on the first run, and the tenant half of the check matters as
-much as the existence half.
-
-The API also offers `rooms/paged`, `rooms/location/{locationId}` and `rooms/active` — none used by
-this screen.
+Table: `MeetingRooms`. Bookings cancelled by a retirement are cancelled one by one through the booking service, each
+booker told once (several of theirs together in one notice, § 1.6).
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding, and this screen's Delete is one of the eight still offered.**
->
-> | | Now |
-> |---|---|
-> | **R4-12.1** | **A typed room code once used by a deleted room is refused with a 500.** The duplicate check reads live rooms only, while round 4's unique index covers deleted rows too. The check passes, the database refuses, and nothing in the company-schedule error filter translates it: *"Something went wrong."* Check the code with deleted rows included, as the generator does. Only reachable after an Admin delete. |
-> | *(R4-6.6)* | ⋯ → **Delete** here is still offered to `hr.head`, and still 403s. |
-
 | Gap | |
 |---|---|
-| ✅ ~~**C-4 · Max duration and advance-booking days are stored and never read**~~ **Fixed in round 4** — enforced on create and edit of a booking (Rule 4, and R4-9.1 for the search) | |
-| **C-33 · The delete failure toast guesses the wrong reason** — it blames bookings when the real answer is a 403 | |
-| ✅ ~~**C-34 · A generated room code can collide.**~~ **Fixed in round 4** — issued from the shared sequence; see R4-12.1 for the typed code | |
-| **C-35 · There is no room detail page.** `rooms/[id]` has only an `edit` child, so there is nowhere to see a room's bookings — which is the thing a facilities manager wants most (and see **C-26**) | |
-| **C-36 · Deactivating a room does not touch its future bookings.** They stay confirmed and the room simply stops appearing in the availability search | |
+| ✅ ~~**C-33** · the delete toast blamed bookings for a 403~~ | **Fixed in lane 3a** |
+| ✅ ~~**C-36, F-18, F-49** · a room retired with live bookings; its history hidden by a delete~~ | **Fixed in lane 3a** (D-18) |
+| ✅ ~~**R4-12.1, F-6** · a typed code refused with a 500; the edit unchecked~~ | **Fixed in lane 3a** |
+| ✅ ~~**C-35** · no view of a room's bookings~~ | **Fixed in lane 7** — the calendar's room view (chapter 3a) |
+| ✅ ~~**C-16** · the site list was the whole tree~~ | **Fixed in lane 5a** |
+| **F-27** · the room edit page opened cold may show no site | The guard is in HEAD; the browser re-test is the plan's lane 5 walk, item 1 |
 
 ---
 
@@ -2522,134 +2462,127 @@ this screen.
 
 ### 📍 Where you are
 
-**Sidebar:** Administration → HR → Company Schedule → **Business Closures** · `…/closures` ·
-as **hr.head** · **5 minutes**
+**Sidebar:** Administration → HR → Company Schedule → **Business Closures** · `…/closures` · as **hr.head** · **6
+minutes**
 
 ### 📖 What it is
 
-> *"A holiday calendar says which days the country is off. This says which days **TDC** is off —
-> the year-end stocktake, a site closed for rewiring, a department away at a conference. Over and
-> above the statutory calendar, and announced by a named person."*
+> *"A holiday calendar says which days the country is off. This says which days **TDC** is off — the year-end stocktake,
+> a site closed for rewiring, a unit away at a retreat — or running a reduced service. And it is not a note: a day off
+> here is a day nobody's leave is charged for."*
 
 ### 👁 On the page
 
-**Header:** *Business closures* — *"Days the organisation is closed, company-wide or for one site
-or department."*, back-link.
+**Header:** *Business closures* — *"Days the company, a site or an organisation unit is closed, or runs reduced
+operations."*, back-link.
 
-**+ Add closure** above a table. Dialog hint: **"You are recorded as the person announcing it."**
+**After a save or a removal, a result card** sits above the list until dismissed (lane 1d):
+- *"“\<title\>” was added."* (or *updated*, or *"The closure was removed."*);
+- the save's **warnings**, in amber — a public holiday on the same day, a scope that covers nobody;
+- **the leave it re-counted** (Rule 1): *"Leave recounted (N) — balances and attendance updated, and each employee
+  told:"*, a line each — *"LV… · name · Annual Leave, 14 Oct 2026 → 18 Oct 2026: 5 → 4 days"*; *"Left as charged (N) —
+  in a finished leave year, whose unused days may already have been carried over. Adjust these by hand:"*; anything that
+  could not be recounted, in red; or *"No approved leave changed with these days."*;
+- for a closure that is a day off and not over, **Announce to the N staff it covers** — *"Nothing is sent until you
+  confirm. Leave it until the dates are final."* — or *"No active staff are covered by this closure, so there is
+  nobody to tell."*
 
-**Seven columns:**
+**+ Add closure** above the table. Dialog hint: *"You are recorded as the person who entered it. Telling staff is a
+separate step: announce it once it is final."*
 
-| Column | Shows |
-|---|---|
-| **Title** | the closure's title |
-| **Type** | *Full Closure* · *Partial Closure* · *Department Closure* · *Station Closure* |
-| **When** | one date, or `29 Dec → 30 Dec` for a range |
-| **Applies to** | **Whole company**, or the site and department joined |
-| **Paid** | a **Paid** / **Unpaid** badge |
-| **Working day** | *Counts* / *Does not count* |
-| **Announced by** | the announcer's name |
+**Seven columns:** **Title** · **Kind** (*Whole company* · *One site* · *One organisation unit* · *Reduced operations*)
+· **When** (one day, or *29 Dec 2026 → 30 Dec 2026*, and *Every year* under a yearly one) · **Covers** (*Whole company*,
+the site, or the unit and everything beneath it) · **Working day** (*No — a day off* / *Yes — reduced operations*) ·
+**Paid** · **Recorded by**. Row ⋯: **Edit**, **Announce to staff…** (until it is over), and **Remove** for
+`HR.Company.Admin` only.
 
-Row ⋯: **Edit**, 🚫 **Remove closure**.
+**The dialog — the kind decides the scope** (lane 1, decision D-1):
 
-**Dialog** *(wider than standard, 640px)*:
-- **Title** *(required, ≤200)*
-- **Type** *(required)*
-- **From** *(required)* · **To** *(required — refused if before the start)*
-- **Affects the whole company** switch — *"Turn this off to close a single site or department."*
-- *When off:* **Site** *(clearable, "Any site")* and **Department** *(clearable, "Any
-  department")*
-- **Staff are paid** switch
-- **Counts as a working day** switch — *"Affects leave and attendance calculations."*
-- **Reason** · **How it was communicated**
+| *What closes* | Its sentence | Then asks for |
+|---|---|---|
+| **Whole company** | *"Everybody is off. Not a working day, so leave over it is not charged."* | nothing more |
+| **One site** | *"The staff based at the site are off. Not a working day for them."* | **Site** — *"Covers the staff based at exactly this site. Only the places staff are assigned to are offered."* |
+| **One organisation unit** | *"The unit and every unit beneath it are off, wherever their staff sit. Not a working day for them."* | **Organisation unit** — *"Covers the unit and every unit beneath it, wherever their staff sit."* |
+| **Reduced operations** | *"Open with reduced service, for the whole company, one site or one unit. Still a working day."* | **Reduced operations for** — *The whole company · One site · One organisation unit*, one only |
 
-The form enforces one cross-field rule: **company-wide, or a site, or a department — you cannot
-leave all three blank**.
+Then **First day** and **Last day** · **Recurs every year** (*"The same dates every year from the first — the year-end
+stocktake is typed once."*; shorter than a year) · **Staff are paid** (*"Recorded for payroll, which decides what an
+unpaid day is worth."*) · **A working day**, shown **locked** — it follows the kind: *"A closure is a day off for the
+staff it covers: leave over it is not charged."* or *"Reduced operations are still a working day: leave over them is
+charged."* · **Reason** · **Notes on how staff were told**.
+
+**The server refuses**, each with a sentence (422): a scope the kind does not take, a missing site or unit, a last day
+before the first, a site or unit not this tenant's, and **a second closure of the same scope on the same days**, naming
+the one already there (C-39). A public holiday underneath, or a scope nobody is in, is a warning, not a refusal.
 
 ### ▶ Walk it
 
-**1 — Open the screen.** One row: *Year-end stocktake*, Full Closure, 29 Dec → 30 Dec, Whole
-company, **Paid**, Does not count.
+**1 — Open the screen.** One row: *Year-end stocktake* · Whole company · 29 Dec 2026 → 30 Dec 2026 · Whole company · No
+— a day off · **Paid** — on both databases (on a rebuilt one, of the build's year).
 
-**2 — Read it across.**
+> *"The year-end stocktake. Two days, the whole company, staff paid — and not a working day, which is the field that
+> matters: it is the difference between 'you were off and it cost you nothing' and 'you were off and it came out of
+> your leave'. Since this year that is not a promise on a form. Leave over those days is not charged, the five-day
+> appeal window in a disciplinary case steps over them, and a trip on those days is not posted as a day on duty."*
 
-> *"The year-end stocktake. Two days, the twenty-ninth and thirtieth of December, the whole company.
-> Staff are paid. And it does not count as a working day — which is the field that matters, because
-> it is the difference between 'you were off and it cost you nothing' and 'you were off and it came
-> out of your leave'."*
+**2 — Press *+ Add closure* and walk the *What closes* list**, reading each kind's sentence.
 
-**3 — ⋯ → *Edit*** and open the dialog. Turn **Affects the whole company** off to reveal the two
-pickers, then turn it back on.
+> *"The kind decides who is off. A site means the people posted there; a unit means the unit and everything under it,
+> wherever they sit; reduced operations means open, but thinly — and still a working day."*
 
-> *"And a closure does not have to be the whole company. Turn that off and you close one site — the
-> Ashaiman office for rewiring — or one department. Which is how closures actually happen."*
+**3 — 🔴 LIVE WRITE 15 — save one.**
 
-**4 — Point at *Announced by* and the dialog hint.**
+- **UAT — make it *Reduced operations*** (Rule 1): *"Head office — reduced counter service"*, **Reduced operations
+  for** *One site* → **Tema Head Office**, one weekday next month, **Staff are paid** on. The result card: *"was added"*
+  — no leave re-counted, because reduced operations are a working day, and no announce offer.
+- **Rebuilt — make it a day off:** *"Ashaiman office — electrical rewiring"*, **One site** → **Ashaiman Market**, two
+  days next month, *Reason* *"Main distribution board replacement; the office cannot be occupied."* The result card
+  lists any approved leave of the Ashaiman staff on those days, re-counted — and offers **Announce to the N staff it
+  covers**.
 
-> *"'You are recorded as the person announcing it.' Same rule as the event organiser and the room
-> booker — the system takes it from whoever is signed in. A closure is an announcement, and an
-> announcement without a name on it is a rumour."*
+> *"And look what it did: the leave already approved over those days has been re-counted — the balances put right,
+> attendance re-posted, and each person told. Nobody had to remember to do it."* (Rebuilt; on UAT, say it of the
+> stocktake: *"had anybody's leave sat on those two days, it would have been given back the moment this was saved."*)
 
-**5 — 🔴 LIVE WRITE 10 — press *Add closure*.** Title *"Ashaiman office — electrical rewiring"*,
-Type **Station Closure**, a two-day window next month, **Affects the whole company** off, Site
-**Ashaiman**, **Staff are paid** on, **Counts as a working day** off, Reason *"Main distribution
-board replacement; the office cannot be occupied."*, communication *"Circular to the Ashaiman
-staff and a notice at the gate."*
+**4 — The announcement.** On a rebuilt database, **🔴 LIVE WRITE 15b — *Announce to the N staff it covers*:** the dialog
+shows the words — *"Closure: …"*, who, when, whether paid — and **Announce to N staff** publishes it to the bell of
+everyone it covers.
 
-> *"One site, two days, paid, not a working day — with a reason and a record of how it was
-> communicated."*
+🚫 **On UAT, do not.** It cannot be unsent, and it reaches real staff (Rule 1). Open the dialog to read the words if
+you like, and press **Not now**.
 
-**6 — Now the honest sentence, and it is the one this chapter is for.** Read Rule 5 first.
-
-> *"And here is where I have to be straight with you, because the switch you just watched me set
-> says 'affects leave and attendance calculations'. Today it does not. A closure is recorded — with
-> its scope, its dates, whether it is paid, whether it counts, and who announced it. Two things
-> read it already: a recruiter scheduling an interview on that day is warned, and it appears in
-> everybody's diary. What has not been wired is the two places that matter most: the leave
-> day-counter and the attendance day-builder. Both already take the statutory holiday calendar out
-> of their arithmetic, so this is the same join, one level up."*
-
-⚠ If you then open a diary to show the closure, note that it shows for **everybody**, including
-people at other sites, whatever the closure's scope (**R4-13.1**). The Ashaiman closure you just
-created is the example that exposes it.
-
-That is a much better thirty seconds than being asked and improvising.
-
-**7 — 🚫 DO NOT PRESS ⋯ → *Remove closure*.** Admin.
+**5 — *Remove*** is not offered to `hr.head` — an administrator's. Removing a day off re-counts the leave again, the
+other way.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | Register | `GET api/CompanySchedule/closures` | `HR.Company.Read` |
-| Create | `POST …/closures` | `HR.Company.Write` |
-| Update | `PUT …/closures/{id}` | `HR.Company.Write` |
-| Delete | `DELETE …/closures/{id}` | **`HR.Company.Admin`** |
-| *(the unused one)* | `GET …/closures/is-closure-date?date&locationId&departmentId` | `HR.Company.Read` |
+| Create · Update | `POST …/closures` · `PUT …/closures/{id}` — answering with the warnings and the leave re-count | `HR.Company.Write` |
+| Remove | `DELETE …/closures/{id}` — answering with the re-count | **`HR.Company.Admin`** |
+| **Announce** | `GET …/closures/{id}/announcement` (the preview) · `POST …/closures/{id}/announce` | `HR.Company.Write` |
+| *Is this a closure date?* | `GET …/closures/is-closure-date?date&locationId&organizationUnitId` — no scope answers company-wide closures only | `HR.Company.Read` |
+| Payroll's read | `GET …/closures/employee-days?employeeIds&from&to` — each employee's closure days, paid or not (D-15c) | `HR.Company.Read` |
+| The one-time re-count | `POST …/closures/recharge-leave` — for closures that existed before lane 1 | **`HR.Company.Admin`** |
 
-Table: `BusinessClosures`. Create stamps `AnnouncedById` from the token and `AnnouncementDate` to
-now. Four more reads exist and none is used: by range, by type, by location, and upcoming — though
-the landing page uses upcoming.
-
-**What `is-closure-date` would answer:** any closure whose window covers the date, narrowed to
-`AffectsAllStations || LocationId == …` when a location is given and the same for a department.
-⚠ Called with **neither**, it answers true for *any* closure, including a single-department one —
-so a caller must pass the scope it means (**C-37**).
+Table: `BusinessClosures`. A closure's scope is an audience rule — everybody, a location, or a unit with its subtree —
+resolved by `IHrAudienceResolver` and read through `IHrClosureCalendar`, the same answer for leave, the diaries, the
+calendar, the announcement and payroll's read. A whole-company day off joins the working-day calculator's days off
+(leave, the discipline clocks, travel's on-duty posting); a site or unit day off is each covered person's own (leave).
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding.**
->
-> | | Now |
-> |---|---|
-> | **R4-13.1** | **Every closure is attributed to everybody.** The commitment source behind the interview clash check and the two diaries reads all the tenant's closures in the window and ignores `AffectsAllStations`, `LocationId` and `DepartmentId`. A two-day closure of the Ashaiman office warns every interview panel at Tema and appears in every diary. That is the same over-reporting as C-37, from a new reader. The scope rule `is-closure-date` already applies is the one to reuse. |
-
 | Gap | |
 |---|---|
-| ◐ **C-5 · Closures reach nothing.** No leave and no attendance code path reads `BusinessClosures`, and no screen calls `is-closure-date`. The screen's own switch description and the demo runbook's aside both claim otherwise — Rule 5. **Since round 4 the interview clash check and the two diaries read closures**, as a soft warning, but without their scope (**R4-13.1**) | |
-| **C-37 · `is-closure-date` with no scope over-reports** — it counts a department closure as a company one | |
-| **C-38 · A closure has no recurrence.** The year-end stocktake happens every year and has to be entered every year, unlike a public holiday, which has an `IsRecurringAnnually` flag | |
-| **C-39 · Nothing prevents overlapping closures**, or a closure overlapping a public holiday | |
+| ✅ ~~**C-5** · closures reached nothing~~ | **Fixed in lane 1** — leave, the discipline clocks, travel, the diaries, the calendar |
+| ✅ ~~**D-1, F-24** · the kind decided nothing~~ | **Fixed in lane 1a** |
+| ✅ ~~**R4-13.1, C-37, F-2** · every closure everybody's; `is-closure-date` over-reported~~ | **Fixed in lane 1a** |
+| ✅ ~~**C-38** · no yearly closure~~ | **Fixed in lane 1a** |
+| ✅ ~~**C-39** · overlapping closures accepted~~ | **Fixed in lane 1a** — refused; a holiday underneath warned |
+| ✅ ~~**F-52** · leave approved before a closure kept its charge~~ | **Fixed in lane 1c** — and the same for public holidays (D-15b) |
+| **A-92** · attendance has no working-day builder, so it reads no closure | HR's own open item, in the attendance guide's ledger |
+| **Payroll** · an unpaid closure day produces no deduction | Payroll's, in the payroll hand-off (§ 3 item 4); HR's read is ready |
 
 ---
 
@@ -2657,260 +2590,158 @@ so a caller must pass the scope it means (**C-37**).
 
 ### 📍 Where you are
 
-**Sidebar:** Administration → HR → Company Schedule → **Milestones** · `…/milestones` ·
-as **hr.head** · **3 minutes**
+**Sidebar:** Administration → HR → Company Schedule → **Milestones** · `…/milestones` · as **hr.head** · **4 minutes**
 
 ### 📖 What it is
 
-> *"The corporation's own history, on the calendar. Anniversaries, achievements, launches, targets
-> met, certifications won. Not operational — but the kind of thing an organisation regrets losing
-> track of."*
+> *"The corporation's own history, on the calendar — anniversaries, achievements, launches, targets met, certifications
+> won — with the papers that prove them. The kind of thing an organisation regrets losing track of."*
 
 ### 👁 On the page
 
-**Header:** *Company milestones* — *"Anniversaries, achievements and other dates worth marking on
-the company calendar."*, back-link.
+**Header:** *Company milestones* — *"Anniversaries, achievements and other dates worth marking on the company
+calendar."*, back-link.
 
 **+ Add milestone** above a table. Dialog hint: *"A date the organisation wants remembered."*
 
-**Five columns:** **Title** · **Category** *(Company Anniversary · Achievement · Product Launch ·
-Target/Goal · Certification)* · **Date** · **Repeats** *(Every year / Once)* · **On calendar**
-*(Yes / Hidden)*. Row ⋯: **Edit**, 🚫 **Remove milestone**.
+**Seven columns:** **Title** · **Category** · **Date** — its own, the founding for an anniversary · **Next** — the
+coming occurrence, with the anniversary for a yearly one (*"2026-10-18 · 74th"*), or *Past* for a one-off already gone
+· **Repeats** (*Every year* / *Once*) · **On calendar** (*Yes* / *Hidden*) · **Files** (a count). Each row
+has **Files**, **Edit**, and **Remove** for `HR.Company.Admin` only.
 
-**Dialog:** **Title** *(required, ≤200)* · **Category** *(required)* · **Date** *(required)* ·
-**Description** · **Why it matters** · **Related documents** · **Repeats every year** switch ·
-**Show on the calendar** switch.
+**Dialog:** **Title** *(required)* · **Category** *(required)* · **Date** *(required)* · **Description** · **Why it
+matters** · **References** (free text — the files themselves are the row's *Files*) · **Repeats every year** · **Show
+on the calendar**.
+
+**Files** — *"Files — \<title\>"*, *"What evidences the milestone: a certificate, a licence, a photograph. Each file is
+scanned before it is stored."* For the HR desk: **About it (optional)** and **File** (up to 25 MB). Each file: its
+name, then its note, size, date and who added it, **Download**, and **Remove** (the HR desk's tier). *"No files yet."*
+
+**A yearly milestone falls on the same month and day every year from its date** — 29 February on the 28th in other
+years (lane 4a, C-40). The landing's *Milestones ahead* and the calendar show its coming anniversary, counted.
 
 ### ▶ Walk it
 
-**1 — Open the screen.** One row: *TDC 74th Anniversary*, Company Anniversary, 18 October, Every
-year, Yes.
+**1 — Open the screen.** One row: *TDC 74th Anniversary* · Company Anniversary · Every year · Yes.
 
-**2 — ⋯ → *Edit*** and read the description and significance aloud.
+- **Rebuilt:** **Date** *1952-10-18*, **Next** *2026-10-18 · 74th* (in 2026).
+- **UAT:** **Date** *2026-10-18*, **Next** *2026-10-18* with no count, because UAT's row is dated 2026 (§ 2.1).
 
-> *"'Founded 1952 to develop the Tema township.' Significance: 'Founding of the Corporation.'
-> Repeats every year, shows on the calendar. It is a small screen and it is the one a Managing
-> Director notices, because it is the only place in an HR system that is about the organisation
-> rather than about the staff."*
+> *"Founded in 1952 to develop the Tema township. Typed once, on the founding date, and the system counts the years —
+> the seventy-fourth this October, the seventy-fifth next. And it is on the company calendar, for everybody."*
+> (UAT: say it without the number.)
 
-**3 — Point at *Why it matters* and *Related documents*.**
+**2 — Press *Files*** on the row.
 
-> *"Two fields that are not decoration. The significance is what somebody writes in the anniversary
-> circular ten years from now. The related documents is where the founding instrument lives."*
+> *"And a milestone has its evidence: the founding instrument, a certificate, the photograph — real files, scanned and
+> kept, downloadable by anybody who may read the calendar's setup."*
 
-**4 — 🔴 LIVE WRITE 11 *(optional)* — *Add milestone*.** Title *"ISO 9001:2015 certification"*,
-Category **Certification**, a date this year, **Repeats every year** off, **Show on the calendar**
-on.
+**3 — *(optional)* 🔴 LIVE WRITE 16 — *Add milestone*:** *"ISO 9001:2015 certification"*, **Certification**, a date this
+year, **Repeats every year** off, **Show on the calendar** on — then, in its **Files**, upload the certificate (a PDF).
+⚠ **CAREFUL:** the upload needs the scanner running (chapter 6, step 17).
 
-> *"A certification is a milestone that does not repeat — the anniversary does, the award does
-> not."*
+> *"A certification happens once; an anniversary every year. Both on the calendar, each with its papers."*
 
-**5 — Be honest about *Show on the calendar*, briefly:**
-
-> *"And that switch is waiting for a screen that does not exist yet — there is no calendar view in
-> this module, everything is a table. Which is the most obvious thing to build next, and it is a
-> rendering job over data that is already here."*
-
-**6 — 🚫 DO NOT PRESS ⋯ → *Remove milestone*.** Admin.
+**4 — *Remove*** is not offered to `hr.head` — deleting a milestone, and its files with it, is an administrator's.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Register | `GET api/CompanySchedule/milestones` | `HR.Company.Read` |
-| Create / update | `POST` / `PUT …/milestones[/{id}]` | `HR.Company.Write` |
-| Delete | `DELETE …/milestones/{id}` | **`HR.Company.Admin`** |
+| Register | `GET api/CompanySchedule/milestones` — each with its next occurrence, years since and file count | `HR.Company.Read` |
+| Create · Update | `POST …/milestones` · `PUT …/milestones/{id}` — a date required; the answer re-read | `HR.Company.Write` |
+| Delete | `DELETE …/milestones/{id}` — its files go with it | **`HR.Company.Admin`** |
+| Files | `GET …/milestones/{id}/documents` · `POST …/milestones/{id}/documents` (multipart, through the upload gate; the milestone checked before a byte is stored) · `GET …/milestones/documents/{id}/download` · `DELETE …/milestones/documents/{id}` | Read / **Write** to add and remove |
+| Upcoming · range | `GET …/milestones/upcoming?daysAhead` · `…/range` — one row per occurrence, at most five years | `HR.Company.Read` |
 
-Table: `CompanyMilestones`. Paged, by-category, by-range and upcoming reads exist and are unused
-except upcoming, on the landing page.
+Tables: `CompanyMilestones`, `CompanyMilestoneDocuments`. The yearly rule is `CompanyMilestoneRules`, the closures'
+own.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-9 · `ShowOnCalendar` has no calendar to show on** | |
-| **C-40 · `IsRecurringAnnually` generates nothing.** The 74th anniversary does not become the 75th; the date stays 18 October 1952-plus-74 for ever unless somebody edits it. Same shape as the public-holiday flag in attendance | |
-| **C-41 · Milestones are not linked to anything.** A long-service award, a certification in the training module and a milestone here are three unconnected records of the same fact | |
+| ✅ ~~**C-40, F-14** · a yearly milestone never came round again~~ | **Fixed in lane 4a** |
+| ✅ ~~**C-9** · *Show on the calendar* had no calendar~~ | **Fixed in lane 7a** — and it decides now |
+| ✅ ~~**F-25** · "Related documents" a text box~~ | **Fixed in lane 4a** — real files (D-3) |
+| *Decided, not built* · **C-41** · a link to an employee's award or certificate | Decision D-17: a milestone is a company fact; its evidence is its files |
+| *UAT data* · the anniversary is dated 2026, so it reads as its first year | Re-dating it to 1952 is a one-row edit that awaits a ruling (§ 2.1) |
 
 ---
 
-## 15. `/administration/hr/company-schedule/fiscal-years` — the reporting windows
+## 15. `/administration/hr/company-schedule/fiscal-calendar` — Finance's fiscal calendar
 
 ### 📍 Where you are
 
-**Sidebar:** Administration → HR → Company Schedule → **Fiscal Years** · `…/fiscal-years` ·
-as **hr.head** · **3 minutes**
+**Sidebar:** Administration → HR → Company Schedule → **Fiscal Calendar** · `…/fiscal-calendar` · as **hr.head** · **2
+minutes**
 
 ### 📖 What it is
 
-> *"The financial years the corporation plans against — and the one that is current, which is what
-> the budgeting, appraisal and manpower screens cut their cycles by."*
+> *"The financial years the corporation plans against — Finance's, read here. HR keeps no year of its own: a
+> requisition's budget year and the accounts' year are the same year, because there is only one."*
 
 ### 👁 On the page
 
-**Header:** *Fiscal years* — *"The reporting windows the organisation plans against, and the
-periods inside them."*, back-link, **+ New fiscal year**.
+**Header:** *Fiscal calendar* — *"The company's fiscal years and periods, as Finance keeps them. Read-only here."*,
+back-link, and **Set up and closed in Finance**, which opens Finance's own screen (`/finance/fiscal-years`) — for
+whoever holds Finance's permission; HR's desk may be refused there.
 
-**Seven columns:** **Year** · **Name** *(with a **Current** badge where applicable)* · **From** ·
-**To** · **Periods** *(a count)* · **Status** *(Active · Closed · Archived)* · ⋯.
-Sorted by year, **newest first**. **Rows are clickable** into the year.
+**A line:** *"Requisitions and manpower budgets take their fiscal year from these years. A date in a year Finance has
+not opened yet continues the sequence, as Finance will have to open it — next, **FY2027**, 1 Jan 2027 – 31 Dec 2027."*
 
-Row ⋯: **Set as current** *(hidden on the current year)*, 🚫 **Delete**.
+**A card per year, newest first:** its name, its dates and how many periods; its own status (*Open*, *Closed*), *Locked*
+where Finance locked it, and a badge for **each accounting book whose year-end is closed** or closing (*"\<book\>:
+year-end closed"*) — Finance closes a year book by book and never marks the year itself closed (lane 4b, the user's
+ruling). Under it, the periods: name, dates, status.
 
-**New-year dialog** — *"The year number cannot be changed afterwards — everything else can."*:
-**Year** *(required, 2000–2100)* · **Name** *(required, ≤200, pre-filled `FY 2026`)* · **From**
-*(pre-filled 1 January)* · **To** *(pre-filled 31 December)* · **Make this the current year**
-switch — *"Only one year is current at a time."*
-
-> ⚠ **The year range is `[Range(2000, 2100)]` on the DTO.** Typing 1999 gives a validation error,
-> not a bug. This one caught the harness.
-
-Creating a duplicate year is refused: *"Fiscal year 2026 already exists."*
+**With no Finance year at all:** *"Finance has defined no fiscal years yet, so requisitions and manpower budgets use the
+year starting in **January** (HR policy settings) until it does."*
 
 ### ▶ Walk it
 
-**1 — Open the screen.** One row: **2026**, *FY 2026*, 1 Jan – 31 Dec, **Current**, Active. ⚠ No
-*Current* badge means a company-schedule harness suite has run since the build (Rule 8). Put it back
-with ⋯ → **Set as current** before the room fills, not during.
+**1 — Open the page.** UAT: **Fiscal Year 2026**, *Open*, with its twelve months (*October 2026* … reading *Open* or
+*Future*); **Fiscal Year 2025**, *Closed*; and the line naming **FY2027**.
 
-> *"One year. January to December, marked current — and only one can be, which the system
-> enforces rather than trusting somebody to untick the old one."*
+> *"HR does not keep a fiscal year. It reads Finance's — one calendar for the corporation. A requisition raised today is
+> checked against FY2026's budget because that is the year Finance has open; one dated next March is labelled FY2027,
+> because that is the year Finance must open next."*
 
-**2 — Say why an HR module owns a fiscal year**, because it is a fair question:
+**2 — Point at *Set up and closed in Finance*.**
 
-> *"And this is worth a sentence, because 'why does HR own a financial year' is a reasonable
-> thing to ask. It is here because HR cuts its own cycles by it: the appraisal year, the manpower
-> budget, the training plan and the leave year all need to know what the corporation's year is. If
-> TDC decides Finance should own this and HR should read it, that is a sensible consolidation and
-> it is on the list. Today it is HR's own entity, and it is honest to say so."*
-
-**3 — ⋯ → *Set as current* is hidden on this row** — point that out:
-
-> *"And the action is not offered on the year that is already current, rather than being offered
-> and doing nothing."*
-
-**4 — 🚫 DO NOT PRESS ⋯ → *Delete*.** Admin — and its dialog warns that the periods go with it.
-
-**5 — Click the row** and continue into chapter 16.
+> *"And opening or closing a year is Finance's — so the button sends you there, rather than letting HR keep a second
+> copy that could disagree."*
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Register | `GET api/CompanySchedule/fiscal-years` | `HR.Company.Read` |
-| Create | `POST …/fiscal-years` | `HR.Company.Write` |
-| **Set as current** | `POST …/fiscal-years/{id}/set-current` | `HR.Company.Write` |
-| Delete | `DELETE …/fiscal-years/{id}` | **`HR.Company.Admin`** |
+| The calendar | `GET api/CompanySchedule/fiscal-calendar` — Finance's years and periods, each year's status and lock, and each book's latest year-end close | `HR.Company.Read` |
+| *The year for a date* | `GET …/fiscal-calendar/year?date=` — Finance's year, else Finance's sequence continued, else the policy month | `HR.Company.Read` |
+| *The dates of a year* | `GET …/fiscal-calendar/period?year=` | `HR.Company.Read` |
 
-Tables: `FiscalYear`, `FiscalPeriod` — singular; the plural pair is Finance's. Also available and unused: paged, by year number, current,
-and by status.
+`IHrFiscalCalendar` reads Finance's `FiscalYears`, `FiscalPeriods` and `YearEndBookCloseCycles` **in the server**, on
+HR's own permission — Finance's routes need Finance's, which the HR desk does not hold. A date Finance has not covered
+continues Finance's own rule for its next year: one higher, from the day after the last ends, twelve months each, and
+the same backwards before the first. The answer says which it is (*Finance*, *Projected* or *Fallback*). The HR policy
+setting *Fiscal year starts* answers only while Finance has no year at all, and the policy screen shows it read-only
+meanwhile.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-42 · No other module reads the fiscal year.** `fiscal-years/current` exists; the appraisal cycle, the manpower budget and the training plan each carry their own year field. The consolidation the say-line describes is not started | |
-| **C-43 · Overlapping years are allowed.** Only the year *number* is unique; two years can cover the same dates | |
-| **C-44 · Nothing generates the periods.** Creating FY 2026 does not create its four quarters or twelve months — every one is typed by hand on the next screen | |
+| ✅ ~~**C-42…C-48, F-3, F-13, R4-2.2** · HR's own fiscal years: read by nothing, overlapping, unclosed, unvalidated~~ | **Closed by retirement in lane 4b** (decision D-6) |
+| ✅ ~~**F-56** · the manpower budget form counted its own year~~ | **Fixed in lane 4b** — Finance's year first |
+| *Later* · HR's `FiscalYear` and `FiscalPeriod` tables | Retired and read by nothing; a later migration drops them |
 
 ---
 
-## 16. `/administration/hr/company-schedule/fiscal-years/[id]` — the year and its periods
+## 16. *(retired)* HR's own fiscal year page
 
-### 📍 Where you are
-
-**From:** any row of the fiscal-years register · `…/fiscal-years/[id]` · as **hr.head** ·
-**4 minutes**
-
-### 📖 What it is
-
-> *"One reporting window, editable, with the quarters or months inside it — and a one-way door on
-> each of them."*
-
-### 👁 On the page
-
-**Header:** the year's name, subtitle `Year 2026 · 4 periods`, back-link, and on the right a
-**Current** badge *(when it is)* plus a status badge.
-
-**"The year" card** — an edit form:
-- **Name** *(required)* · **Status** *(Active · Closed · Archived)*
-- **From** *(required)* · **To** *(required, must be after the start)*
-- **This is the current year** switch
-- **Save changes**
-
-> ⚠ **The year number is not on the form.** The update DTO has no year field, so it is shown in the
-> subtitle and cannot be edited — create-only, as the create dialog warned.
-
-**Periods panel** — **+ Add period** above a table. Dialog hint: *"Quarters, months or halves
-inside this year."*
-
-**Seven columns:** **#** *(period number)* · **Period** · **Type** *(Quarter · Month)* · **From** ·
-**To** · **Status** *(an **Open** / **Closed** badge)* · **Closed on**.
-
-Row ⋯: **Close period** *(hidden once closed — and it **asks for confirmation**: "There is no
-re-open action — closing is final from this screen.")*, **Edit**, 🚫 **Remove period**.
-
-**Dialog:** **Number** *(required, 1–12)* · **Type** *(required)* · **Name** *(required, "e.g. Q1,
-January")* · **From** *(required)* · **To** *(required, after the start)*.
-
-Adding a period number that already exists in the year is refused: *"Period number 1 already
-exists for this fiscal year."*
-
-### ▶ Walk it
-
-**1 — Open FY 2026.**
-
-**2 — If the year has no periods** *(the demo scenario creates the year but not its periods)*,
-say so and build one — that is a better demonstration than a pre-filled list:
-
-> *"The year exists and its periods do not, which is exactly the state a new tenant is in on day
-> one. Let me add the first quarter."*
-
-**3 — 🔴 LIVE WRITE 12 — *Add period*.** Number **1**, Type **Quarter**, Name **Q1**,
-From 1 January, To 31 March. Add.
-
-> *"Q1. And the number has to be unique inside the year — add a second period one and it is
-> refused by name, not by a constraint violation."*
-
-*(Add Q2 as well if you want the close action to be less lonely — same shape.)*
-
-**4 — ⋯ → *Close period* on Q1** and **read the confirmation aloud before pressing**:
-
-> *"'There is no re-open action — closing is final from this screen.' Which is the right way to
-> warn somebody: not 'are you sure', but what specifically they will not be able to undo."*
-
-Then confirm. The badge flips to **Closed** and **Closed on** stamps.
-
-*Undo:* chapter 19 — SQL, or leave it; a closed Q1 in September is the honest state.
-
-**5 — Point at the year's *Status* dropdown in the card above.**
-
-> *"And the year itself has three states — Active, Closed, Archived. A period closes when the
-> month's numbers are final; the year closes when the audit is done; and it is archived when
-> nobody is going to look at it again."*
-
-**6 — 🚫 DO NOT PRESS ⋯ → *Remove period*** or the year's Delete. Both Admin.
-
-### ⚙ Behind the page
-
-| Element | Endpoint | Permission |
-|---|---|---|
-| The page | `GET api/CompanySchedule/fiscal-years/{id}/details` | `HR.Company.Read` |
-| Save the year | `PUT …/fiscal-years/{id}` | `HR.Company.Write` |
-| Periods | `GET`/`POST …/fiscal-years/{id}/periods` · `PUT …/periods/{id}` | Read / Write |
-| **Close a period** | `POST …/periods/{id}/close` | `HR.Company.Write` |
-| Remove a period | `DELETE …/periods/{id}` | **`HR.Company.Admin`** |
-
-Tables: `FiscalYear`, `FiscalPeriod` — singular; the plural pair is Finance's.
-
-### ⚠ Known gaps
-
-| Gap | |
-|---|---|
-| **C-45 · Closing a period locks nothing.** `IsClosed` and `ClosedDate` are set and no module consults them — unlike attendance's monthly-summary lock, which the API itself enforces | |
-| **C-46 · There is genuinely no re-open**, as the confirmation says. A period closed by mistake needs SQL | |
-| **C-47 · Period numbers are capped at 12** by the form, so a 13-period (four-week) calendar cannot be built here | |
-| **C-48 · Periods are not validated against the year.** A period can start before the year does and end after it, and nothing checks that the periods cover the year without gaps or overlaps | |
+The pages that kept HR's own fiscal years and their periods — `…/company-schedule/fiscal-years` and
+`…/fiscal-years/[id]` — were **removed in lane 4b** (decision D-6), with their sixteen API routes. HR reads Finance's
+calendar instead (chapter 15). The number is kept so that references to "chapter 16" elsewhere still resolve.
 
 ---
 
@@ -2919,120 +2750,107 @@ Tables: `FiscalYear`, `FiscalPeriod` — singular; the plural pair is Finance's.
 ### 📍 Where you are
 
 **Sidebar:** Administration → HR → **Settings** → **Company Profile** ·
-`/administration/hr/settings/company-profile` · as **hr.head**, with **admin** in window B ·
-**5 minutes**
+`/administration/hr/settings/company-profile` · as **hr.head**, with **admin** in window D (§ 2.6) · **5 minutes**
 
 ### 📖 What it is
 
-> *"A different menu, the same permission — and the reason this module's Admin tier exists. This is
-> the corporation's legal identity: the statutory numbers, the registered address, the signatory —
-> and the seal that every offer letter and confirmation letter this system generates is stamped
-> with."*
+> *"A different menu, the same permission — and the reason this module's Admin tier exists. This is the corporation's
+> legal identity: the statutory numbers, the registered address, the signatory — and the logo, seal and signature that
+> every letter this system generates carries."*
 
-> **Why it is in this book.** It is gated on `HR.Company.Read` / `Write` / `Admin`, it is built by
-> the same demo scenario, and it is the **only screen in the whole permission family where the
-> Admin tier does something other than delete**. If you are demonstrating what an administrator is
-> for, this is the screen.
+> **Why it is in this book.** It is gated on `HR.Company.Read` / `Write` / `Admin`, it is built by the same demo
+> scenario, and besides the HR policy settings it is the **one screen in the permission family where the Admin tier
+> does something other than delete**. If you are demonstrating what an administrator is for, this is the screen.
 
 ### 👁 On the page
 
-**Header:** *Company Profile* — *"The legal-employer details that appear on offer letters,
-confirmation letters and outgoing email."*
+**Header:** *Company Profile* — *"The legal-employer details that appear on offer letters, confirmation letters and
+outgoing email."*
 
-**Four form cards, then one action card.**
+**Four form cards, then the images card.**
 
-**Card 1 — Legal identity** — Legal name *(required)* · Trading name · Legal form · Registration
-number · Date of incorporation · Country of incorporation.
+- **Legal identity** — Legal name *(required)* · Trading name · Legal form · Registration number · Date of incorporation
+  · Country of incorporation.
+- **Statutory & tax** — Tax identification number (TIN) · VAT number · SSNIT employer number · Postal code · Other
+  statutory registrations.
+- **Registered address & contact** — Registered address · City · Region · Country · Digital address (GhanaPost GPS) ·
+  Primary phone · Website · HR email · General email.
+- **Documents & signature** — Default signatory name · Default signatory title · Offer acceptance instructions ·
+  Document footer text. Then **Save changes** — *"Letters and emails will use these details."* (The old free-text
+  *Logo URL* is gone, lane 4c, F-55.)
 
-**Card 2 — Statutory & tax** — Tax identification number (TIN) · VAT number · SSNIT employer
-number · Postal code · Other statutory registrations.
+**Logo, seal & signature** — *"The images embedded in generated letters: PNG or JPEG, at most 2 MB each. Replacing one
+retires the image it supersedes rather than overwriting it, so it stays possible to say which letters carry which
+seal."* — and, for anybody without the permission, *"Replacing or withdrawing one needs the company administration
+permission."*
 
-**Card 3 — Registered address & contact** — Registered address · City · Region · Country ·
-Digital address (GhanaPost GPS) · Primary phone · Website · HR email · General email.
-
-**Card 4 — Documents & signature** — Default signatory name · Default signatory title · Logo URL ·
-Offer acceptance instructions · Document footer text. Then **Save changes**.
-
-**Card 5 — Seal & signature** *(the interesting one)*
-> *"The images embedded in generated offer and confirmation letters. Replacing one retires the
-> image it supersedes rather than overwriting it, so it stays possible to say which letters carry
-> which seal."*
-
-Two rows — **Company seal** and **Authorised signature** — each showing:
-- a badge: **In force** or **None**
-- the current image's file name, *"in force since"* date and who uploaded it; or, when there is
-  none, *"No image is in force. Letters render without one, and any legacy image the tenant was
-  carrying is used until you upload a replacement."*
-- an **Upload** / **Replace** button *(a hidden file input, images only)*
-- a **Withdraw** button *(only when one is in force)*
-- a **Previously used** list underneath, once anything has been superseded
-
-🚫 **Both Replace and Withdraw are `HR.Company.Admin`.** For `hr.head` they render and 403.
+Three rows — **Company logo**, **Company seal**, **Authorised signature** — each with:
+- **In force** or **None**; the image's name, *"in force since"* and who uploaded it; with none, for the logo *"No logo
+  is uploaded. Letters use the organisation's own logo from its tenant settings, if it has one, and otherwise render
+  without a logo."*;
+- for `HR.Company.Admin` **only** (lane 4c, C-49): **Upload** / **Replace**, which accepts a PNG or JPEG of at most 2 MB
+  and says so before sending anything else (*"It must be a PNG or JPEG image."*, *"It must be at most 2 MB — every letter
+  carries it."*), and **Withdraw**;
+- **Previously used** underneath — each superseded image with its dates and the reason.
 
 ### ▶ Walk it
 
 **1 — Open the page as `hr.head`.** Scroll the four cards without editing.
 
-> *"This is TDC as a legal entity rather than as an employer. CS-1952-000118. The TIN, the VAT
-> number, the SSNIT employer number. TDC House, Community 1, Off Hospital Road, Tema — with the
-> GhanaPost digital address, because that is how somebody actually finds it."*
+> *"This is TDC as a legal entity rather than as an employer. CS-1952-000118. The TIN, the VAT number, the SSNIT
+> employer number. TDC House, Community 1, Tema — with the GhanaPost digital address, because that is how somebody
+> actually finds it."*
 
-**2 — Stop on Card 4 and read the footer text aloud.**
+**2 — Read the footer text aloud.**
 
-> *"And this is not reference data that sits in a drawer. Every letter this system generates — an
-> offer of appointment, a confirmation at the end of probation, a service letter — is rendered from
-> this record. The signatory, the acceptance instructions, and that footer line, on every one."*
+> *"And this is not reference data in a drawer. Every letter this system generates — an offer, a confirmation at the
+> end of probation, a service letter — is rendered from this record: the signatory, the instructions, and that footer,
+> on every one."*
 
-**3 — Scroll to *Seal & signature* and read the card description aloud.** It is the best sentence
-on the screen:
+**3 — Scroll to *Logo, seal & signature*.** Both databases: the seal and the signature *In force*, the logo *None*.
 
-> *"'Replacing one retires the image it supersedes rather than overwriting it, so it stays possible
-> to say which letters carry which seal.' That is a versioned corporate seal. Three years from now,
-> somebody disputes a letter; you can say which seal was in force on that date and who put it
-> there."*
+> *"Three images every letter carries — the logo, the seal, the signature — and each one versioned: replacing one
+> retires the old one, with its dates. Three years from now somebody disputes a letter, and you can say which seal was
+> in force on that day and who put it there."*
 
-**4 — Point at the *In force since* line and the *Previously used* list.**
+**4 — Point at where the buttons are not.**
 
-> *"In force since, and who uploaded it. And underneath, the ones it replaced."*
+> *"And here is the one place in this area where an administrator is genuinely a different person from an HR officer. I
+> can change the address, the signatory, the footer. I cannot change the seal — the screen does not even offer it.
+> That is the administrator's, beside the policy thresholds and the deletes. Which is right: the seal is what makes a
+> letter binding."*
 
-**5 — 🚫 As `hr.head`, do not press *Replace*.** Instead, make the permission point — this is the
-cleanest example of it in the product:
+**5 — *(optional)* 🔴 LIVE WRITE 17 — window D (`admin`):** press **Upload** on **Company logo** and choose a small PNG.
+The row reads *In force*; the next letter carries it. Then **Withdraw** it if you like — the letters fall back to the
+tenant's own logo — and it moves to *Previously used*.
 
-> *"And here is the one place in this whole area where an administrator is genuinely a different
-> person from an HR officer. I can read this, I can change the address and the signatory, I can
-> change what the footer says. I cannot change the seal. Replacing the corporation's seal is
-> `HR.Company.Admin` — the same tier that changes the policy thresholds and deletes records. Which
-> is right: the seal is what makes a letter binding."*
+> *"Same screen, a different person, and now it works. And nothing was overwritten: the history says what letters
+> carried and when."*
 
-**6 — 🔴 LIVE WRITE 13 *(optional — needs window B as `admin`)*.** Switch to the administrator
-window, press **Replace** on *Authorised signature*, pick any small image, and give the reason.
-The row restamps and the old image drops into *Previously used*.
-
-> *"Same screen, different person, and now it works. The old image is not gone — it is retired, with
-> its dates, so a letter from last month is still explicable."*
-
-*Undo:* nothing to undo — the point of the design is that nothing is overwritten. Leave both images
-in place.
+*Undo:* nothing to undo — **Withdraw** leaves the history, which is the point.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | The profile | `GET api/hr/company-profile` | `HR.Company.Read` |
-| Save changes | `PUT api/hr/company-profile` | `HR.Company.Write` |
-| Seal history | `GET api/hr/company-profile/seal-assets` | `HR.Company.Read` |
-| **Replace a seal** | `POST api/hr/company-profile/seal-assets/{kind}` *(multipart)* | **`HR.Company.Admin`** |
-| **Withdraw a seal** | `POST api/hr/company-profile/seal-assets/{kind}/retire` | **`HR.Company.Admin`** |
+| **Save changes** | `PUT api/hr/company-profile` — a `logoUrl` sent is ignored | `HR.Company.Write` |
+| The images | `GET api/hr/company-profile/seal-assets` | `HR.Company.Read` |
+| **Upload / Replace** | `POST api/hr/company-profile/seal-assets/{Logo\|Seal\|Signature}` (multipart) — PNG or JPEG by name, type and first bytes, at most 2 MB, refused before a byte is stored | **`HR.Company.Admin`** |
+| **Withdraw** | `POST api/hr/company-profile/seal-assets/{kind}/retire` | **`HR.Company.Admin`** |
 
-Tables: `CompanyProfiles`, `CompanySealAssets`. The seal upload goes through the product's
-controlled upload gate — unlike the event attachments in chapter 6, which are references.
+Tables: `CompanyProfiles`, `CompanySealAssets`. The images go through the controlled upload gate. Six kinds of letter
+embed them as images inside the letter — offers, probation letters, interview papers, test papers, asset terms and HR
+letter requests — the logo first from the uploaded one, then the tenant's own `LogoUrl`, else none.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-49 · Both seal buttons render for a persona that cannot use them.** Same shape as every delete in this module: gated only on the server | |
-| **C-50 · `logoUrl` is a text field, not an upload** — the one image on this screen that is not versioned | |
+| ✅ ~~**C-49** · the seal buttons shown to people the server refuses~~ | **Fixed in lane 4c** |
+| ✅ ~~**C-50, F-55** · the logo a free-text URL anybody with Write could set~~ | **Fixed in lane 4c** — an uploaded, versioned image |
+| ✅ ~~*(new in 4c)* · any file accepted as a seal~~ | **Fixed in lane 4c** — PNG or JPEG, 2 MB |
+| *Possible* · the asset-terms email may not show an embedded logo in some web mail | Recorded at lane 4c's ruling |
 
 ---
 

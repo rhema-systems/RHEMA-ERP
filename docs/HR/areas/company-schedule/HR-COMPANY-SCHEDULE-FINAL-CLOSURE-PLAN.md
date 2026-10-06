@@ -58,8 +58,8 @@ has not started (the user: "don't start the actual development yet").
    browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
    110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, 6c, its event
-   chapters (3, 3a, 4–7, 6a), and 6d, its bookings, diaries and staff booking (8–10, 10A–10C), written. Next: **6e**, the
-   setup chapters, the company profile, § 18–21 and the appendices, then 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   chapters (3, 3a, 4–7, 6a), 6d, its bookings, diaries and staff booking (8–10, 10A–10C), and 6e-1, its setup chapters
+   (11–17), written. Next: **6e-2**, § 18–21 and the appendices, then 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -339,7 +339,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters) and 6d (bookings, diaries, staff booking) written; 6e–6f, the rest of the guide and the docs, to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters), 6d (bookings, diaries, staff booking) and 6e-1 (setup, 11–17) written; 6e-2 (§ 18–21, appendices) and 6f (the docs) to do | both suites green twice |
 
 ---
 
@@ -3651,6 +3651,25 @@ through the API as `hr.head`, `head.dev` and `staff` (read-only; the API started
 - **Found while writing:** **F-66** — the register's row menu offers **Approve** to the booking's own booker (the
   booking page hides it from them; the server refuses them with the reason).
 
+*6e-1 — what was written (2026-10-06): the setup chapters — 11 the hub, 12 the rooms, 13 the closures, 14 the milestones,
+15 Finance's fiscal calendar, 16 a short note that HR's own fiscal pages are retired (the number kept), 17 the company
+profile. Docs only.* 6e was split in two (6e-1, then 6e-2: § 18–21 and the appendices) to keep each slice readable.
+Every screen re-read in full:
+- the rooms register, form and retirement dialog;
+- the closures page with its result card, re-count summary and announce offer;
+- the milestones page and files dialog;
+- the fiscal calendar page;
+- the company profile's four cards and images panel.
+
+UAT checked by SQL: Finance's years read *Fiscal Year 2025/2026*, with months like *October 2026* (*Open*, *Future*).
+- **The walks** carry the live writes on to 17:
+  - 14, the Boardroom set to need approval (Beat B), and the Deactivate dialog shown and kept;
+  - 15, a closure — *Reduced operations* on UAT (Rule 1), a site's day off on a rebuilt database, where 15b announces
+    it;
+  - 16 (optional), a milestone with its certificate;
+  - 17 (optional), a logo uploaded as `admin`.
+- **No new finding.**
+
 ---
 
 ## 5. Residual register
@@ -4279,3 +4298,11 @@ built API, so no web host and no seeders).
   read through the API as `hr.head`, `head.dev` and `staff`. The old chapter 11's missing heading restored. F-66 found.
 
   Next: 6e — the setup chapters (11–17), § 18–21 and the appendices.
+- **2026-10-06, later** — **6d committed. Slice 6e-1 written** — the guide's setup chapters: 11 the hub (Finance's
+  calendar as the fourth card), 12 the rooms (sites only, every rule, retiring a room per D-18), 13 the closures (the
+  kind decides the scope, the re-count card, announcing on HR's click), 14 the milestones (yearly, counted, with
+  files), 15 Finance's fiscal calendar, 16 a retirement note, 17 the company profile (logo, seal and signature on the
+  Admin tier, PNG or JPEG of 2 MB). 6e split in two; no new finding.
+
+  Next: 6e-2 — § 18–21 (where it shows up elsewhere, the reset for live writes 1–17, the short path, the findings as a
+  pointer to § 5) and the appendices.
