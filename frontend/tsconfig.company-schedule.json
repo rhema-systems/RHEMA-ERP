@@ -15,6 +15,9 @@
     "src/app/hr/manpower-budgets/new/page.tsx",
     "src/app/administration/hr/settings/policy/page.tsx",
     "src/config/hr-setup-nav.ts",
+    "src/app/administration/hr/settings/company-profile/page.tsx",
+    "src/services/hr/company-profile.service.ts",
+    "src/types/hr/company-profile.ts",
     "src/components/hr/company-schedule/**/*.ts",
     "src/components/hr/company-schedule/**/*.tsx"
   ]

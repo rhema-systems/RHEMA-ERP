@@ -71,7 +71,7 @@ export interface CompanyProfile {
   defaultSignatoryTitle: string | null;
   signatureImageUrl: string | null;
   companySealImageUrl: string | null;
-  logoUrl: string | null;
+  // No logoUrl since company-schedule lane 4c (F-55): the logo is an uploaded image (CompanySealAssetKind 'Logo').
   offerAcceptanceInstructions: string | null;
   documentFooterText: string | null;
 
@@ -115,7 +115,6 @@ export interface UpdateCompanyProfileRequest {
 
   defaultSignatoryName: string | null;
   defaultSignatoryTitle: string | null;
-  logoUrl: string | null;
   offerAcceptanceInstructions: string | null;
   documentFooterText: string | null;
 }
@@ -139,8 +138,8 @@ export const COMPANY_LEGAL_FORMS: { value: CompanyLegalForm; label: string }[] =
   { value: 'Other', label: 'Other' },
 ];
 
-/** Seal or signature. Matches `CompanySealAssetKind` in HREnums.cs. */
-export type CompanySealAssetKind = 'Seal' | 'Signature';
+/** Seal, signature or logo (lane 4c). Matches `CompanySealAssetKind` in HREnums.cs. */
+export type CompanySealAssetKind = 'Seal' | 'Signature' | 'Logo';
 
 /**
  * One seal or signature image and the window it was current for.

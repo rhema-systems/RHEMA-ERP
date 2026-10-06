@@ -46,9 +46,10 @@ has not started (the user: "don't start the actual development yet").
    told once, and 3d-2, an extended series bringing its rooms and the event page's Rooms card (D-12), built and proved
    (no migration; UAT has the real Room Booking Approval). ✅ Lane 3 is done (2026-10-06); its screens await lane 5's
    walk. **Lane 4** is source-checked and its five questions settled (lane 4 State), in three slices; 4a, milestone files
-   and a yearly milestone's dates, and 4b, HR reads Finance's fiscal calendar (D-6; a year Finance has not opened
-   continues its sequence), built and proved. Next 4c: the company profile (the logo asset, the Logo URL retired,
-   image-only uploads, the seal buttons gated).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   and a yearly milestone's dates, 4b, HR reads Finance's fiscal calendar (D-6; a year Finance has not opened continues
+   its sequence), and 4c, the company profile (the logo a versioned image, the Logo URL retired, PNG/JPEG of at most
+   2 MB, the image buttons gated), built and proved. ✅ Lane 4 is done (2026-10-06). Next: lane 5, the screens —
+   source-check first; its decisions to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -325,7 +326,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
-| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ◐ source-checked, three slices; 4a built and proved (1027/1027 ×2); 4b built and proved (1066/1066 ×2); 4c next | milestones + fiscal block |
+| **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
@@ -2877,7 +2878,7 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       calls the month the fallback.
 - [x] *✅ 4b; and `run-slice14-company.mjs` reads the calendar instead.* `110-company-schedule.mjs` stops seeding an HR fiscal year; `run-slice3.mjs` drops its fiscal
       assertions.
-- [ ] (D-9, C-49, C-50) Company profile: the two seal buttons hidden without `HR.Company.Admin`;
+- [x] *✅ 4c; and every image a PNG or JPEG of at most 2 MB (the user's rulings).* (D-9, C-49, C-50) Company profile: the two seal buttons hidden without `HR.Company.Admin`;
       `CompanySealAssetKind.Logo` as a third versioned asset through the same replace/retire doors.
       **(F-55) The free-text `LogoUrl` is retired once the asset exists**: letters and emails read the
       logo asset, then `Tenant.LogoUrl`; the field leaves the profile form.
@@ -3026,6 +3027,50 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
   `CreatedAt >= runSince` bound on each.
 - **After the runs:** every harness login off; no company-schedule notice to a real login live; no RoomBooking approval
   running; the R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are stopped.
+
+*4c — what was built (2026-10-06): the company profile — the logo, image-only uploads, the doors (D-9, C-49, C-50, F-55).*
+- **No migration** (lane 0 added `CompanySealAssetKind.Logo = 3`), no template, no topic. One new ruling at the source
+  check: **each image at most 2 MB** (every letter carries it embedded).
+- **The logo** is the third versioned image, through the seal's doors (`POST seal-assets/Logo`, `…/Logo/retire`,
+  `HR.Company.Admin`). `ICompanyProfileProvider.GetLogoAsync(tenant)` answers what letters carry: the logo in force as a
+  `data:` image (`ICompanySealAssetService.GetCurrentAsDataUriForTenantAsync`, clean scans only), else `Tenant.LogoUrl` —
+  now whether or not a profile row exists — else nothing. The six renderers (offer, probation, HR letter requests, asset
+  terms, interview papers, test papers) call it; it is separate from the profile read so a templated email's name lookup
+  never loads an image.
+- **The free-text logo URL is retired** (F-55): gone from both profile DTOs and the mapping, so a `logoUrl` still sent is
+  ignored and none is answered; the column stays, unread, until a later migration.
+- **Images only** (`CompanySealAssetRules.RefuseImage`): a PNG or JPEG by extension, declared type AND first bytes (a
+  renamed file is refused), at most 2 MB — checked in the controller before the gate stores a byte (the gate's type list
+  is a tenant setting). An image kind that does not exist is a 400 with the reason; "nothing in force" names the image.
+- **Screen:** the profile page loses its "Logo URL" field; the panel is "Logo, seal & signature" with a Company logo row;
+  Upload/Replace/Withdraw only for `HR.Company.Admin` (until now the comment said so and nothing checked); the file picker
+  takes PNG/JPEG, and the page refuses a wrong type or over 2 MB before sending.
+- **Suites (dev-harness):** `run-final-review.mjs` block 4c; `hr-tierb-tail/run-slice1.mjs` asserts `logoUrl` ignored
+  (and fixes its stale round-trip expectation for the two seal URLs, legacy read-only since probation lane 3a-ii).
+
+*Proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–4c: **1094/1094 on two clean passes**, first time. 4c has **28 assertions**: staff
+  refused the images; the HR desk refused upload and withdrawal, nothing stored; the profile answers no logo URL and
+  ignores one sent (the column unchanged); a PDF, a text file named `.png`, a PNG over 2 MB, a PDF seal and a GIF
+  signature refused with the reason, none stored, the seal and signature in force untouched; a kind that does not exist
+  refused; with no logo uploaded a letter carries the tenant's own logo (UAT has a profile row — before 4c, none); a JPEG
+  logo accepted, a PNG replacing it (the JPEG retired with the reason), scanned clean and in the DMS; the letter then
+  carries the PNG embedded, byte for byte, not the tenant's; a second withdrawal "no logo in force"; withdrawn, the
+  tenant's again; the tenant's logo restored, no logo at all; the run's logos hidden from the history, its letter
+  request cancelled.
+- **After each pass, by SQL:** `Tenants.LogoUrl` and `CompanyProfiles.LogoUrl` null as found; only UAT's own seal and
+  signature visible (one current each); no pending CSF letter request.
+- **Regression:** the round-4 net **191/191**; recruitment **59/59** (offer letters through the changed renderer); the
+  templates probe **42/42**; `run-lane-n` **109/115** (section J, #40); `hr-tierb-tail/run-slice1.mjs` **68/68** (it
+  writes and restores UAT's real profile). Not run: `hr-probation/run-lane3aii-seal.mjs` — it replaces and withdraws the
+  tenant's seal in force (4c's block proves the same doors without touching it).
+- **The API log:** no request answered 500; the ERR kinds are the known ones; no image read failed.
+- **The blocking watcher:** 43 waits, 34 of 2 s or more (longest 6.7 s), concentrated in the five minutes after the
+  API's start — all on `Notifications` (the notification service's poll, 90-day clean-up and topic read, inserts queued
+  behind them), as at 4b; none on the profile or image tables.
+- **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
+  running; the R4D requisition's notices withdrawn twice (43, then 0). The API and the scanner stub are stopped.
+- ✅ **Lane 4 is done (2026-10-06):** 4a, 4b and 4c built and proved; its screens await lane 5's walk.
 
 ### Lane 5 — Screens (C-1, C-16, R4-3.1, R4-6.1, R4-6.2, R4-6.3, R4-6.6, R4-10A.1, R4-10A.3, R4-10B.1…R4-10B.4, F-19…F-23, F-26, F-27, F-57)
 
@@ -3701,3 +3746,13 @@ built API, so no web host and no seeders).
     (section J, #40). No request answered 500.
 
   Next: 4c — the company profile (D-9, C-49, C-50, F-55).
+- **2026-10-06** — **4b committed** (`e14e5195e`). **Slice 4c built and proved:** the logo a third versioned image through
+  the seal's Admin doors, embedded in the six letter renderers through `ICompanyProfileProvider.GetLogoAsync` (else the
+  tenant's own logo, now with a profile row too); the free-text Logo URL retired; every image a PNG or JPEG of at most
+  2 MB (the size limit the user's ruling at the source check), checked before the gate stores a byte; the image buttons
+  hidden without `HR.Company.Admin`.
+  - **Results:** `run-final-review.mjs` scored 1066 + 28 = 1094/1094 on two clean passes, first time. The round-4 net was
+    191/191, recruitment 59/59, the templates probe 42/42, `run-lane-n` 109/115 (section J, #40) and the tier-B profile
+    suite 68/68. No request answered 500. **Lane 4 is done.**
+
+  Next: lane 5 — the screens (C-1, C-16, R4-3.1, R4-6.x, R4-10A/B, F-19…F-27, F-57). Source-check first.

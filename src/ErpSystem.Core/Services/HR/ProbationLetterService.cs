@@ -119,7 +119,7 @@ public sealed class ProbationLetterService : IProbationLetterService
         {
             ["CompanyName"] = string.IsNullOrWhiteSpace(company.LegalName) ? "Our Company" : company.LegalName,
             ["CompanyAddress"] = NullIfBlank(company.RegisteredAddress),
-            ["CompanyLogoUrl"] = NullIfBlank(company.LogoUrl),
+            ["CompanyLogoUrl"] = await _companyProfile.GetLogoAsync(company.TenantId, cancellationToken), // lane 4c (F-55)
             ["CompanyFooter"] = NullIfBlank(company.DocumentFooterText),
             ["LetterDate"] = DateTime.UtcNow.ToString("d MMMM yyyy", CultureInfo.InvariantCulture),
 

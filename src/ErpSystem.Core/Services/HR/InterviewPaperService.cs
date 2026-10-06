@@ -86,7 +86,7 @@ public sealed class InterviewPaperService : IInterviewPaperService
         {
             ["CompanyName"] = string.IsNullOrWhiteSpace(company.LegalName) ? "Our Company" : company.LegalName,
             ["CompanyAddress"] = company.RegisteredAddress,
-            ["CompanyLogoUrl"] = company.LogoUrl,
+            ["CompanyLogoUrl"] = await _companyProfile.GetLogoAsync(company.TenantId, cancellationToken), // lane 4c (F-55)
             ["JobTitle"] = interview.JobVacancy?.JobTitle ?? "Interview",
             ["InterviewNumber"] = interview.InterviewNumber,
             ["InterviewDate"] = interview.ScheduledDate.ToString("dd MMMM yyyy"),

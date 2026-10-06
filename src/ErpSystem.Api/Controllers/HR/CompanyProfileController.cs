@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ImageRules = ErpSystem.Core.Services.HR.CompanySealAssetRules;
 
 namespace ErpSystem.Api.Controllers.HR;
 
@@ -91,7 +92,12 @@ public class CompanyProfileController : ControllerBase
         }
     }
 
-    // ── The seal and the signature ──────────────────────────────────────────
+    // ── The seal, the signature and the logo ─────────────────────────────────
+    //
+    // Company-schedule final closure lane 4c (D-9, C-50, F-55): the LOGO is the third kind, through the same doors — it is
+    // embedded in every letter like the other two, so it is versioned and replaced by the same restricted act, and the
+    // free-text CompanyProfile.LogoUrl is retired. All three must be a PNG or JPEG of at most 2 MB (the user's rulings),
+    // checked here before the gate stores a byte: the gate's own type list is a tenant setting and admits documents.
     //
     // ⚠ **Gated on Admin, not Write, and that is the point.** HR maintains the company profile —
     // the letterhead, the addresses, the statutory numbers. Replacing the seal is a different act:
@@ -103,14 +109,14 @@ public class CompanyProfileController : ControllerBase
     // substituted straight into rendered offer and probation letters — so an arbitrary value became
     // an image source in a document sent to a candidate.
 
-    /// <summary>The seal and signature in force, and every image used before them.</summary>
+    /// <summary>The seal, signature and logo in force, and every image used before them.</summary>
     [HttpGet("seal-assets")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     [ProducesResponseType(typeof(IEnumerable<CompanySealAssetDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> GetSealAssets(CancellationToken ct)
         => Ok(await _seals.GetHistoryAsync(ct));
 
-    /// <summary>Replaces the seal or the signature, retiring whatever it supersedes.</summary>
+    /// <summary>Replaces the seal, the signature or the logo, retiring whatever it supersedes.</summary>
     [HttpPost("seal-assets/{kind}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     [RequestSizeLimit(10_000_000)]
@@ -120,8 +126,19 @@ public class CompanyProfileController : ControllerBase
     {
         if (_currentUser.TenantId is not Guid tenantId)
             return BadRequest(new { message = "Tenant context could not be resolved." });
+        if (!Enum.IsDefined(kind))
+            return BadRequest(new { message = "Say which image: Seal, Signature or Logo." });
         if (file is null || file.Length == 0)
             return BadRequest(new { message = "No file provided." });
+
+        // Lane 4c: a PNG or JPEG of at most 2 MB — by its name, its type and its first bytes — before a byte is stored.
+        var header = new byte[ImageRules.HeaderLength];
+        int read;
+        await using (var peek = file.OpenReadStream())
+            read = await peek.ReadAtLeastAsync(header, header.Length, throwOnEndOfStream: false, ct);
+        var refusal = ImageRules.RefuseImage(kind, file.FileName, file.ContentType, file.Length, header.AsSpan(0, read));
+        if (refusal is not null)
+            return BadRequest(new { message = refusal });
 
         HrControlledDocument document;
         try
@@ -163,12 +180,13 @@ public class CompanyProfileController : ControllerBase
     }
 
     /// <summary>
-    /// Withdraws the current seal or signature without replacing it.
+    /// Withdraws the current seal, signature or logo without replacing it.
     /// </summary>
     /// <remarks>
     /// A compromised seal must be able to stop being used before a replacement exists. Letters then
     /// render without one, which is the right outcome: the alternative is continuing to stamp
-    /// documents with an image known to be bad.
+    /// documents with an image known to be bad. A withdrawn logo leaves letters on the tenant's own
+    /// logo, if it has one (lane 4c).
     /// </remarks>
     [HttpPost("seal-assets/{kind}/retire")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
@@ -176,7 +194,11 @@ public class CompanyProfileController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RetireSealAsset(
         CompanySealAssetKind kind, [FromBody] RetireCompanySealAssetDto? dto, CancellationToken ct)
-        => await _seals.RetireCurrentAsync(kind, dto?.Reason, ct)
+    {
+        if (!Enum.IsDefined(kind))
+            return BadRequest(new { message = "Say which image: Seal, Signature or Logo." });
+        return await _seals.RetireCurrentAsync(kind, dto?.Reason, ct)
             ? NoContent()
-            : NotFound(new { message = $"There is no {kind} in force to withdraw." });
+            : NotFound(new { message = $"There is no {ImageRules.Describe(kind)} in force to withdraw." });
+    }
 }

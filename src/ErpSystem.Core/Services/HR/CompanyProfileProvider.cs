@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ public sealed class CompanyProfileProvider : ICompanyProfileProvider
     private readonly IGenericRepository<Tenant> _tenantRepo;
     private readonly ICurrentUserProvider _currentUser;
     private readonly IConfiguration _configuration;
+    private readonly ICompanySealAssetService _images;
     private readonly ILogger<CompanyProfileProvider> _logger;
 
     public CompanyProfileProvider(
@@ -27,12 +29,14 @@ public sealed class CompanyProfileProvider : ICompanyProfileProvider
         IGenericRepository<Tenant> tenantRepo,
         ICurrentUserProvider currentUser,
         IConfiguration configuration,
+        ICompanySealAssetService images,
         ILogger<CompanyProfileProvider> logger)
     {
         _repo = repo;
         _tenantRepo = tenantRepo;
         _currentUser = currentUser;
         _configuration = configuration;
+        _images = images;
         _logger = logger;
     }
 
@@ -88,10 +92,29 @@ public sealed class CompanyProfileProvider : ICompanyProfileProvider
             PhonePrimary          = tenant?.ContactPhone,
             HrEmail               = tenant?.ContactEmail ?? _configuration["Company:HrEmail"],
             Website               = tenant?.Domain,
-            LogoUrl               = tenant?.LogoUrl,
             DefaultSignatoryName  = _configuration["Company:HrSignatoryName"],
             DefaultSignatoryTitle = _configuration["Company:HrSignatoryTitle"] ?? "Head of Human Resources",
             OfferAcceptanceInstructions = _configuration["Company:OfferAcceptanceInstructions"],
         };
+    }
+
+    /// <inheritdoc />
+    public async Task<string?> GetLogoAsync(Guid tenantId, CancellationToken cancellationToken = default)
+    {
+        if (tenantId == Guid.Empty) return null;
+
+        // The uploaded logo in force — scanned clean, versioned, embedded (lane 4c, D-9, C-50).
+        var uploaded = await _images.GetCurrentAsDataUriForTenantAsync(tenantId, CompanySealAssetKind.Logo, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(uploaded)) return uploaded;
+
+        // Else the tenant's own logo — now whether or not a profile row exists (before lane 4c, only without one).
+        var tenantLogo = await _tenantRepo
+            .GetQueryable()
+            .IgnoreQueryFilters()
+            .AsNoTracking()
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.LogoUrl)
+            .FirstOrDefaultAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(tenantLogo) ? null : tenantLogo.Trim();
     }
 }

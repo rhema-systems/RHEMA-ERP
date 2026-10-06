@@ -350,7 +350,9 @@ public class HrLetterRequestService : IHrLetterRequestService
             }
         }
 
-        var tokens = BuildTokens(request, company, letterNumber, currencyCode);
+        // Lane 4c (F-55): the uploaded logo, embedded; else the tenant's.
+        var logo = await _companyProfile.GetLogoAsync(company.TenantId, ct);
+        var tokens = BuildTokens(request, company, logo, letterNumber, currencyCode);
 
         var rendered = await _templatedEmail.RenderAsync(
             HrLettersEmailCatalog.Module, EventKeyFor(request.LetterType), tokens, ct);
@@ -367,7 +369,7 @@ public class HrLetterRequestService : IHrLetterRequestService
     }
 
     private static Dictionary<string, string?> BuildTokens(
-        HrLetterRequest r, CompanyProfile company, string? letterNumber, string? currencyCode)
+        HrLetterRequest r, CompanyProfile company, string? logo, string? letterNumber, string? currencyCode)
     {
         var e = r.Employee;
 
@@ -377,7 +379,7 @@ public class HrLetterRequestService : IHrLetterRequestService
             // provider already falls back to the Tenant record when no profile row exists yet.
             ["CompanyName"] = string.IsNullOrWhiteSpace(company.LegalName) ? null : company.LegalName,
             ["CompanyAddress"] = ComposeAddress(company),
-            ["CompanyLogoUrl"] = company.LogoUrl,
+            ["CompanyLogoUrl"] = logo,
             ["CompanyFooter"] = company.DocumentFooterText,
             ["SignatoryName"] = company.DefaultSignatoryName,
             ["SignatoryTitle"] = company.DefaultSignatoryTitle,

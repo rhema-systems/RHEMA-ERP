@@ -29,14 +29,16 @@ import {
 } from '@/types/hr/company-profile';
 import { Badge } from '@/components/ui/badge';
 import { AddressFields } from '@/components/reference/AddressFields';
+import { useAuth } from '@/hooks/use-auth';
 
 /**
  * The tenant's company (legal-employer) profile.
  *
- * This is the letterhead. `LegalName`, `RegisteredAddress`, `LogoUrl`, `DocumentFooterText`,
+ * This is the letterhead. `LegalName`, `RegisteredAddress`, `DocumentFooterText`,
  * `DefaultSignatoryName`, `DefaultSignatoryTitle` and `OfferAcceptanceInstructions` are read by
  * `OfferLetterService` and `ProbationLetterService` on every offer and confirmation letter, and
- * `LegalName` again by every templated email. Until this screen existed there was no way to author
+ * `LegalName` again by every templated email. The logo is no longer a typed URL (company-schedule
+ * lane 4c, F-55): it is uploaded below, beside the seal. Until this screen existed there was no way to author
  * any of it: the provider fell back to the Tenant record and `Company:*` configuration, so letters
  * went out under whatever the tenant happened to be called.
  *
@@ -71,7 +73,6 @@ const profileSchema = z.object({
 
   defaultSignatoryName: z.string().trim().max(200).optional(),
   defaultSignatoryTitle: z.string().trim().max(200).optional(),
-  logoUrl: z.string().trim().max(500).optional(),
   offerAcceptanceInstructions: z.string().trim().max(2000).optional(),
   documentFooterText: z.string().trim().max(1000).optional(),
 });
@@ -141,7 +142,6 @@ export default function CompanyProfilePage() {
 
       defaultSignatoryName: data.defaultSignatoryName ?? '',
       defaultSignatoryTitle: data.defaultSignatoryTitle ?? '',
-      logoUrl: data.logoUrl ?? '',
       offerAcceptanceInstructions: data.offerAcceptanceInstructions ?? '',
       documentFooterText: data.documentFooterText ?? '',
     });
@@ -178,7 +178,6 @@ export default function CompanyProfilePage() {
 
         defaultSignatoryName: orNull(values.defaultSignatoryName),
         defaultSignatoryTitle: orNull(values.defaultSignatoryTitle),
-        logoUrl: orNull(values.logoUrl),
         offerAcceptanceInstructions: orNull(values.offerAcceptanceInstructions),
         documentFooterText: orNull(values.documentFooterText),
       }),
@@ -344,10 +343,11 @@ export default function CompanyProfilePage() {
           <CardHeader>
             <CardTitle>Documents &amp; signature</CardTitle>
             <CardDescription>
-              What appears at the top and bottom of an offer or confirmation letter. The signature
-              and seal images are available to letter templates as{' '}
-              <code>SignatureImageUrl</code> and <code>CompanySealImageUrl</code>; a template that
-              does not reference them simply renders without them.
+              What appears at the top and bottom of an offer or confirmation letter. The logo,
+              signature and seal images (uploaded below) are available to letter templates as{' '}
+              <code>CompanyLogoUrl</code>, <code>SignatureImageUrl</code> and{' '}
+              <code>CompanySealImageUrl</code>; a template that does not reference them simply
+              renders without them.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -360,7 +360,6 @@ export default function CompanyProfilePage() {
                 placeholder="Head of Human Resources"
               />
             </FieldRow>
-            <TextField form={form} name="logoUrl" label="Logo URL" />
             <TextareaField
               form={form}
               name="offerAcceptanceInstructions"
@@ -389,21 +388,28 @@ export default function CompanyProfilePage() {
   );
 }
 
-// ── the seal and the signature ──────────────────────────────────────────────
+// ── the logo, the seal and the signature ────────────────────────────────────
 
 /**
- * The images that make a generated document look authentic.
+ * The images that make a generated document look authentic — and, since company-schedule lane 4c (D-9, C-50, F-55),
+ * the logo, which letters embed the same way and which replaces the free-text Logo URL.
  *
  * ⚠ **Replacing one is Admin-gated, not Write-gated.** HR maintains the company profile; changing
  * what stamps a document as authentic sits with the tier that already holds the settings described
- * as moving trust boundaries. A user without it sees the history and no buttons.
+ * as moving trust boundaries. A user without it sees the history and no buttons (lane 4c: the buttons
+ * really are hidden now — until then this comment said so and nothing checked).
  *
  * ⚠ **Every image is kept.** Overwriting would destroy the answer to the question that matters
  * after a compromise — which documents carry the seal that leaked.
+ *
+ * Each must be a PNG or JPEG of at most 2 MB (the user's rulings); the server refuses anything else, and this
+ * screen says so before uploading.
  */
 function SealAssetsPanel() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canReplace = hasPermission('HR.Company.Admin');
 
   const { data: assets, isLoading } = useQuery({
     queryKey: ['hr', 'company-seal-assets'],
@@ -419,12 +425,13 @@ function SealAssetsPanel() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5" /> Seal &amp; signature
+          <ShieldCheck className="h-5 w-5" /> Logo, seal &amp; signature
         </CardTitle>
         <CardDescription>
-          The images embedded in generated offer and confirmation letters. Replacing one retires the
-          image it supersedes rather than overwriting it, so it stays possible to say which letters
-          carry which seal.
+          The images embedded in generated letters: PNG or JPEG, at most 2 MB each. Replacing one
+          retires the image it supersedes rather than overwriting it, so it stays possible to say
+          which letters carry which seal.
+          {!canReplace && ' Replacing or withdrawing one needs the company administration permission.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -432,8 +439,9 @@ function SealAssetsPanel() {
           <Skeleton className="h-32 w-full" />
         ) : (
           <>
-            <SealKindRow kind="Seal" label="Company seal" history={history} onChanged={invalidate} toast={toast} />
-            <SealKindRow kind="Signature" label="Authorised signature" history={history} onChanged={invalidate} toast={toast} />
+            <SealKindRow kind="Logo" label="Company logo" history={history} onChanged={invalidate} toast={toast} canReplace={canReplace} />
+            <SealKindRow kind="Seal" label="Company seal" history={history} onChanged={invalidate} toast={toast} canReplace={canReplace} />
+            <SealKindRow kind="Signature" label="Authorised signature" history={history} onChanged={invalidate} toast={toast} canReplace={canReplace} />
           </>
         )}
       </CardContent>
@@ -441,18 +449,24 @@ function SealAssetsPanel() {
   );
 }
 
+/** 2 MB — the server's limit (`CompanySealAssetRules.MaxBytes`, the user's ruling). */
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
 function SealKindRow({
   kind,
   label,
   history,
   onChanged,
   toast,
+  canReplace,
 }: {
   kind: CompanySealAssetKind;
   label: string;
   history: CompanySealAsset[];
   onChanged: () => Promise<unknown>;
   toast: ReturnType<typeof useToast>['toast'];
+  /** HR.Company.Admin: the server refuses everyone else, so nobody else is offered the buttons. */
+  canReplace: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -462,6 +476,17 @@ function SealKindRow({
   const retired = mine.filter((a) => !a.isCurrent);
 
   const upload = async (file: File) => {
+    // Said here before a byte is sent; the server checks the same, and the file's first bytes too.
+    const isImage = /\.(png|jpe?g)$/i.test(file.name) && (file.type === '' || /^image\/(png|jpeg)$/i.test(file.type));
+    if (!isImage || file.size > MAX_IMAGE_BYTES) {
+      toast({
+        title: `${label} not uploaded`,
+        description: !isImage ? 'It must be a PNG or JPEG image.' : 'It must be at most 2 MB — every letter carries it.',
+        variant: 'destructive',
+      });
+      if (fileRef.current) fileRef.current.value = '';
+      return;
+    }
     setBusy(true);
     try {
       await companyProfileService.replaceSealAsset(kind, file);
@@ -482,7 +507,10 @@ function SealKindRow({
       await onChanged();
       toast({
         title: `${label} withdrawn`,
-        description: 'Letters will render without it until a replacement is uploaded.',
+        description:
+          kind === 'Logo'
+            ? "Letters use the organisation's own logo, if it has one, until a replacement is uploaded."
+            : 'Letters will render without it until a replacement is uploaded.',
       });
     } catch (error: any) {
       toast({ title: 'Error', description: error?.message || 'Could not withdraw it.', variant: 'destructive' });
@@ -506,6 +534,11 @@ function SealKindRow({
               {current.effectiveFrom.slice(0, 10)}
               {current.uploadedBy ? ` · uploaded by ${current.uploadedBy}` : ''}
             </p>
+          ) : kind === 'Logo' ? (
+            <p className="text-sm text-muted-foreground">
+              No logo is uploaded. Letters use the organisation&apos;s own logo from its tenant
+              settings, if it has one, and otherwise render without a logo.
+            </p>
           ) : (
             <p className="text-sm text-muted-foreground">
               No image is in force. Letters render without one, and any legacy image the tenant was
@@ -514,27 +547,29 @@ function SealKindRow({
           )}
         </div>
 
-        <div className="flex gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void upload(file);
-            }}
-          />
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-            {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-            {current ? 'Replace' : 'Upload'}
-          </Button>
-          {current && (
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => void retire()}>
-              Withdraw
+        {canReplace && (
+          <div className="flex gap-2">
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/png,image/jpeg"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void upload(file);
+              }}
+            />
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+              {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+              {current ? 'Replace' : 'Upload'}
             </Button>
-          )}
-        </div>
+            {current && (
+              <Button variant="outline" size="sm" disabled={busy} onClick={() => void retire()}>
+                Withdraw
+              </Button>
+            )}
+          </div>
+        )}
       </div>
 
       {retired.length > 0 && (

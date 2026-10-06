@@ -89,7 +89,7 @@ public sealed class OfferLetterService : IOfferLetterService
             // Letterhead (from the tenant CompanyProfile, resolved with Tenant/config fallback).
             ["CompanyName"]    = string.IsNullOrWhiteSpace(company.LegalName) ? "Our Company" : company.LegalName,
             ["CompanyAddress"] = ComposeCompanyAddress(company),
-            ["CompanyLogoUrl"] = company.LogoUrl,
+            ["CompanyLogoUrl"] = await _companyProfile.GetLogoAsync(company.TenantId, cancellationToken), // lane 4c (F-55)
             ["CompanyFooter"]  = NullIfBlank(company.DocumentFooterText),
             ["LetterDate"]     = (offer.OfferDate ?? DateTime.UtcNow).ToString("d MMMM yyyy", CultureInfo.InvariantCulture),
 

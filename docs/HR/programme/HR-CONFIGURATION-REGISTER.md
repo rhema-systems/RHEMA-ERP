@@ -462,6 +462,15 @@ Finance's start. HR's own fiscal years and periods, and their 16 routes and two 
 until a later migration). Proof: block 4b — the month moved to July and back changes none of the answers on a tenant with
 Finance years (UAT); the "no Finance year" position cannot be reached on UAT.
 
+**The letterhead logo (`CompanyProfile.LogoUrl`, "Logo URL") — retired since lane 4c (F-55); it was a free-text URL
+substituted into six letter types.** The logo is now an uploaded, versioned image (`CompanySealAssetKind.Logo`,
+`POST api/hr/company-profile/seal-assets/Logo`, `HR.Company.Admin`), embedded in letters like the seal and the
+signature; with none uploaded a letter carries `Tenant.LogoUrl` (now even when a profile row exists), else no logo. A
+`logoUrl` sent with a profile save is ignored and none is answered. **All three images — logo, seal, signature — must
+be a PNG or JPEG of at most 2 MB** (the user's ruling), checked before the upload gate stores a byte; the gate's own
+per-tenant type list does not loosen it. Proof: block 4c, both positions (uploaded vs tenant logo; images refused vs
+accepted).
+
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|
 | `SendReminders` ("Send reminders") | per event | off | **Enforced**. It was a ghost | [A2] on: an event two days away, 3 days before, reminded everybody who had not declined. [A4] off, the same date: nobody |
