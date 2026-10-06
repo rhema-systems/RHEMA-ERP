@@ -7,7 +7,7 @@ candidate_head: ca1dba717
 base_commit: e2831b83104a09413324e39e79e25d5c60036d53
 target_ref: origin/master
 depends_on: none
-migration_status: three-migrations-mixed-application-state
+migration_status: three-migrations-applied-RHEMAERP_BOOKV2_UAT_20260922
 verification_status: passed-with-documented-legacy-fixture-failures
 integration_commit: ca1dba717
 pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/358
@@ -57,9 +57,9 @@ Explicitly excluded:
 ## Migration record
 
 - `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`: authored and already applied to `RHEMAERP_BOOKV2_UAT_20260922` under prior explicit authorization.
-- `20261005225306_AddBudgetScenarioSegmentControls`: authored, corrected, and unapplied.
-- `20261006010000_AllowBankReconciliationRematchAfterUnmatch`: authored and unapplied.
-- This consolidation does not apply or reapply any migration and does not mutate any database.
+- `20261005225306_AddBudgetScenarioSegmentControls`: applied to `RHEMAERP_BOOKV2_UAT_20260922`; history and schema verified 2026-10-06.
+- `20261006010000_AllowBankReconciliationRematchAfterUnmatch`: applied to `RHEMAERP_BOOKV2_UAT_20260922`; history and filtered indexes verified 2026-10-06.
+- All three migrations in this cycle are applied to the named local UAT database. This verification turn did not reapply them because the history rows and expected schema objects already existed.
 
 ## Verification evidence
 
@@ -85,8 +85,8 @@ Explicitly excluded:
 ## Authorization boundaries
 
 - Authorized: fetch latest master, integrate the recorded Finance changes, commit, push the integration branch, and create one unified PR.
-- Not authorized: merge the PR, deploy, restart services, apply migrations, mutate databases, delete branches/worktrees, or add deferred/unrelated changes.
+- Not authorized: merge the PR, deploy, restart services, apply further migrations, mutate databases, delete branches/worktrees, or add deferred/unrelated changes.
 
 ## Integration outcome
 
-Implementation, verification, independent review, push, and PR creation are complete. PR #358 targets `master`; merge, deployment, and unapplied migrations remain outside this authorization.
+Implementation, verification, independent review, push, PR creation, and target-database migration verification are complete. PR #358 targets `master`; merge and deployment remain outside this authorization.

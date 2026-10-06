@@ -7,7 +7,7 @@ candidate_head: 09b9a630782218bb765ba4ef6d0275233062ec45
 base_commit: e1c25df6558f3df70d27d3027ad104dffdd43166
 target_ref: origin/master
 depends_on: bank-deposit-acknowledgement-lifecycle
-migration_status: 20261005225306-authored-unapplied
+migration_status: 20261005225306-applied-RHEMAERP_BOOKV2_UAT_20260922
 verification_status: focused-passed-baseline-typecheck-failures
 integration_commit: pending
 pull_request: pending
@@ -106,6 +106,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - `npm run type-check`: repository-wide baseline remains red on unrelated existing development, portal, HR, inventory, reporting, and test fixture errors; no error references the changed budgeting files.
 - Corrected migration SQL generated idempotently from immediate predecessor `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`; the isolated script contains only the intended control table, legacy backfill, and combined-index operations, with `WHERE [IsDeleted] = 0` on the combined unique index.
 - First local startup application attempt failed before completion because SQL Server rejected the original filtered-index predicate containing `OR` (`Error 156`). The corrected migration uses `[IsDeleted] = 0`; no restart or repeat application was performed by this task.
+- On 2026-10-06, `RHEMAERP_BOOKV2_UAT_20260922` migration history and schema verification confirmed the corrected migration is applied: `BudgetScenarioControlSegments` exists and the combined active Budget Return uniqueness index has the expected `[IsDeleted] = 0` filter.
 - `git diff --check`: passed (only Windows line-ending notices).
 - Broader `FinanceControllerSecurityTests` run: 134 passed and 2 unrelated existing diagnostics failed:
   - `VendorInvoiceService.ReceiptAccounts.cs` contains an existing `Guid.Empty` tenant fallback.
@@ -113,7 +114,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 
 ## Remaining work
 
-- Do not apply the migration until separately authorized; after application, manually verify create/edit/delete and return distribution against a disposable/local test tenant before UAT.
+- The migration is applied to the named local UAT database; manually verify create/edit/delete and return distribution before promoting beyond this environment.
 - The current downstream model supports one account `SegmentValueId` plus one distribution dimension per return. Scenarios may govern multiple eligible segment structures, but a single return selects one structure/value. Supporting multiple account segment values on one return would require a separate normalized return-scope collection and is outside this authorized change.
 - A repository-wide TypeScript cleanup and the two unrelated Finance security diagnostics remain separate workstreams.
 
@@ -121,4 +122,4 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 
 - Local implementation, tests, migration authoring, documentation, and local commit are authorized.
 - The user has now authorized consolidation onto latest `origin/master`, pushing the integration branch, and creating one unified PR.
-- Do not merge, deploy, restart services, apply the pending migration, mutate UAT data, or remove branches/worktrees without separate authorization.
+- Do not merge, deploy, restart services, apply further migrations, mutate UAT data, or remove branches/worktrees without separate authorization.

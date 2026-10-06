@@ -7,7 +7,7 @@ candidate_head: pending-final-commit
 base_commit: 283a8d35811eab0e16d7779e78db05d5ae91915e
 target_ref: origin/master
 depends_on: bank-deposit-acknowledgement-lifecycle,budget-scenario-draft-lifecycle
-migration_status: 20261006010000-authored-unapplied
+migration_status: 20261006010000-applied-RHEMAERP_BOOKV2_UAT_20260922
 verification_status: focused-passed-known-legacy-fixture-failure
 integration_commit: pending
 pull_request: pending
@@ -73,7 +73,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 ## Migrations and application state
 
 - Migration `20261006010000_AllowBankReconciliationRematchAfterUnmatch` changes the cash-transaction and bank-statement-line unique indexes to filtered unique indexes over active matches (`[IsDeleted] = 0`).
-- The migration is included locally but has not been applied to any database.
+- On 2026-10-06, `RHEMAERP_BOOKV2_UAT_20260922` migration history and schema verification confirmed this migration is applied. Both reconciliation-match unique indexes exist with the expected `[IsDeleted] = 0` filter.
 - No UAT data was changed during diagnosis.
 
 ## Verification evidence
@@ -104,7 +104,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 
 - Diagnosis, implementation, tests, and a local commit are authorized.
 - The user authorized consolidation onto latest `origin/master`, pushing the integration branch, and creating one unified PR.
-- Do not merge, deploy, restart services, apply migrations, mutate UAT data, or remove branches/worktrees without separate authorization.
+- Do not merge, deploy, restart services, apply further migrations, mutate UAT data, or remove branches/worktrees without separate authorization.
 ## Maker-checker and printable evidence follow-up (2026-10-06)
 
 - Added server-side enforcement preventing the user recorded in `ReconciledBy` from approving the same reconciliation.
