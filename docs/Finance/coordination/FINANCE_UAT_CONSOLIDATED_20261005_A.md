@@ -10,7 +10,7 @@ depends_on: none
 migration_status: three-migrations-mixed-application-state
 verification_status: passed-with-documented-legacy-fixture-failures
 integration_commit: ca1dba717
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/358
 ---
 
 # Consolidated Finance UAT follow-up cycle FIN-UAT-2026-10-05-A
@@ -80,7 +80,7 @@ Explicitly excluded:
 
 ## Remaining work
 
-- Push the integration branch and create one PR to `master`.
+- Await review and merge of PR #358. No merge or deployment is authorized in this workstream.
 
 ## Authorization boundaries
 
@@ -89,4 +89,4 @@ Explicitly excluded:
 
 ## Integration outcome
 
-Implementation, verification, and independent review are complete. Push and PR creation remain pending.
+Implementation, verification, independent review, push, and PR creation are complete. PR #358 targets `master`; merge, deployment, and unapplied migrations remain outside this authorization.
