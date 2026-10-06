@@ -11,6 +11,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Investigation starting commit: `283a8d35811eab0e16d7779e78db05d5ae91915e`
 - Matching and primary-book correction commit: `dcec41cdb` (`fix(finance): reconcile bank deposits across parallel books`)
 - Searchable adjustment-account follow-up commit: `ffb80426b` (`fix(finance): make reconciliation offset account searchable`)
+- Rematch and adjustment-posting correction commit: `635f3594e` (`fix(finance): restore reconciliation rematch and adjustments`)
 - Pull request: no PR creation, update, or push is authorized for this workstream yet.
 
 ## Evidence and classification
