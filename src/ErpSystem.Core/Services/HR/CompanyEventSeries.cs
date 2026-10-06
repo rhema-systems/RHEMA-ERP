@@ -1,3 +1,4 @@
+using ErpSystem.Core.Entities.HR.CompanySchedule;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR;
@@ -21,6 +22,29 @@ public static class CompanyEventSeries
 {
     /// <summary>The most occurrences one series holds (D-2); a longer one is extended later.</summary>
     public const int MaxOccurrences = 52;
+
+    /// <summary>
+    /// The dates of a series a series action reaches from <paramref name="acted"/>, in date order — and how many more the
+    /// scope covered and left alone because they have started, been completed or been cancelled (D-12: a series action
+    /// never changes a past or completed occurrence). "This and following" is by date, as a calendar reads it.
+    /// </summary>
+    /// <remarks>
+    /// Shared by the event service's series actions (lane 2f) and booking a room for a series (lane 3d-1), so both reach
+    /// the same dates. <paramref name="members"/> is every occurrence of the series; the caller asks for
+    /// <see cref="SeriesScope.ThisOccurrence"/> itself.
+    /// </remarks>
+    public static (List<CompanyEvent> Open, int Closed) Reach(
+        IEnumerable<CompanyEvent> members, CompanyEvent acted, SeriesScope scope, DateTime nowUtc)
+    {
+        var covered = members
+            .Where(x => scope == SeriesScope.WholeSeries
+                        || x.StartDate.Date > acted.StartDate.Date
+                        || (x.StartDate.Date == acted.StartDate.Date && (x.OccurrenceNumber ?? 0) >= (acted.OccurrenceNumber ?? 0)))
+            .OrderBy(x => x.StartDate).ThenBy(x => x.OccurrenceNumber)
+            .ToList();
+        var open = covered.Where(x => !CompanyEventRules.IsClosed(x) && EventWindow.Of(x).Start > nowUtc).ToList();
+        return (open, covered.Count - open.Count);
+    }
 
     /// <summary>The start date of the occurrence at <paramref name="index"/> (0 is the first).</summary>
     public static DateTime DateAt(RecurrencePattern pattern, DateTime first, int index)

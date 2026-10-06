@@ -22,8 +22,9 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 /// the topic path queues rows with no delivery result, would lose the catalogue's wording, and cannot carry an
 /// attachment (the calendar invite, D-14). So the topics are seeded with email off, and the caller sends the email.</para>
 ///
-/// <para><b>Nineteen topics since lane 3b-2</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a; a
-/// room booking approved, not approved, cancelled — to its booker — at 3b-1; marked a no-show at 3b-2).
+/// <para><b>Twenty topics since lane 3d-1</b> (the overdue task at 2e-3; a series invited, a series changed at 2f-2a; a
+/// room booking approved, not approved, cancelled — to its booker — at 3b-1; marked a no-show at 3b-2; several bookings
+/// changed together at 3d-1).
 /// A tenant seeded with fewer gets the rest the next time any notice is raised: <see cref="EnsureTopicsAsync"/> adds
 /// whatever key is missing.</para>
 ///
@@ -74,6 +75,8 @@ public sealed class CompanyScheduleNotices
     public const string BookingCancelled = "BookingCancelled";
     // Lane 3b-2: marked a no-show.
     public const string BookingNoShow = "BookingNoShow";
+    // Lane 3d-1 (the user's ruling): several of a booker's bookings approved, not approved or cancelled by one act.
+    public const string BookingsChanged = "BookingsChanged";
 
     private readonly IUnitOfWork _unitOfWork;
     private readonly IAppEventBus _appEventBus;
@@ -166,6 +169,24 @@ public sealed class CompanyScheduleNotices
     /// HR page (<c>WorkflowEntityDisplayService</c>).
     /// </summary>
     public static string BookingLink(RoomBooking b) => $"/me/room-bookings/{b.Id}";
+
+    /// <summary>The booker's bookings in the portal — where a notice about several of them opens (lane 3d-1).</summary>
+    public const string MyBookingsLink = "/me/room-bookings";
+
+    /// <summary>
+    /// Tells a booker once of several of their bookings changed by one act (lane 3d-1, the user's ruling) — never of their
+    /// own act. The first booking is the notice's entity; the link opens their bookings; the email lists them.
+    /// </summary>
+    /// <param name="what">The outcome in a word or two: Approved, Not approved, Cancelled.</param>
+    public Task<IReadOnlySet<Guid>> TellBookerOfManyAsync(
+        RoomBooking first, int count, string what, CancellationToken cancellationToken = default) =>
+        RaiseAsync(first.TenantId, first.Id, first.BookingNumber, BookingsChanged, ToBooker, [first.BookedById], new Dictionary<string, object>
+        {
+            ["What"] = what,
+            ["Count"] = count,
+            ["When"] = RoomBookingRules.Describe(RoomBookingRules.AsUtc(first.StartDateTime), RoomBookingRules.AsUtc(first.EndDateTime)),
+            ["ActionPath"] = MyBookingsLink,
+        }, null, actorToo: false, cancellationToken);
 
     private async Task<IReadOnlySet<Guid>> RaiseAsync(
         Guid tenantId, Guid entityId, string reference, string notice, string audience, IEnumerable<Guid> employeeIds,
@@ -302,6 +323,10 @@ public sealed class CompanyScheduleNotices
             "Sent in the app to whoever booked a room when the desk marks the booking a no-show — held and not used (lane 3b-2), with the no-show email.",
             "Marked a no-show: {{RoomName}}",
             "{{BookingNumber}} — {{When}} — was marked a no-show: the room was held and not used."),
+        new(BookingsChanged, ToBooker, "Room bookings: several changed together (booker)",
+            "Sent in the app, once, to whoever booked a room when one act approves, does not approve or cancels several of their bookings together — the dates of a series, a series cancelled, a room taken out of use (lane 3d-1) — with the email that lists them.",
+            "{{What}}: {{Count}} room bookings",
+            "From {{When}}. The email lists them."),
     };
 
     /// <summary>Seeds the topics a tenant does not have yet. Every notice calls it; once per tenant per scope.</summary>

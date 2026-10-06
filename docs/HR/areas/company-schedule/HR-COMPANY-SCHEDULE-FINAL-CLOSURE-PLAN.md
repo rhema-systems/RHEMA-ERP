@@ -42,8 +42,9 @@ has not started (the user: "don't start the actual development yet").
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
    **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
    rules and guards, 3b-1, approval on the engine and the booker told, 3b-2, the hourly lapse and completion and
-   no-show, and 3c, staff booking from `/me` (D-13), built and proved (no migration; UAT has the real Room Booking
-   Approval). Next 3d: "book this room for every date" of a series (D-12), which closes lane 3.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   no-show, 3c, staff booking from `/me` (D-13), and 3d-1, a room for every date of a series, approved once and the booker
+   told once (D-12), built and proved (no migration; UAT has the real Room Booking Approval). Next 3d-2: an extended
+   series brings its rooms, and the event page's Rooms card — which closes lane 3.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -319,7 +320,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1, 3b-2 and 3c built and proved (938/938 ×2; round-4 net 212/212); 3d next | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1, 3b-2, 3c and 3d-1 built and proved (989/989 ×2; round-4 net 212/212); 3d-2 next | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2438,7 +2439,8 @@ closes lane 2.*
 - [x] *✅ 3a.* Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
 - [x] *✅ 3a.* (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
       register's.
-- [ ] **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
+- [ ] *◐ 3d-1: booked for every date, approved once, told once; 3d-2 owes the extension's rooms and the event page's Rooms
+      card.* **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
       of a series (lane 2f-1's `RecurrenceSeriesId`): one booking per date, each through this lane's rules and
       lock; the dates where the room is taken are listed, the rest booked. A past or completed occurrence is
       never booked.
@@ -2525,6 +2527,83 @@ cannot open. **Found:** nothing refuses a booking whose start has already passed
 - **No past start from `/me`:** a new booking, or a changed start, may not be in the past; an unchanged start on a booking
   already under way is fine (it can be extended). The HR desk may still record a booking after the fact.
 - **A reason to cancel**, as at the desk.
+
+*3d source check (2026-10-06, at HEAD 1eda2ad49):* a series is its occurrences (`RecurrenceSeriesId`); series actions
+reach dates through `SeriesTargetsAsync` (never a started, completed or cancelled one); a booking linked to an occurrence
+already moves and cancels with it, and a series move is refused whole when any date's room is taken. Nothing books a
+series: a booking links one event, chosen on the HR booking form; the event page shows no room at all. Two precedents
+from 2f (the user's rulings for events): a series is approved once, and each guest is told once per series action.
+
+*3d rulings by the user (2026-10-06, all as recommended):*
+- **Approved once for the set:** a series booked in a room that needs approval — the first date goes to the engine and
+  its decision covers every date still waiting; deciding another is refused, naming the one that carries it; if the
+  carrying date is cancelled, deleted or lapses, the approval passes to the next; a date later moved on its own is
+  approved on its own.
+- **The booker told once per act,** listing the bookings and dates, when one act approves, does not approve or cancels
+  several of their bookings (series cancel and retiring a room included): one new email template, one in-app topic.
+- **Extending a series books the latest date's rooms** for the new dates where free, the taken dates listed; the person
+  extending is the booker.
+- **Two ways in:** the booking form's "every date from this one on" when the linked event is in a series, and a Rooms
+  card on the event page (its bookings; "Book a room" prefilled, with the series option on a series).
+- *Defaults stated at the check:* each date's booking keeps its distance from that date's start (as a moved event moves
+  its rooms); scope "this date and following" or "every date still to come"; a date the room cannot take (held, already
+  booked for it, too far ahead, too many people) is listed with its reason and the rest booked under one lock; if none
+  can be, the request is refused.
+- **Two slices:** 3d-1 — booking a series, approval once for the set, the booker told once; 3d-2 — the extension's rooms
+  and the event page's Rooms card.
+
+*3d-1 — what was built (2026-10-06): a room for every date of a series, approved once, the booker told once (D-12).*
+- **No migration.** One email (`BookingsChanged`, "Room Bookings Changed": 56 templates), one in-app topic (20).
+- **`POST bookings/series`** (Write; `IRoomBookingService.CreateForSeriesAsync`): the window given for the linked occurrence;
+  each date in the scope still to come (`CompanyEventSeries.Reach`, now shared with the event series actions) booked at
+  the same distance from its own start, for the same length; each through the single booking's rules — its event's days,
+  the room's limits and seats, no live booking holding the room, the room not already booked for that date — under the
+  room's one lock in one transaction. A date it cannot take is listed with the reason, the rest booked; none bookable,
+  nothing booked (422). The answer: booked, not booked, how many dates were left alone (started, completed, cancelled),
+  and which booking carries the approval.
+- **Approved once for the set** (`RoomBookingDesk`; the set is the same booker's bookings of the same room for the same
+  series, read from the bookings and their events — no table): only the first date asks; approving covers every date still
+  waiting with nothing of its own under way, not approving cancels them; deciding another is refused, naming the carrier
+  (`RefuseSharedElsewhereAsync`). When the carrier is cancelled, deleted or lapses, the approval passes to the next date
+  still to come (`PassApprovalOnAsync`) — started through `IWorkflowService.StartApprovalWorkflowAsAsync` in the name of
+  whoever started the one withdrawn, so the hourly lapse can pass it on with nobody signed in, and the approver is not
+  barred. The withdrawals now answer who started what they withdrew. Dates moved with their series ask again once per set
+  (the event service's flush groups them).
+- **Told once:** when one act approves, does not approve or cancels several of a booker's bookings — the set decided, a
+  series cancelled, a room taken out of use — each booker gets one notice (`BookingsChanged`: "Approved: 5 room
+  bookings", linked to `/me/room-bookings`) and one email listing them, each with its reason. One booking keeps the
+  single-booking notice.
+- **Screens:** the HR booking form's "Which dates" when the linked event is in a series ("Book the dates"), the free-room
+  search said to check this date only, and a result card listing what was booked and not. The event summary carries
+  `recurrenceSeriesId` and `occurrenceNumber`. `SeriesScopeField` takes its closing clause.
+
+*Proof (UAT, API in Staging; the real Room Booking Approval live):*
+- `run-final-review.mjs` blocks 1a–3d-1: **989/989 on two clean passes**, first time. 3d-1 has **51 assertions**:
+  - **booking a series:** every date still to come but the one the room is held on, the held date naming the booking; the
+    cancelled date counted as left alone; each linked to its own date; each half an hour before its own start — the date
+    moved to 14:00 at 13:30; booking again refused, each date already booked; asked from the fourth with "every date",
+    the dates inside the room's 25 days booked and the rest listed as too far ahead; too many people on every date
+    refused; one date, and a single event, refused;
+  - **approved once:** Tentative throughout, only the first under way; deciding the third refused, naming the first; B
+    approves the first — all five Confirmed by B, nothing left under way; the booker told once in the app (linked to
+    their bookings), never per date, and by one email listing all five;
+  - **the series moved:** every date waiting again, one approval asking for all, on the first;
+  - **told once:** a room retired with five of the booker's bookings — one notice, one email saying why; the series
+    cancelled — eight bookings in two rooms cancelled, no approval left, one notice and one email;
+  - **not approved:** deciding the second refused, naming the carrier; not approving the first cancels all four with the
+    reason, one notice and one email;
+  - **passed on:** the first cancelled by its booker — the second carries it; the second deleted — the third; the third
+    lapsing in the sweep — the fourth, started in the booker's name; B approves the fourth and covers the fifth.
+- **Regression:** the round-4 net **212/212**; recruitment **59/59**; the templates probe **42/42** (its own total moved to
+  56 — the one pin missed at the build; the screen was right); `run-lane-n` **109/115**, the six section-J failures of #40,
+  its TOTAL 56 and B7 with the new raw `BookingList`.
+- **The API log:** no request answered 500; no approval failed to start, withdraw or pass on, and no booker notice failed;
+  six pass-ons, three a pass. The ERR lines are the known kinds. The blocking watcher's first pass logged the suite's own
+  notice counts scanning `Notifications` (3–6 s parallel waits, no blocker) and sub-second lock waits on notice inserts;
+  its second pass nothing.
+- **After the runs:** every RoomBooking approval the runs started is finished (10 completed, 20 cancelled); no CSF booking
+  is live; no company-schedule notice to a real login is live; every harness login is off; the R4D requisition's notices
+  withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 *3c — what was built (2026-10-06): staff book rooms from the portal (D-13).*
 - **No migration**, no template, no in-app topic.
@@ -3407,3 +3486,10 @@ built API, so no web host and no seeders).
     answered 500.
 
   Next: 3d — "book this room for every date" of a series (D-12), which closes lane 3.
+- **2026-10-06** — **3c committed** (`1eda2ad49`). **Lane 3, slice 3d source-checked, its four questions settled by the
+  user as recommended (lane 3 State), split in two; 3d-1 built and proved** (booking a series, approved once, told once).
+  - **Results:** `run-final-review.mjs` scored 989/989 on two clean passes, with 51 checks in 3d-1, first time. The
+    round-4 net was 212/212, recruitment 59/59, the templates probe 42/42 (after its own total was moved to 56) and
+    `run-lane-n` 109/115 (section J, #40). No request answered 500; the watcher's second pass was silent.
+
+  Next: 3d-2 — an extended series brings its rooms; the event page's Rooms card. It closes lane 3.

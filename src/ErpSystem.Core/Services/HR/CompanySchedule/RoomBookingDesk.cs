@@ -26,6 +26,14 @@ namespace ErpSystem.Core.Services.HR.CompanySchedule;
 ///
 /// <para><b>Never fails the act.</b> Every caller has saved first; an approval that cannot start, a withdrawal or a
 /// notice that fails is logged, not thrown.</para>
+///
+/// <para><b>A series' dates (lane 3d-1, the user's rulings).</b> The dates of a series booked together — the same booker's
+/// bookings of the same room for occurrences of the same series — are <b>approved once</b>: the first asks, and its
+/// decision covers every date still waiting with no approval of its own under way (<see cref="SharingSetAsync"/>);
+/// deciding another is refused, naming the one that carries it; when the carrier is cancelled, deleted or lapses the
+/// approval passes on (<see cref="PassApprovalOnAsync"/>). There is no set table: the set is read from the bookings and
+/// their events, as an event series is read from its occurrences. And the booker is <b>told once per act</b>, listing the
+/// bookings, when one act approves, does not approve or cancels several of them.</para>
 /// </remarks>
 public sealed class RoomBookingDesk
 {
@@ -40,6 +48,8 @@ public sealed class RoomBookingDesk
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<RoomBookingDesk> _logger;
     private readonly IWorkflowEngine _engine;
+    // Lane 3d-1: passing a set's approval on with nobody signed in (the hourly lapse), in a named login's name.
+    private readonly IWorkflowService _workflowService;
 
     public RoomBookingDesk(
         IWorkflowIntegrationService workflow,
@@ -49,7 +59,8 @@ public sealed class RoomBookingDesk
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         ILogger<RoomBookingDesk> logger,
-        IWorkflowEngine engine)
+        IWorkflowEngine engine,
+        IWorkflowService workflowService)
     {
         _workflow = workflow;
         _workflowAdapters = workflowAdapters;
@@ -59,6 +70,7 @@ public sealed class RoomBookingDesk
         _currentUser = currentUser;
         _logger = logger;
         _engine = engine;
+        _workflowService = workflowService;
     }
 
     // ---- the engine ----
@@ -109,17 +121,150 @@ public sealed class RoomBookingDesk
     public void ApplyOutcome(RoomBooking b, WorkflowOutcome outcome, Guid deciderEmployeeId, string? reason = null) =>
         _workflowAdapters.GetAdapter(WorkflowEntityType).ApplyApprovalOutcome(b, outcome, deciderEmployeeId, reason);
 
-    /// <summary>Withdraws an approval still under way — the booking was cancelled, deleted or moved.</summary>
-    public async Task WithdrawApprovalAsync(RoomBooking b, string reason)
+    /// <summary>
+    /// Withdraws an approval still under way — the booking was cancelled, deleted or moved. Answers the login that started
+    /// the approval withdrawn, or null when none was under way (lane 3d-1: whose name a passed-on approval goes in).
+    /// </summary>
+    public async Task<Guid?> WithdrawApprovalAsync(RoomBooking b, string reason)
     {
         try
         {
-            if (await _workflow.HasActiveApprovalInstanceAsync(WorkflowEntityType, b.Id))
-                await _workflow.CancelWorkflowAsync(WorkflowEntityType, b.Id, reason);
+            if (!(await ActiveInstancesAsync(b.TenantId, [b.Id], CancellationToken.None)).TryGetValue(b.Id, out var startedBy))
+                return null;
+            await _workflow.CancelWorkflowAsync(WorkflowEntityType, b.Id, reason);
+            return startedBy;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not withdraw the approval of booking {BookingNumber}.", b.BookingNumber);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Withdraws the approval of a booking cancelled or deleted, and — if it carried its set's approval — passes it to the
+    /// next date still waiting (lane 3d-1, the user's ruling).
+    /// </summary>
+    public async Task WithdrawAndPassOnAsync(RoomBooking b, string reason, CancellationToken cancellationToken)
+    {
+        if (await WithdrawApprovalAsync(b, reason) is { } startedBy)
+            await PassApprovalOnAsync(b, startedBy, cancellationToken);
+    }
+
+    // ---- a series' dates booked together (lane 3d-1) ----
+
+    /// <summary>The series of the event a booking is for, or null for a booking of no event or a single event.</summary>
+    private async Task<Guid?> SeriesOfAsync(RoomBooking b, CancellationToken cancellationToken)
+    {
+        if (b.EventId is not { } eventId) return null;
+        return await _unitOfWork.Repository<CompanyEvent>().GetQueryable().AsNoTracking()
+            .Where(e => e.Id == eventId && e.TenantId == b.TenantId)
+            .Select(e => e.RecurrenceSeriesId)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// The other dates booked with <paramref name="b"/> that still wait: the same booker's bookings of the same room for the
+    /// same series, Tentative and not cancelled.
+    /// </summary>
+    private IQueryable<RoomBooking> WaitingWith(RoomBooking b, Guid seriesId) =>
+        _unitOfWork.Repository<RoomBooking>().GetQueryable()
+            .Where(x => x.TenantId == b.TenantId && x.Id != b.Id && x.RoomId == b.RoomId && x.BookedById == b.BookedById
+                        && !x.IsCancelled && x.Status == BookingStatus.Tentative
+                        && x.EventId != null && x.Event!.RecurrenceSeriesId == seriesId);
+
+    /// <summary>
+    /// The approvals under way on the given bookings, as booking id → the login that started it. Read straight from the
+    /// engine's table, tenant-explicit: the hourly lapse asks it with nobody signed in.
+    /// </summary>
+    private async Task<Dictionary<Guid, Guid>> ActiveInstancesAsync(Guid tenantId, IEnumerable<Guid> bookingIds, CancellationToken cancellationToken)
+    {
+        var ids = bookingIds.Distinct().ToList();
+        if (ids.Count == 0) return new();
+        var rows = await _unitOfWork.Repository<WorkflowInstance>().GetQueryable().AsNoTracking()
+            .Where(i => i.TenantId == tenantId && ids.Contains(i.EntityId)
+                        && (i.Status == WorkflowInstanceStatus.Created || i.Status == WorkflowInstanceStatus.InProgress
+                            || i.Status == WorkflowInstanceStatus.Waiting || i.Status == WorkflowInstanceStatus.Suspended))
+            .Select(i => new { i.EntityId, i.InitiatedById, i.CreatedAt })
+            .ToListAsync(cancellationToken);
+        return rows.GroupBy(r => r.EntityId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(r => r.CreatedAt).First().InitiatedById);
+    }
+
+    /// <summary>
+    /// The dates a decision on <paramref name="b"/> also decides (the user's ruling: approved once for the set) — the other
+    /// dates booked with it still waiting with no approval of their own under way — tracked, in date order. Empty for a
+    /// booking of no series.
+    /// </summary>
+    /// <remarks>
+    /// A date moved on its own after approval was sent back for an approval of its own (D-10), and keeps it. As for an
+    /// event series, a decision on that date also covers the dates still waiting with nothing under way.
+    /// </remarks>
+    public async Task<List<RoomBooking>> SharingSetAsync(RoomBooking b, CancellationToken cancellationToken)
+    {
+        if (await SeriesOfAsync(b, cancellationToken) is not { } seriesId) return [];
+        var waiting = await WaitingWith(b, seriesId).OrderBy(x => x.StartDateTime).ToListAsync(cancellationToken);
+        if (waiting.Count == 0) return waiting;
+        var underWay = await ActiveInstancesAsync(b.TenantId, waiting.Select(x => x.Id), cancellationToken);
+        return waiting.Where(x => !underWay.ContainsKey(x.Id)).ToList();
+    }
+
+    /// <summary>
+    /// Refuses a decision on a date whose approval is under way on another date booked with it (the user's ruling) —
+    /// naming the one to decide. A date with an approval of its own is decided on its own.
+    /// </summary>
+    public async Task RefuseSharedElsewhereAsync(RoomBooking b, string verb, CancellationToken cancellationToken)
+    {
+        if (await SeriesOfAsync(b, cancellationToken) is not { } seriesId) return;
+        if ((await ActiveInstancesAsync(b.TenantId, [b.Id], cancellationToken)).Count > 0) return;
+
+        var others = await WaitingWith(b, seriesId).AsNoTracking()
+            .OrderBy(x => x.StartDateTime)
+            .Select(x => new { x.Id, x.BookingNumber, x.StartDateTime, x.EndDateTime })
+            .ToListAsync(cancellationToken);
+        var underWay = await ActiveInstancesAsync(b.TenantId, others.Select(x => x.Id), cancellationToken);
+        if (others.FirstOrDefault(x => underWay.ContainsKey(x.Id)) is { } carrier)
+            throw new InvalidOperationException(
+                $"{b.BookingNumber} is approved with the other dates booked with it: {verb} {carrier.BookingNumber} "
+              + $"({RoomBookingRules.Describe(RoomBookingRules.AsUtc(carrier.StartDateTime), RoomBookingRules.AsUtc(carrier.EndDateTime))}), "
+              + "and the decision covers this one too.");
+    }
+
+    /// <summary>
+    /// When the date that carried its set's approval is cancelled, deleted or lapses (the user's ruling), the approval
+    /// passes to the next date still waiting and still to come — in the name of the login that started the one withdrawn,
+    /// so the booker is still the one asking and the approver still not barred. Nothing happens when another date already
+    /// has an approval under way, or nothing waits.
+    /// </summary>
+    /// <remarks>
+    /// Tenant-explicit (<see cref="IWorkflowService.StartApprovalWorkflowAsAsync"/>): the hourly lapse runs it with nobody
+    /// signed in, where the integration's submit throws. A date whose start has passed is skipped — it lapses itself.
+    /// </remarks>
+    public async Task PassApprovalOnAsync(RoomBooking from, Guid startedBy, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (await SeriesOfAsync(from, cancellationToken) is not { } seriesId) return;
+            var now = DateTime.UtcNow;
+            var waiting = await WaitingWith(from, seriesId).AsNoTracking()
+                .Where(x => x.StartDateTime > now)
+                .OrderBy(x => x.StartDateTime)
+                .Select(x => new { x.Id, x.BookingNumber })
+                .ToListAsync(cancellationToken);
+            if (waiting.Count == 0) return;
+            if ((await ActiveInstancesAsync(from.TenantId, waiting.Select(x => x.Id), cancellationToken)).Count > 0) return;
+
+            var next = waiting[0];
+            var result = await _workflowService.StartApprovalWorkflowAsAsync(WorkflowEntityType, next.Id, startedBy, from.TenantId);
+            if (result.Success)
+                _logger.LogInformation("The approval of the dates booked with {From} passed to {Next}", from.BookingNumber, next.BookingNumber);
+            else
+                _logger.LogWarning("The approval of the dates booked with {From} could not pass to {Next}: {Message}; they wait for the approve tier.",
+                    from.BookingNumber, next.BookingNumber, result.Message);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The approval of the dates booked with {From} could not be passed on; they wait for the approve tier.", from.BookingNumber);
         }
     }
 
@@ -132,7 +277,8 @@ public sealed class RoomBookingDesk
     /// asking the desk. So the engine is asked directly, by the instance, in the name of the login that started the
     /// approval (the booker's): its activity log needs a real user, and the reason says it lapsed.
     /// </remarks>
-    public async Task WithdrawLapsedApprovalAsync(RoomBooking b, string reason, CancellationToken cancellationToken)
+    /// <returns>The login that started the approval withdrawn, or null when none was under way (lane 3d-1).</returns>
+    public async Task<Guid?> WithdrawLapsedApprovalAsync(RoomBooking b, string reason, CancellationToken cancellationToken)
     {
         try
         {
@@ -143,12 +289,14 @@ public sealed class RoomBookingDesk
                 .OrderByDescending(i => i.CreatedAt)
                 .Select(i => new { i.Id, i.InitiatedById })
                 .FirstOrDefaultAsync(cancellationToken);
-            if (instance is null) return;
+            if (instance is null) return null;
             await _engine.CancelWorkflowAsync(instance.Id, instance.InitiatedById, reason);
+            return instance.InitiatedById;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not withdraw the approval of lapsed booking {BookingNumber}.", b.BookingNumber);
+            return null;
         }
     }
 
@@ -176,6 +324,98 @@ public sealed class RoomBookingDesk
                 tokens["CancellationReason"] = b.CancellationReason;
             },
             notApproved ? "booking not approved" : "booking cancelled", cancellationToken);
+
+    /// <summary>
+    /// Several bookings approved by one act — the dates of a series (lane 3d-1). Each booker is told once, listing theirs;
+    /// one booking uses the single-booking notice.
+    /// </summary>
+    public async Task TellApprovedAsync(IReadOnlyList<RoomBooking> bookings, string? approvedBy, CancellationToken cancellationToken)
+    {
+        foreach (var mine in bookings.GroupBy(b => b.BookedById).Select(g => g.OrderBy(b => b.StartDateTime).ToList()))
+        {
+            if (mine.Count == 1) await TellApprovedAsync(mine[0], approvedBy, cancellationToken);
+            else await TellBookerOfManyAsync(mine, "Approved", "Bookings approved",
+                $"These bookings of yours have been approved{(approvedBy is null ? string.Empty : $" by {approvedBy}")}. The rooms are yours.",
+                withReasons: false, "bookings approved", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Several bookings cancelled — or not approved — by one act: the dates of a series, a series cancelled, a room taken
+    /// out of use (lane 3d-1). Each booker is told once, listing theirs, each with its reason; one booking uses the
+    /// single-booking notice.
+    /// </summary>
+    public async Task TellCancelledAsync(IReadOnlyList<RoomBooking> bookings, bool notApproved, CancellationToken cancellationToken)
+    {
+        foreach (var mine in bookings.GroupBy(b => b.BookedById).Select(g => g.OrderBy(b => b.StartDateTime).ToList()))
+        {
+            if (mine.Count == 1) await TellCancelledAsync(mine[0], notApproved, cancellationToken);
+            else if (notApproved)
+                await TellBookerOfManyAsync(mine, "Not approved", "Bookings not approved",
+                    "These bookings of yours were not approved, and the rooms are released.", withReasons: true, "bookings not approved", cancellationToken);
+            else
+                await TellBookerOfManyAsync(mine, "Cancelled", "Bookings cancelled",
+                    "These bookings of yours have been cancelled, and the rooms are released.", withReasons: true, "bookings cancelled", cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Tells one booker of several of their bookings at once (lane 3d-1, the user's ruling): one email listing them —
+    /// each room, time and number, and its reason when <paramref name="withReasons"/> — and one notice in the app. Never of
+    /// their own act; never fails the act.
+    /// </summary>
+    private async Task TellBookerOfManyAsync(
+        IReadOnlyList<RoomBooking> mine, string what, string title, string summary, bool withReasons, string description,
+        CancellationToken cancellationToken)
+    {
+        var first = mine[0];
+        try
+        {
+            if (await _notices.ActorEmployeeIdAsync(cancellationToken) == first.BookedById) return;
+
+            var booker = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                .Where(x => x.Id == first.BookedById && x.TenantId == first.TenantId && x.IsActive)
+                .Select(x => new { x.FirstName, x.LastName, x.EmailAddress })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (booker is null) return;
+
+            var roomIds = mine.Select(b => b.RoomId).Distinct().ToList();
+            var rooms = await _unitOfWork.Repository<MeetingRoom>().GetQueryableIncludingDeleted(r => roomIds.Contains(r.Id))
+                .AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.RoomName, cancellationToken);
+
+            if (!string.IsNullOrWhiteSpace(booker.EmailAddress))
+                await SendAsync(first.TenantId, CompanyScheduleEmailCatalog.Events.BookingsChanged, booker.EmailAddress,
+                    new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["BookerName"] = $"{booker.FirstName} {booker.LastName}".Trim(),
+                        ["ChangeTitle"] = title,
+                        ["ChangeSummary"] = summary,
+                        ["BookingCount"] = mine.Count.ToString(CultureInfo.InvariantCulture),
+                        ["BookingList"] = BookingListHtml(mine, rooms, withReasons),
+                    }, description);
+            await _notices.TellBookerOfManyAsync(first, mine.Count, what, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "The {Description} notice for {Count} bookings from {BookingNumber} could not be sent; they are saved.",
+                description, mine.Count, first.BookingNumber);
+        }
+    }
+
+    /// <summary>
+    /// The bookings a several-at-once email lists — built here, every value encoded, and emitted raw
+    /// (<c>{{{BookingList}}}</c>, declared HTML on the catalogue), as a series email's dates are.
+    /// </summary>
+    private static string BookingListHtml(IEnumerable<RoomBooking> mine, IReadOnlyDictionary<Guid, string> rooms, bool withReasons) =>
+        "<ul style='margin:0.5rem 0 1rem;padding-left:1.25rem'>"
+        + string.Concat(mine.Select(b =>
+        {
+            var line = $"{rooms.GetValueOrDefault(b.RoomId, "the room")} — "
+                       + $"{RoomBookingRules.Describe(RoomBookingRules.AsUtc(b.StartDateTime), RoomBookingRules.AsUtc(b.EndDateTime))} ({b.BookingNumber})";
+            var why = withReasons ? CompanyEventRules.Clean(b.CancellationReason) : null;
+            return $"<li>{System.Net.WebUtility.HtmlEncode(line)}{(why is null ? string.Empty : $"<br><span style='color:#6b7280'>{System.Net.WebUtility.HtmlEncode(why)}</span>")}</li>";
+        }))
+        + "</ul>";
 
     /// <summary>
     /// Tells the booker of an outcome, in the app and by email — never of their own act. Reads the booker, the room and

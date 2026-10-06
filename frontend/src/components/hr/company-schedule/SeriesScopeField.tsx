@@ -13,11 +13,14 @@ export function SeriesScopeField({
   value,
   onChange,
   hint,
+  tail = 'each guest is told once.',
 }: {
   value: SeriesScope;
   onChange: (scope: SeriesScope) => void;
   /** What happens to the other dates, in the action's own words. */
   hint: string;
+  /** The note's last clause — who is told (lane 3d-1: a room booking tells no guest). */
+  tail?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -31,7 +34,7 @@ export function SeriesScopeField({
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground">
-        {hint} A date that has started, been completed or been cancelled is left as it is; each guest is told once.
+        {hint} A date that has started, been completed or been cancelled is left as it is; {tail}
       </p>
     </div>
   );

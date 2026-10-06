@@ -119,7 +119,9 @@ public static class CompanyScheduleMappingExtensions
             VenueName = entity.VenueName,
             Status = entity.Status,
             OrganizerName = entity.Organizer?.FullName ?? string.Empty,
-            EstimatedAttendees = entity.EstimatedAttendees
+            EstimatedAttendees = entity.EstimatedAttendees,
+            RecurrenceSeriesId = entity.RecurrenceSeriesId,
+            OccurrenceNumber = entity.OccurrenceNumber
         };
     }
 

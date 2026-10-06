@@ -88,6 +88,12 @@ public static class CompanyScheduleEmailCatalog
 
         /// <summary>Sent to the booker when the desk marks a booking a no-show — booked and not used (lane 3b-2).</summary>
         public const string BookingNoShow = "BookingNoShow";
+
+        /// <summary>
+        /// Sent once to a booker when one act approves, does not approve or cancels several of their bookings together,
+        /// listing them (lane 3d-1, the user's ruling: told once per act, as a series' guests are).
+        /// </summary>
+        public const string BookingsChanged = "BookingsChanged";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -545,6 +551,34 @@ public static class CompanyScheduleEmailCatalog
             Tokens = BookingTokens(),
         });
 
+        // ── 17. Several room bookings changed together (lane 3d-1) ─────────────
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.BookingsChanged,
+            Name = "Room Bookings Changed",
+            Category = "Booking",
+            Description =
+                "Sent once to whoever booked meeting rooms when one act approves, does not approve or cancels several of "
+                + "their bookings together — the dates of a series booked at once, a series cancelled, a room taken out of "
+                + "use — listing them, each with its reason (lane 3d-1). One booking uses the single-booking email. Nobody "
+                + "is told of their own act.",
+            DefaultSubject = "{{ChangeTitle}}: {{BookingCount}} room bookings",
+            DefaultHtmlBody = Shell(BlueGradient, "{{ChangeTitle}}",
+                @"  <p>Hi <strong>{{BookerName}}</strong>,</p>
+  <p>{{ChangeSummary}}</p>
+  {{{BookingList}}}"),
+            Tokens = new List<EmailTokenDescriptor>
+            {
+                T("BookerName", "Who booked the rooms, to whom the email is addressed.", "Ama Serwaa"),
+                T("ChangeTitle", "The outcome in a few words: Bookings approved, Bookings not approved or Bookings cancelled.", "Bookings approved"),
+                T("ChangeSummary", "The outcome in a sentence.", "These bookings of yours have been approved by Efua Asante. The rooms are yours."),
+                T("BookingCount", "How many bookings it is about.", "4"),
+                BookingListToken(),
+                T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+            },
+        });
+
         return list;
     }
 
@@ -579,6 +613,18 @@ public static class CompanyScheduleEmailCatalog
         "SeriesDates",
         "The dates, as a list the system builds: each date and time, and its event number. Use it raw: {{{SeriesDates}}}.",
         "<ul><li>Monday, 6 October 2026, 09:00 – 10:00 (EVT-2026-00051)</li><li>Monday, 13 October 2026, 09:00 – 10:00 (EVT-2026-00052)</li></ul>")
+    {
+        IsHtml = true,
+    };
+
+    /// <summary>
+    /// The bookings a several-at-once email lists (lane 3d-1), built by the application — each room, time and number, and its
+    /// reason when there is one — and emitted RAW, <c>{{{BookingList}}}</c>, so it is declared HTML.
+    /// </summary>
+    private static EmailTokenDescriptor BookingListToken() => new(
+        "BookingList",
+        "The bookings, as a list the system builds: each room, time and booking number, and why when it was cancelled. Use it raw: {{{BookingList}}}.",
+        "<ul><li>Boardroom — Monday 6 October 2026, 09:00–11:00 (BK-2026-00051)</li><li>Boardroom — Monday 13 October 2026, 09:00–11:00 (BK-2026-00052)</li></ul>")
     {
         IsHtml = true,
     };

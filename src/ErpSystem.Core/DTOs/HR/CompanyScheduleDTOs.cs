@@ -190,6 +190,10 @@ public class CompanyEventSummaryDto
     public string StatusName => Status.ToString();
     public string OrganizerName { get; set; } = string.Empty;
     public int? EstimatedAttendees { get; set; }
+
+    /// <summary>The series it belongs to, if any (lane 3d-1: the booking form offers to book every date).</summary>
+    public Guid? RecurrenceSeriesId { get; set; }
+    public int? OccurrenceNumber { get; set; }
 }
 
 /// <summary>
@@ -1466,6 +1470,45 @@ public class CancelRoomBookingDto
     [Required]
     [MaxLength(1000)]
     public string CancellationReason { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Booking a room for several dates of a series (lane 3d-1, D-12): the window is given for the linked occurrence, and
+/// each other date is booked at the same distance from its own start, for the same length.
+/// </summary>
+public class CreateRoomBookingSeriesDto : CreateRoomBookingDto
+{
+    /// <summary>This date and following, or every date still to come. A single date is an ordinary booking.</summary>
+    public SeriesScope SeriesScope { get; set; } = SeriesScope.ThisAndFollowing;
+}
+
+/// <summary>What booking a room for a series did (lane 3d-1): the dates booked, and each date it could not take, saying why.</summary>
+public class RoomBookingSeriesResultDto
+{
+    public List<RoomBookingSummaryDto> Booked { get; set; } = new();
+    public List<RoomBookingSeriesSkipDto> NotBooked { get; set; } = new();
+
+    /// <summary>Dates the scope covered and left alone: started, completed or cancelled.</summary>
+    public int Closed { get; set; }
+
+    /// <summary>
+    /// On a room needing approval, the booking whose approval covers the rest (the user's ruling: approved once for the
+    /// set); null otherwise.
+    /// </summary>
+    public string? ApprovalCarriedBy { get; set; }
+}
+
+/// <summary>A date of a series the room was not booked for, and why (lane 3d-1).</summary>
+public class RoomBookingSeriesSkipDto
+{
+    public Guid EventId { get; set; }
+    public string EventNumber { get; set; } = string.Empty;
+    public int OccurrenceNumber { get; set; }
+
+    /// <summary>The window that date would have had.</summary>
+    public DateTime StartDateTime { get; set; }
+    public DateTime EndDateTime { get; set; }
+    public string Reason { get; set; } = string.Empty;
 }
 
 /// <summary>

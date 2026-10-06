@@ -44,6 +44,8 @@ import type {
   CreateFiscalYear,
   CreateMeetingRoom,
   CreateRoomBooking,
+  CreateRoomBookingSeries,
+  RoomBookingSeriesResult,
   EventAttachment,
   EventAttendance,
   EventCategory,
@@ -482,6 +484,14 @@ class RoomBookingService {
 
   create(data: CreateRoomBooking): Promise<RoomBooking> {
     return apiService.post<RoomBooking>(`${this.baseUrl}/bookings`, data);
+  }
+
+  /**
+   * Books the room for every date of the linked event's series in the scope still to come (lane 3d-1); the dates it
+   * cannot take come back with the reason. On a room needing approval the first date's approval covers the rest.
+   */
+  createForSeries(data: CreateRoomBookingSeries): Promise<RoomBookingSeriesResult> {
+    return apiService.post<RoomBookingSeriesResult>(`${this.baseUrl}/bookings/series`, data);
   }
 
   update(id: string, data: UpdateRoomBooking): Promise<RoomBooking> {

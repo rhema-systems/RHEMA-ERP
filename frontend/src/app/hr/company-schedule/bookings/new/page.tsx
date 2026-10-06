@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
@@ -22,8 +23,9 @@ import {
   TextareaField,
   toIsoInstant,
 } from '@/components/hr/employee/tabs/fields';
+import { SeriesScopeField } from '@/components/hr/company-schedule/SeriesScopeField';
 import { companyEventService, meetingRoomService, roomBookingService } from '@/services/hr/company-schedule.service';
-import type { MeetingRoomSummary } from '@/types/hr/company-schedule';
+import type { MeetingRoomSummary, RoomBookingSeriesResult, SeriesScope } from '@/types/hr/company-schedule';
 
 /**
  * Booking a room.
@@ -34,6 +36,11 @@ import type { MeetingRoomSummary } from '@/types/hr/company-schedule';
  * empty until both times are set.
  *
  * ⚠ **No booked-by field** — the API takes the booker from the token.
+ *
+ * **A series (lane 3d-1, D-12).** When the linked event is a date of a recurring event, "Which dates" offers this date
+ * and following, or every date: the window is this date's, and each other date is booked at the same distance from its
+ * own start. The room is checked here for this date only; the server checks each other date and lists those it cannot
+ * take, booking the rest — so the answer is a list, shown in place of moving to one booking's page.
  */
 
 const schema = z
@@ -57,12 +64,22 @@ type FormValues = z.infer<typeof schema>;
 
 const orNull = (s?: string) => (s && s.trim() ? s.trim() : null);
 
+/** "Tue 14 Oct 2026, 09:00–11:00" — a booking's window as the series result lists it. */
+const span = (startIso: string, endIso: string) => {
+  const s = new Date(startIso);
+  const e = new Date(endIso);
+  const t = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${s.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}, ${t(s)}–${t(e)}`;
+};
+
 export default function NewRoomBookingPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [seriesScope, setSeriesScope] = useState<SeriesScope>('ThisOccurrence');
+  const [seriesResult, setSeriesResult] = useState<RoomBookingSeriesResult | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema) as any,
@@ -100,10 +117,15 @@ export default function NewRoomBookingPage() {
     queryFn: () => companyEventService.getUpcoming(120),
   });
 
+  const eventId = form.watch('eventId');
+  const linkedEvent = (events ?? []).find((e) => e.id === eventId);
+  const inSeries = !!linkedEvent?.recurrenceSeriesId;
+  const bookSeries = inSeries && seriesScope !== 'ThisOccurrence';
+
   const onSubmit = form.handleSubmit(async (values) => {
     setSaving(true);
     try {
-      const created = await roomBookingService.create({
+      const body = {
         roomId: values.roomId,
         eventId: orNull(values.eventId),
         startDateTime: toIsoInstant(values.startDateTime) ?? '',
@@ -113,7 +135,25 @@ export default function NewRoomBookingPage() {
         specialRequirements: orNull(values.specialRequirements),
         cateringRequirements: orNull(values.cateringRequirements),
         notes: orNull(values.notes),
-      });
+      };
+      if (bookSeries && body.eventId) {
+        const result = await roomBookingService.createForSeries({
+          ...body,
+          eventId: body.eventId,
+          seriesScope: seriesScope as Exclude<SeriesScope, 'ThisOccurrence'>,
+        });
+        await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'bookings'] });
+        setSeriesResult(result);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        toast({
+          title: `Room booked for ${result.booked.length} date${result.booked.length === 1 ? '' : 's'}`,
+          description: result.notBooked.length
+            ? `${result.notBooked.length} date${result.notBooked.length === 1 ? '' : 's'} could not be booked — listed below.`
+            : undefined,
+        });
+        return;
+      }
+      const created = await roomBookingService.create(body);
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'bookings'] });
       toast({
         title: 'Room booked',
@@ -143,6 +183,56 @@ export default function NewRoomBookingPage() {
         description="You are recorded as the person booking."
         backHref="/hr/company-schedule/bookings"
       />
+
+      {seriesResult && (
+        <Card>
+          <CardHeader>
+            <CardTitle>
+              Booked for {seriesResult.booked.length} date{seriesResult.booked.length === 1 ? '' : 's'}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm">
+            {seriesResult.approvalCarriedBy && (
+              <p className="text-muted-foreground">
+                The room needs approval: {seriesResult.approvalCarriedBy} asks for all of them, and its decision covers the
+                rest.
+              </p>
+            )}
+            <ul className="space-y-1">
+              {seriesResult.booked.map((b) => (
+                <li key={b.id}>
+                  <Link href={`/hr/company-schedule/bookings/${b.id}`} className="font-medium hover:underline">
+                    {b.bookingNumber}
+                  </Link>{' '}
+                  — {span(b.startDateTime, b.endDateTime)} · {b.status === 'Tentative' ? 'awaiting approval' : b.statusName}
+                </li>
+              ))}
+            </ul>
+            {seriesResult.notBooked.length > 0 && (
+              <div className="space-y-1">
+                <p className="font-medium">Not booked</p>
+                <ul className="space-y-1">
+                  {seriesResult.notBooked.map((n) => (
+                    <li key={n.eventId}>
+                      {n.eventNumber} — {span(n.startDateTime, n.endDateTime)}:{' '}
+                      <span className="text-muted-foreground">{n.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {seriesResult.closed > 0 && (
+              <p className="text-muted-foreground">
+                {seriesResult.closed} date{seriesResult.closed === 1 ? '' : 's'} already started, completed or cancelled
+                {seriesResult.closed === 1 ? ' was' : ' were'} left alone.
+              </p>
+            )}
+            <Button asChild variant="outline">
+              <Link href="/hr/company-schedule/bookings">Go to the bookings</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader><CardTitle>When and how many</CardTitle></CardHeader>
@@ -209,6 +299,12 @@ export default function NewRoomBookingPage() {
               </div>
             </>
           )}
+          {bookSeries && (
+            <p className="text-xs text-muted-foreground">
+              Rooms are checked here for this date only. Each other date is checked when you book, and any the room cannot
+              take is listed.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -224,6 +320,14 @@ export default function NewRoomBookingPage() {
             emptyLabel="Not linked to an event"
             options={(events ?? []).map((e) => ({ value: e.id, label: `${e.eventNumber} — ${e.eventName}` }))}
           />
+          {inSeries && (
+            <SeriesScopeField
+              value={seriesScope}
+              onChange={setSeriesScope}
+              hint={`${linkedEvent?.eventNumber} is date ${linkedEvent?.occurrenceNumber ?? ''} of a recurring event. Book the room for its other dates too, each at the same time relative to its own start; the dates the room cannot take are listed and the rest booked.`}
+              tail="on a room needing approval, the first date asks and its decision covers the rest."
+            />
+          )}
           <FieldRow>
             <TextareaField form={form} name="specialRequirements" label="Special requirements" />
             <TextareaField form={form} name="cateringRequirements" label="Catering" />
@@ -243,7 +347,7 @@ export default function NewRoomBookingPage() {
         </Button>
         <Button type="submit" disabled={saving}>
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
-          Book room
+          {bookSeries ? 'Book the dates' : 'Book room'}
         </Button>
       </div>
     </form>

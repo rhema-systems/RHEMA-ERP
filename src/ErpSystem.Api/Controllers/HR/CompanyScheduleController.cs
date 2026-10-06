@@ -773,6 +773,22 @@ public class CompanyScheduleController : HrControllerBase
         return CreatedAtAction(nameof(GetBooking), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Books the room for every date of the linked event's series in the scope still to come (lane 3d-1, D-12): one booking
+    /// per date, each at the same distance from its date's start; the dates the room cannot take listed, saying why. On a
+    /// room needing approval the first date's approval covers the rest (the user's ruling).
+    /// </summary>
+    [HttpPost("bookings/series")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingSeriesResultDto>> CreateSeriesBookings([FromBody] CreateRoomBookingSeriesDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var bookedById, "Booking a room");
+        if (ctx != null) return ctx;
+
+        return Ok(await _bookingService.CreateForSeriesAsync(dto, bookedById, ct));
+    }
+
     [HttpPut("bookings/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<RoomBookingDto>> UpdateBooking(Guid id, [FromBody] UpdateRoomBookingDto dto)

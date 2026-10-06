@@ -225,6 +225,13 @@ public interface IRoomBookingService
     Task<byte[]> ExportCsvAsync(RoomBookingSearchDto search, CancellationToken cancellationToken = default);
 
     Task<RoomBookingDto> CreateAsync(CreateRoomBookingDto createDto, Guid bookedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Books the room for every date of the linked event's series in the scope still to come (lane 3d-1, D-12): one booking
+    /// per date under the room's rules and lock, each at the same distance from its date's start; the dates it cannot take
+    /// are listed, saying why. On a room needing approval the first date's approval covers the rest (the user's ruling).
+    /// </summary>
+    Task<RoomBookingSeriesResultDto> CreateForSeriesAsync(CreateRoomBookingSeriesDto dto, Guid bookedById, CancellationToken cancellationToken = default);
     Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default);
 

@@ -301,7 +301,7 @@ was off.
 
 Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
 template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
-**55 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two, lane 3b-1 two, lane 3b-2 one). Since this lane a tenant can reword any of them at **Administration → HR Settings →
+**56 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two, lane 3b-1 two, lane 3b-2 one, lane 3d-1 one). Since this lane a tenant can reword any of them at **Administration → HR Settings →
 Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
 and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
 is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
@@ -386,6 +386,7 @@ every render, and the escaped form would have printed their markup as text.
 | `CompanySchedule/BookingApproved` | Room Booking Approved | email | a booking of a room that needs approval is approved at its last stage; to its booker, with the in-app notice (lane 3b-1) | signed in | **Enforced** |
 | `CompanySchedule/BookingCancelled` | Room Booking Cancelled | email | a booking is cancelled by somebody other than its booker — by the desk, with its event, by retiring its room — or not approved; to its booker, with the reason (lane 3b-1). From lane 3b-2 also when the hourly sweep lapses one still Tentative at its start ("Not approved before it started.") — that send has nobody signed in, so under #40 it finds no mail server and only the in-app notice reaches the booker | signed in; the sweep's has nobody | **Enforced** |
 | `CompanySchedule/BookingNoShow` | Room Booking No-Show | email | the desk marks a confirmed booking whose start has passed a no-show — for good; to its booker, with the in-app notice (lane 3b-2) | signed in | **Enforced** |
+| `CompanySchedule/BookingsChanged` | Room Bookings Changed | email | one act approves, does not approve or cancels several of a booker's bookings together — a series' dates approved or not approved at once, a series cancelled, a room taken out of use; once to that booker, listing them with each reason, with one in-app notice (lane 3d-1, the user's ruling). One booking uses the single-booking email | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
 | `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
 | `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |
@@ -433,6 +434,13 @@ configurable**: a booking from the portal is never linked to an event, and its s
 past (`RoomBookingRules.SelfServiceStartGrace`; an unchanged start on a booking under way is allowed, so it can be
 extended). Every booker's in-app notice (approved, not approved, cancelled, no-show) now opens `/me/room-bookings/{id}`.
 Proof: `hr-company-schedule/run-final-review.mjs` block 3c, both positions.
+
+**A room for every date of a series (company-schedule final closure lane 3d-1, D-12) — no setting.** `POST
+api/CompanySchedule/bookings/series` (Write) books each date in the scope still to come at the same distance from its own
+start, under the room's own rules; the dates it cannot take are listed. Fixed in code, by the user's rulings: on a room
+needing approval the dates are **approved once** (the first asks; its decision covers the rest; it passes on when that
+date is cancelled, deleted or lapses), and a booker is **told once per act** about several bookings — the
+`BookingsChanged` email above and one in-app notice (topic `CompanySchedule.BookingsChanged.Booker`). Proof: block 3d-1.
 
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|

@@ -319,6 +319,9 @@ export interface CompanyEventSummary {
   statusName: string;
   organizerName: string;
   estimatedAttendees?: number | null;
+  /** The series it belongs to, if any (lane 3d-1: the booking form offers to book every date). */
+  recurrenceSeriesId?: string | null;
+  occurrenceNumber?: number | null;
 }
 
 export interface CompanyEventDetail extends CompanyEvent {
@@ -970,6 +973,34 @@ export interface UpdateRoomBooking {
 export interface CancelRoomBooking {
   bookingId: string;
   cancellationReason: string;
+}
+
+/**
+ * Booking a room for several dates of a series (lane 3d-1, D-12): the window is the linked occurrence's; each other date
+ * is booked at the same distance from its own start.
+ */
+export interface CreateRoomBookingSeries extends CreateRoomBooking {
+  eventId: string;
+  seriesScope: Exclude<SeriesScope, 'ThisOccurrence'>;
+}
+
+/** A date of a series the room was not booked for, and why. */
+export interface RoomBookingSeriesSkip {
+  eventId: string;
+  eventNumber: string;
+  occurrenceNumber: number;
+  startDateTime: string;
+  endDateTime: string;
+  reason: string;
+}
+
+export interface RoomBookingSeriesResult {
+  booked: RoomBookingSummary[];
+  notBooked: RoomBookingSeriesSkip[];
+  /** Dates the scope covered and left alone: started, completed or cancelled. */
+  closed: number;
+  /** On a room needing approval, the booking whose approval covers the rest. */
+  approvalCarriedBy?: string | null;
 }
 
 /**
