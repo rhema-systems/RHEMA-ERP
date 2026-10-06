@@ -42,9 +42,10 @@ has not started (the user: "don't start the actual development yet").
    (C-18, F-54) and the drill's event (C-51) — none with a migration; its screens await lane 5's browser walk.
    **Lane 3 (rooms and bookings) is source-checked and D-13 and D-18 settled (lane 3 State), in four slices; 3a, the
    rules and guards, 3b-1, approval on the engine and the booker told, 3b-2, the hourly lapse and completion and
-   no-show, 3c, staff booking from `/me` (D-13), and 3d-1, a room for every date of a series, approved once and the booker
-   told once (D-12), built and proved (no migration; UAT has the real Room Booking Approval). Next 3d-2: an extended
-   series brings its rooms, and the event page's Rooms card — which closes lane 3.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   no-show, 3c, staff booking from `/me` (D-13), 3d-1, a room for every date of a series, approved once and the booker
+   told once, and 3d-2, an extended series bringing its rooms and the event page's Rooms card (D-12), built and proved
+   (no migration; UAT has the real Room Booking Approval). ✅ Lane 3 is done (2026-10-06); its screens await lane 5's
+   walk. Next: lane 4 (milestones, fiscal, company profile) — source-check first.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -320,7 +321,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **0** | Schema: one migration (series, unit and gate columns, milestone documents, unique guards, upload category; no data steps — L0-1, L0-2) | — | ✅ 2026-10-04 | applied on UAT: `__EFMigrationsHistory` 142 → 143, every object present (§ 6) |
 | **1** | Closures: type drives scope through the audience resolver; `is-closure-date` fixed; leave and the statutory clocks read closures; approved leave and holidays re-charged; announcements on HR's click | — | ✅ 2026-10-05, slices 1a–1e (156/156 ×2; round-4 net 201/201 ×2); browser walk in lane 5 | `run-final-review.mjs` blocks 1a–1e |
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
-| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ◐ source-checked, four slices; 3a, 3b-1, 3b-2, 3c and 3d-1 built and proved (989/989 ×2; round-4 net 212/212); 3d-2 next | rooms block |
+| **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ☐ | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
@@ -2439,8 +2440,8 @@ closes lane 2.*
 - [x] *✅ 3a.* Rooms page: the delete toast says 403 when it is one; Delete hidden without Admin.
 - [x] *✅ 3a.* (D-9, C-32) Delete on the booking detail page, Admin-only and hidden otherwise, beside the
       register's.
-- [ ] *◐ 3d-1: booked for every date, approved once, told once; 3d-2 owes the extension's rooms and the event page's Rooms
-      card.* **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
+- [x] *✅ 3d-1: booked for every date, approved once, told once; ✅ 3d-2: an extended series brings its rooms, and the event
+      page's Rooms card.* **(D-12, moved here from lane 2f on the user's word, 2026-10-05)** "Book this room for every occurrence"
       of a series (lane 2f-1's `RecurrenceSeriesId`): one booking per date, each through this lane's rules and
       lock; the dates where the room is taken are listed, the rest booked. A past or completed occurrence is
       never booked.
@@ -2551,6 +2552,38 @@ from 2f (the user's rulings for events): a series is approved once, and each gue
   can be, the request is refused.
 - **Two slices:** 3d-1 — booking a series, approval once for the set, the booker told once; 3d-2 — the extension's rooms
   and the event page's Rooms card.
+
+*3d-2 — what was built (2026-10-06): an extended series brings its rooms; the event's rooms on its page (D-12). **Lane 3 is
+done.***
+- **No migration**, no template, no topic.
+- **`IRoomBookingService.CarryRoomsAsync`**, called by `ExtendSeriesAsync` after its save: each room the latest date still
+  holds is booked for the new dates by whoever extends — at the same distance from each date's start, for the same length,
+  its purpose, people and requirements copied — through 3d-1's per-date core (`BookDatesAsync`, extracted), which here
+  never refuses: a room out of use, or a date a room cannot take, is listed. On a room needing approval the new dates are
+  approved once. The extension's answer gains `rooms`; each date not booked is a warning naming the room. A login with no
+  employee link carries nothing and is told to book them (it cannot be a booker); a failure to carry never fails the
+  extension.
+- **`GET events/{id}/bookings`** (Read): an event's bookings, any status, in time order.
+- **Screens:** the event page's **Rooms card** (`EventRoomsCard`): its bookings with their status, linked; "Book a room"
+  and, on a series date, "Book for this and following dates", for whoever may book while the event is open. The booking
+  form reads `?event=&scope=` — the event chosen even beyond the upcoming list, its times and name filled where empty. The
+  extend dialog says rooms come too, and its toast lists them.
+
+*Proof (UAT, API in Staging; the real Room Booking Approval live):*
+- `run-final-review.mjs` blocks 1a–3d-2: **1002/1002 on two clean passes**, first time. 3d-2 has **13 assertions**: the
+  latest date holding three rooms (two by series, one alone); an event's bookings any status, in time order; extended by
+  three — three answers; the open room booked for the free dates, the held one listed naming its booking; each linked to
+  its new date, booked by the extender, its purpose copied; the approval room's new dates Tentative, the first carrying
+  the approval, only it under way; the room booked alone carried at its own 08:30 and the dates beyond its 30 days listed;
+  the dates not booked among the warnings; extended by admin — the date made, no room, told why.
+- **Regression:** the round-4 net **212/212**; recruitment **59/59**; the templates probe **42/42**; `run-lane-n`
+  **109/115**, the six section-J failures of #40.
+- **The API log:** no request answered 500; nothing failed to carry, start, withdraw or tell; each pass carried 1, 2 and 3
+  dates as the suite expects. The ERR lines are the known kinds. The blocking watcher logged one 1.9 s lock wait (the
+  notification dispatcher writing back notices it could not email), under its 3 s mark, and nothing else in two passes.
+- **After the runs:** every RoomBooking approval the runs started is finished (12 completed, 22 cancelled); no CSF booking
+  is live; no company-schedule notice to a real login is live; every harness login is off; the R4D requisition's notices
+  withdrawn twice (43, then 0). The API and the scanner stub are stopped.
 
 *3d-1 — what was built (2026-10-06): a room for every date of a series, approved once, the booker told once (D-12).*
 - **No migration.** One email (`BookingsChanged`, "Room Bookings Changed": 56 templates), one in-app topic (20).
@@ -3493,3 +3526,11 @@ built API, so no web host and no seeders).
     `run-lane-n` 109/115 (section J, #40). No request answered 500; the watcher's second pass was silent.
 
   Next: 3d-2 — an extended series brings its rooms; the event page's Rooms card. It closes lane 3.
+- **2026-10-06** — **3d-1 committed** (`18c8c8664`). **Lane 3, slice 3d-2 built and proved** (an extended series brings its
+  rooms; the event page's Rooms card) — **lane 3 is done.**
+  - **Results:** `run-final-review.mjs` scored 1002/1002 on two clean passes, with 13 checks in 3d-2, first time. The
+    round-4 net was 212/212, recruitment 59/59, the templates probe 42/42 and `run-lane-n` 109/115 (section J, #40). No
+    request answered 500.
+
+  Next: lane 4 — milestones (documents, recurring projection), fiscal (Finance's calendar, HR's retired), the company
+  profile. Source-check first; its decisions to the user.

@@ -441,6 +441,9 @@ start, under the room's own rules; the dates it cannot take are listed. Fixed in
 needing approval the dates are **approved once** (the first asks; its decision covers the rest; it passes on when that
 date is cancelled, deleted or lapses), and a booker is **told once per act** about several bookings — the
 `BookingsChanged` email above and one in-app notice (topic `CompanySchedule.BookingsChanged.Booker`). Proof: block 3d-1.
+Lane 3d-2, also fixed in code: **extending a series books the rooms its latest date still holds** for the new dates, by
+whoever extends (a login with no employee link carries none and is told); the dates a room cannot take are warnings. `GET
+api/CompanySchedule/events/{id}/bookings` (Read) feeds the event page's Rooms card. Proof: block 3d-2.
 
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|

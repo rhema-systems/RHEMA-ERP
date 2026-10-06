@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -41,7 +41,22 @@ import type { MeetingRoomSummary, RoomBookingSeriesResult, SeriesScope } from '@
  * and following, or every date: the window is this date's, and each other date is booked at the same distance from its
  * own start. The room is checked here for this date only; the server checks each other date and lists those it cannot
  * take, booking the rest — so the answer is a list, shown in place of moving to one booking's page.
+ *
+ * **From an event's page (lane 3d-2).** `?event={id}` chooses the event — read on its own, so one beyond the upcoming
+ * list is still offered — and fills the window with its times and the purpose with its name, when they are still empty;
+ * `&scope=ThisAndFollowing` (the Rooms card's second button) chooses the dates.
  */
+
+type EventOption = {
+  id: string;
+  eventNumber: string;
+  eventName: string;
+  recurrenceSeriesId?: string | null;
+  occurrenceNumber?: number | null;
+};
+
+const isSeriesScope = (s: string | null): s is Exclude<SeriesScope, 'ThisOccurrence'> =>
+  s === 'ThisAndFollowing' || s === 'WholeSeries';
 
 const schema = z
   .object({
@@ -76,9 +91,12 @@ export default function NewRoomBookingPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const params = useSearchParams();
+  const preEvent = params.get('event') ?? '';
+  const preScope = params.get('scope');
   const [saving, setSaving] = useState(false);
   const [searched, setSearched] = useState(false);
-  const [seriesScope, setSeriesScope] = useState<SeriesScope>('ThisOccurrence');
+  const [seriesScope, setSeriesScope] = useState<SeriesScope>(isSeriesScope(preScope) ? preScope : 'ThisOccurrence');
   const [seriesResult, setSeriesResult] = useState<RoomBookingSeriesResult | null>(null);
 
   const form = useForm<FormValues>({
@@ -87,7 +105,7 @@ export default function NewRoomBookingPage() {
       startDateTime: '',
       endDateTime: '',
       roomId: '',
-      eventId: '',
+      eventId: preEvent,
       purpose: '',
       expectedAttendees: 1,
       specialRequirements: '',
@@ -117,8 +135,34 @@ export default function NewRoomBookingPage() {
     queryFn: () => companyEventService.getUpcoming(120),
   });
 
+  // Lane 3d-2: the event the Rooms card came from, read on its own — it may lie beyond the upcoming list.
+  const { data: chosen } = useQuery({
+    queryKey: ['hr', 'company-schedule', 'events', preEvent],
+    queryFn: () => companyEventService.getById(preEvent),
+    enabled: !!preEvent,
+  });
+  const eventOptions = useMemo<EventOption[]>(() => {
+    const list: EventOption[] = [...(events ?? [])];
+    if (chosen && !list.some((e) => e.id === chosen.id)) list.unshift(chosen);
+    return list;
+  }, [events, chosen]);
+
+  // Its times and name fill the form once, where still empty: the booking is usually for the meeting's own hours.
+  const filled = useRef(false);
+  useEffect(() => {
+    if (!chosen || filled.current) return;
+    filled.current = true;
+    const day = String(chosen.startDate).slice(0, 10);
+    const lastDay = String(chosen.endDate).slice(0, 10);
+    if (!chosen.isAllDayEvent && chosen.startTime && chosen.endTime) {
+      if (!form.getValues('startDateTime')) form.setValue('startDateTime', `${day}T${chosen.startTime.slice(0, 5)}`);
+      if (!form.getValues('endDateTime')) form.setValue('endDateTime', `${lastDay}T${chosen.endTime.slice(0, 5)}`);
+    }
+    if (!form.getValues('purpose')) form.setValue('purpose', chosen.eventName);
+  }, [chosen]);
+
   const eventId = form.watch('eventId');
-  const linkedEvent = (events ?? []).find((e) => e.id === eventId);
+  const linkedEvent = eventOptions.find((e) => e.id === eventId);
   const inSeries = !!linkedEvent?.recurrenceSeriesId;
   const bookSeries = inSeries && seriesScope !== 'ThisOccurrence';
 
@@ -318,7 +362,7 @@ export default function NewRoomBookingPage() {
             label="Linked event"
             allowEmpty
             emptyLabel="Not linked to an event"
-            options={(events ?? []).map((e) => ({ value: e.id, label: `${e.eventNumber} — ${e.eventName}` }))}
+            options={eventOptions.map((e) => ({ value: e.id, label: `${e.eventNumber} — ${e.eventName}` }))}
           />
           {inSeries && (
             <SeriesScopeField

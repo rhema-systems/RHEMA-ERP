@@ -58,6 +58,8 @@ public class CompanyEventService : ICompanyEventService
     private readonly IHrClosureCalendar _closureCalendar;
     // Lane 3b-1: a linked booking's approval and its booker, when an event cancels or moves it.
     private readonly RoomBookingDesk _bookingDesk;
+    // Lane 3d-2: an extended series brings the latest date's rooms.
+    private readonly IRoomBookingService _bookings;
 
     public CompanyEventService(
         ICompanyEventRepository eventRepository,
@@ -77,11 +79,13 @@ public class CompanyEventService : ICompanyEventService
         CompanyScheduleNotices notices,
         IHrWorkingDayCalculator workingDays,
         IHrClosureCalendar closureCalendar,
-        RoomBookingDesk bookingDesk)
+        RoomBookingDesk bookingDesk,
+        IRoomBookingService bookings)
     {
         _workingDays = workingDays;
         _closureCalendar = closureCalendar;
         _bookingDesk = bookingDesk;
+        _bookings = bookings;
         _notices = notices;
         _audience = audience;
         _announcements = announcements;
@@ -1558,6 +1562,10 @@ public class CompanyEventService : ICompanyEventService
     ///
     /// <para>Lane 2f-2a (the user's ruling): the latest occurrence's guests are put on the new dates and invited once
     /// each, listing them — or with the approval, when the new dates need one. Their answers start afresh.</para>
+    ///
+    /// <para>Lane 3d-2 (the user's ruling): the rooms the latest occurrence still holds are booked for the new dates by
+    /// whoever extends (<see cref="IRoomBookingService.CarryRoomsAsync"/>) — the dates a room cannot take listed among the
+    /// warnings and in <c>Rooms</c>. An extender with no employee link cannot be a booker: they are told to book them.</para>
     /// </remarks>
     public async Task<EventSeriesResultDto> ExtendSeriesAsync(Guid eventId, ExtendEventSeriesDto dto, CancellationToken cancellationToken = default)
     {
@@ -1643,6 +1651,36 @@ public class CompanyEventService : ICompanyEventService
 
         var notes = await DayOffNotesAsync(tenantId, made.Select(m => (m.Id, m.StartDate, m.EndDate)).ToList(), cancellationToken);
         var warnings = DayOffWarnings(made, notes);
+
+        // Lane 3d-2 (the user's ruling): the latest date's rooms come too, booked by whoever extends — each date through the
+        // room's rules, the ones it cannot take listed. Never fails the extension, which has saved.
+        var rooms = new List<RoomBookingSeriesResultDto>();
+        var heldForTemplate = await _unitOfWork.Repository<RoomBooking>().GetQueryable().AsNoTracking()
+            .AnyAsync(b => b.TenantId == tenantId && b.EventId == template.Id && !b.IsCancelled
+                           && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed), cancellationToken);
+        if (heldForTemplate)
+        {
+            if (await _notices.ActorEmployeeIdAsync(cancellationToken) is { } extender)
+            {
+                try
+                {
+                    rooms = await _bookings.CarryRoomsAsync(template.Id, made.Select(m => m.Id).ToList(), extender, cancellationToken);
+                    foreach (var room in rooms.Where(r => r.NotBooked.Count > 0))
+                        warnings.Add($"{room.RoomName} was not booked for {string.Join(", ", room.NotBooked.Select(n => n.EventNumber))}: "
+                                     + room.NotBooked[0].Reason);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "The rooms of {EventNumber} could not be carried to the new dates", template.EventNumber);
+                    warnings.Add("The latest date's rooms could not be booked for the new dates. Book them from Room Bookings.");
+                }
+            }
+            else
+            {
+                warnings.Add("The latest date's rooms were not booked for the new dates: your login is not linked to an employee, "
+                             + "who would be their booker. Book them from Room Bookings.");
+            }
+        }
         // Lane 2g-2 (C-15): an overlap the server allows is said, by date.
         foreach (var occurrence in made) warnings.AddRange(await ClashWarningsAsync(occurrence, true, cancellationToken));
         return new EventSeriesResultDto
@@ -1656,6 +1694,7 @@ public class CompanyEventService : ICompanyEventService
                 DayOffNote = notes.GetValueOrDefault(m.Id),
             }).ToList(),
             Warnings = warnings,
+            Rooms = rooms,
         };
     }
 
@@ -4949,8 +4988,107 @@ public class RoomBookingService : IRoomBookingService
             throw new InvalidOperationException(
                 $"No date of {ev.EventName} {(dto.SeriesScope == SeriesScope.WholeSeries ? "in the series" : "from this date on")} is still to come, so none can be booked.");
 
-        var offset = start - EventWindow.Of(ev).Start;
-        var length = end - start;
+        var result = new RoomBookingSeriesResultDto { RoomId = room.Id, RoomName = room.RoomName, Closed = closed };
+        await BookDatesAsync(tenantId, room, dates, start - EventWindow.Of(ev).Start, end - start, dto, bookedById, result,
+            refuseWhenNone: true, cancellationToken);
+
+        _logger.LogInformation("Room {Room} booked for {Count} date(s) of the series of {EventNumber}; {Skipped} not booked",
+            room.RoomName, result.Booked.Count, ev.EventNumber, result.NotBooked.Count);
+        return result;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Lane 3d-2 (the user's ruling, as guests are carried at 2f-2a): each room the latest date still holds, through the same
+    /// per-date rules as booking a series — never refusing the extension, which has already saved: a room out of use, or a
+    /// date it cannot take, is listed. Purpose, people and requirements are copied; the booker is whoever extends. On a
+    /// room needing approval the new dates are approved once, the first asking.
+    /// </remarks>
+    public async Task<List<RoomBookingSeriesResultDto>> CarryRoomsAsync(
+        Guid templateEventId, IReadOnlyList<Guid> newEventIds, Guid bookedById, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var results = new List<RoomBookingSeriesResultDto>();
+        if (newEventIds.Count == 0) return results;
+
+        var template = await _unitOfWork.Repository<CompanyEvent>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == templateEventId && e.TenantId == tenantId, cancellationToken);
+        if (template is null) return results;
+        var held = await _bookingRepository.GetQueryable().AsNoTracking()
+            .Include(b => b.Room)
+            .Where(b => b.TenantId == tenantId && b.EventId == templateEventId && !b.IsCancelled
+                        && (b.Status == BookingStatus.Tentative || b.Status == BookingStatus.Confirmed))
+            .OrderBy(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
+        if (held.Count == 0) return results;
+
+        var dates = await _unitOfWork.Repository<CompanyEvent>().GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && newEventIds.Contains(e.Id))
+            .OrderBy(e => e.StartDate).ThenBy(e => e.OccurrenceNumber)
+            .ToListAsync(cancellationToken);
+
+        foreach (var source in held)
+        {
+            // The room's rules are read, never changed here. A room deleted since holds nothing to carry.
+            var room = await _roomRepository.GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == source.RoomId && r.TenantId == tenantId, cancellationToken);
+            if (room is null) continue;
+            var result = new RoomBookingSeriesResultDto { RoomId = room.Id, RoomName = room.RoomName };
+            results.Add(result);
+            var closedRoom = !room.IsActive ? $"{room.RoomName} is not in use, so it cannot be booked."
+                : !room.IsBookable ? $"{room.RoomName} is not open for booking."
+                : null;
+            var offset = source.StartDateTime - EventWindow.Of(template).Start;
+            var length = source.EndDateTime - source.StartDateTime;
+            if (closedRoom is not null)
+            {
+                result.NotBooked.AddRange(dates.Select(d => Skip(d, RoomBookingRules.AsUtc(EventWindow.Of(d).Start + offset), length, closedRoom)));
+                continue;
+            }
+            await BookDatesAsync(tenantId, room, dates, offset, length, new CreateRoomBookingDto
+            {
+                RoomId = room.Id,
+                Purpose = source.Purpose,
+                ExpectedAttendees = source.ExpectedAttendees,
+                SpecialRequirements = source.SpecialRequirements,
+                CateringRequirements = source.CateringRequirements,
+                Notes = source.Notes,
+            }, bookedById, result, refuseWhenNone: false, cancellationToken);
+            _logger.LogInformation("Room {Room} carried to {Count} new date(s) of the series of {EventNumber}; {Skipped} not booked",
+                room.RoomName, result.Booked.Count, template.EventNumber, result.NotBooked.Count);
+        }
+        return results;
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<RoomBookingSummaryDto>> GetByEventAsync(Guid eventId, CancellationToken cancellationToken = default)
+    {
+        var entities = await TenantBookings(GetTenantId()).AsNoTracking()
+            .Where(b => b.EventId == eventId)
+            .OrderBy(b => b.StartDateTime)
+            .ToListAsync(cancellationToken);
+        return entities.ToSummaryDtoList();
+    }
+
+    private static RoomBookingSeriesSkipDto Skip(CompanyEvent date, DateTime start, TimeSpan length, string reason) => new()
+    {
+        EventId = date.Id, EventNumber = date.EventNumber, OccurrenceNumber = date.OccurrenceNumber ?? 0,
+        StartDateTime = start, EndDateTime = start + length, Reason = reason,
+    };
+
+    /// <summary>
+    /// Books <paramref name="room"/> for each of <paramref name="dates"/> at <paramref name="offset"/> from the date's own
+    /// start, for <paramref name="length"/> (lane 3d-1; the extension's rooms, 3d-2): each date through the single booking's
+    /// rules — its event's days, the room's limits and seats, the room not already booked for it, no live booking holding
+    /// the room — under the room's one lock in one transaction. What a date fails is listed in <paramref name="result"/>.
+    /// With none bookable, <paramref name="refuseWhenNone"/> refuses (nothing written); otherwise nothing is booked.
+    /// On a room needing approval the dates are approved once: the first asks (the user's ruling).
+    /// </summary>
+    private async Task BookDatesAsync(
+        Guid tenantId, MeetingRoom room, IReadOnlyList<CompanyEvent> dates, TimeSpan offset, TimeSpan length,
+        CreateRoomBookingDto source, Guid bookedById, RoomBookingSeriesResultDto result, bool refuseWhenNone,
+        CancellationToken cancellationToken)
+    {
         var dateIds = dates.Select(d => d.Id).ToList();
         var alreadyHeld = await _bookingRepository.GetQueryable().AsNoTracking()
             .Where(b => b.TenantId == tenantId && b.RoomId == room.Id && b.EventId != null && dateIds.Contains(b.EventId.Value)
@@ -4958,7 +5096,6 @@ public class RoomBookingService : IRoomBookingService
             .Select(b => new { EventId = b.EventId!.Value, b.BookingNumber })
             .ToListAsync(cancellationToken);
 
-        var result = new RoomBookingSeriesResultDto { Closed = closed };
         var made = new List<RoomBooking>();
         var status = room.RequiresApproval ? BookingStatus.Tentative : BookingStatus.Confirmed;
         var bookedAt = DateTime.UtcNow;
@@ -4973,29 +5110,28 @@ public class RoomBookingService : IRoomBookingService
                 var why = alreadyHeld.FirstOrDefault(h => h.EventId == date.Id) is { } held
                     ? $"{room.RoomName} is already booked for this date: {held.BookingNumber}."
                     : RoomBookingRules.RefuseOutsideEvent(s, e, date)
-                      ?? RoomRuleRefusal(room, s, e, RoomBookingRules.SeatsNeeded(dto.ExpectedAttendees, date))
+                      ?? RoomRuleRefusal(room, s, e, RoomBookingRules.SeatsNeeded(source.ExpectedAttendees, date))
                       ?? (planned.Any(p => p.Start < e && p.End > s) ? "It overlaps another date of this booking." : null)
                       ?? await ClashOfAsync(tenantId, room, s, e, null, ct);
                 if (why is null)
-                {
                     planned.Add((date, s, e));
-                    continue;
-                }
-                result.NotBooked.Add(new RoomBookingSeriesSkipDto
-                {
-                    EventId = date.Id, EventNumber = date.EventNumber, OccurrenceNumber = date.OccurrenceNumber ?? 0,
-                    StartDateTime = s, EndDateTime = e, Reason = why,
-                });
+                else
+                    result.NotBooked.Add(Skip(date, s, length, why));
             }
             if (planned.Count == 0)
-                throw new InvalidOperationException(
-                    $"{room.RoomName} could not be booked for any date: "
-                  + string.Join(" ", result.NotBooked.Select(n => $"{n.EventNumber}: {n.Reason}")));
+            {
+                if (refuseWhenNone)
+                    throw new InvalidOperationException(
+                        $"{room.RoomName} could not be booked for any date: "
+                      + string.Join(" ", result.NotBooked.Select(n => $"{n.EventNumber}: {n.Reason}")));
+                return;
+            }
 
             foreach (var (date, s, e) in planned)
             {
-                var booking = dto.ToEntity();
+                var booking = source.ToEntity();
                 booking.TenantId = tenantId;
+                booking.RoomId = room.Id;
                 booking.EventId = date.Id;
                 booking.StartDateTime = s;
                 booking.EndDateTime = e;
@@ -5008,9 +5144,7 @@ public class RoomBookingService : IRoomBookingService
                 made.Add(booking);
             }
         }, cancellationToken);
-
-        _logger.LogInformation("Room {Room} booked for {Count} date(s) of the series of {EventNumber}; {Skipped} not booked",
-            room.RoomName, made.Count, ev.EventNumber, result.NotBooked.Count);
+        if (made.Count == 0) return;
 
         // The user's ruling: approved once for the set — the first date asks, and its decision covers the rest.
         if (status == BookingStatus.Tentative)
@@ -5025,7 +5159,6 @@ public class RoomBookingService : IRoomBookingService
                 .OrderBy(b => b.StartDateTime)
                 .ToListAsync(cancellationToken))
             .ToSummaryDtoList().ToList();
-        return result;
     }
 
     /// <remarks>

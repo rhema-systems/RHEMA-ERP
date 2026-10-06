@@ -370,6 +370,8 @@ export interface EventSeriesResult {
   guests: number;
   /** Who their invitations reached; null when they wait for approval or there were none. */
   told?: CompanyEventNoticeResult | null;
+  /** Lane 3d-2: the latest date's rooms, booked for the new dates by whoever extended — one per room. */
+  rooms: RoomBookingSeriesResult[];
 }
 
 /** What a guest action with a series scope did (lane 2f-2a): add, remove, or an answer. */
@@ -995,6 +997,8 @@ export interface RoomBookingSeriesSkip {
 }
 
 export interface RoomBookingSeriesResult {
+  roomId: string;
+  roomName: string;
   booked: RoomBookingSummary[];
   notBooked: RoomBookingSeriesSkip[];
   /** Dates the scope covered and left alone: started, completed or cancelled. */

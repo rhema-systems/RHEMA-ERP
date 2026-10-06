@@ -466,6 +466,11 @@ class RoomBookingService {
     return apiService.get<RoomBookingSummary[]>(`${this.baseUrl}/bookings/room/${roomId}`);
   }
 
+  /** The bookings made for an event, any status, in time order (lane 3d-2: the event page's Rooms card). */
+  getByEvent(eventId: string): Promise<RoomBookingSummary[]> {
+    return apiService.get<RoomBookingSummary[]>(`${this.baseUrl}/events/${eventId}/bookings`);
+  }
+
   getByBooker(bookedById: string): Promise<RoomBookingSummary[]> {
     return apiService.get<RoomBookingSummary[]>(`${this.baseUrl}/bookings/booker/${bookedById}`);
   }

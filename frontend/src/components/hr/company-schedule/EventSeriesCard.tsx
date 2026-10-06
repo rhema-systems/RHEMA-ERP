@@ -49,6 +49,8 @@ export function EventSeriesCard({ event, open }: { event: CompanyEventDetail; op
       }),
     onSuccess: async (r) => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
+      // Lane 3d-2: the latest date's rooms came too — the Rooms card and the register refresh.
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'bookings'] });
       setExtendOpen(false);
       setCount('');
       setUntil('');
@@ -62,6 +64,11 @@ export function EventSeriesCard({ event, open }: { event: CompanyEventDetail; op
                 ? describeReach(r.told, `${r.guests} guest(s) invited to the new dates`)
                 : `${r.guests} guest(s) put on the new dates; their invitations go when the new dates are approved.`]
             : []),
+          // Lane 3d-2 (the user's ruling): the latest date's rooms booked for the new dates; the ones a room could not
+          // take are among the warnings.
+          ...(r.rooms ?? [])
+            .filter((room) => room.booked.length > 0)
+            .map((room) => `${room.roomName} booked for ${room.booked.length} new date(s)${room.approvalCarriedBy ? ', awaiting approval' : ''}.`),
           ...r.warnings.map((w) => `⚠ ${w}`),
         ].join(' '),
       });
@@ -143,7 +150,8 @@ export function EventSeriesCard({ event, open }: { event: CompanyEventDetail; op
             <DialogDescription>
               More occurrences after the last, on the same rule, copied from the latest occurrence. Give how many more,
               or the date to run until — one, not both. The series can hold {room} more (52 in all). The latest date's
-              guests are invited to the new dates, once each.
+              guests are invited to the new dates, once each, and its rooms are booked for them in your name where they are
+              free.
             </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4">

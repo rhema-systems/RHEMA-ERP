@@ -410,7 +410,16 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<CompanyEventNoticeResultDto>> SendEventReminders(Guid eventId, CancellationToken ct)
         => Ok(await _eventService.SendEventRemindersAsync(eventId, ct));
 
-    /// <summary>Extends the event's series on its rule (lane 2f-1): either how many more occurrences, or until a date.</summary>
+    /// <summary>The room bookings made for the event, any status, in time order (lane 3d-2: the event page's Rooms card).</summary>
+    [HttpGet("events/{eventId:guid}/bookings")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IEnumerable<RoomBookingSummaryDto>>> GetEventBookings(Guid eventId, CancellationToken ct)
+        => Ok(await _bookingService.GetByEventAsync(eventId, ct));
+
+    /// <summary>
+    /// Extends the event's series on its rule (lane 2f-1): either how many more occurrences, or until a date. Its guests come
+    /// (2f-2a), and so do the latest date's rooms, booked by whoever extends (lane 3d-2).
+    /// </summary>
     [HttpPost("events/{eventId:guid}/series/extend")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<EventSeriesResultDto>> ExtendSeries(Guid eventId, [FromBody] ExtendEventSeriesDto dto, CancellationToken ct)

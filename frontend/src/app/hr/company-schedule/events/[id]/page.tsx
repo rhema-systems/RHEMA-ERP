@@ -48,6 +48,7 @@ import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/Wo
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
 import { EventSeriesCard } from '@/components/hr/company-schedule/EventSeriesCard';
+import { EventRoomsCard } from '@/components/hr/company-schedule/EventRoomsCard';
 import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
 import { describeReach, describeSeriesChange } from '@/components/hr/company-schedule/noticeReach';
 import { SeriesScopeField } from '@/components/hr/company-schedule/SeriesScopeField';
@@ -503,6 +504,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
       </Card>
 
       <EventSeriesCard event={event} open={open} />
+
+      {/* Lane 3d-2 (the user's ruling): the rooms booked for it, and booking one from here. */}
+      <EventRoomsCard event={event} open={open} />
 
       <Card>
         <CardHeader><CardTitle>Invitations and reminders</CardTitle></CardHeader>

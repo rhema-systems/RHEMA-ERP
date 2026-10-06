@@ -278,6 +278,12 @@ public class EventSeriesResultDto
 
     /// <summary>Who the series invitations reached; null when they wait for approval or there were no guests.</summary>
     public CompanyEventNoticeResultDto? Told { get; set; }
+
+    /// <summary>
+    /// Lane 3d-2 (the user's ruling): the rooms booked for the latest date, booked for the new dates by whoever extends —
+    /// one result per room, with the dates it could not take.
+    /// </summary>
+    public List<RoomBookingSeriesResultDto> Rooms { get; set; } = new();
 }
 
 /// <summary>
@@ -1485,6 +1491,10 @@ public class CreateRoomBookingSeriesDto : CreateRoomBookingDto
 /// <summary>What booking a room for a series did (lane 3d-1): the dates booked, and each date it could not take, saying why.</summary>
 public class RoomBookingSeriesResultDto
 {
+    /// <summary>The room — one result per room when an extended series brings several (lane 3d-2).</summary>
+    public Guid RoomId { get; set; }
+    public string RoomName { get; set; } = string.Empty;
+
     public List<RoomBookingSummaryDto> Booked { get; set; } = new();
     public List<RoomBookingSeriesSkipDto> NotBooked { get; set; } = new();
 

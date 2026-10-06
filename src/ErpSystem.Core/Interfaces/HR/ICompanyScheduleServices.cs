@@ -232,6 +232,16 @@ public interface IRoomBookingService
     /// are listed, saying why. On a room needing approval the first date's approval covers the rest (the user's ruling).
     /// </summary>
     Task<RoomBookingSeriesResultDto> CreateForSeriesAsync(CreateRoomBookingSeriesDto dto, Guid bookedById, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// An extended series brings the latest date's rooms (lane 3d-2, the user's ruling): each room booked for
+    /// <paramref name="templateEventId"/> still holding it is booked for the new dates, at the same distance from each
+    /// date's start, under the same rules; the dates a room cannot take are listed, never refused. One result per room.
+    /// </summary>
+    Task<List<RoomBookingSeriesResultDto>> CarryRoomsAsync(Guid templateEventId, IReadOnlyList<Guid> newEventIds, Guid bookedById, CancellationToken cancellationToken = default);
+
+    /// <summary>The room bookings made for an event, any status, in time order (lane 3d-2: the event page's Rooms card).</summary>
+    Task<IEnumerable<RoomBookingSummaryDto>> GetByEventAsync(Guid eventId, CancellationToken cancellationToken = default);
     Task<RoomBookingDto> UpdateAsync(UpdateRoomBookingDto updateDto, CancellationToken cancellationToken = default);
     Task<bool> ApproveBookingAsync(Guid bookingId, Guid approvedById, CancellationToken cancellationToken = default);
 
