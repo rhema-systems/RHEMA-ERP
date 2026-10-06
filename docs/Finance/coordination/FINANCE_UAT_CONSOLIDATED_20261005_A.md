@@ -3,13 +3,13 @@ integration_cycle: FIN-UAT-2026-10-05-A
 integration_status: integrated
 integration_decision: include
 candidate_branch: codex/finance-uat-consolidated-20261005
-candidate_head: pending-final-evidence-commit
+candidate_head: ca1dba717
 base_commit: e2831b83104a09413324e39e79e25d5c60036d53
 target_ref: origin/master
 depends_on: none
 migration_status: three-migrations-mixed-application-state
 verification_status: passed-with-documented-legacy-fixture-failures
-integration_commit: pending-final-evidence-commit
+integration_commit: ca1dba717
 pull_request: pending
 ---
 
@@ -52,6 +52,7 @@ Explicitly excluded:
 - Independent high-risk review initially identified three blockers: non-atomic direct approval, acceptance of an auto-completed or step-less workflow, and a reconciliation query cache key that omitted the requested reconciliation ID.
 - Commit `2dca3ac96` wraps direct approval and workflow progression in the provider execution strategy and one transaction, requires an actionable independent approval step before finalization, and includes the requested reconciliation ID in the client query key.
 - Independent re-review confirmed those three blockers were resolved and identified one additional P1: Approval Workbench approval did not revalidate the current authoritative GL balance. The final correction adds one shared domain validator used by both approval surfaces, invokes it inside the workbench's serializable workflow/outcome transaction before consuming the task, and returns a controlled failed result while preserving `Completed`/pending states when the balance has drifted.
+- Final independent re-review of `ca1dba717`: approved with no blocking findings.
 
 ## Migration record
 
@@ -79,8 +80,7 @@ Explicitly excluded:
 
 ## Remaining work
 
-- Obtain final independent approval of the balance-revalidation correction.
-- Commit this final evidence and correction, push the integration branch, and create one PR to `master`.
+- Push the integration branch and create one PR to `master`.
 
 ## Authorization boundaries
 
@@ -89,4 +89,4 @@ Explicitly excluded:
 
 ## Integration outcome
 
-Implementation and verification are complete, subject to final independent approval. Push and PR creation remain pending.
+Implementation, verification, and independent review are complete. Push and PR creation remain pending.
