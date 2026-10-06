@@ -2030,6 +2030,9 @@ export interface ProjectBoqItemDto {
   projectPackageId: string;
   packageCode?: string;
   packageName?: string;
+  projectWorkItemId?: string;
+  activityNodeType?: string;
+  activityTitle?: string;
   sectionCatalogEntryId?: string;
   sectionCode?: string;
   sectionName?: string;
@@ -2068,6 +2071,7 @@ export interface ProjectBoqItemDto {
 
 export interface CreateProjectBoqItemDto {
   projectPackageId: string;
+  projectWorkItemId?: string;
   sectionCatalogEntryId?: string;
   tradeCatalogEntryId?: string;
   costCodeCatalogEntryId?: string;
@@ -2178,8 +2182,11 @@ export interface ProjectBoqVersionLineDto {
   lineKey: string;
   sourceBoqItemId?: string;
   projectPackageId?: string;
+  projectWorkItemId?: string;
   packageCode?: string;
   packageName?: string;
+  activityNodeType?: string;
+  activityTitle?: string;
   sectionCode?: string;
   sectionName?: string;
   tradeCode?: string;

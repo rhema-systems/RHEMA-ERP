@@ -4468,6 +4468,114 @@ public class ProjectServiceTests
     }
 
     [Fact]
+    public async Task AddProjectBoqItemAsync_ShouldPreserveActivityAssociationInVersionSnapshot()
+    {
+        var tenantId = Guid.NewGuid();
+        var userId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-ACTIVITY",
+            Title = "Activity-linked BoQ",
+            CreatedById = userId
+        };
+        var package = new ProjectPackage
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            Code = "WP-ACT",
+            Name = "General Works",
+            Currency = "GHS"
+        };
+        var activity = new ProjectWorkItem
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectId = project.Id,
+            ProjectPackageId = package.Id,
+            NodeType = ProjectWorkItemNodeTypes.Task,
+            Title = "Construct foundations"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, userId);
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.Add(package);
+        fixture.WorkItems.Add(activity);
+        var service = fixture.CreateService();
+
+        var created = await service.AddProjectBoqItemAsync(project.Id, new CreateProjectBoqItemDto
+        {
+            ProjectPackageId = package.Id,
+            ProjectWorkItemId = activity.Id,
+            Description = "Excavate and cast foundations",
+            Quantity = 1m,
+            UnitOfMeasure = "item",
+            UnitRate = 100m
+        });
+        var workspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        var version = await service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
+        {
+            VersionType = QuantitySurveyBoqVersionType.Original,
+            ExpectedWorkingSetHash = workspace.WorkingSetHash,
+            ChangeSummary = "Activity-linked original BoQ"
+        }, "qs-activity-snapshot");
+
+        created.ProjectWorkItemId.Should().Be(activity.Id);
+        created.ActivityNodeType.Should().Be(ProjectWorkItemNodeTypes.Task);
+        created.ActivityTitle.Should().Be("Construct foundations");
+        var snapshot = fixture.ProjectBoqVersionLines.Single(item => item.ProjectBoqVersionId == version.Id);
+        snapshot.ProjectWorkItemId.Should().Be(activity.Id);
+        snapshot.ActivityNodeType.Should().Be(ProjectWorkItemNodeTypes.Task);
+        snapshot.ActivityTitle.Should().Be("Construct foundations");
+    }
+
+    [Fact]
+    public async Task AddProjectBoqItemAsync_ShouldRejectActivityAssignedToAnotherWorkComponent()
+    {
+        var tenantId = Guid.NewGuid();
+        var project = new Project
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            ProjectCode = "PRJ-QS-ACTIVITY-GUARD",
+            Title = "Activity package guard"
+        };
+        var selectedPackage = new ProjectPackage
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id,
+            Code = "WP-001", Name = "Selected Works", Currency = "GHS"
+        };
+        var otherPackage = new ProjectPackage
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id,
+            Code = "WP-002", Name = "Other Works", Currency = "GHS"
+        };
+        var activity = new ProjectWorkItem
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, ProjectId = project.Id,
+            ProjectPackageId = otherPackage.Id, NodeType = ProjectWorkItemNodeTypes.Task,
+            Title = "Other package task"
+        };
+        var fixture = new ProjectServiceFixture(tenantId, Guid.NewGuid());
+        fixture.Projects.Add(project);
+        fixture.ProjectPackages.AddRange([selectedPackage, otherPackage]);
+        fixture.WorkItems.Add(activity);
+
+        var action = () => fixture.CreateService().AddProjectBoqItemAsync(project.Id, new CreateProjectBoqItemDto
+        {
+            ProjectPackageId = selectedPackage.Id,
+            ProjectWorkItemId = activity.Id,
+            Description = "Invalid activity association",
+            Quantity = 1m
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*different work component*");
+        fixture.ProjectBoqItems.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task AddProjectBoqItemAsync_ShouldRejectClassificationOwnedByAnotherTenant()
     {
         var tenantId = Guid.NewGuid();

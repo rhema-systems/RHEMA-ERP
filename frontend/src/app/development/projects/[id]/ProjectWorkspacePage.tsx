@@ -2623,6 +2623,7 @@ export default function ProjectWorkspacePage({
     setEditingProjectBoqItemId(boqItem.id);
     setBoqItemDraft({
       projectPackageId: boqItem.projectPackageId,
+      projectWorkItemId: boqItem.projectWorkItemId || undefined,
       sectionCatalogEntryId: boqItem.sectionCatalogEntryId || undefined,
       tradeCatalogEntryId: boqItem.tradeCatalogEntryId || undefined,
       costCodeCatalogEntryId: boqItem.costCodeCatalogEntryId || undefined,
@@ -5154,6 +5155,7 @@ export default function ProjectWorkspacePage({
 
         return projectService.updateProjectBoqItem(update.boqItemId, {
           projectPackageId: currentItem.projectPackageId,
+          projectWorkItemId: currentItem.projectWorkItemId,
           sectionCatalogEntryId: currentItem.sectionCatalogEntryId,
           tradeCatalogEntryId: currentItem.tradeCatalogEntryId,
           costCodeCatalogEntryId: currentItem.costCodeCatalogEntryId,

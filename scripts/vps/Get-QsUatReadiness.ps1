@@ -56,6 +56,17 @@ try {
     } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $report -Encoding UTF8
     if($PublicBaseUrl.Scheme -notin @('https','http') -or $PublicBaseUrl.UserInfo -or $PublicBaseUrl.Query -or $PublicBaseUrl.Fragment){throw 'Public URL must be an HTTP(S) origin without credentials, query or fragment.'}
     $html=[IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\..\docs\TDC_QS_END_TO_END_UAT_WALKTHROUGH.html'))
+    $requiredWalkthroughMarkers=@(
+        'Work Component / Work Package',
+        'Activity / Project Task',
+        'Finance Cost Centre: no entry on this dialog',
+        'The dialog does not require a Phase Weight'
+    )
+    foreach($marker in $requiredWalkthroughMarkers) {
+        if(-not $html.Contains($marker)) {
+            throw "QS walkthrough is missing required SRS reconciliation marker '$marker'."
+        }
+    }
     $html=$html.Replace('http://localhost:3000',$PublicBaseUrl.GetLeftPart([UriPartial]::Authority))
     $notice='<aside class="callout"><strong>VPS UAT:</strong> Follow the fresh A-F run. Historical project IDs in demonstration links belong to the local fixture and are not verified on this VPS. Use the register to select records created for this run. This copy is navigation guidance, not a passed UAT report.</aside>'
     $html=$html.Replace('<main>','<main>'+$notice)

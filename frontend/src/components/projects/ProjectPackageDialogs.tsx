@@ -55,6 +55,7 @@ import type {
   ProjectPurchaseOrderLookupDto,
   ProjectPurchaseRequisitionLookupDto,
   ProjectTenderLookupDto,
+  ProjectWorkItemDto,
 } from '@/services/projectService';
 import { cn } from '@/lib/utils';
 
@@ -65,6 +66,11 @@ const EMPTY_BOQ_CLASSIFICATIONS: ProjectBoqClassificationOptionsDto = {
   costCodes: [],
   measurementCodes: [],
 };
+
+const flattenProjectWorkItems = (
+  items: ProjectWorkItemDto[]
+): ProjectWorkItemDto[] =>
+  items.flatMap((item) => [item, ...flattenProjectWorkItems(item.children || [])]);
 
 type BoqClassificationSelectProps = {
   label: string;
@@ -294,6 +300,22 @@ export function ProjectPackageDialogs({
   );
   const selectedPhaseStartDate = selectedPhase?.plannedStartDate?.slice(0, 10);
   const selectedPhaseEndDate = selectedPhase?.plannedEndDate?.slice(0, 10);
+  const boqActivityOptions = useMemo(
+    () =>
+      flattenProjectWorkItems(project.workItems || [])
+        .filter(
+          (item) =>
+            item.nodeType !== 'Phase' &&
+            (!item.projectPackageId ||
+              item.projectPackageId === boqDraft.projectPackageId)
+        )
+        .sort(
+          (left, right) =>
+            left.sortOrder - right.sortOrder ||
+            left.title.localeCompare(right.title)
+        ),
+    [boqDraft.projectPackageId, project.workItems]
+  );
   const currentBoqItem = useMemo(
     () => project.boqItems.find((item) => item.id === editingBoqItemId) ?? null,
     [editingBoqItemId, project.boqItems]
@@ -610,7 +632,7 @@ export function ProjectPackageDialogs({
         </div>
       </div>
       <div className="grid gap-2">
-        <Label>Work Component Type</Label>
+        <Label>Work Component / Work Package Type</Label>
         <Select
           value={packageDraft.packageType || packageTypeOptions[0]}
           onValueChange={(value) =>
@@ -656,7 +678,7 @@ export function ProjectPackageDialogs({
         </Select>
       </div>
       <div className="grid gap-2">
-        <Label>Completion Weight (%)</Label>
+        <Label>Work Component Completion Weight (%)</Label>
         <Input
           type="number"
           min={0}
@@ -680,7 +702,7 @@ export function ProjectPackageDialogs({
         />
         <div className="text-xs text-muted-foreground">
           {selectedPhase
-            ? `This is the component's share of the ${selectedPhase.name} phase. Components in that phase may not exceed 100% in total.`
+            ? `This is the component's share of progress inside the ${selectedPhase.name} phase. It is not the phase weight. Components in the phase may not exceed 100% in total.`
             : 'Unphased work components use 0%. Choose a phase to enter a completion weight.'}
         </div>
       </div>
@@ -988,15 +1010,27 @@ export function ProjectPackageDialogs({
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div className="grid gap-2">
-          <Label>Work Component</Label>
+          <Label>Work Component / Work Package</Label>
           <Select
             value={boqDraft.projectPackageId || 'none'}
-            onValueChange={(value) =>
-              setBoqDraft((current) => ({
-                ...current,
-                projectPackageId: value === 'none' ? '' : value,
-              }))
-            }
+            onValueChange={(value) => {
+              const projectPackageId = value === 'none' ? '' : value;
+              setBoqDraft((current) => {
+                const selectedActivity = flattenProjectWorkItems(
+                  project.workItems || []
+                ).find((item) => item.id === current.projectWorkItemId);
+                const keepActivity =
+                  !selectedActivity?.projectPackageId ||
+                  selectedActivity.projectPackageId === projectPackageId;
+                return {
+                  ...current,
+                  projectPackageId,
+                  projectWorkItemId: keepActivity
+                    ? current.projectWorkItemId
+                    : undefined,
+                };
+              });
+            }}
             disabled={readOnly}
           >
             <SelectTrigger
@@ -1015,7 +1049,38 @@ export function ProjectPackageDialogs({
           </Select>
         </div>
         <div className="grid gap-2">
-          <Label>Item Type</Label>
+          <Label>Activity / Project Task (Optional)</Label>
+          <Select
+            value={boqDraft.projectWorkItemId || 'none'}
+            onValueChange={(value) =>
+              setBoqDraft((current) => ({
+                ...current,
+                projectWorkItemId: value === 'none' ? undefined : value,
+              }))
+            }
+            disabled={readOnly}
+          >
+            <SelectTrigger
+              className={readOnly ? 'bg-slate-50 text-slate-700' : undefined}
+            >
+              <SelectValue placeholder="No activity link" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">No activity link</SelectItem>
+              {boqActivityOptions.map((item) => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.nodeType} - {item.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="text-xs text-muted-foreground">
+            Link the BOQ line to an existing project activity when the work plan
+            has one. Activities assigned to another work component are hidden.
+          </div>
+        </div>
+        <div className="grid gap-2">
+          <Label>Work Category / BOQ Item Type</Label>
           <Select
             value={boqDraft.itemType || boqItemTypeOptions[0]}
             onValueChange={(value) =>
@@ -1036,6 +1101,10 @@ export function ProjectPackageDialogs({
               ))}
             </SelectContent>
           </Select>
+          <div className="text-xs text-muted-foreground">
+            Controls the commercial line behaviour, such as measured item,
+            provisional sum, prime cost, variation, or allowance.
+          </div>
         </div>
         <BoqClassificationSelect
           label="Section"
@@ -1123,6 +1192,12 @@ export function ProjectPackageDialogs({
             </div>
           </div>
         ) : null}
+        <div className="rounded-lg border border-slate-200 bg-slate-50/70 px-3 py-2 text-xs text-slate-700 md:col-span-2">
+          Section, trade and cost code classify this BOQ line. A Finance cost
+          centre is assigned through budgeting or posting and is not entered
+          here. Measurement code is optional unless the effective QS policy
+          requires an approved measurement standard.
+        </div>
         {boqClassificationsError ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 md:col-span-2">
             {boqClassificationsError}
@@ -1474,10 +1549,11 @@ export function ProjectPackageDialogs({
       >
         <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Add Work Component</DialogTitle>
+            <DialogTitle>Add Work Component / Work Package</DialogTitle>
             <DialogDescription>
-              Capture a construction, trade, or supply work component without
-              taking space away from the live list.
+              Create the project container that groups BOQ lines. Phase,
+              schedule and completion weight belong here; BOQ classifications
+              are captured on each BOQ item.
             </DialogDescription>
           </DialogHeader>
           {renderPackageForm()}
@@ -1508,7 +1584,7 @@ export function ProjectPackageDialogs({
       >
         <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Work Component</DialogTitle>
+            <DialogTitle>Edit Work Component / Work Package</DialogTitle>
             <DialogDescription>
               Update work component linkage, currency, and commercial values in
               a focused dialog.
