@@ -1024,6 +1024,50 @@ public sealed class BankReconciliationPostingMigrationTests
             .WithMessage("Maker-checker control: the user who finalized this bank reconciliation cannot approve it.");
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task Finalization_ShouldRequireActionableApprovalWorkflow(bool autoCompleted)
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-001", 0m);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.InProgress
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(
+            db,
+            tenantId,
+            currentUserId: makerId,
+            workflowStartResult: new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = autoCompleted ? WorkflowInstanceStatus.Completed : WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid(),
+                CurrentStepId = autoCompleted ? Guid.NewGuid() : null
+            });
+
+        var act = () => service.FinalizeReconciliationAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*actionable independent approval step*");
+        (await db.Set<BankReconciliation>().AsNoTracking().SingleAsync(item => item.Id == reconciliation.Id))
+            .Status.Should().Be(ReconciliationStatus.InProgress);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
@@ -1129,7 +1173,8 @@ public sealed class BankReconciliationPostingMigrationTests
         Guid tenantId,
         string documentPrefix = "BRC",
         bool withDimensions = false,
-        Guid? currentUserId = null)
+        Guid? currentUserId = null,
+        WorkflowExecutionResult? workflowStartResult = null)
     {
         var currentUser = CreateCurrentUserService(tenantId, currentUserId);
         var auditService = new FinanceAuditService(
@@ -1152,11 +1197,12 @@ public sealed class BankReconciliationPostingMigrationTests
             db, currentUser.Object, auditService, documentPrefix, sourceDimensions);
         var workflow = new Mock<IWorkflowService>();
         workflow.Setup(x => x.StartApprovalWorkflowAsync("BankReconciliation", It.IsAny<Guid>()))
-            .ReturnsAsync(new WorkflowExecutionResult
+            .ReturnsAsync(workflowStartResult ?? new WorkflowExecutionResult
             {
                 Success = true,
-                Status = WorkflowInstanceStatus.Completed,
-                WorkflowInstanceId = Guid.NewGuid()
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid(),
+                CurrentStepId = Guid.NewGuid()
             });
         workflow.Setup(x => x.CanUserApproveAsync("BankReconciliation", It.IsAny<Guid>(), It.IsAny<Guid>()))
             .ReturnsAsync(true);

@@ -136,7 +136,7 @@ export default function BankReconciliationPage() {
     });
 
     const activeReconciliationQuery = useQuery({
-        queryKey: ['active-reconciliation', selectedAccountId],
+        queryKey: ['active-reconciliation', selectedAccountId, requestedReconciliationId],
         queryFn: async () => {
             const reconciliations = await cashManagementDataService.getBankReconciliations(selectedAccountId);
             return reconciliations.find((item) => item.id === requestedReconciliationId)
