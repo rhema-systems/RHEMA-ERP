@@ -57,7 +57,7 @@ docs/HR/
   README.md            this index
   areas/               one folder per functional area — the system guide plus that area's plans
     recruitment/  leave/  performance/  attendance/  travel/
-    company-schedule/  orientation/  employees/  she/
+    company-schedule/  orientation/  training/  employees/  she/
   integration/         every boundary HR shares with another module
     handoffs/          reports raised with another module's owner
   programme/           where the work stands: finish plan, ledger, open questions, demo rounds
@@ -129,6 +129,12 @@ demonstration workbook.
 | Document | What it answers | Read it when |
 |---|---|---|
 | [`HR-ORIENTATION-SYSTEM-GUIDE.md`](areas/orientation/HR-ORIENTATION-SYSTEM-GUIDE.md) | The whole **Orientation & Onboarding** menu group — 9 screens, from the dashboard to the onboarding task queues — the 8 setup screens under Administration → HR → Orientation & Onboarding, and the 3 portal pages: *My Orientations*, one programme, *My Onboarding*. **20 screens over 27 tables**, and the round 4 automation behind them: the triggers, the renewals, the plan on hire, the reminders and the notices | Written 2026-09-24 (round 4, P2c), from the code and `ErpSystemDB_UAT`, read-only; **not browser-walked**. **Updated the same day for lane R**, which closed its worst finding, O-15: every enrolment now has its declaration to sign, and a programme that is only its live session completes by attendance — so the new hire finishes the induction, certificate and all, in the walk. Also a demonstration workbook: 15 numbered live writes, a reset chapter and a 15-minute short path. **Read the eight rules above chapter 1 first** — **Rule 3: a completion cannot be undone from a screen**, so finish Kojo Ansah's induction once per rebuild. Also: never open a participant's page as HR (Rule 4, O-4), `hr.head` is offered every delete and can make only one (Rule 2), a plan is fixed once made (Rule 5), and nothing is emailed (Rule 7). 65 code findings `O-…` (O-15 closed) and four data findings `D-…`, listed in § 23 |
+
+### `areas/training/` — Training & Learning
+
+| Document | What it answers | Read it when |
+|---|---|---|
+| [`HR-TRAINING-SYSTEM-GUIDE.md`](areas/training/HR-TRAINING-SYSTEM-GUIDE.md) | The whole **Training** and **Mentoring** menu groups, the 8 setup areas under Administration → HR → Training & Learning, **Service Bonds**, and the portal's *My Training*, *My Learning Paths* and *My Mentoring*. About **60 screens**, walked as the training cycle: catalogue → need, plan, budget → the employee asks → delivery (schedule, nominate, approve, waitlist, attendance, completion, verification, certificate) → bonds → feedback → compliance and outside certificates → learning paths and mentoring → oversight | Written 2026-10-06 from the code, the demo seeders and the demo scenario scripts (`040-training`, `041-learning-and-mentoring`); **not browser-walked, and no number was read off a live database — rehearse once on a fresh rebuild.** Also a demonstration workbook: 26 numbered live writes, a **prepare script** (§ 1.4), an undo chapter, the questions you will be asked, and a 35-minute short path. **Read the eleven rules above chapter 1 first**: HR-entered nominations never reach the approval queues without the prepare script (T-1); seat counts read 0 (T-2); a run cannot be closed from its page (T-3); plan and budget approval, bond waiver and certificate revocation are an Administer-tier act nobody in the demo holds (T-4); managers have no desk, so the runbook's "switch to `head.dev` and approve" does not work (T-5). 12 findings `T-…` in chapter 29 |
 
 ### `areas/employees/` — Employees & job analysis
 
