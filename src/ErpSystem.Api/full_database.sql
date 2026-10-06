@@ -7258,6 +7258,7 @@ CREATE TABLE [BusinessPartners] (
     [LegalName] nvarchar(200) NULL,
     [BusinessRegistrationNumber] nvarchar(100) NULL,
     [TaxIdentificationNumber] nvarchar(100) NULL,
+    [SsnitNumber] nvarchar(100) NULL,
     [VATNumber] nvarchar(100) NULL,
     [RegistrationDate] datetime2 NULL,
     [IncorporationDate] datetime2 NULL,
