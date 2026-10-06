@@ -55,8 +55,10 @@ has not started (the user: "don't start the actual development yet").
    **Lane 7** (the company calendar) is source-checked and its four questions settled (lane 7 State), in two slices; 7a,
    the server (the calendar read, the staff event view, the invitee's own answer), and 7b, the screens (month bands and
    week, the room view, the staff event page, the menus), built and proved. ✅ Lane 7's code is done (2026-10-06); its
-   browser walk (lane 7 State, items 9–12) is the user's. Next: **lane 6** — the harness, the guide, the registers and
-   memory (lane 6's list), which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
+   (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
+   110's staff booking), built and proved. Next: **6b**, the guide's front, rules and § 1–2 (L6-1: rewritten whole, the
+   travel guide's way), then 6c–6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -336,7 +338,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b–6f, the guide and the docs, to do | both suites green twice |
 
 ---
 
@@ -3407,19 +3409,24 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
 
 ### Lane 6 — Harness, guide, registers, memory
 
-- [ ] `dev-harness/hr-company-schedule/run-final-review.mjs`: surname-identified fixtures of its own;
+- [x] *✅ built block by block, 1a–7a; 6a added the one review item missing — the discipline deadline (L6-3) — and
+      read `Notifications` with `NOLOCK` (L6-4); 1152/1152 on two clean passes.* `dev-harness/hr-company-schedule/run-final-review.mjs`: surname-identified fixtures of its own;
       minted logins switched off in `finally`; no "first N employees"; minted leave types switched off
       after. One assertion per rule above, in both positions, including the review's: leave across a
       scoped closure for two employees at different sites; a company-wide closure moving a discipline
       deadline; invitations held until approval; in-app notices counted by recipient; two parallel
       bookings for one slot; a lapsed Tentative booking; the staff event view's redaction; the reply
       door's refusals. Run twice from different states.
-- [ ] If D-10 chooses the engine: definitions of two steps or more, and two approver fixtures for
+- [x] *✅ 2b and 3b-1: Draft → Approval → Approved (a one-step definition auto-approves); H creates and is refused, B
+      approves.* If D-10 chooses the engine: definitions of two steps or more, and two approver fixtures for
       `preventInitiatorApproval`.
-- [ ] `run-slice0..3.mjs` and `run-round4-d.mjs` re-run as the regression net; the assertions the new
+- [x] *✅ at every slice since 2a: run-slice0 self-approval, run-slice2's edit and completion, run-slice3's fiscal sections
+      (4b); 191 at 6a.* `run-slice0..3.mjs` and `run-round4-d.mjs` re-run as the regression net; the assertions the new
       guards change (approve without `RequiresApproval`, the status edit, the fiscal block) updated.
-- [ ] *(2h: the event files are uploaded as files, replacing a path-only row of the same name; scenario 170 saves
-      each seeded drill once more through the SHE API so its event is made.)* Scenario 110: event files uploaded as files (F-54), no HR fiscal year, `hr.head` books the
+- [x] *(2h: the event files are uploaded as files, replacing a path-only row of the same name; scenario 170 saves
+      each seeded drill once more through the SHE API so its event is made.)* *✅ F-54 in 2h; no HR fiscal year in 4b; the
+      D suites' tidy step in 3a; ✅ 6a: the second booking is `head.dev`'s through the staff door, its failure reported
+      (L6-2).* Scenario 110: event files uploaded as files (F-54), no HR fiscal year, `hr.head` books the
       second room (R4-2.3); the D suites get a tidy step (R4-2.1).
 - [ ] The guide: § 21 "Final review" closing every finding this plan closes; the eight rules
       rewritten; **every changed chapter rewritten**, not only § 21 (events, bookings, rooms, closures,
@@ -3442,7 +3449,112 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       `EntityId` (a seek) first, and match the `ActionUrl` only for notices that name the event in their link alone
       (the engine's approval notices), in batches of events.
 
-**State:** *(filled when it lands)*
+**State (2026-10-06): source-checked; four rulings taken; six slices, 6a–6f.**
+
+*The source check — what the list above still owes, item by item:*
+- **The review suite** already meets the fixture rules: surname-identified fixtures, its logins switched off in the
+  clean-up, nothing read from "the first N employees", its leave types switched off. It has a block per slice, each
+  in both positions. Every review item but one is asserted:
+  - leave across a scoped closure, for people at two sites (1b, 1d);
+  - invitations held until approval (2e-1);
+  - notices counted by recipient (2e-1 on);
+  - two parallel bookings for one slot (3a, the lock);
+  - a lapsed Tentative booking (3b-2);
+  - the staff event view's redaction and the reply door's refusals (7a).
+
+  **The one missing is a company-wide closure moving a discipline deadline.** Lane 1b proved only the shared
+  list of days off, and recorded the discipline clocks as "not driven end to end".
+- **The engine (D-10 chose it):** the suite's definitions are Draft → Approval → Approved (a one-step definition
+  auto-approves), with two approver fixtures — H creates and is refused, B approves (2b, 3b-1). Met.
+- **The regression net** has been re-run and its pinned assertions updated at every slice since 2a. Met.
+- **Scenario 110:** the event files are files (2h), and it holds no HR fiscal year (4b). **The second booking still
+  swallows a 403 (R4-2.3).** The D suites' tidy step was done in 3a.
+- **The notice reads.** UAT's `Notifications` is 1.1 GB, 418k rows (293k live), indexed on `Id` and `TenantId`
+  only, so each of the suite's reads scans the whole table. The suite cannot make its reads cheap. The index is
+  Platform's, already in cross-module **#33**, which gets today's measurement.
+- **The other docs:**
+  - **A-92** and **the payroll hand-off** were done in 1d (see lane 1's checklist).
+  - **The configuration register** has the lanes' entries, but two lines still call the room's two limits ghosts
+    (C-4, fixed in round 4).
+  - **The HR README's** company-schedule row still says "No code yet".
+  - **The finish plan's D-02** is closed by D-8.
+  - **The guide** describes round 4: all eight rules, the retired fiscal screens, approval as a flag. It has no
+    chapter for the calendar, the staff event page or staff room booking.
+
+*The rulings (the user, 2026-10-06, all as recommended):*
+- **L6-1 · the guide** is rewritten whole, the travel guide's way (2026-10-04):
+  - every chapter rewritten from the code;
+  - new chapters lettered so no number moves;
+  - the two fiscal chapters become one fiscal-calendar chapter;
+  - § 21 becomes a pointer to this plan's register, with what is still open;
+  - every walk says what UAT shows and what a rebuilt demo shows.
+- **L6-2 · R4-2.3:** scenario 110's second booking stays `head.dev`'s, made through the staff booking door
+  (`/me/room-bookings`, lane 3c). A rebuilt demo then holds one booking from the HR desk and one from a member of
+  staff. A failure is reported, not swallowed.
+- **L6-3 · the discipline deadline is driven.** A Draft disciplinary case of the run's own, on fixture A:
+  - numbered `CSF-…`, so no real case number is used;
+  - reported now, so no discipline sweep reaches it: the written-query sweep waits 48 hours, and the appeal sweep
+    reads decided cases only;
+  - decided by SQL on that row only;
+  - its appeal window read with the company-wide closure in place and after it is gone;
+  - deleted in the block and again in the clean-up.
+- **L6-4 · the suite reads `Notifications` with `NOLOCK`**, so a read never makes a notice being written wait. A
+  check that nothing was sent stays strict: it sees more, not less. The withdrawal, an `UPDATE`, is unchanged.
+
+*The slices:*
+- **6a**, the harness (no server code);
+- **6b–6e**, the guide in four parts:
+  - 6b: the front, the rules, § 1–2;
+  - 6c: the events, § 3–7;
+  - 6d: the bookings, the diaries, the calendar and the staff pages;
+  - 6e: setup, the profile, § 18–21 and the appendices;
+- **6f**, the README, the finish plan, the register, cross-module #33, the demo runbook's aside and memory, which
+  closes the plan.
+
+*6a — what was built (2026-10-06): the harness only — no server code, no migration; nothing in the repo but this plan.*
+- **The discipline deadline (L6-3, F-29 driven end to end):** in block 1b, a Draft case of the run's own on fixture A
+  (`CSF-…`, an existing active offence read, never changed), decided by SQL at 10:00 on the Monday of the company-wide
+  closure's week. Its appeal window (FR-HR-180: five working days) is read from the case's process clock and checked
+  against the same walk over the leave calendar's days off for the span. It is read with the closure in place (one
+  working day later, the closure inside the window), and again once the closure is deleted (the day counted again,
+  closing sooner). The Draft is deleted as admin (`HR.Policy.DisciplineAdmin`); the clean-up deletes any left, before
+  the employees, and counts them.
+- **`NOLOCK` on every `Notifications` read (L6-4):** 19 reads; the withdrawal's `UPDATE` unchanged.
+- **Scenario 110 (L6-2, R4-2.3):** the second booking, `head.dev`'s "Community 25 design review", goes through
+  `/me/room-bookings`, and a failure is reported (`quiet`) instead of swallowed. It runs only on a rebuild; the staff
+  door it uses is block 3c's, with the same body.
+
+*6a — proof (UAT, API in Staging; no build needed):*
+- `run-final-review.mjs` **1152/1152 on two clean passes**, first time (1147 + 5). The new assertions:
+  - the Draft case reads as decided, with an appeal window;
+  - the window steps over the company-wide closure, which lies inside it;
+  - with the closure deleted, the window counts that day again and closes sooner.
+- **Regression:** the round-4 net **191/191** (29 + 33 + 66 + 23 + 40), recruitment **59/59**, the templates probe
+  **42/42**, `run-lane-n` **109/115** (section J, #40).
+- **The API log:** no request answered 500. The ERR kinds are the known ones:
+  - payroll's foreign key on minted fixtures, #23 (35);
+  - the guest and attendance unique-index race proofs (9);
+  - notifications with no mail server;
+  - one identity reconciliation.
+- **The blocking watcher logged nothing** — no blocked request and no wait over 3 s through both passes and the net
+  (5a–7b: 84–111 waits a run, 56–82 of them 2 s or more). Each pass took **about 5 minutes** (≈11 before). A freshly
+  started API helps too, so the change is credited to `NOLOCK` with that caveat; the table itself still has no index
+  for the poll (#33).
+- **After the runs, by SQL:** no live `CSF-` disciplinary case (one deleted Draft per pass); no CSF event, room,
+  booking, closure or milestone live; every harness login off; no live company-schedule notice to a real login; no
+  RoomBooking approval running; the R4D requisition's notices withdrawn twice (0, then 0). The API and the scanner stub
+  are stopped.
+- **UAT, read for the guide (6b):**
+  - 4,978 active employees, 4,949 numbered `TDC/…`;
+  - 2 active HR-desk logins (`hr.head`, `hr.officer`);
+  - no mail server;
+  - both approval definitions live;
+  - three rooms, none needing approval or carrying a limit;
+  - the one booking completed;
+  - the stocktake closure, and the milestone still dated 2026;
+  - Finance's FY2025 closed and FY2026 open;
+  - **54 "R4D …" events**, live and a month ahead, from the recruitment suite (two more each run — lane 3a's ruling
+    left them), and 10 cancelled "R4NB2 …" events from the templates suite.
 
 ---
 
@@ -3473,7 +3585,7 @@ Every finding from the guide's § 21, with its owner here. Nothing is dropped si
 | C-42…C-48 | Lane 4 | closed by retirement (D-6) |
 | C-49, C-50 | Lane 4 (D-9) | buttons hidden; the logo a versioned asset; the free-text URL retired (F-55) |
 | C-51 | ✅ Lane 2, slice 2h (D-9) | the drill creates its event, for everyone, never blocked; UAT's one drill given its event |
-| R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1 ✅ in lane 3a: both D suites tidy their rooms, bookings and — this module's — events; R4-2.3: scenario 110's booking by `hr.head`) | R4-2.4 is the demo database, not the code |
+| R4-2.1, R4-2.2, R4-2.3, R4-2.4 | Lane 6 (R4-2.1 ✅ in lane 3a: both D suites tidy their rooms, bookings and — this module's — events; R4-2.2 ✅ closed by retirement in 4b; R4-2.3 ✅ 6a: scenario 110's second booking by `head.dev` through the staff door, L6-2) | R4-2.4 is the demo database, not the code |
 | R4-3.1 | Lane 5 | **live** — the first draft had it as kept |
 | R4-5.1, R4-6.1, R4-6.2, R4-6.4…R4-6.7, R4-7.1 | Lanes 2 and 5 | |
 | R4-6.3 | ✅ Lane 2, slice 2e-2 (deliveries counted, and the card built with them); lane 5 walks it | the card is "Invitations and reminders" |
@@ -4044,3 +4156,11 @@ built API, so no web host and no seeders).
     round-4 net 191/191, recruitment 59/59, the probe 42/42, `run-lane-n` 109/115 (#40). **Lane 7's code is done.**
 
   Next: lane 6 — the harness, the guide, the registers, memory. The browser walks of lanes 1–5 and 7 are the user's.
+- **2026-10-06, later** — **7b committed. Lane 6 source-checked** (four rulings, L6-1…L6-4, all as recommended: the guide
+  rewritten whole the travel guide's way; scenario 110's second booking by `head.dev` through the staff door; the
+  discipline deadline driven on a Draft case of the run's own; the suite reading `Notifications` with `NOLOCK`). **Slice
+  6a built and proved** — the harness only.
+  - **Results:** `run-final-review.mjs` 1152/1152 on two clean passes; the round-4 net 191/191, recruitment 59/59, the
+    probe 42/42, `run-lane-n` 109/115 (#40); the blocking watcher logged nothing, and a pass took about 5 minutes.
+
+  Next: 6b — the guide's front, its rules and § 1–2.
