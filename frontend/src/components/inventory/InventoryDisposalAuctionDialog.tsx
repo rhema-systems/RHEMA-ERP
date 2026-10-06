@@ -37,7 +37,7 @@ export function InventoryDisposalAuctionDialog({ disposal, open, onOpenChange, o
     if (!open) return;
     let current = true;
     const timer = window.setTimeout(() => {
-      arService.getCustomers({ searchTerm: search, pageSize: 50, status: 'Active', includeBalances: false })
+      arService.getCustomers({ searchTerm: search, pageSize: 50, isActive: true, includeBalances: false })
         .then(result => { if (current) { setCustomers(result.items); setLookupError(''); } })
         .catch(() => { if (current) setLookupError('Customers could not be loaded. Check your customer lookup access.'); });
     }, 250);

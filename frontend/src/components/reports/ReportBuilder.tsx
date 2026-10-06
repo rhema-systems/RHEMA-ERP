@@ -288,15 +288,35 @@ const ReportBuilder: React.FC<ReportBuilderProps> = ({ onClose, onReportCreated,
       })
       return
     }
+
+    if (!editingReportId) {
+      toast({
+        title: 'Save the report first',
+        description: 'A template must be linked to an existing report definition.',
+        variant: 'destructive'
+      })
+      return
+    }
     
     setIsCreatingTemplate(true)
     
     try {
+      const normalizedKey = reportName
+        .trim()
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
       const templateData: CreateReportTemplateDto = {
+        reportId: editingReportId,
+        templateKey: `CUSTOM-${normalizedKey}-${Date.now()}`,
         name: `${reportName} Template`,
         description: reportDescription || `Template for ${reportName} reports`,
         category: 'custom',
         type: chartType,
+        audience: 'Finance',
+        cadence: 'AdHoc',
+        defaultOutputFormat: 'Online',
+        outputFormats: ['Online', 'XLSX', 'PDF'],
         chartType: chartType !== 'table' ? chartType : undefined,
         isCustom: true,
         tags: ['custom', chartType, 'user-created'],

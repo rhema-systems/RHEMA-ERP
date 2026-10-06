@@ -36,6 +36,7 @@ const lookupDimension: SegmentStructure = {
     lifecycleStatus: 'Active',
     rowVersion: 'fixture',
     accountUsageCount: 0,
+    totalAccountCount: 0,
     canActivate: false,
     canFreeze: true,
     isSystemDefined: false,
