@@ -3277,7 +3277,87 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
       booking per D-13.
 - [ ] The landing page's summary cards link to the calendar.
 
-**State:** *(filled when it lands)*
+**State:**
+
+*Source check (2026-10-06, at HEAD b47322fb2; two read-only surveys, the key points re-read by hand):*
+- **No calendar read exists** in the module (only the fiscal calendar). HR's nearest reads — `dashboard`, `events/range`
+  (its summary DTO has no end time, visibility, scope or calendar flag), `closures/range` (original dates, not the
+  yearly repeats), `bookings/range` — are all `HR.Company.Read`.
+- **Who sees an event is computed, not stored:** `CompanyEventRules.CalendarAudienceOf` (the audience rule when
+  `ShowOnCompanyCalendar`; none for Private / Confidential), resolved with `IncludedAmongForTenantAsync`. The diary's event
+  source adds guests (any visibility, not declined, not cancelled) and the organiser.
+- **The answer door is the HR desk's:** `POST events/{id}/participants/respond` (Write) — answers only, the guest on the
+  event, a series by `SeriesScope`; it does NOT check the reply deadline, `RequiresRsvp`, awaiting approval, `NotSent`
+  or a started date, and raises no notice. No self-service door; no staff read of one event. `MeetingPassword` is on the
+  event DTO and kept out of emails, `.ics` files and announcements.
+- **Notices:** 20 in-app topics, none for "a guest answered"; 17 company-schedule email templates. The guest link opens
+  `/hr/company-schedule/my-schedule?from=&event=`, and the page ignores `event=`.
+- **Milestones:** `ShowOnCalendar` is stored and read by nothing (the range read ignores it). Yearly ones expand with
+  `CompanyMilestoneRules.OccurrencesIn`. **Closures:** `IHrClosureCalendar.GetClosuresAsync` (rows, recurring included) +
+  `BusinessClosureRules.OccurrencesIn`, `CoverageAsync` for who they cover. **Holidays:** `GetHolidaysAsync` — one row
+  per day, named, substitute days flagged.
+- **Rooms:** the staff door's busy read (`me/rooms/busy`, 31 days) carries only room, time and whether it is theirs.
+- **Duplicates the calendar must avoid:** the diary's Closure and Holiday kinds, its Event kind (an audience event is also
+  on the company layer) and the caller's own bookings.
+- **Screens:** no calendar component anywhere (no library; `date-fns` and `react-day-picker`, a picker, only).
+  `LeaveCalendar.tsx` says it draws bands broken at week boundaries; it draws a chip per day. No `/me/calendar`, no
+  portal entry, no sidebar "Company Calendar"; no Accept / Decline UI for an invitee.
+
+*Rulings by the user (2026-10-06, all as recommended):*
+- **The organiser is told of each answer in the app only** — one notice per answer (who, which answer, the comment; a
+  series answer lists the dates); no email, no new template.
+- **The month view draws a several-day entry as one band** across its days, broken at each week's end (built here — the
+  leave calendar has no bands to copy).
+- **A guest's notices open the staff event page**, `/me/calendar/events/{id}`; organisers and the HR desk keep the full
+  page.
+- **An invitee may answer** once the invitation has been sent (never while the event awaits approval), until the reply
+  deadline, or — with none — until the event starts; never on a cancelled or completed event. The HR desk's door is
+  unchanged.
+- **Two slices:** 7a — the server (the calendar read, the staff event view, the reply door, the organiser's notice, the
+  guest link, `ShowOnCalendar` for milestones); 7b — the screens (the calendar for HR and in the portal, month and week,
+  filters, legend, the room view, the staff event page with its answer, booking from the calendar, the landing's links,
+  the sidebar and portal entries).
+
+*7a — what was built (2026-10-06): the server. No migration; one in-app topic (21), no email template.*
+- **`GET calendar?from&to&roomId`** (any internal user; at most sixty days — the diary's own limit, not the plan's 62) —
+  `ICompanyCalendarService` (`Services/HR/CompanySchedule/CompanyCalendarService.cs`). The desk (`HR.Company.Read`, checked
+  per request): every live event (awaiting approval marked), every closure occurrence, every booking. Anyone else: events
+  they organise, are invited to (once the invitation has gone; a declined one too, so they can change it), or are the
+  calendar audience of (never Private / Confidential, never while awaiting approval) — each audience rule resolved once;
+  the closures covering them; their own bookings. Everybody: the calendar milestones (`ShowOnCalendar`, a ghost until now;
+  every anniversary in range), the holidays (one band per run) and their own leave, travel, interview panels and
+  training as Mine — closures, holidays, events and bookings never repeated in Mine. Each event entry carries the
+  caller's invitation, answer and whether they may answer. **The room view:** `roomId` narrows it — the desk sees its
+  bookings in full, anyone else "Room: booked" with no purpose, number or id unless it is theirs (lane 3c).
+- **`GET calendar/events/{id}`** — the event as staff see it: for its organiser, a guest, its audience or the desk;
+  anyone else 404. What, when, where, the link, the rooms booked for it, the organiser, who it is for, the caller's own
+  invitation and whether they may answer; the password only to a guest or the organiser; no budget, no other guest.
+- **`POST events/{id}/participants/{participantId}/reply`** — the invitee's own answer: their row or 404;
+  `CompanyEventRules.RefuseSelfAnswer` (422 with the reason); on a series every date still answerable; saved by
+  tracking; the organiser told in the app (`CompanySchedule.Answered.Organiser`, never of their own answer).
+- **The guest link** (`CompanyScheduleNotices.GuestLink`) now opens `/me/calendar/events/{id}` — every guest notice. ⚠ That
+  page is 7b's; between the two commits a guest's link opens a page not yet built.
+- **Suites:** `run-final-review.mjs` block 7a; 2e-1's guest-link pin (the portal page) and topic count (21) moved.
+
+*7a — proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–7a: **1147/1147 on two clean passes.** The first pass failed one assertion of the
+  suite's own: the off-calendar event and the off-calendar milestone share their words, and the desk (rightly) sees the
+  event — the milestone counts now filter by kind; the next two passes were clean. 7a has **31 assertions**: staff see
+  their invitation, the whole-company event and their series dates, never the private or off-calendar ones; their
+  invitation on the entry (theirs, Sent, answerable, the portal link); the company-wide closure once, not the other
+  site's; the calendar milestone only; nobody else's booking, and the room as "booked" with nothing of it; no Mine entry
+  repeating the company layer; sixty-one days refused; the desk sees every event (HR links), both closures, the calendar
+  milestone only, the booking in full; the guest's view with link and password and their invitation, the audience's
+  without, a private event 404 to staff and open to the desk; a non-answer 422, somebody else's invitation 404, their
+  own accepted with the comment and the organiser told once; a passed reply-by date, an invitation not sent and a begun
+  event each 422 with the reason; a series answered for its three dates, the organiser told once.
+- **Regression:** the round-4 net **191/191**, recruitment **59/59**, the probe **42/42**, `run-lane-n` **109/115** (#40).
+  No request answered 500; the ERR kinds are the known ones.
+- **The blocking watcher:** 100 waits over three passes, 67 of 2 s or more, none on the calendar's tables. The longest yet,
+  **11.1 s, is the notification service's own poll** (`SELECT TOP … maxRetryAttempts` over `Notifications`, a parallel
+  scan) — the table grows with every run; lane 6 takes the suite's share, and the poll's own index is Platform's.
+- **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
+  running; the R4D requisition's notices withdrawn. The API and the scanner stub are stopped.
 
 ### Lane 6 — Harness, guide, registers, memory
 

@@ -67,6 +67,8 @@ public sealed class CompanyScheduleNotices
     public const string TaskAssigned = "TaskAssigned";
     public const string TaskOverdue = "TaskOverdue";
     // Lane 2f-2a (D-12): one notice per guest per series action, raised on the first date it covers.
+    /// <summary>Lane 7 (the user's ruling): a guest answered their own invitation — to the organiser, in the app only.</summary>
+    public const string Answered = "Answered";
     public const string SeriesInvited = "SeriesInvited";
     public const string SeriesChanged = "SeriesChanged";
     // Lane 3b-1 (F-34, the user's ruling: every outcome told): a room booking's, to its booker.
@@ -104,9 +106,12 @@ public sealed class CompanyScheduleNotices
 
     // ---- links ----
 
-    /// <summary>The reader's own schedule, opened at the event's first day — every employee can open it.</summary>
-    public static string GuestLink(CompanyEvent e) =>
-        $"/hr/company-schedule/my-schedule?from={e.StartDate:yyyy-MM-dd}&event={e.Id}";
+    /// <summary>
+    /// The event's page in the portal (lane 7, the user's ruling) — what, when, where, the organiser, and the guest's own
+    /// answer with Accept / Decline / Tentative. Every employee can open it for an event they are invited to. It opened
+    /// My Schedule at the event's day, which showed no event and could not take an answer.
+    /// </summary>
+    public static string GuestLink(CompanyEvent e) => $"/me/calendar/events/{e.Id}";
 
     /// <summary>The event's page, where an organiser's or an assignee's work is.</summary>
     public static string EventLink(CompanyEvent e) => $"/hr/company-schedule/events/{e.Id}";
@@ -299,6 +304,10 @@ public sealed class CompanyScheduleNotices
             "Sent in the app, once, to the employee a task is given to when it passes its due date unfinished (lane 2e-3), with the overdue email. Again only if the due date moves or the task passes to someone new.",
             "Overdue: a task for {{EventName}}",
             "{{Task}} was due {{DueOn}} and is not yet done. For {{EventNumber}}, {{When}}."),
+        new(Answered, ToOrganiser, "Company events: a guest answered (organiser)",
+            "Sent in the app to the event's organiser each time an employee guest answers their own invitation from the calendar (lane 7) — once for an answer covering several dates of a series. Not for an answer the HR desk records, and not by email.",
+            "{{Who}} {{Answer}}: {{EventName}}",
+            "{{EventNumber}} — {{When}}{{Dates}}. The answer is on the event's guest list."),
         new(SeriesInvited, ToGuest, "Company events: invited to several dates (guest)",
             "Sent in the app, once, to an employee guest invited to several dates of a recurring event at once (lane 2f-2a), with the series invitation email, which lists the dates.",
             "You are invited: {{EventName}}, {{Count}} dates",

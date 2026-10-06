@@ -577,6 +577,9 @@ public static class HrModuleServiceRegistration
         // interview clash check fans out over.
         services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService,
             ErpSystem.Core.Services.HR.CompanySchedule.PersonalScheduleService>();
+        // Company-schedule final closure lane 7 (D-7): the company calendar, for HR and for staff, and an event as staff see it.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService,
+            ErpSystem.Core.Services.HR.CompanySchedule.CompanyCalendarService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
         // Who hears what about a company event in the app — one topic per notice and audience
         // (company-schedule final closure, lane 2e-1). The event service needs it.

@@ -3696,6 +3696,91 @@ public class CompanyEventService : ICompanyEventService
     }
 
     /// <remarks>
+    /// <para><b>Lane 7 (D-8, the user's rulings).</b> The invitee's own door, beside the HR desk's: the participant row must
+    /// be the caller's — anybody else's is a lookup miss (404), never a refusal that confirms it exists. Held to
+    /// <see cref="CompanyEventRules.RefuseSelfAnswer"/> (sent, not awaiting approval, before the reply-by date or — with
+    /// none — the start, not closed). On a series, each date it may still be answered on; the others are passed over and
+    /// counted. The organiser is told in the app, once per answer — never of their own.</para>
+    /// </remarks>
+    public async Task<EventSeriesGuestResultDto> ReplyToOwnInvitationAsync(
+        Guid eventId, Guid participantId, Guid actorEmployeeId, ReplyToEventInvitationDto reply, CancellationToken cancellationToken = default)
+    {
+        if (!CompanyEventRules.IsAnswer(reply.Response))
+            throw new InvalidOperationException("Answer accepted, declined or tentative.");
+
+        var tenantId = GetTenantId();
+        var guest = await TenantGuests(tenantId)
+            .FirstOrDefaultAsync(p => p.Id == participantId && p.EventId == eventId, cancellationToken);
+        if (guest is null || guest.EmployeeId is not { } own || own != actorEmployeeId)
+            throw new ArgumentException("That invitation was not found.");
+
+        var ev = await GetOwnedEventAsync(eventId, cancellationToken);
+        var comments = CompanyEventRules.Clean(reply.Comment);
+        var now = DateTime.UtcNow;
+
+        List<(CompanyEvent Event, EventParticipant Row)> answered;
+        var skipped = 0;
+        var closed = 0;
+        if (reply.Scope != SeriesScope.ThisOccurrence && ev.RecurrenceSeriesId is not null)
+        {
+            var (targets, closedCount) = await SeriesTargetsAsync(ev, reply.Scope, cancellationToken);
+            var byId = targets.ToDictionary(t => t.Id);
+            var ids = byId.Keys.ToList();
+            var rows = await TenantGuests(tenantId)
+                .Where(p => ids.Contains(p.EventId) && p.EmployeeId == actorEmployeeId)
+                .ToListAsync(cancellationToken);
+            var open = rows.Where(r => CompanyEventRules.RefuseSelfAnswer(byId[r.EventId], r, now) is null).ToList();
+            if (open.Count == 0)
+                throw new InvalidOperationException(rows.Count == 0
+                    ? $"You are not invited to any date of {ev.EventName} {ScopeWords(reply.Scope)} still to come."
+                    : CompanyEventRules.RefuseSelfAnswer(byId[rows[0].EventId], rows[0], now)!);
+
+            answered = open.Select(r => (byId[r.EventId], r)).OrderBy(x => x.Item1.StartDate).ThenBy(x => x.Item1.OccurrenceNumber).ToList();
+            skipped = targets.Count - open.Count;
+            closed = closedCount;
+        }
+        else
+        {
+            if (CompanyEventRules.RefuseSelfAnswer(ev, guest, now) is { } why)
+                throw new InvalidOperationException(why);
+            answered = [(ev, guest)];
+        }
+
+        foreach (var (_, row) in answered)
+        {
+            row.InvitationStatus = reply.Response;
+            row.ResponseDate = now;
+            row.ResponseComments = comments;
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // The organiser, in the app only — once, naming the dates' count for a series (the user's ruling).
+        var first = answered[0].Event;
+        var word = reply.Response switch
+        {
+            InvitationStatus.Accepted => "accepted",
+            InvitationStatus.Declined => "declined",
+            _ => "may attend",
+        };
+        await _notices.TellAsync(first, CompanyScheduleNotices.Answered, CompanyScheduleNotices.ToOrganiser, [first.OrganizerId],
+            new Dictionary<string, object>
+            {
+                ["Who"] = GuestName(guest),
+                ["Answer"] = word,
+                ["Dates"] = answered.Count > 1 ? $", and {answered.Count - 1} more date{(answered.Count == 2 ? "" : "s")}" : "",
+            }, cancellationToken: cancellationToken);
+
+        _logger.LogInformation("{Guest} answered {Answer} for {Count} date(s) of {EventName} themselves",
+            GuestName(guest), reply.Response, answered.Count, ev.EventName);
+        return new EventSeriesGuestResultDto
+        {
+            EventNumbers = answered.Select(x => x.Event.EventNumber).ToList(),
+            Skipped = skipped,
+            Closed = closed,
+        };
+    }
+
+    /// <remarks>
     /// <para>Organiser work, on Write (lane 2d) — it needed Admin. Not from a cancelled or completed event, whose
     /// guest list is its record.</para>
     ///

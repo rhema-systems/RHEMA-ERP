@@ -974,6 +974,174 @@ public class RespondToEventInvitationDto
     public SeriesScope Scope { get; set; }
 }
 
+/// <summary>
+/// The invitee's own answer (lane 7, D-8) — through <c>events/{id}/participants/{participantId}/reply</c>, which checks the
+/// invitation is the caller's. Accepted, Declined or Tentative.
+/// </summary>
+public class ReplyToEventInvitationDto
+{
+    [Required]
+    public InvitationStatus Response { get; set; }
+
+    [MaxLength(1000)]
+    public string? Comment { get; set; }
+
+    /// <summary>On a series (D-12): this date (the default), this and following dates, or every date.</summary>
+    public SeriesScope Scope { get; set; }
+}
+
+#endregion
+
+#region Company calendar (lane 7, D-7)
+
+/// <summary>
+/// The company calendar for one person (lane 7, D-7): what the server decides they may see between two dates — the HR
+/// desk (<c>HR.Company.Read</c>) every event, closure, calendar milestone, holiday and room booking; anyone else the events
+/// whose audience includes them, they are invited to or organise, the closures that cover them, calendar milestones,
+/// holidays and their own bookings — and, for everyone, their own leave, travel, interview panels and training as "Mine".
+/// Closures and holidays appear once, in the company layer.
+/// </summary>
+public class CompanyCalendarDto
+{
+    public DateOnly From { get; set; }
+    public DateOnly To { get; set; }
+
+    /// <summary>The caller holds <c>HR.Company.Read</c>: the whole company's calendar.</summary>
+    public bool HrDesk { get; set; }
+
+    /// <summary>The room the calendar was narrowed to — the room view (C-26, C-35) — or null.</summary>
+    public Guid? RoomId { get; set; }
+    public string? RoomName { get; set; }
+
+    public List<CalendarEntryDto> Entries { get; set; } = new();
+
+    /// <summary>Parts of the caller's own diary that could not be read (lane 5b's answer) — the "Mine" layer is incomplete.</summary>
+    public List<string> IncompleteSources { get; set; } = new();
+}
+
+/// <summary>One thing on the calendar: a band from <see cref="Start"/> to <see cref="End"/>.</summary>
+public class CalendarEntryDto
+{
+    /// <summary>Event, Closure, Milestone, Holiday, RoomBooking or Mine.</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Narrows the kind: an event's category; Full or Partial for a closure; Holiday or InLieu; for Mine, Leave, Travel,
+    /// Interview or Training.
+    /// </summary>
+    public string? SubKind { get; set; }
+
+    public string Label { get; set; } = string.Empty;
+    public DateTime Start { get; set; }
+    public DateTime End { get; set; }
+
+    /// <summary>Recorded by the day — no times to show.</summary>
+    public bool IsAllDay { get; set; }
+
+    /// <summary>Kind, or Kind.SubKind — what the page colours by and the legend names.</summary>
+    public string ColourKey { get; set; } = string.Empty;
+
+    /// <summary>The record's number (an event's, a booking's), when it has one.</summary>
+    public string? Reference { get; set; }
+
+    /// <summary>Where a click goes — the HR page for the desk, the portal page otherwise — or null when there is nowhere.</summary>
+    public string? Link { get; set; }
+
+    // ── an event ──
+    public Guid? EventId { get; set; }
+    public Guid? SeriesId { get; set; }
+    public string? Status { get; set; }
+    public bool AwaitingApproval { get; set; }
+    public bool IsOrganiser { get; set; }
+
+    /// <summary>The caller's own invitation to it: its id, their answer so far, and whether they may answer now.</summary>
+    public Guid? MyParticipantId { get; set; }
+    public string? MyAnswer { get; set; }
+    public bool CanAnswer { get; set; }
+    public string? WhyNotAnswer { get; set; }
+
+    // ── a room booking ──
+    public Guid? RoomId { get; set; }
+    public string? RoomName { get; set; }
+
+    /// <summary>The caller booked it. Somebody else's booking, to staff, is only "Booked" — no purpose, no booker (lane 3c).</summary>
+    public bool IsMine { get; set; }
+    public Guid? BookingId { get; set; }
+}
+
+/// <summary>
+/// An event as staff see it (lane 7): for anyone it is for — its organiser, a guest, its audience — or the HR desk. What,
+/// when, where, the link and the organiser, and the caller's own invitation; the meeting password only to its guests and
+/// its organiser; no budget, no other guest's answer.
+/// </summary>
+public class CalendarEventViewDto
+{
+    public Guid Id { get; set; }
+    public string EventNumber { get; set; } = string.Empty;
+    public string EventName { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string Type { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public bool IsCancelled { get; set; }
+    public string? CancellationReason { get; set; }
+    public bool AwaitingApproval { get; set; }
+
+    public DateTime StartDate { get; set; }
+    public TimeSpan? StartTime { get; set; }
+    public DateTime EndDate { get; set; }
+    public TimeSpan? EndTime { get; set; }
+    public bool IsAllDay { get; set; }
+
+    /// <summary>The window in words, as the notices say it.</summary>
+    public string When { get; set; } = string.Empty;
+
+    public string LocationType { get; set; } = string.Empty;
+    public string? SiteName { get; set; }
+    public string? VenueName { get; set; }
+    public string? VenueAddress { get; set; }
+    public string? OnlineMeetingLink { get; set; }
+
+    /// <summary>Only to the event's guests and its organiser.</summary>
+    public string? MeetingPassword { get; set; }
+
+    /// <summary>The rooms booked for it, each with its time ("Boardroom, 09:00–11:00").</summary>
+    public List<string> Rooms { get; set; } = new();
+
+    public string? OrganizerName { get; set; }
+    public bool IsOrganiser { get; set; }
+
+    /// <summary>Who it is for, in words ("Everyone", "Finance and the units beneath it", "Its guests and organiser").</summary>
+    public string AudienceDescription { get; set; } = string.Empty;
+
+    public bool RequiresRsvp { get; set; }
+    public DateTime? RsvpDeadline { get; set; }
+
+    /// <summary>One date of a series (D-12): which, of how many.</summary>
+    public Guid? SeriesId { get; set; }
+    public int? OccurrenceNumber { get; set; }
+    public int? OccurrenceCount { get; set; }
+
+    /// <summary>The caller's own invitation, or null when they are not on the guest list.</summary>
+    public MyInvitationDto? MyInvitation { get; set; }
+
+    /// <summary>The caller holds <c>HR.Company.Read</c>: the full HR page is theirs to open.</summary>
+    public bool CanOpenHrPage { get; set; }
+}
+
+/// <summary>The caller's own invitation to an event (lane 7).</summary>
+public class MyInvitationDto
+{
+    public Guid ParticipantId { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public DateTime? ResponseDate { get; set; }
+    public string? ResponseComments { get; set; }
+
+    /// <summary>Whether they may answer it now (<c>CompanyEventRules.RefuseSelfAnswer</c>), and if not, why.</summary>
+    public bool CanAnswer { get; set; }
+    public string? WhyNot { get; set; }
+}
+
 #endregion
 
 #region Event Attendance DTOs

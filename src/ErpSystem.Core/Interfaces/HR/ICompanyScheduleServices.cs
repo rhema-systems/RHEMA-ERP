@@ -127,6 +127,15 @@ public interface ICompanyEventService
     /// </summary>
     Task<EventSeriesGuestResultDto> RespondToInvitationAsync(Guid eventId, RespondToEventInvitationDto responseDto, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// The invitee answers their OWN invitation (lane 7, D-8): refused unless the invitation is <paramref name="actorEmployeeId"/>'s
+    /// (a lookup miss otherwise, never a refusal that confirms it exists), and held to
+    /// <c>CompanyEventRules.RefuseSelfAnswer</c>; on a series, this and following dates or every date — each date it may
+    /// still be answered on. The organiser is told in the app (the user's ruling).
+    /// </summary>
+    Task<EventSeriesGuestResultDto> ReplyToOwnInvitationAsync(
+        Guid eventId, Guid participantId, Guid actorEmployeeId, ReplyToEventInvitationDto reply, CancellationToken cancellationToken = default);
+
     /// <summary>Uninvites a guest — from this date, or on a series from this and following dates or every date (lane 2f-2a).</summary>
     Task<EventSeriesGuestResultDto> RemoveParticipantAsync(Guid participantId, SeriesScope scope = SeriesScope.ThisOccurrence, CancellationToken cancellationToken = default);
 

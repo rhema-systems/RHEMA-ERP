@@ -462,6 +462,12 @@ Finance's start. HR's own fiscal years and periods, and their 16 routes and two 
 until a later migration). Proof: block 4b — the month moved to July and back changes none of the answers on a tenant with
 Finance years (UAT); the "no Finance year" position cannot be reached on UAT.
 
+**A milestone's "Show on calendar" (`CompanyMilestone.ShowOnCalendar`, per milestone) — Enforced since lane 7a; it was a
+ghost** (stored, read by nothing). The company calendar (`GET api/CompanySchedule/calendar`) shows a milestone only when it
+is set — on every anniversary in range for a yearly one. An event's "Show on company calendar" already decided its diary
+audience (lane 2c); since 7a it also decides who sees it on the calendar (never a Private or Confidential event, never one
+awaiting approval, beyond its organiser and guests). Proof: block 7a, both positions (on vs off).
+
 **Who reads a team schedule — data, not a setting (lane 5b, R4-10B.3, the user's ruling).** `OrganizationUnit.HeadEmployeeId`
 decides it beside the HR desk's `HR.Company.Write`: a unit's head reads that unit and every unit beneath it
 (`team-schedule/{unitId}`, `team-schedule/units`). A unit with no head recorded is readable by the desk only — on UAT, 39 of

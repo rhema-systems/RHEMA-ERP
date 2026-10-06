@@ -418,6 +418,52 @@ public class CompanyScheduleController : HrControllerBase
         return (await authorization.AuthorizeAsync(User, HrPermissions.CompanyWritePolicy)).Succeeded;
     }
 
+    // ── The company calendar (lane 7, D-7, D-8) ─────────────────────────────────────────────────
+
+    /// <summary>The company-schedule READ policy, checked per request: the desk's whole-company calendar.</summary>
+    private async Task<bool> CanReadCompanyAsync()
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, HrPermissions.CompanyReadPolicy)).Succeeded;
+    }
+
+    /// <summary>
+    /// The company calendar between two dates (at most sixty days apart) for any signed-in internal user — the server
+    /// decides what each may see (<c>ICompanyCalendarService</c>). <paramref name="roomId"/> narrows it to one room: the
+    /// room view (C-26, C-35).
+    /// </summary>
+    [HttpGet("calendar")]
+    public async Task<ActionResult<CompanyCalendarDto>> GetCompanyCalendar(
+        [FromQuery] DateOnly from, [FromQuery] DateOnly to, [FromQuery] Guid? roomId,
+        [FromServices] ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService calendar, CancellationToken ct)
+    {
+        if (from == default || to == default) return BadRequest(new { message = "Say which dates (from and to)." });
+        return Ok(await calendar.GetCalendarAsync(CurrentUser.EmployeeId, await CanReadCompanyAsync(), from, to, roomId, ct));
+    }
+
+    /// <summary>
+    /// An event as staff see it (lane 7) — for its organiser, its guests, its audience and the HR desk; anyone else gets 404.
+    /// </summary>
+    [HttpGet("calendar/events/{eventId:guid}")]
+    public async Task<ActionResult<CalendarEventViewDto>> GetCalendarEvent(
+        Guid eventId, [FromServices] ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService calendar, CancellationToken ct)
+        => Ok(await calendar.GetEventAsync(eventId, CurrentUser.EmployeeId, await CanReadCompanyAsync(), ct));
+
+    /// <summary>
+    /// The invitee's own answer (lane 7, D-8): any signed-in internal user, for their OWN invitation only — anybody else's
+    /// is 404 — and only while it may be answered (sent, not awaiting approval, before the reply-by date or the start, not
+    /// closed: 422 with the reason). The organiser is told in the app. The HR desk's <c>participants/respond</c> is
+    /// unchanged.
+    /// </summary>
+    [HttpPost("events/{eventId:guid}/participants/{participantId:guid}/reply")]
+    public async Task<ActionResult<EventSeriesGuestResultDto>> ReplyToOwnInvitation(
+        Guid eventId, Guid participantId, [FromBody] ReplyToEventInvitationDto reply, CancellationToken ct)
+    {
+        if (CurrentUser.EmployeeId is not { } me || me == Guid.Empty)
+            return BadRequest(new { message = "Your user account is not linked to an employee record." });
+        return Ok(await _eventService.ReplyToOwnInvitationAsync(eventId, participantId, me, reply, ct));
+    }
+
     /// <summary>
     /// Chases everybody who has not answered their invitation (round 4, D6) — answering who it was for and who it
     /// reached (lane 2e-2). It counted attempts as <c>sent</c>.

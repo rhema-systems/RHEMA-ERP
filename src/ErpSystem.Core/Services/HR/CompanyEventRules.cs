@@ -361,6 +361,30 @@ public static class CompanyEventRules
         status is InvitationStatus.Accepted or InvitationStatus.Declined or InvitationStatus.Tentative;
 
     /// <summary>
+    /// Whether an invitee may answer their OWN invitation now (lane 7, D-8, the user's ruling) — answers the sentence to
+    /// refuse with, or null. Once the invitation has gone (never while the event awaits approval, whose approval sends
+    /// it), until the reply-by date when the event asks for replies, or — with none — until it begins; never on a
+    /// cancelled or completed event. The HR desk's door (<c>participants/respond</c>) is not held to this: it records an
+    /// answer for a guest at any time.
+    /// </summary>
+    public static string? RefuseSelfAnswer(CompanyEvent e, EventParticipant invitation, DateTime nowUtc)
+    {
+        if (IsClosed(e))
+            return $"{e.EventName} is {(e.IsCancelled || e.Status == EventStatus.Cancelled ? "cancelled" : "completed")}, so its invitation can no longer be answered.";
+        if (IsAwaitingApproval(e))
+            return $"{e.EventName} is still awaiting approval, so its invitations have not gone out yet.";
+        if (invitation.InvitationStatus == InvitationStatus.NotSent)
+            return $"Your invitation to {e.EventName} has not been sent yet.";
+        if (e.RequiresRsvp && e.RsvpDeadline is { } deadline)
+            return deadline <= nowUtc
+                ? $"The reply-by date for {e.EventName} ({Describe(deadline)}) has passed. Ask the organiser to record your answer."
+                : null;
+        return EventWindow.Of(e).Start <= nowUtc
+            ? $"{e.EventName} has already begun. Ask the organiser to record your answer."
+            : null;
+    }
+
+    /// <summary>
     /// Checks a guest and trims their details: an employee, or someone from outside with a name and an
     /// email address — the invitation goes to the address. Answers the sentence to refuse with, or null.
     /// </summary>
