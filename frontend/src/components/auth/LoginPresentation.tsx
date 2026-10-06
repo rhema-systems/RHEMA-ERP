@@ -2,6 +2,7 @@ import React, { type ReactNode, type SVGProps } from 'react';
 import { BarChart3, Cloud, Settings, ShieldCheck, type LucideIcon } from 'lucide-react';
 
 import type { LoginPageStyle } from '../../services/login-appearance';
+import { EnvironmentBadge } from '../environment/EnvironmentBadge';
 
 interface LoginShellProps {
   children: ReactNode;
@@ -159,6 +160,9 @@ function ShellFrame({
         aria-hidden="true"
       />
       <div data-login-overlay className="absolute inset-0 -z-10" aria-hidden="true" />
+      <div className="absolute left-1/2 top-4 z-20 -translate-x-1/2 sm:left-auto sm:right-5 sm:translate-x-0">
+        <EnvironmentBadge hideProduction />
+      </div>
 
       <style>{`
         /* Light and Dark deliberately own separate visual tokens. Desktop

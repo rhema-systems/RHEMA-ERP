@@ -979,6 +979,8 @@ function Compare-MigrationState {
 function Invoke-PublicSmoke {
     param(
         [string]$ExpectedCacheVersion,
+        [string]$ExpectedEnvironment,
+        [string]$ExpectedCommit,
         [switch]$AllowConfigurationDrift
     )
 
@@ -991,6 +993,28 @@ function Invoke-PublicSmoke {
         Assert-True ($LASTEXITCODE -eq 0 -and $code -eq '200') `
             "Public route failed: $route (HTTP $code)"
         Write-Output "PUBLIC_ROUTE|200|$route"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedEnvironment)) {
+        $environmentJson = (& curl.exe -k -sS --max-time 30 `
+            "$base/api/public/config/environment") -join "`n"
+        Assert-True ($LASTEXITCODE -eq 0) `
+            'Could not retrieve the public application environment descriptor.'
+        $environmentDescriptor = $environmentJson | ConvertFrom-Json
+        Assert-True ($environmentDescriptor.environment -ceq $ExpectedEnvironment) `
+            "Public environment descriptor expected $ExpectedEnvironment but received $($environmentDescriptor.environment)."
+        Assert-True (-not [bool]$environmentDescriptor.isProduction) `
+            'The test VPS must never identify itself as Production.'
+        Assert-True ([bool]$environmentDescriptor.configurationValid) `
+            'The public environment descriptor reports invalid configuration.'
+        if (-not [string]::IsNullOrWhiteSpace($ExpectedCommit)) {
+            Assert-True ($environmentDescriptor.buildId -ceq $ExpectedCommit.Substring(0, 7)) `
+                'The public build identifier differs from the deployed release commit.'
+        }
+        Assert-True ($environmentJson -notmatch `
+            '(?i)connectionstring|password|secretkey|privatekey|accesstoken') `
+            'The public environment descriptor contains a forbidden sensitive field name.'
+        Write-Output "PUBLIC_ENVIRONMENT|$($environmentDescriptor.environment)|$($environmentDescriptor.buildId)"
     }
 
     $serviceWorker = (& curl.exe -k -sS --max-time 30 "$base/sw.js") -join "`n"
@@ -1286,7 +1310,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
         Import-RemoteTimings $verify
         $migrationState = Compare-MigrationState $verify $true
         Invoke-Step 'Public API, asset, and CORS smoke' {
-            Invoke-PublicSmoke '' -AllowConfigurationDrift
+            Invoke-PublicSmoke '' '' '' -AllowConfigurationDrift
         } | Out-Host
         if (-not $SkipBrowserSmoke) {
             Invoke-Step 'Headless Chrome browser smoke' {
@@ -1412,7 +1436,7 @@ Move-Item -LiteralPath `$source -Destination `$target -Force
     $migrationState = Compare-MigrationState $verifyOutput $true
 
     Invoke-Step 'Public API, asset, and CORS smoke' {
-        Invoke-PublicSmoke $releaseManifest.cacheVersion
+        Invoke-PublicSmoke $releaseManifest.cacheVersion 'Test' $releaseManifest.commit
     } | Out-Host
     if (-not $SkipBrowserSmoke) {
         Invoke-Step 'Headless Chrome browser smoke' {

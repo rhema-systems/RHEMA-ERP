@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
@@ -123,30 +124,29 @@ namespace ErpSystem.Api.Controllers
         {
             try
             {
-                var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId) ? (Guid?)parsedUserId : null;
-
-                // Role-based access is handled by the [Authorize] attribute
-                // Additional logic can be added here if needed
-
-                var sessions = await _userSessionService.GetActiveUserSessionsAsync(userId);
-
-                var sessionDtos = sessions.Select(s => new ActiveSessionDto
-                {
-                    SessionId = s.SessionId,
-                    UserId = s.UserId,
-                    Username = "Current User", // We don't need to query user again
-                    Role = "Current User", // This would need proper role lookup if needed
-                    Email = "Current User", // This would need proper email lookup if needed
-                    IpAddress = s.IpAddress,
-                    UserAgent = s.UserAgent,
-                    DeviceType = s.DeviceType,
-                    Browser = s.Browser,
-                    OperatingSystem = s.OperatingSystem,
-                    Location = s.Location,
-                    LoginTime = s.LoginTime,
-                    LastActivityTime = s.LastActivityTime,
-                    SessionDuration = DateTime.UtcNow - s.LoginTime
-                }).ToList();
+                var tenantId = GetRequiredTenantId();
+                var sessionDtos = await _context.UserSessions
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == tenantId && s.UserId == userId && s.IsActive)
+                    .OrderByDescending(s => s.LastActivityTime)
+                    .Select(s => new ActiveSessionDto
+                    {
+                        SessionId = s.SessionId,
+                        UserId = s.UserId,
+                        Username = s.User.UserName ?? "Unknown",
+                        Role = s.User.UserRoles.Select(ur => ur.Role.Name).FirstOrDefault() ?? "Unknown",
+                        Email = s.User.Email ?? "Unknown",
+                        IpAddress = s.IpAddress,
+                        UserAgent = s.UserAgent,
+                        DeviceType = s.DeviceType,
+                        Browser = s.Browser,
+                        OperatingSystem = s.OperatingSystem,
+                        Location = s.Location,
+                        LoginTime = s.LoginTime,
+                        LastActivityTime = s.LastActivityTime,
+                        SessionDuration = DateTime.UtcNow - s.LoginTime
+                    })
+                    .ToListAsync();
 
                 return Ok(sessionDtos);
             }
@@ -168,13 +168,24 @@ namespace ErpSystem.Api.Controllers
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 var currentUsername = _currentUserService.UserName;
+                var tenantId = _currentUserService.TenantId;
 
-                if (!currentUserId.HasValue)
+                if (!currentUserId.HasValue || !tenantId.HasValue || tenantId.Value == Guid.Empty)
                 {
                     return Unauthorized();
                 }
 
-                await _userSessionService.TerminateSessionAsync(sessionId, request.Reason ?? "Terminated by administrator");
+                var sessionExists = await _context.UserSessions
+                    .AsNoTracking()
+                    .AnyAsync(s => s.TenantId == tenantId.Value && s.SessionId == sessionId);
+                if (!sessionExists)
+                {
+                    return NotFound(new { message = "Session not found" });
+                }
+
+                var reason = request.Reason ?? "Terminated by administrator";
+                await _userSessionService.TerminateSessionAsync(sessionId, reason);
+                await RecordSessionAuditAsync(currentUserId.Value, tenantId.Value, currentUsername, sessionId, reason);
 
                 _logger.LogInformation("Session {SessionId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}",
                     sessionId, currentUserId.Value, currentUsername, request.Reason);
@@ -199,14 +210,24 @@ namespace ErpSystem.Api.Controllers
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var parsedUserId2) ? (Guid?)parsedUserId2 : null;
                 var currentUsername = _currentUserService.UserName;
+                var tenantId = _currentUserService.TenantId;
 
-                if (!currentUserId.HasValue)
+                if (!currentUserId.HasValue || !tenantId.HasValue || tenantId.Value == Guid.Empty)
                 {
                     return Unauthorized();
                 }
 
-                await _userSessionService.TerminateAllUserSessionsAsync(userId, null,
-                    request.Reason ?? "All sessions terminated by administrator");
+                var targetBelongsToTenant = await _context.Users
+                    .AsNoTracking()
+                    .AnyAsync(u => u.Id == userId && u.TenantId == tenantId.Value);
+                if (!targetBelongsToTenant)
+                {
+                    return NotFound(new { message = "User not found" });
+                }
+
+                var reason = request.Reason ?? "All sessions terminated by administrator";
+                await _userSessionService.TerminateAllUserSessionsAsync(userId, null, reason);
+                await RecordSessionAuditAsync(currentUserId.Value, tenantId.Value, currentUsername, userId.ToString(), reason, "TerminateAllUserSessions");
 
                 _logger.LogInformation("All sessions for user {UserId} terminated by admin {AdminId} ({AdminUsername}). Reason: {Reason}",
                     userId, currentUserId.Value, currentUsername, request.Reason);
@@ -231,8 +252,9 @@ namespace ErpSystem.Api.Controllers
             {
                 var currentUserId = Guid.TryParse(_currentUserService.UserId, out var userId) ? userId : (Guid?)null;
                 var currentUsername = _currentUserService.UserName;
+                var tenantId = _currentUserService.TenantId;
 
-                if (!currentUserId.HasValue)
+                if (!currentUserId.HasValue || !tenantId.HasValue || tenantId.Value == Guid.Empty)
                 {
                     return Unauthorized();
                 }
@@ -244,9 +266,27 @@ namespace ErpSystem.Api.Controllers
 
                 var results = new List<BulkSessionOperationResult>();
                 var reason = request.Reason ?? "Bulk terminated by administrator";
+                var requestedIds = request.SessionIds.Distinct(StringComparer.Ordinal).ToList();
+                var tenantSessionIds = (await _context.UserSessions
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == tenantId.Value && requestedIds.Contains(s.SessionId))
+                    .Select(s => s.SessionId)
+                    .ToListAsync())
+                    .ToHashSet(StringComparer.Ordinal);
 
-                foreach (var sessionId in request.SessionIds)
+                foreach (var sessionId in requestedIds)
                 {
+                    if (!tenantSessionIds.Contains(sessionId))
+                    {
+                        results.Add(new BulkSessionOperationResult
+                        {
+                            SessionId = sessionId,
+                            Success = false,
+                            Message = "Session not found"
+                        });
+                        continue;
+                    }
+
                     try
                     {
                         await _userSessionService.TerminateSessionAsync(sessionId, reason);
@@ -276,9 +316,17 @@ namespace ErpSystem.Api.Controllers
                     "Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}",
                     currentUserId.Value, currentUsername, successCount, failureCount, reason);
 
+                await RecordSessionAuditAsync(
+                    currentUserId.Value,
+                    tenantId.Value,
+                    currentUsername,
+                    "bulk",
+                    $"{reason}; successful={successCount}; failed={failureCount}",
+                    "BulkTerminateSessions");
+
                 return Ok(new BulkSessionOperationResponse
                 {
-                    TotalRequested = request.SessionIds.Count(),
+                    TotalRequested = requestedIds.Count,
                     Successful = successCount,
                     Failed = failureCount,
                     Results = results
@@ -392,6 +440,14 @@ namespace ErpSystem.Api.Controllers
                     "Criteria: {Criteria}, Success: {SuccessCount}, Failures: {FailureCount}. Reason: {Reason}",
                     currentUserId.Value, currentUsername, request.GetCriteriaDescription(), successCount, failureCount, reason);
 
+                await RecordSessionAuditAsync(
+                    currentUserId.Value,
+                    currentTenantId.Value,
+                    currentUsername,
+                    "criteria",
+                    $"{reason}; criteria={request.GetCriteriaDescription()}; successful={successCount}; failed={failureCount}",
+                    "TerminateSessionsByCriteria");
+
                 return Ok(new BulkSessionOperationResponse
                 {
                     TotalRequested = matchingSessions.Count,
@@ -501,26 +557,32 @@ namespace ErpSystem.Api.Controllers
                 // Role-based access is handled by the [Authorize] attribute
                 // Additional logic can be added here if needed
 
-                var sessions = await _userSessionService.GetUserSessionHistoryAsync(userId, days);
-
-                var sessionDtos = sessions.Select(s => new SessionHistoryDto
-                {
-                    SessionId = s.SessionId,
-                    UserId = s.UserId,
-                    IpAddress = s.IpAddress,
-                    UserAgent = s.UserAgent,
-                    DeviceType = s.DeviceType,
-                    Browser = s.Browser,
-                    OperatingSystem = s.OperatingSystem,
-                    Location = s.Location,
-                    LoginTime = s.LoginTime,
-                    LogoutTime = s.LogoutTime,
-                    LastActivityTime = s.LastActivityTime,
-                    IsActive = s.IsActive,
-                    TerminationReason = s.TerminationReason,
-                    WasTerminatedByConcurrentLogin = s.WasTerminatedByConcurrentLogin,
-                    SessionDuration = s.GetSessionDuration()
-                }).ToList();
+                var tenantId = GetRequiredTenantId();
+                var cutoff = DateTime.UtcNow.AddDays(-Math.Clamp(days, 1, 365));
+                var now = DateTime.UtcNow;
+                var sessionDtos = await _context.UserSessions
+                    .AsNoTracking()
+                    .Where(s => s.TenantId == tenantId && s.UserId == userId && s.LoginTime >= cutoff)
+                    .OrderByDescending(s => s.LoginTime)
+                    .Select(s => new SessionHistoryDto
+                    {
+                        SessionId = s.SessionId,
+                        UserId = s.UserId,
+                        IpAddress = s.IpAddress,
+                        UserAgent = s.UserAgent,
+                        DeviceType = s.DeviceType,
+                        Browser = s.Browser,
+                        OperatingSystem = s.OperatingSystem,
+                        Location = s.Location,
+                        LoginTime = s.LoginTime,
+                        LogoutTime = s.LogoutTime,
+                        LastActivityTime = s.LastActivityTime,
+                        IsActive = s.IsActive,
+                        TerminationReason = s.TerminationReason,
+                        WasTerminatedByConcurrentLogin = s.WasTerminatedByConcurrentLogin,
+                        SessionDuration = (s.LogoutTime ?? now) - s.LoginTime
+                    })
+                    .ToListAsync();
 
                 return Ok(sessionDtos);
             }
@@ -529,6 +591,43 @@ namespace ErpSystem.Api.Controllers
                 _logger.LogError(ex, "Error retrieving session history for user {UserId}", userId);
                 return StatusCode(500, new { message = "An error occurred while retrieving session history" });
             }
+        }
+
+        private Guid GetRequiredTenantId()
+        {
+            var tenantId = _currentUserService.TenantId;
+            if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+            {
+                throw new InvalidOperationException("Tenant context is required for session administration.");
+            }
+
+            return tenantId.Value;
+        }
+
+        private async Task RecordSessionAuditAsync(
+            Guid administratorId,
+            Guid tenantId,
+            string? administratorName,
+            string resourceId,
+            string reason,
+            string action = "TerminateSession")
+        {
+            _context.AuditLogs.Add(new AuditLog
+            {
+                Id = Guid.NewGuid(),
+                UserId = administratorId,
+                Username = string.IsNullOrWhiteSpace(administratorName) ? administratorId.ToString() : administratorName,
+                Action = action,
+                Resource = "UserSession",
+                ResourceId = resourceId,
+                NewValues = JsonSerializer.Serialize(new { Reason = reason }),
+                IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
+                UserAgent = Request.Headers.UserAgent.ToString(),
+                Timestamp = DateTime.UtcNow,
+                TenantId = tenantId,
+                CreatedAt = DateTime.UtcNow
+            });
+            await _context.SaveChangesAsync();
         }
     }
 

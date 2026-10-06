@@ -19,6 +19,7 @@ import { AccountSidebar } from './AccountSidebar';
 import { FontSizeToggle } from './FontSizeToggle';
 import { settingsNavigationItems } from './sidebar';
 import { hasAnyAccessibleSettings } from '../settings/settings-access';
+import { EnvironmentBadge } from '../environment/EnvironmentBadge';
 
 interface HeaderProps {
   className?: string;
@@ -78,6 +79,7 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
         </div>
 
         <div className="ml-auto flex shrink-0 items-center gap-3">
+          <EnvironmentBadge hideProduction compact className="hidden md:inline-flex" />
           {/* Current Tenant */}
           <ClientOnly>
             {currentTenant && (

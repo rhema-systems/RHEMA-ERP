@@ -74,8 +74,10 @@ public class SettingsController : ControllerBase
                     CaptchaProvider = "recaptcha",
                     RecaptchaSiteKey = null,
                     RecaptchaSecretKey = null,
+                    RecaptchaSecretConfigured = false,
                     HCaptchaSiteKey = null,
                     HCaptchaSecretKey = null,
+                    HCaptchaSecretConfigured = false,
 
                     // Legal URLs
                     TermsOfServiceUrl = null,
@@ -112,9 +114,11 @@ public class SettingsController : ControllerBase
                 CaptchaEnabled = settings.CaptchaEnabled,
                 CaptchaProvider = settings.CaptchaProvider,
                 RecaptchaSiteKey = settings.RecaptchaSiteKey,
-                RecaptchaSecretKey = settings.RecaptchaSecretKey,
+                RecaptchaSecretKey = null,
+                RecaptchaSecretConfigured = !string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey),
                 HCaptchaSiteKey = settings.HCaptchaSiteKey,
-                HCaptchaSecretKey = settings.HCaptchaSecretKey,
+                HCaptchaSecretKey = null,
+                HCaptchaSecretConfigured = !string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey),
 
                 // Legal URLs
                 TermsOfServiceUrl = settings.TermsOfServiceUrl,
@@ -205,8 +209,10 @@ public class SettingsController : ControllerBase
                     Action = existingSettings == null ? "CREATE" : "UPDATE",
                     Resource = "SecuritySettings",
                     ResourceId = updatedSettings.Id.ToString(),
-                    OldValues = existingSettings != null ? System.Text.Json.JsonSerializer.Serialize(existingSettings) : null,
-                    NewValues = System.Text.Json.JsonSerializer.Serialize(request),
+                    OldValues = existingSettings != null
+                        ? System.Text.Json.JsonSerializer.Serialize(ToSecuritySettingsAuditValues(existingSettings))
+                        : null,
+                    NewValues = System.Text.Json.JsonSerializer.Serialize(ToSecuritySettingsAuditValues(request)),
                     IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
                     UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                     TenantId = tenantId.Value
@@ -236,9 +242,11 @@ public class SettingsController : ControllerBase
                 CaptchaEnabled = updatedSettings.CaptchaEnabled,
                 CaptchaProvider = updatedSettings.CaptchaProvider,
                 RecaptchaSiteKey = updatedSettings.RecaptchaSiteKey,
-                RecaptchaSecretKey = updatedSettings.RecaptchaSecretKey,
+                RecaptchaSecretKey = null,
+                RecaptchaSecretConfigured = !string.IsNullOrWhiteSpace(updatedSettings.RecaptchaSecretKey),
                 HCaptchaSiteKey = updatedSettings.HCaptchaSiteKey,
-                HCaptchaSecretKey = updatedSettings.HCaptchaSecretKey,
+                HCaptchaSecretKey = null,
+                HCaptchaSecretConfigured = !string.IsNullOrWhiteSpace(updatedSettings.HCaptchaSecretKey),
                 TermsOfServiceUrl = updatedSettings.TermsOfServiceUrl,
                 PrivacyPolicyUrl = updatedSettings.PrivacyPolicyUrl,
                 LoginPageStyle = updatedSettings.LoginPageStyle.ToString()
@@ -630,6 +638,62 @@ public class SettingsController : ControllerBase
         return false;
     }
 
+    private static object ToSecuritySettingsAuditValues(Core.Entities.Security settings) => new
+    {
+        settings.PasswordMinLength,
+        settings.PasswordRequireUppercase,
+        settings.PasswordRequireLowercase,
+        settings.PasswordRequireDigits,
+        settings.PasswordRequireSpecialChars,
+        settings.PasswordMaxAge,
+        settings.PasswordPreventReuse,
+        settings.SessionTimeoutMinutes,
+        settings.JwtTokenLifetimeMinutes,
+        PreventConcurrentLogin = settings.PreventConcurrentLogin.ToString(),
+        settings.MaxFailedLoginAttempts,
+        settings.AccountLockoutMinutes,
+        settings.RateLimitLoginMaxAttempts,
+        settings.RateLimitLoginWindowMinutes,
+        settings.RateLimitLoginBlockDurationMinutes,
+        settings.CaptchaEnabled,
+        settings.CaptchaProvider,
+        settings.RecaptchaSiteKey,
+        RecaptchaSecretConfigured = !string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey),
+        settings.HCaptchaSiteKey,
+        HCaptchaSecretConfigured = !string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey),
+        settings.TermsOfServiceUrl,
+        settings.PrivacyPolicyUrl,
+        LoginPageStyle = settings.LoginPageStyle.ToString()
+    };
+
+    private static object ToSecuritySettingsAuditValues(SecuritySettingsDto settings) => new
+    {
+        settings.PasswordMinLength,
+        settings.PasswordRequireUppercase,
+        settings.PasswordRequireLowercase,
+        settings.PasswordRequireDigits,
+        settings.PasswordRequireSpecialChars,
+        settings.PasswordMaxAge,
+        settings.PasswordPreventReuse,
+        settings.SessionTimeoutMinutes,
+        settings.JwtTokenLifetimeMinutes,
+        settings.PreventConcurrentLogin,
+        settings.MaxFailedLoginAttempts,
+        settings.AccountLockoutMinutes,
+        settings.RateLimitLoginMaxAttempts,
+        settings.RateLimitLoginWindowMinutes,
+        settings.RateLimitLoginBlockDurationMinutes,
+        settings.CaptchaEnabled,
+        settings.CaptchaProvider,
+        settings.RecaptchaSiteKey,
+        RecaptchaSecretSupplied = !string.IsNullOrWhiteSpace(settings.RecaptchaSecretKey),
+        settings.HCaptchaSiteKey,
+        HCaptchaSecretSupplied = !string.IsNullOrWhiteSpace(settings.HCaptchaSecretKey),
+        settings.TermsOfServiceUrl,
+        settings.PrivacyPolicyUrl,
+        settings.LoginPageStyle
+    };
+
     /// <summary>
     /// Get email settings
     /// </summary>
@@ -660,7 +724,8 @@ public class SettingsController : ControllerBase
                 SmtpHost = settings.SmtpHost,
                 SmtpPort = settings.SmtpPort,
                 SmtpUsername = settings.SmtpUsername,
-                SmtpPassword = settings.SmtpPassword, // In production, don't return the password
+                SmtpPassword = string.Empty,
+                SmtpPasswordConfigured = !string.IsNullOrWhiteSpace(settings.SmtpPassword),
                 UseTLS = settings.UseTLS,
                 FromAddress = settings.FromAddress,
                 FromName = settings.FromName
@@ -715,7 +780,7 @@ public class SettingsController : ControllerBase
                     Resource = "EmailSettings",
                     ResourceId = createdSettings.Id.ToString(),
                     OldValues = null,
-                    NewValues = System.Text.Json.JsonSerializer.Serialize(request),
+                    NewValues = System.Text.Json.JsonSerializer.Serialize(ToEmailAuditValues(request)),
                     IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
                     UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                     TenantId = tenantId.Value
@@ -729,7 +794,8 @@ public class SettingsController : ControllerBase
                 SmtpHost = createdSettings.SmtpHost,
                 SmtpPort = createdSettings.SmtpPort,
                 SmtpUsername = createdSettings.SmtpUsername,
-                SmtpPassword = createdSettings.SmtpPassword,
+                SmtpPassword = string.Empty,
+                SmtpPasswordConfigured = !string.IsNullOrWhiteSpace(createdSettings.SmtpPassword),
                 UseTLS = createdSettings.UseTLS,
                 FromAddress = createdSettings.FromAddress,
                 FromName = createdSettings.FromName
@@ -783,8 +849,8 @@ public class SettingsController : ControllerBase
                     Action = "UPDATE",
                     Resource = "EmailSettings",
                     ResourceId = updatedSettings.Id.ToString(),
-                    OldValues = System.Text.Json.JsonSerializer.Serialize(existingSettings),
-                    NewValues = System.Text.Json.JsonSerializer.Serialize(request),
+                    OldValues = System.Text.Json.JsonSerializer.Serialize(ToEmailAuditValues(existingSettings)),
+                    NewValues = System.Text.Json.JsonSerializer.Serialize(ToEmailAuditValues(request)),
                     IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown",
                     UserAgent = Request.Headers["User-Agent"].FirstOrDefault(),
                     TenantId = tenantId.Value
@@ -798,7 +864,8 @@ public class SettingsController : ControllerBase
                 SmtpHost = updatedSettings.SmtpHost,
                 SmtpPort = updatedSettings.SmtpPort,
                 SmtpUsername = updatedSettings.SmtpUsername,
-                SmtpPassword = updatedSettings.SmtpPassword,
+                SmtpPassword = string.Empty,
+                SmtpPasswordConfigured = !string.IsNullOrWhiteSpace(updatedSettings.SmtpPassword),
                 UseTLS = updatedSettings.UseTLS,
                 FromAddress = updatedSettings.FromAddress,
                 FromName = updatedSettings.FromName
@@ -820,12 +887,15 @@ public class SettingsController : ControllerBase
     {
         try
         {
+            var persistedSettings = await _settingsService.GetEmailSettingsAsync();
             var emailSettings = new Core.Entities.EmailSettings
             {
                 SmtpHost = request.Settings.SmtpHost,
                 SmtpPort = request.Settings.SmtpPort,
                 SmtpUsername = request.Settings.SmtpUsername,
-                SmtpPassword = request.Settings.SmtpPassword,
+                SmtpPassword = string.IsNullOrWhiteSpace(request.Settings.SmtpPassword)
+                    ? persistedSettings?.SmtpPassword ?? string.Empty
+                    : request.Settings.SmtpPassword,
                 UseTLS = request.Settings.UseTLS,
                 FromAddress = request.Settings.FromAddress,
                 FromName = request.Settings.FromName
@@ -884,6 +954,28 @@ public class SettingsController : ControllerBase
             // Best-effort audit logging. Do not fail the request.
         }
     }
+
+    private static object ToEmailAuditValues(EmailSettingsDto settings) => new
+    {
+        settings.SmtpHost,
+        settings.SmtpPort,
+        settings.SmtpUsername,
+        SmtpPasswordSupplied = !string.IsNullOrWhiteSpace(settings.SmtpPassword),
+        settings.UseTLS,
+        settings.FromAddress,
+        settings.FromName
+    };
+
+    private static object ToEmailAuditValues(Core.Entities.EmailSettings settings) => new
+    {
+        settings.SmtpHost,
+        settings.SmtpPort,
+        settings.SmtpUsername,
+        SmtpPasswordConfigured = !string.IsNullOrWhiteSpace(settings.SmtpPassword),
+        settings.UseTLS,
+        settings.FromAddress,
+        settings.FromName
+    };
 
     /// <summary>
     /// Get SMS settings (per tenant)
@@ -1340,6 +1432,7 @@ public class EmailSettingsDto
     public int SmtpPort { get; set; }
     public string SmtpUsername { get; set; } = string.Empty;
     public string SmtpPassword { get; set; } = string.Empty;
+    public bool SmtpPasswordConfigured { get; set; }
     public bool UseTLS { get; set; }
     public string FromAddress { get; set; } = string.Empty;
     public string FromName { get; set; } = string.Empty;
@@ -1452,8 +1545,10 @@ public class SecuritySettingsDto
     public string CaptchaProvider { get; set; } = "recaptcha";
     public string? RecaptchaSiteKey { get; set; }
     public string? RecaptchaSecretKey { get; set; }
+    public bool RecaptchaSecretConfigured { get; set; }
     public string? HCaptchaSiteKey { get; set; }
     public string? HCaptchaSecretKey { get; set; }
+    public bool HCaptchaSecretConfigured { get; set; }
 
     // Legal URLs
     public string? TermsOfServiceUrl { get; set; }

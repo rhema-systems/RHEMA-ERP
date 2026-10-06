@@ -672,6 +672,8 @@ builder.Services.AddErpSystemDatabase(builder.Configuration);
 builder.Services.AddErpSystemIdentity();
 builder.Services.AddErpSystemRepositories();
 builder.Services.AddErpSystemServices();
+builder.Services.AddSingleton<ErpSystem.Api.Services.IApplicationEnvironmentService,
+    ErpSystem.Api.Services.ApplicationEnvironmentService>();
 builder.Services.Configure<ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions>(
     builder.Configuration.GetSection(
         ErpSystem.Core.DTOs.Procurement.SupplierApplicantAccessOptions.SectionName));

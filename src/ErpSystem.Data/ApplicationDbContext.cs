@@ -6622,6 +6622,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.Timestamp);
             entity.HasIndex(a => a.UserId);
             entity.HasIndex(a => a.Resource);
+            entity.HasIndex(a => new { a.TenantId, a.Timestamp });
             entity.Property(a => a.IdempotencyKey).HasMaxLength(450);
             entity.HasIndex(a => new { a.TenantId, a.IdempotencyKey })
                 .IsUnique()
@@ -6636,6 +6637,9 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(s => s.Timestamp);
             entity.HasIndex(s => s.IpAddress);
             entity.HasIndex(s => s.Action);
+            entity.HasIndex(s => new { s.TenantId, s.Timestamp });
+            entity.HasIndex(s => new { s.TenantId, s.Action, s.Timestamp });
+            entity.HasIndex(s => new { s.TenantId, s.UserId, s.Timestamp });
         });
 
         // Configure Security entity
@@ -6669,6 +6673,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
 
         // Configure SecurityAlert entity
+        builder.Entity<UserSession>(entity =>
+        {
+            entity.HasIndex(session => new { session.TenantId, session.IsActive, session.LastActivityTime });
+            entity.HasIndex(session => new { session.TenantId, session.UserId, session.LoginTime });
+        });
+
         builder.Entity<SecurityAlert>(entity =>
         {
             entity.HasOne(sa => sa.Tenant).WithMany().HasForeignKey(sa => sa.TenantId).OnDelete(DeleteBehavior.Cascade);
@@ -6678,6 +6688,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(sa => sa.Type);
             entity.HasIndex(sa => sa.Category);
             entity.HasIndex(sa => sa.Dismissed);
+            entity.HasIndex(sa => new { sa.TenantId, sa.Dismissed, sa.Timestamp });
         });
 
         // Configure SecurityMetrics entity
@@ -6699,6 +6710,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(td => td.Status);
             entity.HasIndex(td => td.Severity);
             entity.HasIndex(td => td.IpAddress);
+            entity.HasIndex(td => new { td.TenantId, td.Status, td.Severity, td.DetectedAt });
         });
 
         // Configure ThreatIndicator entity

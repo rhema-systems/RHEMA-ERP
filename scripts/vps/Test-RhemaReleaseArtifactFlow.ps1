@@ -123,6 +123,13 @@ foreach ($contract in @('DeployOnly', 'ArtifactDirectory',
         'Package API artifact', 'Package frontend artifact')) {
     Assert-Test $deploy.Contains($contract) "Deploy-only contract is missing: $contract"
 }
+foreach ($contract in @('/api/public/config/environment',
+        'Public environment descriptor expected',
+        'The test VPS must never identify itself as Production',
+        'connectionstring|password|secretkey|privatekey|accesstoken')) {
+    Assert-Test $deploy.Contains($contract) `
+        "Deployment environment-awareness smoke contract is missing: $contract"
+}
 Assert-Test (-not $deploy.Contains("NODE_OPTIONS = '--max-old-space-size=8192'")) `
     'The legacy deployer still overrides the build wrapper heap with 8 GB.'
 Assert-Test $deploy.Contains('$script:ArtifactCommit = $ExpectedCommit.ToLowerInvariant()') `
@@ -212,6 +219,15 @@ foreach ($contract in @("Join-Path `$RhemaRoot 'releases'", 'VERSIONED_RELEASE|'
         'Activate frontend release and wait for readiness',
         'REMOTE_TIMING_JSON|')) {
     Assert-Test $remote.Contains($contract) "Remote release contract is missing: $contract"
+}
+foreach ($contract in @('Application__Environment',
+        "'Application__Environment' = 'Test'",
+        'Application__DataIsolationConfirmed',
+        'Application__Version',
+        'Application__BuildId',
+        'Application__DeployedAtUtc')) {
+    Assert-Test $remote.Contains($contract) `
+        "Remote environment-awareness activation contract is missing: $contract"
 }
 Assert-Test (-not $remote.Contains('Expand-Archive')) `
     'Remote activation still uses slow PowerShell Expand-Archive.'

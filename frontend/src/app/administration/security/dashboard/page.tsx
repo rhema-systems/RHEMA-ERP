@@ -19,6 +19,7 @@ import { AuditLog } from '../../../../components/security/AuditLog'
 import { DeviceManagement } from '../../../../components/security/DeviceManagement'
 import { SecurityPolicies } from '../../../../components/security/SecurityPolicies'
 import { LoginAppearanceSettings } from '../../../../components/security/LoginAppearanceSettings'
+import { SecurityOperationsOverview } from '../../../../components/security/SecurityOperationsOverview'
 import { SessionManagementTab } from '@/components/admin/SessionManagementTab';
 import { useToast } from '../../../../hooks/use-toast'
 import { useAuth } from '../../../../hooks/use-auth'
@@ -208,6 +209,7 @@ export default function SecurityDashboardPage() {
   const { data: securityMetrics, isLoading: metricsLoading, error: metricsError } = useQuery({
     queryKey: ['securityMetrics'],
     queryFn: () => securityService.getSecurityMetrics(),
+    enabled: false,
     refetchInterval: 30000, // Refresh every 30 seconds
   })
 
@@ -215,6 +217,7 @@ export default function SecurityDashboardPage() {
   const { data: securityAlerts, isLoading: alertsLoading, error: alertsError, refetch: refetchAlerts } = useQuery({
     queryKey: ['securityAlerts'],
     queryFn: () => securityService.getSecurityAlerts(false),
+    enabled: false,
     refetchInterval: 15000, // Refresh every 15 seconds
   })
 
@@ -222,6 +225,7 @@ export default function SecurityDashboardPage() {
   const { data: securityHealth, isLoading: healthLoading, error: healthError } = useQuery({
     queryKey: ['securityHealthScore'],
     queryFn: () => securityService.getSecurityHealthScore(),
+    enabled: false,
     refetchInterval: 60000, // Refresh every minute
   })
 
@@ -229,6 +233,7 @@ export default function SecurityDashboardPage() {
   const { data: threatDetections, isLoading: threatsLoading, error: threatsError } = useQuery({
     queryKey: ['securityThreats'],
     queryFn: () => securityService.getThreatDetections(),
+    enabled: false,
     refetchInterval: 30000,
   })
 
@@ -663,6 +668,8 @@ export default function SecurityDashboardPage() {
 
         {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
+          <SecurityOperationsOverview />
+          {false && <>
 
           {/* Security Metrics */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1018,6 +1025,7 @@ export default function SecurityDashboardPage() {
               </div>
             </CardContent>
           </Card>
+          </>}
         </TabsContent>
 
         {/* Settings Tab - Database-backed Security Settings */}
@@ -1364,7 +1372,7 @@ export default function SecurityDashboardPage() {
                               <Input
                                 id="recaptchaSiteKey"
                                 type="text"
-                                placeholder="6Lc..."
+                                placeholder={settings?.recaptchaSecretConfigured ? 'Configured — enter a new key to replace it' : '6Lc...'}
                                 {...register('recaptchaSiteKey')}
                               />
                               <p className="text-sm text-slate-500">
@@ -1384,7 +1392,9 @@ export default function SecurityDashboardPage() {
                                 {...register('recaptchaSecretKey')}
                               />
                               <p className="text-sm text-slate-500">
-                                Private secret key from Google reCAPTCHA admin console
+                                {settings?.recaptchaSecretConfigured
+                                  ? 'A secret is stored securely. Leave this blank to keep it.'
+                                  : 'Private secret key from Google reCAPTCHA admin console'}
                               </p>
                               {errors.recaptchaSecretKey && (
                                 <p className="text-sm text-red-500">{errors.recaptchaSecretKey.message}</p>
@@ -1416,11 +1426,13 @@ export default function SecurityDashboardPage() {
                               <Input
                                 id="hCaptchaSecretKey"
                                 type="password"
-                                placeholder="0x0000000000000000000000000000000000000000"
+                                placeholder={settings?.hCaptchaSecretConfigured ? 'Configured — enter a new key to replace it' : '0x0000000000000000000000000000000000000000'}
                                 {...register('hCaptchaSecretKey')}
                               />
                               <p className="text-sm text-slate-500">
-                                Private secret key from hCaptcha dashboard
+                                {settings?.hCaptchaSecretConfigured
+                                  ? 'A secret is stored securely. Leave this blank to keep it.'
+                                  : 'Private secret key from hCaptcha dashboard'}
                               </p>
                               {errors.hCaptchaSecretKey && (
                                 <p className="text-sm text-red-500">{errors.hCaptchaSecretKey.message}</p>

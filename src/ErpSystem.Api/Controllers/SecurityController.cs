@@ -1,3 +1,4 @@
+using ErpSystem.Api.Services;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Services;
 using ErpSystem.Shared;
@@ -12,17 +13,74 @@ namespace ErpSystem.Api.Controllers
     public class SecurityController : ControllerBase
     {
         private readonly ISecurityService _securityService;
+        private readonly ISecurityOperationsService _securityOperationsService;
         private readonly ICurrentUserService _currentUserService;
         private readonly ILogger<SecurityController> _logger;
 
         public SecurityController(
             ISecurityService securityService,
+            ISecurityOperationsService securityOperationsService,
             ICurrentUserService currentUserService,
             ILogger<SecurityController> logger)
         {
             _securityService = securityService;
+            _securityOperationsService = securityOperationsService;
             _currentUserService = currentUserService;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Consolidated tenant-scoped security operations overview backed by persisted evidence.
+        /// </summary>
+        [HttpGet("operations/overview")]
+        [Authorize(Policy = "SecurityManagementRead")]
+        public async Task<IActionResult> GetOperationsOverview(
+            [FromQuery] string range = "24h",
+            [FromQuery] DateTime? startUtc = null,
+            [FromQuery] DateTime? endUtc = null,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return Ok(await _securityOperationsService.GetOverviewAsync(
+                    range,
+                    startUtc,
+                    endUtc,
+                    cancellationToken));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Invalid security analytics range",
+                    Detail = ex.Message,
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
+        }
+
+        /// <summary>
+        /// Server-filtered and paged tenant security events.
+        /// </summary>
+        [HttpGet("operations/events")]
+        [Authorize(Policy = "SecurityManagementRead")]
+        public async Task<IActionResult> GetOperationsEvents(
+            [FromQuery] SecurityEventQueryDto query,
+            CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _securityOperationsService.GetEventsAsync(query, cancellationToken));
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new ProblemDetails
+                {
+                    Title = "Invalid security event query",
+                    Detail = ex.Message,
+                    Status = StatusCodes.Status400BadRequest
+                });
+            }
         }
 
         /// <summary>

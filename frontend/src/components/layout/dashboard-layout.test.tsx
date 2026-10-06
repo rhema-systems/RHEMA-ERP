@@ -54,11 +54,14 @@ function PageContent() {
 describe('Dashboard account panel integration', () => {
   it('docks the panel beside a shrinkable main region and keeps page content interactive and mounted', () => {
     render(<DashboardLayout><PageContent /></DashboardLayout>);
+    expect(screen.getByTestId('environment-banner')).toHaveTextContent('Unknown Environment');
     fireEvent.click(screen.getByRole('button', { name: 'Page action 0' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
 
     const main = screen.getByRole('main');
     const panel = screen.getByRole('complementary', { name: 'Demo User' });
+    expect(panel).toHaveTextContent('System context');
+    expect(panel).toHaveTextContent('Unknown Environment');
     expect(panel.parentElement?.parentElement).toBe(main.parentElement);
     expect(panel.parentElement).toHaveClass('contents');
     expect(main).toHaveClass('min-w-0', 'min-h-0', 'flex-1', 'overflow-auto');
