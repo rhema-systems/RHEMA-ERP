@@ -9,8 +9,9 @@ and each lane's *State* says what was built and how it was proved. The guide des
 screen offers something the server refuses, the step says so.
 
 > **⚠ Rewrite in progress (lane 6).** The front matter, the seven rules, the conventions and chapters 1–2 are
-> new (slice 6b, 2026-10-06). Chapters 3–21 and the appendices still describe round 4 until slices 6c–6e
-> replace them. Where an old chapter disagrees with the rules or chapter 1, the rules and chapter 1 are right.
+> new (slice 6b, 2026-10-06), and so are chapters 3–7 with the new 3a and 6a (slice 6c). Chapters 8–21 and the
+> appendices still describe round 4 until slices 6d–6e replace them; their live-write numbers will follow on from
+> chapter 6a's 9. Where an old chapter disagrees with the rules or chapter 1, the rules and chapter 1 are right.
 >
 > ⚠ **Not yet walked in a browser:** the screens lanes 1–7 changed. The plan lists the walks (lane 5 items
 > 1–8, lane 7 items 9–12); every server rule behind them is proved by the review suite on UAT (1152 assertions,
@@ -144,7 +145,8 @@ saved live over a day when anybody has leave changes those people's balances and
 - 🚫 **Two buttons publish to everybody they cover, and their notices cannot be unsent:** *Announce to the N staff
   it covers* on a closure, and *Announce on the intranet* on an event. The announcement itself can be archived
   afterwards under HR → Announcements; the notices it sent stay sent. On UAT a whole-company announcement reaches
-  4,978 people. Press them only for a unit or a scope you know, or on a rebuilt database.
+  about five thousand people — the screens count 5,001 active staff. Press them only for a unit or a scope you know,
+  or on a rebuilt database.
 
 Two things still do not read closures, and both are someone's open item: **attendance**, which has no working-day
 builder at all (attendance guide A-92, HR's own), and **payroll**, which can read the days and their *Staff are
@@ -464,15 +466,15 @@ The rest, for reference:
 | **Event category** | Meeting · Training · Company Event · Deadline · Conference · Social Event. *Holiday* and *Milestone* are refused for a new event, because each has its own register — public holidays in the holiday calendar, milestones in chapter 14; older rows keep them |
 | **Event type** | Internal · External · Client Meeting · Statutory · Board Meeting |
 | **Priority** | Critical · High · Medium · Low — a label only, and the form says so |
-| **Location type** | On-site · Off-site · Virtual/Online · Hybrid |
-| **Audience (scope)** | All Staff · Department (an organisation unit and everything beneath it) · Selected Individuals · Management Only · External Only |
+| **Location type** | On Site · Off Site · Virtual · Hybrid |
+| **Audience (scope)** | All Staff · Department (an organisation unit and everything beneath it) · Selected (the guest list) · Management Only · External Only |
 | **Visibility** | Public · Private · Department · Management · Confidential |
-| **Repeats** | Daily · Weekdays *(Monday to Friday, new)* · Weekly · Bi-weekly · Monthly · Quarterly · Annually |
+| **Repeats** | Every day · Every weekday (Mon–Fri) *(new)* · Every week · Every two weeks · Every month · Every quarter · Every year |
 | **Series scope** | This date only · This and following dates · Every date in the series |
-| **Participant role** | Organizer · Presenter · Attendee · Optional Attendee · Facilitator |
+| **Participant role** | Organizer · Presenter · Attendee · Optional · Facilitator |
 | **Invitation status** | Not Sent · Sent · Accepted · Declined · Tentative · No Response. An answer is one of Accepted, Declined or Tentative — *"May attend"* on the staff screens |
 | **Attachment type** | Agenda · Minutes · Presentation · Handout · Resource Material |
-| **Task category** / **status** | Pre-event · During · Follow-up / Not Started · In Progress · Completed · Cancelled. *Overdue* is worked out from the due date when the task is read, never set |
+| **Task stage** / **status** | Preparation · During Event · Follow Up / Not Started · In Progress · Completed · Cancelled. *Overdue* is worked out from the due date when the task is read, never set |
 | **Room type** | Conference Room · Boardroom · Training Room · Huddle Room · Auditorium |
 | **Closure kind** | Whole company · One site · One organisation unit · Reduced operations *(on the wire: Full, Station, Department, Partial)* |
 | **Milestone category** | Company Anniversary · Achievement · Product Launch · Target/Goal · Certification |
@@ -501,7 +503,7 @@ A room with **any booking on record** cannot be deleted, only made inactive, so 
 | **Requires approval** | the event waits on the engine (Rule 2); its invitations, reminders and calendar audience wait with it |
 | **Who it is for** — scope, unit, visibility, **Show on company calendar** | who sees it on the calendar and in the diaries, what the clash rule compares, and whom *Announce on the intranet* reaches (§ 1.1, point 3). The form shows the count before you save, and warns of a unit nobody is in |
 | **Show on intranet** | marks it to announce: *Announce on the intranet* appears on its page, and HR presses it — never on save (L1-1) |
-| **Replies asked** / **Reply by** | a reply-by date is required, on or before the start; everybody unanswered is chased **once**, two days before it by default (Rule 6); an invitee answers until then |
+| **Requires RSVP** / **RSVP deadline** | the deadline is required, on or before the start; everybody unanswered is chased **once**, two days before it by default (Rule 6); an invitee answers until then |
 | **Send reminders** / **Days before** | *Days before* is required when reminders are on; everybody not declined is reminded **once**, that many days before, and again after a move |
 | **Repeats** | every date is made at once, up to 52 (Rule 4) |
 | **Site** | where it is: the clash rule's "same place", the calendar file's location. Only sites where staff can be placed are offered (§ 1.7) |
@@ -782,94 +784,229 @@ Team Schedule opens on their unit (chapter 10B).
 
 ### 👁 On the page
 
-**Header:** *Company schedule* — *"Events, room bookings, closures and the milestones on the
-company calendar."* No back-link; this is a group root.
+**For the HR desk** (`HR.Company.Read`):
 
-**Five navigation cards**, in a grid:
+**Header:** *Company schedule* — *"Events, room bookings, closures and the milestones on the company calendar."* No
+back-link; this is a group root.
+
+**Six navigation cards**, in a grid:
 
 | Card | Goes to |
 |---|---|
+| **Company calendar** — *Events, closures, holidays, milestones and bookings, month by month.* | `/hr/company-schedule/calendar` (chapter 3a) |
 | **Events** — *Meetings, training days, conferences and company occasions.* | `/hr/company-schedule/events` |
 | **Room bookings** — *Who has which room, and what is waiting on approval.* | `/hr/company-schedule/bookings` |
 | **Meeting rooms** — *The rooms people can book and the rules for booking them.* | `/administration/hr/company-schedule/rooms` |
 | **Business closures** — *Days the organisation is shut, company-wide or per site.* | `/administration/hr/company-schedule/closures` |
 | **Milestones** — *Anniversaries, achievements and dates worth marking.* | `/administration/hr/company-schedule/milestones` |
 
-> Three of the five jump into Administration. That is deliberate — an HR officer thinks
-> *"where are the rooms"*, not *"is that setup or operations"* — and it is the only place in HR
-> where a `/hr` landing links out of its own area.
+> Three of the six jump into Administration. That is deliberate — an HR officer thinks *"where are the rooms"*, not
+> *"is that setup or operations"*.
 
-**Four summary cards**, two by two:
+**Four summary cards**, two by two, each with **See the calendar** in its corner:
 
 | Card | Shows | Empty state |
 |---|---|---|
-| **Next 30 days** | up to six upcoming events: name over `date · category · organiser`, with a status badge | *"Nothing scheduled in the next month."* |
-| **Bookings awaiting approval (N)** | up to six Tentative bookings: room over `date and time · booked by`, with a status badge. The count is in the card title | *"Nothing is waiting on a decision."* |
-| **Closures ahead** *(next 60 days)* | up to six: title over the date or date range · *Whole company* or the site/department, with a **Paid** / **Unpaid** badge | *"No closures in the next two months."* |
-| **Milestones ahead** *(next 90 days)* | up to six: title over `date · category` | *"Nothing coming up in the next quarter."* |
+| **Next 30 days** | the first six events not cancelled whose days fall in the next thirty, earliest first: name over `date · category · organiser`, with a status badge | *"Nothing scheduled in the next month."* |
+| **Bookings awaiting approval (N)** | up to six *Tentative* bookings: room over `date and time · booked by`. The count is in the title | *"Nothing is waiting on a decision."* |
+| **Closures ahead** *(next 60 days)* | up to six, a yearly one at its coming date: title over the date or range · who it covers (*Whole company*, a site, a unit), with a **Paid** / **Unpaid** badge | *"No closures in the next two months."* |
+| **Milestones ahead** *(next 90 days)* | up to six, a yearly one at its coming anniversary: title over `date · category · 74th anniversary` | *"Nothing coming up in the next quarter."* |
 
-Nothing on this page is clickable except the five cards — the summary lists are read-only.
+If the summary cannot be read, one red line says so — *"that is not an empty schedule"* — and no card is drawn.
+
+**For anybody else** — every employee sees this group in the sidebar, because the calendar and the two diaries are
+theirs — the page is one card: *"This summary of the company's events, room bookings, closures and milestones is for
+the HR desk."* Under it, *What is yours to see*: **Company Calendar**, **My Schedule**, and — for the head of a unit —
+**Team Schedule**. Nothing reads as empty because it was refused (R4-3.1, fixed in lane 5a).
 
 ### ▶ Walk it
 
 **1 — Open `/hr/company-schedule`.**
 
-> *"Every organisation has a calendar; most of them have it in somebody's Outlook and a printed
-> sheet on a notice board. This is the corporation's own, and it carries the things a company
-> calendar actually needs to carry — not just when, but who is coming, what it costs, what has to
-> be done before it and who is doing it."*
+> *"Every organisation has a calendar; most of them have it in somebody's Outlook and a printed sheet on a notice
+> board. This is the corporation's own, and it carries what a company calendar actually needs to carry — not just
+> when, but who it is for, who is coming, what it costs and what has to be done before it."*
 
-**2 — Read *Next 30 days* aloud.** Name the three:
+**2 — Read *Next 30 days* aloud.**
 
-> *"The board's Q3 meeting. The annual staff durbar. A fire drill at head office. Three
-> occasions, three completely different shapes — and the same record behind all of them."*
+- **Rebuilt:** the fire drill and the board meeting, perhaps the durbar — name them:
 
-**3 — Point at *Closures ahead*.**
+  > *"The board's Q3 meeting. A fire drill at head office. Different occasions, completely different shapes, and the
+  > same record behind both."*
 
-> *"The year-end stocktake, the twenty-ninth and thirtieth of December, whole company, paid. Which
-> is a different kind of calendar entry: not an occasion, a day the organisation is shut."*
+- **UAT:** the fire drill (8 October) and the board meeting (12 October), then four *R4D Board meeting …* rows from
+  30 October. Name the first two, and say what the rest are (§ 2.1) before anybody asks.
 
-**4 — Point at *Milestones ahead*.**
+**3 — Point at *Milestones ahead*.**
 
-> *"And the seventy-fourth anniversary, on the eighteenth of October. TDC was founded in 1952 to
-> develop the Tema township. That is on the calendar every year, because a corporation that
-> forgets its own anniversary has forgotten something."*
+- **Rebuilt:** *TDC 74th Anniversary · 18 October · Company Anniversary · 74th anniversary.*
 
-**5 — If *Bookings awaiting approval* reads 0**, say so rather than skipping it:
+  > *"Founded in 1952 to develop the Tema township, and on the calendar every year — counted, because a corporation
+  > that forgets its own anniversary has forgotten something."*
 
-> *"And nothing waiting on a decision, because none of our three rooms is set to need approval —
-> which is a choice, made per room. I will turn that on for the boardroom in a moment and you will
-> see what it changes."*
+- **UAT:** the same row without *"74th anniversary"*, because UAT's milestone is dated 2026 (§ 2.1). Say the line
+  without the number.
 
-**6 — Click *Events*** and continue into chapter 4.
+**4 — Point at *Closures ahead*.** The year-end stocktake (29–30 December) is listed only within sixty days of it —
+from 30 October. Earlier than that the card reads *"No closures in the next two months"*; say so, and show the
+stocktake on the calendar in chapter 3a instead:
+
+> *"Closures are a different kind of entry: not an occasion, a day the organisation is shut — and since this year,
+> a day nobody's leave is charged for."*
+
+**5 — *Bookings awaiting approval* reads 0** on both databases (§ 2.3). Say why rather than skipping it:
+
+> *"Nothing waiting on a decision, because none of our rooms is set to need approval — a choice made per room. I
+> will turn it on for the boardroom later, and you will see what it changes."*
+
+**6 — Click *Company calendar*** and continue into chapter 3a.
 
 ### ⚙ Behind the page
 
-| Card | Endpoint |
-|---|---|
-| Next 30 days | `GET api/CompanySchedule/events/upcoming?daysAhead=30` |
-| Bookings awaiting approval | `GET api/CompanySchedule/bookings/pending-approvals` |
-| Closures ahead | `GET api/CompanySchedule/closures/upcoming?daysAhead=60` |
-| Milestones ahead | `GET api/CompanySchedule/milestones/upcoming?daysAhead=90` |
+| Element | Endpoint | Permission |
+|---|---|---|
+| The four cards | `GET api/CompanySchedule/dashboard` — one read since lane 2g-1: events overlapping the next 30 days, *Tentative* bookings, closure occurrences in the next 60, milestone occurrences in the next 90 | `HR.Company.Read` |
+| *Team Schedule* link, for a refused caller | `GET …/team-schedule/units` — offered only when the caller heads a unit | any internal login |
 
-All four gated on `HR.Company.Read`. Four separate requests — there is no aggregated dashboard
-endpoint here as there is for attendance, and each card slices its own list client-side to six.
-
-**Round 4 did not change this page.** It has no card for the two diaries, which are reached from
-the sidebar only.
+The page asks for the summary only when the signed-in person holds `HR.Company.Read`; anybody else is never refused,
+because nothing is asked.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding.**
->
-> | | Now |
-> |---|---|
-> | **R4-3.1** | **My schedule opened this group to every employee, and this page answers them wrongly.** The new sidebar entry needs no permission, and every persona holds `hr.access`, so `staff`, `head.dev` and `md.tdc` now see a *Company Schedule* group. Its header opens this page. All four reads answer **403** for them, and the page does not handle a refusal: each card shows its **empty** sentence — *"Nothing scheduled in the next month."* — and the five cards lead to screens they cannot open. Measured on UAT for all three personas. Either gate the header link, or send people without Read to My schedule. |
+| Gap | |
+|---|---|
+| ✅ ~~**R4-3.1** · the landing answered a refusal with "Nothing scheduled"~~ | **Fixed in lane 5a** — the card for the HR desk, above |
+| ✅ ~~**C-9** · no calendar view anywhere~~ | **Fixed in lane 7** — chapter 3a |
+| ✅ ~~**C-10** · four requests~~ | **Fixed in lane 2g-1** — one read |
+| **F-64** · an event awaiting approval reads *Scheduled* here and in the register | Only its own page, the calendar and the CSV export say *awaiting approval*. Found while rewriting (lane 6) |
+
+---
+
+## 3a. `/hr/company-schedule/calendar` and `/me/calendar` — the company calendar
+
+### 📍 Where you are
+
+**Sidebar:** … → Company Schedule → **Company Calendar** · `/hr/company-schedule/calendar` — and in the portal,
+**Company → Calendar** · `/me/calendar` · window A as **hr.head**, window C as **staff** · **5 minutes**. No
+permission is needed for either: the server decides what each person sees (Rule 5).
+
+### 📖 What it is
+
+> *"One calendar for the whole organisation — and everybody sees their own version of it. HR sees everything. A member
+> of staff sees what they are invited to, what is for them, the days the office is shut, and their own leave and
+> travel. The same page, the same screen, a different answer for each person."*
+
+### 👁 On the page
+
+The two doors draw **the same component**. The HR page's header reads *Company calendar — "Events, closures, public
+holidays, milestones and room bookings — and your own leave, travel, panels and training."*; the portal's reads
+*Calendar — "What is on — for the company and for you. Click anything to see it, or to answer an invitation."*
+
+**The toolbar:**
+
+| Control | Does |
+|---|---|
+| **‹** · **Today** · **›** | a month or a week back, this month or week, a month or a week on; the title reads *October 2026*, or *5 Oct – 11 Oct 2026* |
+| **Month** / **Week** | the two views |
+| **Room picker** | *Every room* for the HR desk (*My bookings only* for anybody else), then each room by name. Choosing one is **the room view** (below) |
+| **Book this room** | appears once a room is chosen: opens the booking form with the room and the day filled in — the desk's form for the HR desk, the portal's for anybody else (chapters 9 and 10C) |
+| **The kind chips** | *Events · Closures · Public holidays · Milestones · Room bookings · My leave, travel, panels and training* — each is both the **legend** (its colour) and a **filter** (press to hide or show). Beside them, a dashed swatch: *waiting for your answer* |
+
+**The month view** — six weeks from the Monday before the first, today shaded, other months' days greyed. **An entry
+over several days is one band across them**, broken at the end of each week with **◂** and **▸** to say it carries on;
+a timed entry starts with its time. Four bands fit a week row; more are counted per day as **+n more**, which opens that
+week. A day's number opens its week too.
+
+**The week view** — the all-day and several-day entries as bands across the top; the timed ones listed under their
+day, in time order, as *09:00–16:00* over the name.
+
+**The colours:** events blue — **dashed** while the invitation waits for your answer, struck through once you decline;
+closures red (orange for reduced operations, labelled *"(reduced operations — a working day)"*); public holidays green
+(*"Day off in lieu of Boxing Day"* for a substitute day); milestones purple, labelled with their years (*"TDC 74th
+Anniversary (74 years)"*); room bookings grey (darker for your own); your own leave amber, travel cyan, interview panels
+indigo, training teal. An event awaiting approval is in italics.
+
+**Clicking an entry** opens its card: the name, when, a badge for its kind, its number, and *Awaiting approval* or
+*You organise it* where they apply. For an **invitation of your own**, the card shows where it stands (*"You have not
+answered yet"*) and, while you may still answer, **Accept · May attend · Decline** with *A note for the organiser
+(optional)* — and on a series, **Which dates**: *This date only · This and the following dates · Every date still to
+come*. Where you may not answer, it says why (*"The reply-by date … has passed. Ask the organiser to record your
+answer."*). For an event that is yours to see but not to answer: *"You are not on its guest list; it is on your
+calendar because it is for you."* **Open** goes to its page: the HR event page for the desk, the staff event page
+(chapter 6a) for anybody else; a closure or a milestone opens its register for the desk; a booking its page.
+
+**The room view** — with a room chosen, a line says *"Showing when **Boardroom** is booked"*, and for anybody but the
+desk *"— other people's bookings show only as 'booked'"*. A booking that is not yours reads *Boardroom: booked*, with
+no purpose, number or booker.
+
+If a source of *your own* entries could not be read, a banner names it, as on the diaries (chapter 10A).
+
+### ▶ Walk it
+
+**1 — Window A (`hr.head`): open the Company Calendar** on the month view.
+
+> *"Here is the whole company's month. The events in blue, the days off in green and red, the anniversary in purple,
+> the rooms in grey — and, in amber and indigo, my own leave and my interview panels, because a calendar that does
+> not show what I personally am doing is only half a calendar."*
+
+- **UAT:** the fire drill (8 October), the board meeting (12 October), the anniversary (18 October), `hr.head`'s
+  interview panels and leave — and, from 30 October, a crowd of *R4D* events that the week's **+n more** counts.
+  Click **+n more** to show the week view, then say what they are (§ 2.1).
+- **Rebuilt:** the seeded events, the anniversary and the two bookings.
+
+**2 — Point at a dashed band.** On either database `hr.head` is a guest of the board meeting, the durbar and the fire
+drill, and has not answered.
+
+> *"Dashed means it waits for my answer. Click it —"* (the card opens) *"— and I can answer from here: accept, may
+> attend, decline, with a note to the organiser."*
+
+Close the card without answering — chapter 6a answers one live, from the portal.
+
+**3 — Press *Events* in the chips** to hide them, then again to bring them back.
+
+> *"The legend is the filter. If all you want is who is away and which days are shut, take the events off."*
+
+**4 — Move on to December** (**›**, once a month). On the way, November shows the durbar on the 13th. In December the
+stocktake on 29–30 December is one red band across two days; Christmas, Boxing Day and the day off in lieu of it are
+green; and the Safety drill's event on the 13th is blue (chapter 6 shows where it came from).
+
+**5 — Window C (`staff`): open the portal's *Company → Calendar*** on the same month.
+
+> *"Same calendar, a member of staff. No board meeting — that is for management. No R4D test events, nobody's
+> bookings, no interview panels. What they do see is everything that is theirs: the fire drill and the durbar, which
+> are for all staff; the anniversary; the stocktake; and their own leave in October — one approved, one still
+> waiting."*
+
+*(That leave is UAT's. On a rebuilt database it is whatever leave the demo pack gave `staff`.)*
+
+**6 — Still in window C, choose *Boardroom* in the room picker.**
+
+> *"And this is the room view. When is the boardroom free? Other people's bookings show only as 'booked' — not what
+> the meeting is, not who is in it. And from here, Book this room."* (Do not press it here — chapter 10C books from
+> the portal.)
+
+Clear the room picker afterwards.
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| The entries | `GET api/CompanySchedule/calendar?from&to&roomId` — at most sixty days a read (the month view asks for forty-two) | any internal login; the desk is decided by `HR.Company.Read`, checked on each request |
+| The room picker | the desk: `GET …/rooms`; anybody else: `GET …/me/rooms` | Read / any internal login |
+| An answer | `POST …/events/{eventId}/participants/{participantId}/reply` — **the invitee's own door** (lane 7a, D-8): their own invitation or a 404; the reply window the server holds (§ 6a) | any internal login |
+
+`CompanyCalendarService` (`Services/HR/CompanySchedule/`) builds one list from five layers and the caller's diary: the
+events the caller may see (the desk: every live event; anybody else: organised, invited once sent, or the audience of
+— each audience rule resolved once), closure occurrences and whom they cover, calendar milestones on every anniversary
+in range, public holidays from the default holiday calendar, bookings — and, as *Mine*, the caller's own leave, travel,
+interview panels and training from the diary, never repeating what the company layers already show.
+
+### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-9 · There is no calendar view anywhere in the module.** Every screen is a table. `ShowOnCompanyCalendar` is a field on both events and milestones, and there is no calendar for it to show on | |
-| **C-10 · The landing is the only aggregate and it is four requests.** Not a problem at this size; worth knowing it does not scale the way the attendance dashboard does | |
+| **F-62** · to the HR desk, an event it is not invited to says *"it is on your calendar because it is for you"* | The desk sees every event, so the sentence is true only for staff. Found while rewriting (lane 6) |
+| *By design* · an outside guest has no calendar | They answer from their mail client, to the organiser's address on the calendar file, and HR records it (§ 1.6) |
 
 ---
 
@@ -882,97 +1019,91 @@ as **hr.head** · **4 minutes**
 
 ### 📖 What it is
 
-> *"Every occasion the organisation has scheduled, past and future, in one list — with its number,
-> its category, when and where it is, who is running it and what state it is in."*
+> *"Every occasion the organisation has scheduled, past and future, in one list — with its number, its category,
+> when and where it is, who is running it and what state it is in — searched, filtered and exported on the server,
+> so it works the same at four events or four thousand."*
 
 ### 👁 On the page
 
-**Header:** *Company events* — *"Meetings, training days, conferences and company-wide
-occasions."*, back-link to the landing, and a **+ New event** button.
+**Header:** *Company events* — *"Meetings, training days, conferences and company-wide occasions."*, a back-link to the
+landing, and two buttons: **Export CSV** (disabled while nothing is found) and **+ New event**.
 
-**Card header carries three controls**, right-aligned:
+**The search and filters**, above the table — each runs on the server, and a new one starts again at page 1:
 
-| Control | Behaviour |
+| Control | Finds |
 |---|---|
-| **Status** dropdown | *All statuses*, or one of the seven event statuses |
-| **Category** dropdown | *All categories*, or one of the eight event categories |
-| **Search** box | free text over **event name, event number, venue name and organiser** |
+| **Search** — *"Name, number, venue or organiser…"* | any of the four, as you type |
+| **Status** | *All statuses*, or one of the seven |
+| **Category** | *All categories*, or one of the eight (older rows keep *Holiday* and *Milestone*) |
+| **From** / **To** | events whose days **overlap** the dates — a two-day event that starts the day before *From* is found |
 
-All three filter **in the browser** over the full list — there is no server-side search on this
-screen. Sorting is fixed: **start date, newest first**.
+**Seven columns:** **Number** (`EVT-2026-00001`) · **Event** — the name, and on a series *"3 of 10"* · **Category** ·
+**When** — the start date, then *· all day* or *· 09:00* · **Where** — the venue, else the site, else the location type
+· **Organiser** · **Status**. **The latest start date is first.** Each row opens the event.
 
-**Seven columns:**
+**Under the table:** *"69 events · page 1 of 3"*, and **Previous** / **Next** — 25 to a page.
 
-| Column | Shows |
-|---|---|
-| **Number** | `EVT-2026-00001`, monospaced |
-| **Event** | the name, in bold |
-| **Category** | *Company Event*, *Board Meeting*… (PascalCase split into words) |
-| **When** | the start date, then `· all day` for an all-day event or `· 09:00` for a timed one |
-| **Where** | the venue name, falling back to the site name, falling back to the location type |
-| **Organiser** | the organiser's name |
-| **Status** | a status badge |
+**One series** — the event page's *Open in the register* (chapter 6) opens this page on one series: the title reads
+*One series*, the dates in order, with **Show all events** beside it.
 
-**Rows are clickable** — the whole row opens the event.
+**Empty states:** *"No events yet — Schedule the first company event."* with the button; or *"No matching events —
+Try a different search, filter or dates."*
 
-**Empty states** distinguish the two cases: *"No events yet — schedule the first company event."*
-with a button, versus *"No matching events — try a different search or filter."*
+**Export CSV** downloads the events the filters find — up to ten thousand — in the order shown: *Number · Event ·
+Category · Type · Start date · Start time · End date · End time · All day · Site · Venue · Unit · Audience · Organiser
+· Status · Approval* (*Not needed*, *Approved 2026-10-07*, or *Awaiting*) *· Occurrence* (*3 of 10*). It opens in
+Excel with its names intact, and a cell a spreadsheet would run as a formula is written as text.
 
 ### ▶ Walk it
 
-**1 — Open the register.** Four rows — on a clean rebuild. If there are *R4D …* rows, the harness has
-run since the build (Rule 8), and the story below needs a filter to survive.
+**1 — Open the register.**
 
-**2 — Read them across, top to bottom.** The point is the *variety*, not any one row:
+- **Rebuilt:** five rows — scenario 110's four and the Safety drill's event.
+- **UAT:** *69 events*, the 54 *R4D* and 10 cancelled *R4NB2* test rows among them (§ 2.1). Set **From** to today and
+  **To** a fortnight on, before you say a word — the story below works on what is left.
 
-> *"Four events, and look how different they are. A board meeting for fourteen people in the
-> boardroom. An all-day durbar for a hundred and twenty on the forecourt. A one-hour fire drill.
-> And a two-day management retreat at a hotel in Ho — which is the only one in the past, and the
-> only one that is Completed."*
+**2 — Read the rows across.** The point is the *variety*, not any one row:
+
+> *"Look how different they are. A board meeting for fourteen people in the boardroom. An all-day durbar for a hundred
+> and twenty on the forecourt. A one-hour fire drill. And a drill Safety scheduled itself — chapter 6 shows how."*
 
 **3 — Point at the *Number* column.**
 
-> *"Every event is numbered — EVT, the year, a sequence. Small thing, and it is the difference
-> between 'the durbar' and a record somebody can reference in a memo."*
+> *"Every event is numbered — EVT, the year, a sequence that never repeats, even after a delete. Small thing, and it is
+> the difference between 'the durbar' and a record somebody can reference in a memo."*
 
-**4 — Use the *Category* filter.** Choose **Meeting**, then **Company Event**, then back to *All*.
+**4 — Clear the dates and type `retreat` in the search.** The *Management retreat — 2026 budget preparation* row,
+*Completed*.
 
-> *"Categories, because a board meeting and a staff durbar do not belong in the same conversation
-> even though they are on the same calendar."*
+> *"And it searches the name, the number, the venue and the organiser, on the server — this is not filtering a page,
+> it is asking the whole register."*
 
-**5 — Type `durbar` in the search.**
+**5 — Press *Export CSV*.** A file downloads; open it if a spreadsheet is to hand.
 
-> *"And search across the name, the number, the venue and the organiser."*
+> *"The same search, as a spreadsheet: who organised it, who it was for, whether it needed approval and got it, which
+> date of a series it was."*
 
-Clear it afterwards.
+**6 — Click the retreat row** and continue into chapter 6.
 
-**6 — Click the *Management retreat* row** — the completed one — and continue into chapter 6.
-
-⚠ **Do not open the board meeting first.** The retreat is the only event with attendance and an
-outcome; leading with it makes chapter 6 twice as good, and you can come back to the board meeting
-for the participants tab.
+⚠ **Open the retreat before the board meeting.** It is the only event with attendance and an outcome; leading with it
+makes chapter 6 twice as good, and the board meeting comes next for its guest list.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| The grid | `GET api/CompanySchedule/events` | `HR.Company.Read` |
+| The table | `GET api/CompanySchedule/events/search?text&status&category&from&to&seriesId&sort&page&pageSize` — sorted and paged on the server (lane 2g-1) | `HR.Company.Read` |
+| **Export CSV** | `GET …/events/export`, with the same filters, `text/csv` | `HR.Company.Read` — the user's ruling: whoever may read the register may export it |
 
-Table: `CompanyEvents`, with `Organizer`, `Department` and `SiteLocation` included. **The site
-include on the list read was missing until the screens were built** — detail had it, list did not,
-so every row's *Where* column fell back to the location type. Found by the harness on the first run.
-
-**The API offers six reads this screen does not use:** paged, by date range, by organiser, by
-department, by status and by category. All six are implemented server-side; the screen fetches
-everything and filters in the browser (**C-11**).
+`SearchAsync` sorts and pages narrow rows first, then reads the page's events with their organiser, site and unit:
+sorting whole rows, each carrying an `Employee`, once asked UAT's server for 387 MB.
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-11 · Everything is filtered client-side over an unpaged list.** `GET events` returns every event the tenant has ever had. Fine at four; not fine at four hundred, and `events/paged` already exists | |
-| **C-12 · No date filter on the register.** The most obvious question — *"what is on this month?"* — cannot be asked here, though `events/range` exists and the landing page uses `events/upcoming` | |
-| **C-13 · No export** | |
+| ✅ ~~**C-10, C-11, C-12, C-13** · four requests; everything filtered in the browser; no date filter; no export~~ | **Fixed in lane 2g-1** |
+| **F-64** · an event awaiting approval reads *Scheduled* in the Status column | The CSV's *Approval* column says *Awaiting*; the event page and the calendar say it. Found while rewriting (lane 6) |
 
 ---
 
@@ -980,475 +1111,508 @@ everything and filters in the browser (**C-11**).
 
 ### 📍 Where you are
 
-**From:** the register → **+ New event** · `/hr/company-schedule/events/new` ·
-as **hr.head** · **6 minutes**
+**From:** the register → **+ New event** · `/hr/company-schedule/events/new` · as **hr.head** · **6 minutes**. Also
+opened by Team Schedule's *Schedule for this unit* (chapter 10B), with the audience, the unit and the day filled in
+(`?scope=Department&unit=…&date=…`).
 
 ### 📖 What it is
 
-> *"Everything you need to say about an occasion before it happens — and the form is honest about
-> which of those things the system will act on and which it is simply recording."*
+> *"Everything you need to say about an occasion before it happens — who it is for, who runs it, where, what it
+> costs — and the form tells you, before you save, how many people that reaches and what it would clash with."*
 
 ### 👁 On the page
 
-**Header:** *New event* — **"You are recorded as the organiser."** *(that one line is the whole
-actor design, see § 1.6)*, back-link.
+**Header:** *New event* — *"You are recorded as the organiser."* (⚠ only the default: the *Organiser* field below can
+name somebody else, and then you are recorded as its creator — **F-63**), back-link.
 
-**Five cards.** The same component renders the edit page, so a handful of fields appear on one and
-not the other — marked below.
+**Five cards.** The edit page (chapter 7) uses the same form; the differences are marked.
 
 **Card 1 — Basics**
-- **Event name** *(required, ≤100)*
-- **Description** *(≤1000)*
-- **Category** *(required)* · **Type** *(required)*
-- **Priority** *(required — Critical · High · Medium · Low)*
-- **Status** — **edit only**. A new event is always created *Scheduled*
+- **Event name** *(required, at most 100)* · **Description**
+- **Category** *(required — "Public holidays and company milestones have their own registers."; a new event cannot be
+  either)* · **Type** *(required)*
+- **Priority** *(required — "A label for HR's own sorting; it changes nothing about the event.")* · **Status** — *edit
+  only*
+- **Organiser** — an employee search, *"You — or search for someone else"*. Left empty, it is you (decision D-11)
 
 **Card 2 — When**
-- **All-day event** switch — hides the two time fields when on
-- **Start date** *(required)* · **End date** *(required, refused if before the start)*
-- **Start time** · **End time** *(hidden when all-day)*
-- **Repeats** switch — **create only** → **Pattern** *(required when on — Daily · Weekly ·
-  Bi-weekly · Monthly · Quarterly · Annually)*, **Number of occurrences**, **Repeat until**,
-  **Recurrence notes**
-
-> ⚠ **Recurrence is create-only because the update DTO has no recurrence fields at all.** Rendering
-> it on the edit form would silently discard it. And ⚠ **nothing generates the occurrences** — see
-> § 1.4 and **C-14**.
+- **All-day event** · **Start date** and **End date** *(required)* · **Start time** and **End time** *(hidden when
+  all-day; both or neither)*
+- **Repeats** — *create only*. On, it says what saving will do: *"Saving makes every occurrence now, each a full event
+  with its own number, guest list, replies and register. Give how many times it happens, or the date it runs until —
+  one, not both; at most 52, and the series can be extended later. A monthly series on the 31st falls on the last day
+  of shorter months. An occurrence on a public holiday or a company-wide closure is made and flagged, not skipped."*
+  Then **Repeats** *(Every day · Every weekday (Mon–Fri) · Every week · Every two weeks · Every month · Every quarter ·
+  Every year)*, **How many times (2–52)**, **…or until**, **Recurrence notes**
 
 **Card 3 — Where**
-- **Location type** *(required — On-site · Off-site · Virtual/Online · Hybrid)*
-- *When not purely virtual:* **Site** *(the location tree, clearable, "Not tied to a site")*,
-  **Venue**, **Venue address**
-- *When Virtual or Hybrid:* **Meeting link**, **Meeting password**
+- **Location type** *(required — On Site · Off Site · Virtual · Hybrid)*
+- *Not purely virtual:* **Site** — the sites only, each labelled with its level (*"Tema Head Office · Site / Office"*),
+  or *"Not tied to a site"* · **Venue** · **Venue address**
+- *Virtual or hybrid:* **Meeting link** · **Meeting password** — the password reaches the event's guests and organiser,
+  never an email, a calendar file or an announcement
 
 **Card 4 — Who**
-- **Audience** *(required — All Staff · Department · Selected Individuals · Management Only ·
-  External Only)* · **Department** *(clearable, "Company-wide")*
-- **Estimated attendees** · **Visibility**
-- **Requires RSVP** switch → **RSVP deadline** *(date and time)*
-- **Show on company calendar** switch · **Show on intranet** switch
+- **Audience** *(required — All Staff · Department · Selected · Management Only · External Only; new events start on
+  Selected: the guest list only)*, with its own sentence: *"Who the event is for: all staff; a unit and the units
+  beneath it (Department); management — unit heads and line managers; or only the people you invite (Selected, External
+  only)."*
+- **Organisation unit** — required for *Department* (*"The unit the event is for, with every unit beneath it."*),
+  otherwise optional (*"the unit hosting the event"*)
+- **Estimated attendees** · **Visibility** — *"Public follows the audience. Department narrows it to the unit,
+  Management to management. Private and Confidential: the guests and the organiser only."*
+- **The audience line**, as the server counts it before you save: *"For: Management — unit heads and line managers —
+  493 active staff"* (UAT), *"For: Everyone — 5001 active staff"*, or *"For: Its guests and organiser"*; with a ⚠
+  warning when the choice reaches nobody (an empty unit, management with no heads named)
+- **The clash line** — the events these dates, this audience and this site would meet: **✕ in red**, refused on save
+  (two whole-company events, or two for the same unit, at the same time in the same place — the same site, or either
+  with no site); **⚠ in amber**, any other overlap with an event for more than its guests, which HR decides. A series
+  adds *"This checks the first date; every date of the series is checked when you save."*
+- **Requires RSVP** → **RSVP deadline** *(required, on or before the start)*
+- **Show on company calendar** *(on by default — "On the company calendar, and in the diary of everyone it is for — who
+  may then look busy to an interview panel.")* · **Show on intranet** *("Lets HR announce it to everyone it is for, from
+  the event page, once it is approved. Nothing is sent on save.")*
 
 **Card 5 — Approval, budget and logistics**
-- **Requires approval before it is confirmed** — **create only**
-- **Has a budget** switch → **Budget amount**, and then **Budget code** *(create)* or
-  **Actual cost** + **Budget code** *(edit)*
+- **Requires approval before it is confirmed** — *create only*: once an event exists, approval is an action
+- **Has a budget** → **Budget amount** and **Budget code** (on the edit page, **Actual cost** too)
 - **Required resources** · **Catering** · **Technical**
-- **Send reminders** switch → **Days before**. Since round 4 the switch explains itself: *"Everybody
-  who has not declined is emailed once, automatically, the days before the event set below — and
-  again if the date moves."* ⚠ **Days before** is optional, and left blank it means **never** (**R4-5.1**)
+- **Send reminders** — *"Everybody who has not declined is emailed once, automatically, the days before the event set
+  below — and again if the date moves."* → **Days before** *(required when on)*
 - **Notes**
 
-**Footer:** **Cancel** · **Schedule event**. On success you land on the new event with a toast
-naming its number.
+**Footer:** **Cancel** · **Schedule event**. The form checks what the server checks before it sends — an end before
+the start, one time without the other, a pattern without a count or a date (or both), an RSVP without a deadline or
+with one after the start, reminders without days, a unit audience without a unit — so a refusal is seen in place.
 
 ### ▶ Walk it
 
-**1 — Press *+ New event*.** Read the subtitle aloud before touching anything:
+This chapter makes the event that Beat A (§ 2.5) approves in chapter 6.
 
-> *"'You are recorded as the organiser.' There is no organiser field on this form, and there never
-> will be — the system takes it from whoever is signed in. That was a deliberate change: these
-> fields used to be settable by the caller, which would have meant anybody could file an event
-> under somebody else's name."*
+**1 — Press *+ New event*.** Point at the **Organiser** field before touching anything else.
 
-**2 — Fill in the basics.** Name it something real and dateable —
-*"Quarterly Heads of Unit meeting"*. Category **Meeting**, Type **Internal**, Priority **High**.
+> *"Whose event it is, is a choice. It defaults to me, but an HR officer keying in the board meeting would put the
+> Managing Director here — and the system still records who keyed it in. Neither of them may approve it."*
 
-**3 — Set the dates.** Pick a date next month; leave it as a timed event, 09:00 to 13:00.
+**2 — Basics.** *"Heads of Unit — Q4 planning"*, Category **Meeting**, Type **Internal**, Priority **High**.
 
-**4 — Turn *Repeats* on** and choose **Quarterly**. Then say the honest sentence:
+**3 — When.** A weekday next week, 09:00 to 12:00.
 
-> *"Quarterly — and I will be straight about this one. The pattern is recorded on the event; it
-> does not yet generate the next three occurrences for you. That is a scheduling job on top of a
-> record that already carries the pattern, the count and the end date. Today it is a statement of
-> intent, and it is visible on the event."*
+**4 — Show *Repeats*, and turn it off again.** Turn it on, choose **Every week**, and read the grey sentence aloud.
 
-Then turn it **off** again — a recurring event you leave behind makes chapter 19's reset messier.
+> *"Saving this makes every date now — each a full event, with its own guest list, answers and register. A weekly
+> meeting for a quarter is thirteen events, and each one keeps its own record."*
 
-**5 — Card 3, *Where*.** Location type **On-site**, Site → **Tema Head Office · Site**, Venue
-*"Boardroom"*.
+Turn it **off**: the approval beat wants one date (Rule 4).
 
-> *"Two fields, and they are not the same. The site is the entry in the corporation's location
-> tree — the same tree the employee register and the geofences use. The venue is what you would
-> write on the invitation."*
+**5 — Where.** **On Site**, Site **Tema Head Office · Site / Office**, Venue *"Boardroom"*.
 
-**6 — Card 4, *Who*.** Audience **Management Only**, Department **Company-wide**, Estimated
-attendees **16**, Visibility **Management**, **Requires RSVP** on with a deadline a week before.
+> *"The site is the corporation's own list of sites — only sites, because staff are placed at a site. The venue is
+> what you would write on the invitation."*
 
-**7 — Card 5.** Turn **Has a budget** on, put **8,500** in, budget code *"HRA/EVT/2026/04"*.
-Required resources *"Boardroom projector, video link for the Ho office."* Catering *"Tea, coffee
-and a working lunch for sixteen."*
+**6 — Who.** Choose **Management Only** and stop on the audience line.
 
-> *"And this is where an event stops being a diary entry. A budget with a code that Finance will
-> recognise. The resources somebody has to physically produce. The catering somebody has to
-> order. That is the difference between a calendar and a plan."*
+> *"Before I save, it tells me who that is: management means unit heads and anybody named as somebody's line manager —
+> four hundred and ninety-three people on this database."* (**UAT**; a rebuilt one counts its own.)
 
-**7b — Still on Card 5, turn two more things on.** *(Round 4; chapter 6 depends on both.)*
-- **Requires approval before it is confirmed.** ⚠ Without it this event has no **Approve** button,
-  and **neither has any seeded event** (Rule 3), so chapter 6's approval needs this one.
-- **Send reminders**, with **Days before** set to **2**. Read the switch's own sentence aloud.
+Then set the audience back to **Selected** — *"For: Its guests and organiser"* — so that this event reaches only the
+people chapter 6 invites. Estimated attendees **12**. Leave *Show on company calendar* on.
 
-> *"And it tells people. Everybody invited is reminded two days before, once, automatically — and
-> because this one needs approval, not until somebody approves it."*
+**7 — Approval, budget, reminders.** Turn on **Requires approval before it is confirmed**. **Has a budget**: **8,500**,
+code *"HRA/EVT/2026/04"*. Catering *"Tea, coffee and a working lunch for twelve."* **Send reminders**, **Days before
+2**.
 
-**8 — 🔴 LIVE WRITE 1 — press *Schedule event*.** The toast names the number; you land on the
-event.
+> *"This is where an event stops being a diary entry: a budget with a code Finance will recognise, the catering
+> somebody has to order — and because it needs approval, nobody is invited or reminded until it gets it."*
 
-> *"EVT-2026-00005. Scheduled."*
+**8 — 🔴 LIVE WRITE 1 — press *Schedule event*.** The toast names the number; you land on the event, its header
+showing **Approve** and **Reject** only to the person the engine names — not to you (Rule 2).
 
-*Undo:* chapter 19. `hr.head` cannot delete it — **Cancel** is the exit.
+> *"EVT-2026-… — scheduled, and waiting for approval."*
+
+*Undo:* **Cancel** on its page, with a reason (chapter 19). `hr.head` cannot delete it.
+
+**Optional — a short series** *(🔴 LIVE WRITE 1b)*: a second event, *Repeats* on, **Every week**, **How many times 3**.
+The toast reads *"Series scheduled — 3 occurrences"*. Undo it with **Cancel → Every date in the series** (chapter 6).
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Create | `POST api/CompanySchedule/events` | `HR.Company.Write` |
-| Site dropdown | `GET api/Location` | location read |
-| Department dropdown | `GET api/hr/departments` | lookup |
+| **Schedule event** | `POST api/CompanySchedule/events` — a series makes every occurrence in one call | `HR.Company.Write` |
+| The audience line | `GET …/events/audience-preview?scope&visibility&organizationUnitId` | `HR.Company.Read` |
+| The clash line | `GET …/events/clashes?…` — the same rule the save applies | `HR.Company.Read` |
+| Site picker | `GET api/Location`, `GET api/LocationLevel` | location read |
+| Organiser, unit pickers | the employee search; the organisation-unit tree | lookups |
 
-Table: `CompanyEvents`. The service sets `TenantId`, `OrganizerId` **from the token**, the event
-number, and `Status = Scheduled` — then **re-reads the row before mapping it to a DTO**, because
-the graph it just inserted still has null navigations and the response would otherwise answer
-`organizerName: ""` and `locationName: null`. That was one of four defects the harness found in
-code no screen had ever executed.
+On save `CompanyEventService` checks the window, the references (the site, the unit, the organiser — an active
+employee), the clash rule (every date of a series) and the category; stamps the creator; numbers each event from the
+atomic sequence; and, where approval is required, starts the engine's request at create (lane 2b). An occurrence on a
+public holiday or a whole-company closure is saved and returned as a warning, which the toast shows with ⚠.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding.**
->
-> | | Now |
-> |---|---|
-> | **R4-5.1** | **Send reminders on with Days before blank sends nothing, while the event says it will.** The form lets the number be empty, the sweep only picks up events that have one, and the event's Reminders card then reads *"Goes 0 days before the event, automatically"*. Make the number required when the switch is on, or default it. |
-
 | Gap | |
 |---|---|
-| **C-14 · Recurrence generates nothing.** Pattern, count and end date are stored; no occurrence is ever created | |
-| ~~**C-6 · The event number counts live rows**~~ ✅ **Fixed in round 4** — issued from the shared sequence, which counts deleted rows, and unique per tenant (Rule 6) | |
-| **C-15 · No conflict check of any kind on an event.** Two all-staff events on the same morning are accepted without a murmur. Only *rooms* are protected from double-booking, and an event is not a room booking. Round 4 built the pieces a check would need — the diaries read every commitment — but nothing on this form asks them (**R4-10B.1**) | |
-| **C-16 · The site dropdown lists the whole location tree** — every level, not just sites. Mitigated by suffixing the level on every option; see § 1.6 | |
+| ✅ ~~**C-14** · recurrence generates nothing~~ | **Fixed in lane 2f** — every date, at once |
+| ✅ ~~**C-15** · no clash check on an event~~ | **Fixed in lane 2g-2** — refused or warned, before and on save |
+| ✅ ~~**C-16** · the site picker lists the whole tree~~ | **Fixed in lane 5a** — sites only |
+| ✅ ~~**R4-5.1** · reminders with no days send nothing~~ | **Fixed in lane 2a** — *Days before* is required |
+| ✅ ~~**F-44** · "Holiday" and "Milestone" categories suggest effects they do not have~~ | **Fixed in lane 2a** — refused for a new event |
+| **F-63** · the header says *"You are recorded as the organiser"* | True only while the *Organiser* field is left empty; the creator is recorded either way. Found while rewriting (lane 6) |
 
 ---
 
-## 6. `/hr/company-schedule/events/[id]` — the event, and its four collections
+## 6. `/hr/company-schedule/events/[id]` — the event, and everything that hangs off it
 
 ### 📍 Where you are
 
-**From:** any row of the register · `/hr/company-schedule/events/[id]` · as **hr.head** ·
-**10 minutes** — the longest chapter in the book, and the one worth the time
+**From:** any row of the register, the calendar's **Open** for the HR desk, or a notice · `/hr/company-schedule/events/[id]`
+· window A as **hr.head**, window B as **hr.officer** for the approval, window C as **staff** to watch it arrive ·
+**12 minutes** — the longest chapter in the book, and the one worth the time
 
 ### 📖 What it is
 
-> *"One occasion, in full: what it is, who was asked, who came, what has to be done and by whom,
-> and the papers. Plus the four things you can do to it — approve it, move it, close it off, or
-> call it off."*
+> *"One occasion, in full: what it is and who it is for, who was asked and what they said, who came, what has to be
+> done and by whom, its rooms, its papers — and who approved it. Plus what you can do to it: approve it, move it,
+> close it off, or call it off."*
 
 ### 👁 On the page
 
-**Header:** the event name, subtitle `EVT-2026-00004 · organised by Akosua Mensah`, back-link, and
-**up to five action buttons**:
+**Header:** the event's name; *"EVT-2026-00001 · occurrence 3 of 10 · organised by …"* (the occurrence only on a series);
+a back-link; and the actions:
 
 | Button | Appears when | Does |
 |---|---|---|
-| **Approve** | `requiresApproval` **and** not yet approved **and** the event is open. ⚠ **None of the four seeded events requires approval**, so on a fresh database this button appears only on an event you create with the switch on (chapter 5, step 7b) | fires immediately — no dialog. Sets the approver, the date and the status to *Confirmed*, and — since round 4 — releases the event's reminders |
-| **Reschedule** | the event is open | dialog: new start date/time, new end date/time, **reason** *(all four of date-start, date-end and reason required)*. Since round 4 the original is kept and **everybody invited is emailed** |
-| **Complete** | the event is open | dialog: **actual attendance** and **outcome** |
-| **Cancel** | the event is open | dialog: **reason** *(required)*. Since round 4 **everybody invited is emailed** the cancellation and the reason |
-| **Delete** | **only for `HR.Company.Admin`** — *destructive red*. ✅ **Hidden from `hr.head` since round 4** | removes the event |
-| **Edit** | always | → the edit page |
+| **Approve** · **Reject** — the workflow's buttons | the event needs approval and waits for it — **for whoever the engine is asking**, never its creator (Rule 2) | a dialog with a comment. Approving confirms it and sends the invitations it was holding; rejecting cancels it with its rooms. The organiser is told either way |
+| **Reschedule** | the event is open — not cancelled, not completed | a dialog: **New start date** and **New end date** *(required)*, **New start time** and **New end time** (*"Leave the times empty to keep its hours"*), **New RSVP deadline** *(only for an event asking for replies; "Needed only if the current one would fall after the new start. Empty keeps it.")*, **Reason** *(required)*, and on a series **Which dates** |
+| **Complete** | open, **and it has started** | a dialog — *"Close off this event"*: **Actual attendance**, **Outcome** |
+| **Cancel** | open | a dialog: **Reason** *(required)*; on a series **Which dates** — *"This and following ends the series at this date; their rooms are cancelled with them."* |
+| **Announce on the intranet** | open, and *Show on intranet* is on | a dialog: who it reaches (*"It goes to N active staff"*), exactly what they will read, and **Announce to N staff** — or, instead, why it cannot go yet (still awaiting approval, already begun, reaching nobody). 🚫 on UAT (Rule 1) |
+| **Edit** | open | chapter 7 |
+| **Delete** | **`HR.Company.Admin` only** | a confirmation: *"The event and everything recorded against it are removed. Cancelling instead keeps the history."* Its live rooms are cancelled first |
 
-*"Open"* means `!isCancelled && status !== 'Completed'`.
+**Two notes may sit under the header:**
 
-**Overview card** — a four-column grid of up to twenty-two fields: Status · Category · Type ·
-Priority · Starts · Ends · Repeats · Audience · Location type · Site · Venue · Department ·
-*Meeting link* (a **Join** hyperlink, shown only when the location type is not On-site) ·
-Expected · Attended · Visibility · *Budget · Actual cost · Budget code* (only when it has a
-budget) · *Approved by · date* (only when approved) · *Cancelled* · *Rescheduled*.
+- **A day off** — on a date of a series that falls on a public holiday or a whole-company closure: what it falls on,
+  then *"It is kept as scheduled; reschedule it if it should not go ahead that day."*
+- **Where it came from** — on an event Safety made: *"From **Emergency drill DRILL-2026-001 — …**"*, linked to the plan,
+  then *"Its date follows the drill's next date in Safety: a change there moves or cancels it here."* (lane 2h, C-51)
 
-> ⚠ *Rescheduled* reads `2026-09-17 — <reason>`, and that date is **when the button was pressed**.
-> The original window round 4 now keeps is **not on this page** (**R4-6.1**).
+**Overview card** — a grid of up to twenty-five fields: Status · Category · Type · Priority · Starts · Ends ·
+**Repeats** (*One-off*, *Every week — 3 of 10*, or for a row saved as repeating before series existed *"(no occurrences
+made)"*) · Audience · Location type · Site · Venue · Organisation unit · **For** (who it is for, in words — *"Everyone"*,
+*"Management — unit heads and line managers"*, *"Its guests and organiser"*) · *Meeting link* (**Join**, when not on
+site) · Expected · Attended · Visibility · *Budget · Actual cost · Budget code* (with a budget) · *Approved by* and the
+date · *Cancelled* — the date and the reason · and, once moved, **Originally** — the window before its first move —
+and **Moved on** — the day it was moved, and why.
 
-**Reminders card** *(round 4)* — two lines, then two buttons and a footnote:
+**Series card** *(on a date of a series)* — *"Series — occurrence 3 of 10"*, **Open in the register** (chapter 4's one
+series) and, while there is room under fifty-two, **Extend the series**: a dialog of **How many more** or **…or until**
+(*"The latest date's guests are invited to the new dates, once each, and its rooms are booked for them in your name
+where they are free."*). Then every date in order: its number, its `EVT-…` (linked), the day and time, its status,
+and ⚠ a day-off note where there is one.
+
+**Rooms card** — every booking made for the event, at any status: room, `BK-…`, when, a status badge, each opening its
+booking. **Book a room** opens the booking form with the event chosen; on a series, **Book for this and following
+dates** too (chapter 9). Empty: *"No room is booked for this event."*
+
+**Invitations and reminders card** — three lines:
 
 | Line | Reads |
 |---|---|
-| **Event reminder** | *"Off — turn on Send reminders in Edit"* · or *"Sent"* and the date and time · or *"Goes N days before the event, automatically"* |
-| **RSVP chase** | *"No RSVP deadline"* · or *"Chased"* and the date and time · or *"Goes automatically ahead of the RSVP deadline, to everybody who has not answered"* |
+| **Invitations** | *"5 of 6 delivered — 1 not delivered"* · *"2 wait for the approval"* · *"Nobody invited yet"* |
+| **Event reminder** | *"Off — turn on Send reminders in Edit"* · *"Sent"* and when · *"Goes on Fri 9 Oct 2026, 3 days before the event, automatically"* · *"Due since … — it has reached nobody yet. The hourly sweep tries again."* · *"Not sent"* when the sweep would not send it (over, postponed, begun, or awaiting approval) |
+| **RSVP chase** | *"No RSVP deadline"* · *"Chased"* and when · *"Goes on …, automatically, to everybody who has not answered"* · *"Due since …"* · *"Not sent"* |
 
-- **Send reminder now** — while the event is open, whether or not *Send reminders* is on.
-- **Chase unanswered now** — while the event is open and asks for RSVPs.
-- The footnote: *"Each is sent once. Sending it here counts as that send. Moving the event's date,
-  or its RSVP deadline, lets it go again for the new date."*
+Then, as they apply: the amber line *"No mail server is set up, so no email goes. Employees with a login are told in the
+app; guests from outside, and staff without a login, are not reached."*; *"Nobody is invited while the event awaits
+approval: its invitations go out when it is approved."*; and the buttons **Send the undelivered invitations (N)**,
+**Send reminder now** and **Chase unanswered now** — each shown only when the sweep itself would send it (lane 2e-1,
+F-33). The footnote: an invitation, reminder or chase counts as sent once it reaches somebody; each is sent once, and
+sending it here counts as that send; a move lets them go again; every invitation carries a calendar entry, and a move,
+a new venue or link, a postponement, a cancellation or being taken off the list sends guests the update.
 
-⚠ Three things this card cannot tell you:
-- **"Sent" means attempted.** It is stamped whether or not a mail server delivered anything, and the
-  demo database has none (Rule 7, **R4-6.3**).
-- **"Goes … automatically" is sometimes a promise the sweep will not keep.** That includes a finished
-  event such as the seeded retreat, an event still waiting for its approval, an RSVP deadline already
-  passed, and a blank *Days before* (**R4-6.2**).
-- **Neither line knows who answered.** The chase goes only to invitations still *Sent* or *Not sent*,
-  and the reminder to everybody who has not declined. The card does not say how many that is.
+**Notes card** — the description, the **Outcome**, and the notes, when there are any.
 
-**Notes card** — rendered only if there is a description, an outcome summary or notes.
+**Tabs, each with its count:** **Participants** · **Attendance** · **Tasks** · **Attachments** · and **Workflow** on an
+event that needs approval.
 
-**Four tabs, each with a live count in its label:**
+**Participants** — *Participant* · *Kind* (*Employee*, or the outside guest's organisation) · *Role* · *Required* ·
+*Invitation* (*Sent*, *Accepted*, *Declined*, *Tentative*, *Waits for approval*, or *Not delivered*) · *Responded*.
+- **Add participant**: an **Employee**, *or* someone from outside — **External name**, **External email** *(required:
+  "the invitation goes there")*, **External organisation** — then **Role**, **Attendance required**, **Special
+  requirements**, and on a series **Which dates**. Refused: nobody twice, a leaver, an outside guest without an
+  address, a cancelled or completed event.
+- Each row: **Edit** (an outside guest's name, address and organisation, the role, required, needs — an employee
+  stays who they are: *"To invite someone else instead, remove this guest and invite them."*; a changed address is
+  sent the invitation), **Remove** (they are told), **Record accepted / declined / tentative** (the desk records an
+  answer that came back another way — no notice), and on a series **Answer for several dates…** and **Take off
+  several dates…**.
+- A cancelled or completed event's list is its record: nothing can be added, changed, removed or answered.
 
-**Tab 1 — Participants (N).** *"Invite an employee, or add an external guest."* Six columns:
-**Participant** · **Kind** (*Employee*, or the external organisation) · **Role** · **Required**
-(*Yes* / *Optional*) · **Invitation** (a status badge) · **Responded** (a date).
-Row ⋯ menu carries **Record accepted**, **Record declined**, **Record tentative** *(each hidden
-when the participant is already at that status)* and 🚫 **Remove participant**.
-**No Edit** — the API has no participant update, so rows are added and removed, never amended.
+**Attendance** — the register, taken **once the event has started** and never on a cancelled one (before then:
+*"Attendance is marked once the event has started."*). *Employee · Attended (Present / Absent) · Checked in · Checked
+out · Reason · Marked by*. **Add**: **Employee**, **Attended**, **Check-in time** (*"On one of the event's days and not
+still to come. Blank keeps the time already recorded, or now."*) or **Reason for absence**, **Notes**. Each row:
+**Check out** (once, after the check-in), **Edit** (marks again — the check-in is kept unless a new one is given), and
+**Remove** — a wrong row is corrected on the desk's tier (C-21).
 
-Dialog: **Employee** *(picker)* · *"Or add someone from outside the organisation:"* ·
-**External name** · **External email** *(validated)* · **External organisation** · **Role**
-*(required)* · **Attendance required** switch · **Special requirements**.
-Two rules the form enforces: you must give **either** an employee **or** an external name, and
-**not both**.
+**Tasks** — *Task · Stage · Assigned to · Due · Priority · Status*, with an **Overdue** badge worked out from the due
+date and *"assignee chased 06/10/2026"* once the sweep has chased it. **Add task**: **Task**, **Stage**, **Priority**,
+**Assigned to**, **Due date**; the edit adds **Status** (Overdue is not one you can set). Each row: **Mark complete**,
+**Edit**, and **Remove** for `HR.Company.Admin` only. Whoever a task is given to, or passed to, is told.
 
-> ⚠ **Adding a participant *is* inviting them.** The service sets `InvitationStatus = Sent` and
-> stamps `InvitationSentDate` on insert. There is no separate "send invitations" action. **Since
-> round 4 the invitation is emailed at that moment** — to the employee's address, or the external
-> guest's — with the event's when and where and, if the event asks for one, the RSVP deadline
-> (**C-17**, fixed). It is best effort: the participant is added even if the email fails, and the
-> status says *Sent* either way. On the demo database nothing is delivered (Rule 7).
->
-> ⚠ The invitation asks the guest to *"confirm whether you can attend by …"* and gives them **no way
-> to**: no link, no word on how to reply, and no screen where an invitee answers for themselves. HR
-> records the answers here (**R4-6.4**).
+**Attachments** — for the desk, on an event not cancelled, an **Add a file** box: **What it is** (Agenda · Minutes ·
+Presentation · Handout · Resource), **About it (optional)**, and **File** (*"Agendas, minutes, presentations and
+handouts. Each file is scanned before it is stored."*, up to 25 MB). Below, *File · Type · About it · Size · Added*,
+each row with **Download** and **Remove**. A row from before lane 2h that only named a path reads *"Reference only — no
+file stored"*, with no download.
 
-**Tab 2 — Attendance (N).** *"You are recorded as the person who marked it."* Six columns:
-**Employee** · **Attended** (a *Present* / *Absent* badge) · **Checked in** · **Checked out** ·
-**Reason** · **Marked by**. Row ⋯ carries **Check out** *(only on an attended row with no
-check-out yet)*. **No Edit and no Remove** — marking the same employee again is how a record is
-corrected, and there is no delete endpoint at all.
-
-Dialog: **Employee** *(required)* · **Attended** switch → **Check-in time** *(when attended)* or
-**Reason for absence** *(when not)* · **Notes**.
-
-**Tab 3 — Tasks (N).** *"Everything that has to happen before, during and after the event."* Six
-columns: **Task** · **Stage** · **Assigned to** · **Due** · **Priority** · **Status**.
-Row ⋯ carries **Mark complete** *(hidden once Completed or Cancelled)*, **Edit** and 🚫 **Remove
-task**.
-Dialog: **Task** *(required, ≤1000)* · **Stage** *(Pre-Event Preparation · During Event ·
-Post-Event Follow-up)* · **Priority** · **Assigned to** *(picker)* · **Due date** · **Status**
-*(edit only — a new task is always Not Started)*.
-
-**Tab 4 — Attachments (N).** *"Agendas, minutes, presentations and handouts for this event."* Four
-columns: **File** · **Type** · **Description** · **Uploaded**. Row ⋯ carries 🚫 **Remove
-attachment** only.
-Dialog: **File name** *(required)* · **Type** *(Agenda · Minutes · Presentation · Handout ·
-Resource Material)* · **File path** *(required)* · **Description**.
-
-> ⚠ **This is a reference, not an upload.** The endpoint takes a file name and a stored path as
-> JSON; no bytes move, there is no file picker and there is no download link. The row points at
-> the document register rather than carrying the document (**C-18**).
+**Workflow** — the engine's record of the approval: the route, who it is with, and who decided what and when.
 
 ### ▶ Walk it
 
-Ten minutes. Take them.
+Twelve minutes, in four parts: the finished retreat, the approval beat (§ 2.5, Beat A) on the event chapter 5 made,
+the board meeting's guests and tasks, and Safety's drill.
+
+**Part 1 — a finished event, read only**
 
 **1 — Open the *Management retreat — 2026 budget preparation*.**
 
-> *"The management retreat, five weeks ago. Two days at the Volta Serene in Ho, to settle the 2026
-> operating budget and the manpower plan. This is the only event on this calendar that has already
-> happened, which makes it the only one with a full record."*
+> *"The management retreat — two days at the Volta Serene in Ho, to settle the 2026 operating budget and the
+> manpower plan. It is the only event here that has already happened, which makes it the only one with a full
+> record."*
 
-**2 — Read the Overview card, following the grid.**
+**2 — Read the Overview across.**
 
-> *"Status Completed. Meeting, internal, management only — and visibility management, so it is not
-> on the all-staff view. Sixty-two thousand cedis against MD/EVT/2026/01. Eighteen expected."*
+> *"Completed. A meeting for management — 'For: Management, unit heads and line managers.' Sixty-two thousand cedis
+> against MD/EVT/2026/01. Eighteen expected, four attended — and that gap is the reason both numbers are kept. In a
+> paper system you get the invitation list or the register, never both."*
 
-**3 — Point at *Expected* and *Attended* side by side.**
+**3 — Point at the *Invitations and reminders* card.** On a finished event its reminder line reads *Not sent*, and
+no button is offered — the card follows the sweep's own rule, and the sweep does not remind about the past.
 
-> *"Eighteen expected, four attended — and that gap is the reason both numbers are on the record
-> rather than one. In a paper system you get the invitation list or the register, never both."*
+**4 — Read the *Outcome* aloud** from the Notes card. It is the single best line on either database:
 
-⚠ **Scroll past the Reminders card on this event.** It sits between the Overview and the Notes and
-reads *"Goes 3 days before the event, automatically"* — about an event that finished five weeks ago
-(**R4-6.2**). If somebody reads it out: *"that card is for events still ahead; on a finished one it
-should say so, and today it does not."*
+> *"'Operating budget agreed at GHS 214 million with a 6% contingency; manpower plan referred back to HR for costing;
+> Community 25 phasing endorsed.' That is what closing an event off means here. Not archiving it — writing down what
+> it decided."*
 
-**4 — Scroll to the *Notes* card and read the outcome aloud.** This is the single best line on the
-demo database:
+**5 — Open *Attendance*.**
 
-> *"'Operating budget agreed at GHS 214 million with a 6% contingency; manpower plan referred back
-> to HR for costing; Community 25 phasing endorsed.' That is what closing an event off means here.
-> Not archiving it — writing down what it decided."*
+> *"Four present, with the times they signed in. One absent, with a reason: 'On annual leave; represented by the
+> Deputy Internal Auditor.' That is what a minute secretary writes — on the record rather than in somebody's
+> notebook."*
 
-**5 — Open the *Attendance* tab.**
+**6 — Open *Attachments*, and press *Download* on the communiqué.** A PDF opens.
 
-> *"Five rows. Four present, with their check-in times against the register they signed. And one
-> absent, with a reason: 'On annual leave; represented by the Deputy Internal Auditor.' That is
-> what a minute secretary writes, and it is on the record rather than in somebody's notebook."*
+> *"And the papers are the papers — uploaded, scanned for viruses, filed in the document store, and downloaded by
+> anybody who may read the event."*
 
-**6 — Open the *Attachments* tab.**
+**Part 2 — the approval beat (Beat A, § 2.5)**
 
-> *"And the communiqué. One point of honesty: this holds a reference to the document rather than
-> the document itself — the file name and where it is stored. Attachments across this product go
-> through a single controlled upload gate, and wiring this register onto that gate is the change
-> that makes it a download link."*
+**7 — Window A: open the event chapter 5 made.** Point at the header: no **Approve** for `hr.head`.
 
-**7 — Now go back and open the *Board of Directors — Q3 meeting*.** This is where the live writes
-happen.
+> *"It needs approval, and I made it — so I am the one person who cannot approve it. The engine has asked the HR
+> desk, and it is waiting."*
 
-**8 — Open the *Participants* tab.** Five employees and **one external**.
+**8 — 🔴 LIVE WRITE 2 — *Participants* → *Add participant*:** the `staff` persona (UAT: Efua Seidu, `TDC/00017`),
+Role **Attendee**. The toast: *"Added. The invitation goes when the event is approved."* Their *Invitation* reads
+**Waits for approval**, and the *Invitations and reminders* card *"1 waits for the approval"*.
 
-> *"Five internal, and Nana Kwame Baffoe from the Board Secretariat — an external participant,
-> with his organisation and his email, as a Facilitator. An event's guest list is not the staff
-> list, and the model knows the difference."*
+**9 — Window C (`staff`): the bell is quiet, and the portal calendar does not show the event.**
 
-**9 — Point at the *Invitation* column.** Two rows read **Accepted** and **Tentative** with
-response dates; the rest read **Sent**.
+> *"Nothing has reached them, and nothing should: this meeting may not happen."*
 
-> *"'Will attend.' 'Joining for the first session only.' The RSVPs are on the record."*
+**10 — 🔴 LIVE WRITE 3 — Window B (`hr.officer`): open the same event and press *Approve*,** with a comment. The
+status becomes *Confirmed*, *Approved by* appears on the Overview, and the Workflow tab records the decision.
 
-**10 — 🔴 LIVE WRITE 2 — press *Add participant*.** Pick an employee, Role **Attendee**,
-Attendance required **on**. Add.
+> *"Approved — by somebody who did not create it, on the same engine that approves leave, travel and requisitions,
+> with who decided and when on the record. And in the same moment, the invitation it was holding has gone."*
 
-> *"And adding somebody is inviting them. The invitation is emailed the moment you add the row —
-> when, where, and the date we need an answer by — and there is no second 'send' button. This
-> demonstration database has no mail server, so nothing actually leaves it, but that is the email
-> they would get."*
+**11 — Window C: the bell has the invitation, and the portal calendar draws the event dashed** — waiting for an
+answer. Window A: `hr.head`'s bell says it was approved. Back on the event, the guest reads **Sent** and the card
+*"1 of 1 delivered"*. Chapter 6a answers it.
 
-Rule 7 is why the last clause is there. If you want to show the wording, § 18 has the template.
+**12 — Show *Reschedule* without pressing it.** Open the dialog, read its sentence aloud, then **Cancel**.
 
-**11 — 🔴 LIVE WRITE 3 — on your new row, ⋯ → *Record accepted*.** The badge flips and the
-Responded date fills.
+> *"Move it, with a reason, and the record keeps where it was — 'Originally' — when it moved and why. Everybody
+> invited is told, accepted answers are asked again, its rooms move with it, and because it was approved, it goes
+> back for approval."*
 
-> *"And HR records a reply that came back by phone. Which is the honest description of this
-> control — it says 'record', not 'respond', because the person answering is not the invitee."*
+**Part 3 — the board meeting**
 
-**12 — Open the *Tasks* tab.** Two rows on the board meeting.
+**13 — Open the *Board of Directors — Q3 meeting* → *Participants*.** Five employees and **one from outside**:
+*Nana Kwame Baffoe, Board Secretariat*, a Facilitator — the *Kind* column shows the organisation.
 
-> *"Circulate the board pack seven days before — Critical, assigned to the Managing Director. Take
-> the minutes and produce the draft within three working days — assigned to the Head of HR. Before
-> and during, with owners and due dates."*
+> *"An event's guest list is not the staff list. Somebody from outside is invited at their own address, gets the
+> calendar entry, and answers from their own mail — to the organiser."*
 
-**13 — 🔴 LIVE WRITE 4 — *Add task*.** *"Book the video link to the Ho office"*, Stage
-**Pre-Event Preparation**, Priority **High**, assign it to someone, due next week.
+**14 — 🔴 LIVE WRITE 4 — on the outside guest's row, ⋯ → *Record accepted*.**
 
-**14 — 🔴 LIVE WRITE 5 — ⋯ → *Mark complete* on it.** The status badge flips to *Completed*.
+> *"Which is how their answer gets here: HR records it. It says 'record', not 'respond', because the person
+> answering is not the person pressing the button."*
 
-**15 — 🔴 LIVE WRITE 6 — open the event you created in chapter 5 and press *Approve* in the header.**
-*(Corrected 2026-09-24: this step used to approve the board meeting, which has no Approve button.
-None of the seeded events requires approval — Rule 3.)* It fires with no dialog; the status goes to
-**Confirmed** and *Approved by* appears on the Overview card.
+**15 — Open *Tasks*.** Two rows: the board pack, **Critical**, assigned to the Managing Director — on UAT already
+**Overdue**, with *"assignee chased"* and the date (5 October) — and the minutes, assigned to the Head of HR.
 
-Then say the honest sentence — **do not skip this one**:
+> *"Overdue is not a box somebody ticks; it is the due date, read every time. And the hourly sweep chased the
+> Managing Director once, the day after it fell due."* (**Rebuilt:** the board pack falls due five days after the
+> build, and is chased the day after that.)
 
-> *"Approved. And I want to be precise about what that is, because everywhere else in this product
-> approval means the workflow engine — a definition, a routed step, a named approver, an entry in
-> their inbox. Here it is a decision recorded in place: who approved it and when. For a room
-> booking that is the right weight. For a board meeting with a fifty-thousand-cedi budget, TDC may
-> want it routed — and the engine is already in the product approving leave, travel and
-> requisitions. Putting a company event onto it is the same four-step change we made for every
-> other module."*
+**16 — 🔴 LIVE WRITE 5 — *Add task*:** *"Book the video link to the Ho office"*, Stage **Preparation**, Priority
+**High**, assigned to `hr.officer`, due next week. Window B's bell: *"A task for Board of Directors — Q3 meeting"*.
+**🔴 LIVE WRITE 6 — ⋯ → *Mark complete*.**
 
-**15b — *(round 4)* Stay on this event and read the *Reminders* card.** It reads *"Goes 2 days before
-the event, automatically"*, and the RSVP chase line *"Goes automatically ahead of the RSVP deadline,
-to everybody who has not answered"*.
+**17 — *(optional)* 🔴 LIVE WRITE 7 — *Attachments* → *Add a file*:** What it is **Presentation**, a small PDF.
+⚠ **CAREFUL:** the upload gate scans every file and refuses one it cannot scan — the scanner
+(`scripts/Start-DemoVirusScanner.ps1`) must be running on the demo machine. Without it, show *Download* instead.
 
-> *"And approving it did one more thing: it released the reminders. An event that needs approval is
-> not reminded until somebody approves it — there is no point telling people about a meeting that
-> may not happen. From here, the reminder goes two days before, once, and anybody who has not
-> answered is chased before the RSVP deadline, once."*
+**18 — *(optional)* 🔴 LIVE WRITE 8 — *Send reminder now*** (the board meeting has a guest list). The toast counts
+whom it was for and whom it reached — *"N of M reached — 0 by email, N in the app. K not reached: no mail server is
+set up, and they have no login to be told in the app."* Every guest with a login is reached through the bell; the
+outside guest, and any guest without a login, is not. ⚠ The cost: it counts as the automatic reminder, which will not
+go again for this date.
 
-**🔴 LIVE WRITE 14 *(optional)* — *Send reminder now*, on the board meeting.** This event has nobody
-invited yet, so use the board meeting, which has a guest list. The toast says how many were
-*reminded*, and the card flips to *Sent* with the time. Then say Rule 7's sentence: *"on this
-database that email has nowhere to go — there is no mail server — but the send is recorded, and the
-automatic one will not go a second time."* ⚠ That last clause is the cost: the board meeting's own
-reminder, due three days before it, will now not go. *Undo:* § 19, row 13.
+**Part 4 — an event nobody in HR keyed in**
 
-**16 — Show *Reschedule* without pressing it.** Open the dialog, then **Cancel** it.
+**19 — Open *Emergency drill: Fire Emergency Response Plan*** (13 December on UAT). The note under the header: *From
+Emergency drill DRILL-2026-001*, linked.
 
-> *"Moving an event needs a reason — the dialog will not submit without one."*
+> *"Safety recorded this drill's next date, and the company calendar has it, for everybody, without anybody in HR
+> typing it twice. Move the date in Safety and it moves here."*
 
-⚠ **Read Rule 2 before you say anything about history here.** The dialog's own line —
-*"The original dates are kept on the record as history"* — has been **true since round 4**: the first
-move keeps where the event was. But **this page does not show it** (**R4-6.1**), so do not offer to.
-Say:
-
-> *"Move it, with a reason, and the record keeps where it was, when it moved and why — and
-> everybody invited is emailed the new date, with the old one struck through and the reason."*
-
-And do not move an event with **Edit** (chapter 7): that route skips all of it (**R4-7.1**).
-
-**17 — Point at where *Delete* is not.** Since round 4 the red **Delete** button is not rendered for
-`hr.head` — it is an Admin action, and the screen no longer offers it to anybody without Admin. If you
-want to make the point:
-
-> *"Notice there is no delete here. Cancel keeps the event, its invitations, its attendance and its
-> reason. Deleting removes the lot, and that is an administrator's permission, not an HR officer's —
-> so the screen does not offer it to me at all."*
-
-⚠ The Participants, Tasks and Attachments tabs still offer **Remove** in their row menus, and those
-still answer 403 (Rule 1). Do not demonstrate the point from a tab.
+⚠ **Do not press *Announce on the intranet*** on UAT (Rule 1). On the seeded events it is not offered anyway: none has
+*Show on intranet* on. **Delete** is not offered to `hr.head`; **Cancel** is the exit for anything made live.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | The page | `GET api/CompanySchedule/events/{id}/details` | `HR.Company.Read` |
-| **Approve** | `POST api/CompanySchedule/events/{id}/approve` *(empty body)* | `HR.Company.Write` |
-| **Cancel** | `POST …/{id}/cancel` | `HR.Company.Write` |
-| **Reschedule** | `POST …/{id}/reschedule` | `HR.Company.Write` |
-| **Complete** | `POST …/{id}/complete` | `HR.Company.Write` |
-| **Delete** | `DELETE …/{id}` — the button renders only for this permission | **`HR.Company.Admin`** |
-| **Send reminder now** *(round 4)* | `POST …/events/{eventId}/reminders` → `{ sent }` | `HR.Company.Write` |
-| **Chase unanswered now** *(round 4)* | `POST …/events/{eventId}/rsvp-reminders` → `{ sent }` | `HR.Company.Write` |
-| Participants | `GET`/`POST …/{eventId}/participants` · `POST …/participants/respond` | Read / Write |
-| Remove participant | `DELETE …/participants/{participantId}` | **`HR.Company.Admin`** |
-| Attendance | `GET`/`POST …/{eventId}/attendance` · `POST …/attendance/{id}/checkout` | Read / Write |
-| Tasks | `GET`/`POST …/{eventId}/tasks` · `PUT …/tasks/{id}` · `POST …/tasks/{id}/complete` | Read / Write |
-| Remove task | `DELETE …/tasks/{id}` | **`HR.Company.Admin`** |
-| Attachments | `GET`/`POST …/{eventId}/attachments` | Read / Write |
-| Remove attachment | `DELETE …/attachments/{id}` | **`HR.Company.Admin`** |
+| **Approve** / **Reject** | `POST …/events/{id}/approve` · `…/reject` — the engine names the approver; the service also refuses the organiser | `HR.Company.Write` (and the engine's say) |
+| **Reschedule** · **Cancel** · **Complete** | `POST …/events/{id}/reschedule` · `…/cancel` · `…/complete` — a series by its scope | `HR.Company.Write` |
+| **Delete** | `DELETE …/events/{id}` — its live bookings cancelled first | **`HR.Company.Admin`** |
+| **Announce on the intranet** | `GET …/events/{id}/announcement` (the preview) · `POST …/events/{id}/announce` | `HR.Company.Write` |
+| **Series** | `POST …/events/{eventId}/series/extend` | `HR.Company.Write` |
+| **Rooms card** | `GET …/events/{eventId}/bookings` | `HR.Company.Read` |
+| **Send reminder now** · **Chase unanswered now** · **Send the undelivered invitations** | `POST …/events/{eventId}/reminders` · `…/rsvp-reminders` · `…/invitations/send` — each answers whom it was for and whom it reached | `HR.Company.Write` |
+| Participants | `GET`/`POST …/events/{eventId}/participants` · `PUT`/`DELETE …/participants/{id}` (a series by its scope) · `POST …/events/{eventId}/participants/respond` | Read / Write |
+| Attendance | `GET`/`POST …/events/{eventId}/attendance` · `POST …/attendance/{id}/checkout` · `DELETE …/events/{eventId}/attendance/{id}` | Read / Write |
+| Tasks | `GET`/`POST …/events/{eventId}/tasks` · `PUT …/tasks/{id}` · `POST …/tasks/{id}/complete` · `DELETE …/tasks/{id}` | Read / Write / **Admin** to delete |
+| Attachments | `GET …/events/{eventId}/attachments` · `POST` multipart through the upload gate · `GET …/attachments/{id}/download` · `DELETE …/attachments/{id}` | Read / Write |
 
-Tables: `CompanyEvents`, `EventParticipants`, `EventAttendances`, `EventTasks`,
-`EventAttachments`.
+Tables: `CompanyEvents`, `EventParticipants`, `EventAttendances`, `EventTasks`, `EventAttachments`, and the engine's
+instance for the approval.
 
-**Approve sends an empty POST on purpose.** The approver comes from the token; passing an id would
-be act-as-anyone, which is exactly what this endpoint used to allow.
+**The guards are the server's** (lane 2a). An approval needs an event that requires one and is waiting; cancelling
+or moving needs an open one; completing needs one that has started; a move asks for a reason, resets accepted and
+tentative answers, moves the linked rooms (refusing, with the room named, if one is taken), and sends an approved
+event back for approval. The screen hides what the server would refuse, so a refusal is rare — and when it comes, it
+is a sentence.
 
-**What sends email since round 4, and how.** The *CompanySchedule* catalogue has five emails:
-*Event Invitation*, *RSVP Reminder*, *Event Reminder*, *Event Rescheduled* and *Event Cancelled*.
-
-- **Adding a participant** sends the invitation, to that one person.
-- **Reschedule** and **Cancel** notify **everybody** on the list, including anybody who declined. The
-  reschedule notice carries `OriginalWhen`, the old date struck through.
-- **The reminder** goes to everybody who has not declined; **the chase** only to invitations still
-  *Sent* or *Not sent*.
-
-Every send names the **event's** tenant (`SendForTenantAsync`), because the hourly sweep runs with
-nobody signed in. Each is best effort, raced against a ten-second timeout, and never undoes the
-action that prompted it. `sent` in the response counts participants **with an email address**, not
-emails delivered.
+**Who is told** — § 1.6. Each act names the event's own tenant, because the hourly sweep sends with nobody signed in;
+no notice ever makes the act fail.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: seven findings, one of them about the demo data.**
->
-> | | Now |
-> |---|---|
-> | **R4-6.1** | **The original window is kept and emailed, and shown nowhere on this page.** `originalStartDate` and its three siblings reach the page's data and are not rendered; the Overview's *Rescheduled* still shows the day the button was pressed. Rule 2's say-line works around it. |
-> | **R4-6.2** | **The Reminders card promises sends the sweep will not make.** It reads *"Goes N days before the event, automatically"* whenever the reminder is on and unsent. That includes a finished event (the seeded retreat), an event still waiting for its approval, and a blank *Days before* (**R4-5.1**). The chase line has the same fault for a deadline already passed. The card should state the sweep's own conditions. |
-> | **R4-6.3** | **"Sent", "reminded" and "chased" mean attempted.** The stamp is written and the toast counts people with an address whether or not a mail server took the email — by design (round 4 plan, N-b2 decision 4), so that nothing is held back waiting for a mail server. On a database with none, like the demo's, every send looks like a success (Rule 7). The card could say *"attempted — no mail server"*; the outbox the orientation notices use already records that state. |
-> | **R4-6.4** | **The emails ask for an answer and give no way to give one — and a reschedule does not reset the answers.** The invitation and the chase ask the guest to confirm by the deadline, with no link and no instruction. There is still no screen where an invitee answers for themselves (Appendix B's open decision D-02). The reschedule notice asks everybody *"please confirm again for the new time"*, but their earlier answers stay on the record, so nobody is chased and HR cannot tell who re-confirmed. |
-> | **R4-6.5** | **C-19 now sends email.** With no lifecycle guard on the server, a cancel through the API on a *completed* event, or a second cancel, emails everybody invited that it is cancelled. A reschedule of a cancelled event emails that it has moved. The screen hides these buttons on closed events, so only a direct API call gets there. |
-> | **R4-6.6** | **Eight Admin-only removes are still offered to `hr.head`** (Rule 1). Round 4 hid the event page's Delete and the bookings register's. It did not hide *Remove participant / attachment / task* here, the rooms register's Delete, *Remove closure*, *Remove milestone*, or the fiscal years' Delete and *Remove period*. The shared table they use already takes `allowRemove`; none of the eight passes it. |
-> | **R4-6.7** | **An event's organiser is invisible to the diaries and the interview clash check unless they are also on its guest list.** Both read `EventParticipants` only; the module's own organiser check is not one of the seven sources. The demo is unaffected, because `hr.head` organises all four seeded events and is invited to each. |
+| Gap | |
+|---|---|
+| ✅ ~~**C-1, R4-6.6** · removes offered to people the server refuses~~ | **Fixed** — Delete in round 4, the rest in lane 5a |
+| ✅ ~~**C-2, R4-6.1** · the original dates kept but not shown~~ | **Fixed in lane 5a** — *Originally* and *Moved on* |
+| ✅ ~~**C-3, C-20** · approval a flag, on any event~~ | **Fixed in lane 2b** — the engine, on events that need it |
+| ✅ ~~**C-18** · attachments are references~~ | **Fixed in lane 2h** — files through the upload gate |
+| ✅ ~~**C-19, R4-6.5** · no lifecycle guard~~ | **Fixed in lane 2a** |
+| ✅ ~~**C-21, C-22** · attendance not removable, a guest not editable~~ | **Fixed in lane 2d** |
+| ✅ ~~**C-23** · Overdue never set~~ | **Fixed in lane 2d** — worked out on read; chased once (lane 2e-3) |
+| ✅ ~~**R4-6.2, R4-6.3** · the card promised sends, and counted attempts~~ | **Fixed in lane 2e** — the sweep's own conditions, and *reached* |
+| ✅ ~~**R4-6.4** · no way for a guest to answer~~ | **Fixed in lane 7** — chapter 6a, and the calendar file |
+| ✅ ~~**R4-6.7** · the organiser invisible to the diaries~~ | **Fixed in lane 2a** |
+| **F-65** · an organiser on the HR desk who did not create the event is offered **Approve** by the engine | The engine knows the creator, not the organiser; the server refuses the organiser with the reason. Found while rewriting (lane 6) |
+
+---
+
+## 6a. `/me/calendar/events/[id]` — the event as staff see it
+
+### 📍 Where you are
+
+**From:** a guest's notice (*"You are invited …"* and every notice after it), or **Open** on an event in the portal's
+calendar — or the HR menu's calendar, for anybody not on the HR desk · `/me/calendar/events/[id]` · window C as
+**staff** · **3 minutes**
+
+### 📖 What it is
+
+> *"The event as an invitee sees it: what, when, where, how to join, who organises it, who it is for — and their own
+> invitation, which they answer here. Nothing of the budget, and nothing of anybody else's answer."*
+
+### 👁 On the page
+
+**Header:** the event's name; *"EVT-2026-… · Meeting"*; a back-link to the calendar; and, for the HR desk only, **Open
+the HR page**.
+
+**Badges:** the status (or a red *Cancelled*), *Awaiting approval*, *You organise it*, *Date 3 of 10* on a series. A
+cancelled event shows its reason.
+
+**The event** card — *When* (*"12 October 2026, 09:00–16:00"*, or *"all day 13 November 2026"*) · *Where* (the site, the
+venue, the address) · *Rooms* (the rooms booked for it) · *Joining* — on an online or hybrid event, **Join online**, or
+*"The link is not set yet"*, and the meeting password **for a guest or the organiser only** · *Organiser* · *For* (who it
+is for, in words) · *Reply by* (when replies are asked, with a deadline) · *About it*.
+
+**Your invitation** card — where it stands (*"You have not answered yet"*, *"You accepted"*, *"You said you may
+attend"*, *"You declined"*, *"Your invitation has not been sent yet"*), then, while you may answer, the same **Accept ·
+May attend · Decline**, the note, and on a series **Which dates** as on the calendar's card (chapter 3a). Where you may
+not, the reason. Your earlier note is shown under it. For an event that is for you but not an invitation: *"You are not
+on its guest list — it is on your calendar because it is for you, and there is nothing to answer."*; for its organiser,
+*"You organise this event."*
+
+**Not yours to see** — an event you are neither invited to nor the audience of, or a private one: *"This event was not
+found — or it is not one you are invited to or that is for you."* Exactly what a missing event says.
+
+**When an invitee may answer** (lane 7, the user's ruling): once the invitation has gone (never while the event awaits
+approval), until the RSVP deadline — or, with none, until the event begins — and never on a cancelled or completed
+event. Each refusal is a sentence: *"The reply-by date for … has passed. Ask the organiser to record your answer."*,
+*"… has already begun. Ask the organiser to record your answer."*, *"… is still awaiting approval, so its invitations
+have not gone out yet."*
+
+### ▶ Walk it
+
+**1 — Window C (`staff`): open the bell's *"You are invited"* notice** from chapter 6, step 11 — or click the dashed
+band on the portal calendar and press **Open**.
+
+> *"This is what Efua sees — not HR's page. When, where, who organises it, who it is for. No budget, no catering
+> order, no list of who else said what."* (UAT's `staff`; say the name your database shows.)
+
+**2 — 🔴 LIVE WRITE 9 — under *Your invitation*, type a note** — *"I will bring the Q3 project figures."* — **and
+press *Accept*.** The toast: *"Accepted — The organiser is told."* The card now reads *"You accepted"*, with the note.
+
+**3 — Window A (`hr.head`): the bell** — *"… accepted: Heads of Unit — Q4 planning"*. On the event's page the guest
+reads *Accepted* with today's date.
+
+> *"The invitee answered for themselves, on their own page, and the organiser knew in the same second — in the app.
+> Nobody in HR keyed it in."*
+
+**4 — *(optional)* Window C: open the board meeting** by its address from window A. *"This event was not found …"*
+
+> *"And a member of staff cannot read the board meeting at all — not because it is hidden on a menu, but because the
+> server will not hand it over. It is for management."*
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| The page | `GET api/CompanySchedule/calendar/events/{eventId}` — for its organiser, a guest, its audience or the HR desk; anybody else a 404 | any internal login |
+| An answer | `POST …/events/{eventId}/participants/{participantId}/reply` — the caller's own invitation or a 404; the window above; on a series every date the scope reaches that may still be answered; the organiser told in the app, never of their own answer | any internal login |
+
+`CompanyCalendarService.GetEventAsync` builds the staff view; the HR desk's own answer door,
+`participants/respond`, is unchanged and is not held to the reply window.
+
+### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| ◐ **C-1 · The red Delete button 403s for `hr.head`** — ✅ hidden from `hr.head` since round 4; eight other removes still 403 (**R4-6.6**, Rule 1) | |
-| ◐ **C-2 · Rescheduling overwrites the dates and the dialog claims otherwise** — ✅ the original is kept and emailed since round 4; not shown here (**R4-6.1**), and Edit still overwrites (**R4-7.1**) | |
-| **C-19 · There is no lifecycle guard on the server.** The screen hides the four actions once an event is cancelled or completed; the API does not. A completed event can be cancelled, a cancelled one completed, and either rescheduled. Every other HR module refuses these. **Since round 4 the cancel and the reschedule also email everybody invited (R4-6.5)** | |
-| **C-20 · Approve ignores `RequiresApproval`.** It sets *Confirmed* on any open event, whether or not one was asked for. Since round 4 an event that does require it is not reminded until approved | |
-| ✅ ~~**C-17 · No invitation is sent.**~~ **Fixed in round 4** — adding a participant emails the invitation. `InvitationStatus = Sent` is still set whether or not it was delivered (**R4-6.3**), and the demo database delivers nothing (Rule 7) | |
-| **C-18 · Attachments are references, not files** — no upload, no download | |
-| **C-21 · An attendance record cannot be removed.** There is no delete endpoint; a wrong row is corrected by marking again, which leaves both | |
-| **C-22 · A participant cannot be edited.** No update endpoint — remove and re-add, and removal is Admin, so `hr.head` cannot correct a typo in an external guest's email at all | |
-| **C-23 · `EventTaskStatus.Overdue` is never set.** A task past its due date stays *Not Started* | |
+| *By design* · the organiser is told of an answer **in the app only** | The user's ruling (lane 7): no email, no template |
+| *By design* · an answer recorded at the desk (chapter 6, *Record accepted*) tells nobody | It is HR writing down an answer that came another way |
 
 ---
 
@@ -1456,80 +1620,85 @@ emails delivered.
 
 ### 📍 Where you are
 
-**From:** the event → **Edit** · `/hr/company-schedule/events/[id]/edit` · as **hr.head** ·
-**2 minutes**
+**From:** the event → **Edit** (offered while the event is open) · `/hr/company-schedule/events/[id]/edit` · as
+**hr.head** · **2 minutes**
 
 ### 📖 What it is
 
-> *"The same authoring form, with two halves swapped: what you can only set when an event is
-> created is gone, and what only makes sense afterwards has appeared."*
+> *"The same authoring form, with two halves swapped — what can only be set when an event is created is gone, and what
+> only makes sense afterwards has appeared — and one thing it will not let you do quietly: move the event."*
 
 ### 👁 On the page
 
-**Header:** *Edit \<event name\>* — **"Recurrence is set when the event is created and cannot be
-changed here."**, back-link to the event.
+**Header:** *Edit \<event name\>* — *"Recurrence is set when the event is created and cannot be changed here."*,
+back-link to the event.
 
-The form is chapter 5's, with four differences:
+The form is chapter 5's, with these differences:
 
 | Field | Create | Edit |
 |---|---|---|
-| **Status** | absent — always *Scheduled* | **present** — all seven statuses |
-| **Repeats** and the four recurrence fields | present | **absent** |
-| **Requires approval** | present | **absent** — *"once an event exists, approval is an action, not a checkbox"* |
-| **Actual cost** | absent | **present**, beside the budget amount |
+| **Status** | absent — a new event is *Scheduled* | **present**: *Scheduled*, *In Progress*, *Postponed*; *Confirmed* only where no approval is needed or it has been given; and whatever it is now. *"Cancel, complete and reschedule have their own buttons on the event."* |
+| **Repeats** and its fields | present | **absent** — a series is lengthened from the event page, and each date edited on its own |
+| **Requires approval** | present | **absent** — once an event exists, approval is an action |
+| **Actual cost** | absent | **present**, beside the budget |
+| **Organiser** | *"You — or search for someone else"* | the organiser's name, to change |
+| **Category** | the six for a new event | the same, plus *Holiday* or *Milestone* if an old event already is one |
 
-**Footer:** **Cancel** · **Save changes**.
+**Moving it here is a reschedule.** Change a date, a time or the all-day switch and an amber box appears: *"Changing the
+dates or times moves the event. Everybody invited is told why, accepted and tentative replies go back to awaiting an
+answer, its room bookings move with it, the original dates are kept, and an approved event waits for approval
+again."* — with **Reason for the change**, which the save requires.
+
+**On a date of a series**, a card under the form: **Which dates** (*This date only · This and following dates · Every
+date in the series*) — *"The other dates take only what you change here; new dates or times move each by the same
+amount. A date that has started, been completed or been cancelled is left as it is, and each guest is told once."*
+
+**Footer:** **Cancel** · **Save changes**. The toast says what the save did: *"Event updated"*, or *"Event moved —
+Accepted replies are asked again, and its room bookings moved with it."*, with whom it reached (a postponement, or a new
+venue, site or joining link, tells the guests too); on a series *"Dates moved"* or *"Dates updated"* with the dates it
+reached.
 
 ### ▶ Walk it
 
 **1 — From the board meeting, press *Edit*.**
 
-**2 — Point at the *Status* dropdown in Card 1** — it is the visible difference.
+**2 — Open the *Status* list.**
 
-> *"And here is the one field that only exists after the event does. Seven states, and three of
-> them — In progress, Postponed, Rescheduled — are only reachable from this dropdown. The buttons
-> on the event set Confirmed, Completed and Cancelled; anything else is a judgement somebody makes
-> by hand."*
+> *"Only what an edit may honestly set: scheduled, in progress, postponed — and confirmed only where no approval is
+> involved. Cancelling, completing and moving have their own buttons, because each of them tells people things."*
 
-**3 — Point at the header line about recurrence.**
+**3 — Change the *Start time* by an hour** — and stop at the amber box.
 
-> *"And what has gone. Recurrence is set once, when the event is created, because changing the
-> pattern of something that has already started repeating is a different and much harder question.
-> The form does not show it rather than showing it and quietly ignoring it — which is what would
-> happen, because the update endpoint has no recurrence fields at all."*
+> *"And if I move it here, it is a move, not a quiet edit: it asks for the reason, and everything the Reschedule button
+> does happens — the guests told, the answers asked again, the room moved with it."*
 
-**4 — Turn *Has a budget* on if it is not already**, and point at **Actual cost**.
+Put the time back; the box goes.
 
-> *"And what has appeared. A budget is what you asked for; the actual cost is what it came to. You
-> cannot know the second one when you are creating the event, so the form does not ask."*
+**4 — Point at *Actual cost*** under the budget (turn *Has a budget* on if it is off).
 
-**5 — Press *Cancel*.** Nothing to write here — the live writes are all on the event page.
+> *"A budget is what you asked for; the actual cost is what it came to. You cannot know the second when you create
+> the event, so the form does not ask."*
+
+**5 — Press *Cancel*.** Nothing is written here.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | Load | `GET api/CompanySchedule/events/{id}` | `HR.Company.Read` |
-| Save | `PUT api/CompanySchedule/events/{id}` | `HR.Company.Write` |
+| Save | `PUT api/CompanySchedule/events/{id}` — on a series, with its scope | `HR.Company.Write` |
 
-Table: `CompanyEvents`. The update read includes the three navigations, so the response carries
-resolved names without a re-read — unlike create.
-
-**Round 4 gave the save one duty.** Changing the start date clears the reminder's sent-stamp, and
-changing the RSVP deadline clears the chase's, so the sweep sends each again for the new date. That
-is all it does about a move — see R4-7.1.
+The update refuses a cancelled or completed event and a status it may not set. **A change of dates, times or the
+all-day switch takes the reschedule path** (lane 2a, F-37, R4-7.1) — the reason is required, and the move does what a
+reschedule does. A change of venue, site or joining link, or *Postponed*, tells the guests (lane 2e-1); the answer is a
+re-read of what was saved (F-46).
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding.**
->
-> | | Now |
-> |---|---|
-> | **R4-7.1** | **Edit moves an event without anything Reschedule now does.** The *When* card's dates are written straight onto the event. Nothing keeps the original, no reason is asked for, and nobody invited is told: the reschedule notice goes only from the Reschedule button. The C-2 repair therefore covers one of the two ways to move an event. Either route date changes here through the reschedule, or take the dates off this form. |
-
 | Gap | |
 |---|---|
-| **C-24 · The status dropdown accepts any transition.** *Completed* → *Scheduled* is allowed, and setting *Cancelled* here does **not** set `IsCancelled`, the cancellation date or a reason — so an event cancelled from the edit form still shows its action buttons and reads as open everywhere except the status badge. **Since round 4 it also tells nobody:** the cancellation email goes only from the Cancel button, so *Cancelled* or *Postponed* chosen here is a silent change | |
+| ✅ ~~**R4-7.1, F-37** · Edit moved an event without anything a reschedule does~~ | **Fixed in lane 2a** — the edit takes the reschedule's path |
+| ✅ ~~**C-24, F-9** · the status list accepted any transition~~ | **Fixed in lane 2a** — only what an edit may set |
 
 ---
 

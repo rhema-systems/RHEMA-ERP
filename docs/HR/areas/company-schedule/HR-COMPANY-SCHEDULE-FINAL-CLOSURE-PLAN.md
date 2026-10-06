@@ -57,8 +57,9 @@ has not started (the user: "don't start the actual development yet").
    week, the room view, the staff event page, the menus), built and proved. ✅ Lane 7's code is done (2026-10-06); its
    browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
-   110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, written. Next:
-   **6c**, the guide's event chapters (3, 3a, 4–7, 6a), then 6d–6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, and 6c, its
+   event chapters (3, 3a, 4–7, 6a), written. Next: **6d**, the bookings, diaries and staff booking (8–10, 10A–10C), then
+   6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -338,7 +339,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2) written; 6c–6f, the rest of the guide and the docs, to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2) and 6c (its event chapters) written; 6d–6f, the rest of the guide and the docs, to do | both suites green twice |
 
 ---
 
@@ -3578,12 +3579,55 @@ only.* Every statement re-read in the code or on UAT; the walks' database fork s
 - **§ 2:** which database (UAT vs Rebuilt); what each holds; the numbers to quote; a clash of your own; the two
   approval beats with two HR windows; four windows; the tabs; the checklist.
 - **Found while writing (recorded for § 21, 6e):**
-  - the reminder sweep's run-now, `POST reminders/run`, has no control on any screen — only the event page's
-    per-event buttons;
-  - `HR.Company.Approve`'s description names events, not bookings, though it is the bookings' fallback tier too;
-  - the recruitment suite (`hr-recruitment/run-round4-d.mjs`) leaves two "R4D" events on UAT each run — 54 now, on
-    the desk's register, landing and calendar; its own clean-up is owed (lane 3a's ruling kept them out of this
+  - **F-59** — the reminder sweep's run-now, `POST reminders/run`, has no control on any screen — only the event
+    page's per-event buttons;
+  - **F-60** — `HR.Company.Approve`'s description names events, not bookings, though it is the bookings' fallback
+    tier too;
+  - **F-61** — the recruitment suite (`hr-recruitment/run-round4-d.mjs`) leaves two "R4D" events on UAT each run — 54
+    now, on the desk's register, landing and calendar; its own clean-up is owed (lane 3a's ruling kept them out of this
     module's tidy step).
+
+*6c — what was written (2026-10-06): the event chapters — 3, the new 3a (the calendar), 4, 5, 6, the new 6a (the staff
+event page), 7. Docs only.* Every screen re-read in full (the landing, `CompanyCalendar`, `InvitationAnswer`, the
+register, `EventForm`, the event page and its panels, cards and dialogs, the staff page, the edit page); what UAT
+shows read through the API as `hr.head` and `staff` (read-only; the API started and stopped for it, no migration
+pending): the landing's lists, the register's 69 rows, each persona's calendar over four months, the staff event view
+of three events, the audience counts (Everyone 5,001; Management 493).
+- **The walks:** nine numbered live writes so far:
+  1. the event needing approval (1b, an optional three-date series);
+  2. `staff` invited — *"Waits for approval"*;
+  3. `hr.officer` approves, and the invitation goes;
+  4. an answer recorded at the desk for the outside guest;
+  5. a task given to `hr.officer`;
+  6. the task completed;
+  7. a file uploaded (optional; needs the scanner);
+  8. a reminder sent now (optional);
+  9. `staff` accepts with a note, and the organiser is told in the app.
+- **UAT facts the walks fork on:**
+  - *Next 30 days* shows four R4D rows after the board meeting;
+  - the stocktake is beyond the landing's 60-day window until 30 October;
+  - `hr.head` is an unanswered guest of the board meeting, the durbar and the fire drill;
+  - `staff` sees the fire drill, the durbar, the Safety drill, the anniversary, the holidays, the stocktake and their
+    own leave, and gets a 404 on the board meeting;
+  - UAT's board meeting predates the reply-by rule (replies asked, no deadline — never chased);
+  - its board-pack task was chased on 5 October;
+  - its four papers are real files (2h).
+- **Corrected in 6b's text while writing 6c:**
+  - § 1.4's *Replies asked / Reply by* → the form's *Requires RSVP / RSVP deadline*;
+  - § 1.3's labels to what the screens print (*On Site*, *Selected*, *Optional*, *Preparation · During Event ·
+    Follow Up*, *Every week*…);
+  - Rule 1's 4,978 → the screens' 5,001 active staff.
+- **Found while writing:**
+  - **F-62** — to the HR desk, a calendar entry it is not invited to says *"it is on your calendar because it is for
+    you"*;
+  - **F-63** — the new-event header says *"You are recorded as the organiser"* though the *Organiser* field may name
+    another;
+  - **F-64** — an event awaiting approval reads *Scheduled* on the landing and in the register (the CSV, the page and the
+    calendar say so);
+  - **F-65** — the engine offers **Approve** to an organiser on the HR desk who did not create the event, and the server
+    then refuses them.
+
+  All four are small; recorded, not fixed (lane 6 is docs).
 
 ---
 
@@ -4199,3 +4243,10 @@ built API, so no web host and no seeders).
   recruitment suite's R4D residue on UAT).
 
   Next: 6c — the guide's event chapters (3, 3a, 4–7, 6a).
+- **2026-10-06, later** — **6b committed. Slice 6c written** — the guide's event chapters: 3 (the landing, both faces),
+  the new 3a (the company calendar, both doors), 4 (the register on the server), 5 (the form, with the audience and
+  clash lines), 6 (the event page — the approval beat across three windows), the new 6a (the staff event page and the
+  invitee's own answer) and 7 (an edit that moves is a reschedule). What UAT shows was read through the API as
+  `hr.head` and `staff`. Findings F-59…F-61 (6b) numbered; F-62…F-65 found.
+
+  Next: 6d — the bookings, the diaries and staff booking (8–10, 10A–10C).
