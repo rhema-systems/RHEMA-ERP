@@ -2,7 +2,17 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { BookTemplate, FileText, Loader2, Plus, Workflow } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import {
+  BookTemplate,
+  FileText,
+  Loader2,
+  Pencil,
+  Plus,
+  Power,
+  Workflow,
+  X,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -39,13 +49,34 @@ const splitList = (value: string) =>
     .filter(Boolean);
 
 export default function DmsMetadataTemplatesSetupPage() {
+  const searchParams = useSearchParams();
+  const setupScope = searchParams.get('q')?.trim() ?? '';
+  const scopedModule = setupScope.toLowerCase().includes('legal')
+    ? 'Legal Department'
+    : setupScope.toLowerCase().includes('estate')
+      ? 'Estate / Facilities'
+      : initialTemplateForm.module;
   const [templates, setTemplates] = React.useState<
     CentralDocumentMetadataTemplate[]
   >([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [form, setForm] = React.useState(initialTemplateForm);
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [form, setForm] = React.useState({
+    ...initialTemplateForm,
+    module: scopedModule,
+    sourceLabel: `Source: ${scopedModule} -> Central DMS`,
+  });
+  const visibleTemplates = React.useMemo(() => {
+    const query = setupScope.toLowerCase();
+    if (!query) return templates;
+    return templates.filter((template) =>
+      [template.module, template.documentType, template.templateCode]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    );
+  }, [setupScope, templates]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -92,7 +123,7 @@ export default function DmsMetadataTemplatesSetupPage() {
 
     setIsSaving(true);
     try {
-      const created = await documentManagementService.createMetadataTemplate({
+      const payload = {
         module: form.module.trim(),
         documentType: form.documentType.trim(),
         templateCode: form.templateCode.trim(),
@@ -101,11 +132,29 @@ export default function DmsMetadataTemplatesSetupPage() {
         relationships: splitList(form.relationships),
         retentionRule: form.retentionRule.trim(),
         accessProfile: form.accessProfile.trim(),
-        isActive: true,
-      });
-      setTemplates((current) => [created, ...current]);
+        isActive: editingId
+          ? (templates.find((template) => template.id === editingId)
+              ?.isActive ?? true)
+          : true,
+      };
+      const saved = editingId
+        ? await documentManagementService.updateMetadataTemplate(
+            editingId,
+            payload
+          )
+        : await documentManagementService.createMetadataTemplate(payload);
+      setTemplates((current) =>
+        editingId
+          ? current.map((template) =>
+              template.id === editingId ? saved : template
+            )
+          : [saved, ...current]
+      );
+      setEditingId(null);
       setForm({
         ...initialTemplateForm,
+        module: scopedModule,
+        sourceLabel: `Source: ${scopedModule} -> Central DMS`,
         documentType: '',
         templateCode: '',
       });
@@ -115,6 +164,57 @@ export default function DmsMetadataTemplatesSetupPage() {
       );
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const editTemplate = (template: CentralDocumentMetadataTemplate) => {
+    if (!template.id) return;
+    setEditingId(template.id);
+    setForm({
+      module: template.module,
+      documentType: template.documentType,
+      templateCode: template.templateCode,
+      sourceLabel: template.sourceLabel,
+      requiredFields: template.requiredFields.join(', '),
+      relationships: template.relationships.join(', '),
+      retentionRule: template.retentionRule,
+      accessProfile: template.accessProfile,
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setForm({
+      ...initialTemplateForm,
+      module: scopedModule,
+      sourceLabel: `Source: ${scopedModule} -> Central DMS`,
+    });
+  };
+
+  const toggleTemplate = async (template: CentralDocumentMetadataTemplate) => {
+    if (!template.id) return;
+    setError(null);
+    try {
+      const saved = await documentManagementService.updateMetadataTemplate(
+        template.id,
+        {
+          module: template.module,
+          documentType: template.documentType,
+          templateCode: template.templateCode,
+          sourceLabel: template.sourceLabel,
+          requiredFields: template.requiredFields,
+          relationships: template.relationships,
+          retentionRule: template.retentionRule,
+          accessProfile: template.accessProfile,
+        isActive: template.isActive === false,
+        }
+      );
+      setTemplates((current) =>
+        current.map((item) => (item.id === template.id ? saved : item))
+      );
+    } catch {
+      setError('Could not update the metadata template status.');
     }
   };
 
@@ -252,14 +352,22 @@ export default function DmsMetadataTemplatesSetupPage() {
 
             {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
-            <Button type="submit" disabled={isSaving}>
-              {isSaving ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="mr-2 h-4 w-4" />
-              )}
-              Save template
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" disabled={isSaving}>
+                {isSaving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 h-4 w-4" />
+                )}
+                {editingId ? 'Update template' : 'Save template'}
+              </Button>
+              {editingId ? (
+                <Button type="button" variant="outline" onClick={cancelEdit}>
+                  <X className="mr-2 h-4 w-4" />
+                  Cancel
+                </Button>
+              ) : null}
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -274,7 +382,7 @@ export default function DmsMetadataTemplatesSetupPage() {
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {templates.map((template) => (
+        {visibleTemplates.map((template) => (
           <Card
             key={template.templateCode}
             className="border-border bg-card text-card-foreground"
@@ -325,10 +433,37 @@ export default function DmsMetadataTemplatesSetupPage() {
                   </div>
                 </div>
               </div>
+              {template.id ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => editTemplate(template)}
+                  >
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void toggleTemplate(template)}
+                  >
+                    <Power className="mr-2 h-4 w-4" />
+                    {template.isActive === false ? 'Activate' : 'Deactivate'}
+                  </Button>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
         ))}
       </div>
+      {!isLoading && visibleTemplates.length === 0 ? (
+        <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+          No metadata templates match {setupScope || 'the current scope'}.
+        </div>
+      ) : null}
     </div>
   );
 }

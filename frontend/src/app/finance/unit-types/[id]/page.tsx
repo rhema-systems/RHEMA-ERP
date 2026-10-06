@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 
 export default function EditUnitTypePage() {
@@ -20,6 +21,7 @@ export default function EditUnitTypePage() {
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [deleteOpen, setDeleteOpen] = useState(false);
 
     useEffect(() => {
         let cancelled = false;
@@ -38,7 +40,7 @@ export default function EditUnitTypePage() {
         if (!form.name.trim()) return setError('Name is required.');
         setBusy(true); setError(null);
         try {
-            await unitAccountsDataService.updateUnitType(id, { name: form.name.trim(), description: form.description.trim(), decimalPlaces: form.decimalPlaces, roundingIncrement: form.roundingIncrement ? Number(form.roundingIncrement) : null });
+            await unitAccountsDataService.updateUnitType(id, { name: form.name.trim(), description: form.description.trim(), decimalPlaces: form.decimalPlaces, roundingIncrement: form.roundingIncrement ? Number(form.roundingIncrement) : undefined });
             if (form.isActive !== originalActive) await unitAccountsDataService.setUnitTypeActive(id, form.isActive);
             router.push('/finance/unit-types');
         } catch (reason) {
@@ -46,17 +48,16 @@ export default function EditUnitTypePage() {
         } finally { setBusy(false); }
     };
 
-    const remove = async () => {
-        if (!window.confirm('Delete this unit type? The server will block deletion when accounts depend on it.')) return;
-        setBusy(true);
+    const remove = async (): Promise<void | boolean> => {
+        setBusy(true); setError(null);
         try { await unitAccountsDataService.deleteUnitType(id); router.push('/finance/unit-types'); }
-        catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to delete unit type.'); setBusy(false); }
+        catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to delete unit type.'); setBusy(false); return false; }
     };
 
     if (loading) return <p className="p-6 text-muted-foreground">Loading unit type…</p>;
 
     return <div className="space-y-6">
-        <div className="flex items-center justify-between"><div><h1 className="text-3xl font-bold">Edit Unit Type</h1><p className="text-muted-foreground">{form.code}</p></div><Button variant="destructive" disabled={busy} onClick={() => void remove()}><Trash2 className="mr-2 h-4 w-4" />Delete</Button></div>
+        <div className="flex items-center justify-between"><div><h1 className="text-3xl font-bold">Edit Unit Type</h1><p className="text-muted-foreground">{form.code}</p></div><Button variant="destructive" disabled={busy} onClick={() => setDeleteOpen(true)}><Trash2 className="mr-2 h-4 w-4" />Delete</Button></div>
         {error && <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
         <form onSubmit={save}><Card><CardHeader><CardTitle>Unit type details</CardTitle></CardHeader><CardContent className="space-y-5">
             <div className="grid gap-4 md:grid-cols-2">
@@ -69,5 +70,15 @@ export default function EditUnitTypePage() {
             <div className="space-y-2"><Label>Description</Label><Textarea maxLength={500} value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></div>
             <div className="flex justify-end gap-2"><Button asChild type="button" variant="outline"><Link href="/finance/unit-types">Cancel</Link></Button><Button disabled={busy} type="submit"><Save className="mr-2 h-4 w-4" />Save</Button></div>
         </CardContent></Card></form>
+        <ConfirmationDialog
+            open={deleteOpen}
+            onOpenChange={setDeleteOpen}
+            title="Delete unit type?"
+            description="The unit type will be permanently removed. The server will block deletion when accounts depend on it."
+            confirmText="Delete unit type"
+            variant="destructive"
+            isLoading={busy}
+            onConfirm={remove}
+        />
     </div>;
 }

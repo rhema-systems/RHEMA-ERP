@@ -8,22 +8,77 @@ interface AdministrationLayoutProps {
   children: React.ReactNode;
 }
 
-export default function AdministrationLayout({ children }: AdministrationLayoutProps) {
+export default function AdministrationLayout({
+  children,
+}: AdministrationLayoutProps) {
   const pathname = usePathname() ?? '';
 
   let requiredPermissions: string[] | undefined;
+  let requiredRoles: string[] | undefined;
+  let accessMode: 'all' | 'any' = 'all';
   if (pathname.startsWith('/administration/finance')) {
     requiredPermissions = ['Finance.Admin'];
-  } else if (/^\/administration\/project-management\/(quantity-survey-config|quantity-survey-catalogues)(\/|$)/.test(pathname)) {
+  } else if (pathname.startsWith('/administration/document-management')) {
+    requiredPermissions = ['Finance.Admin'];
+    requiredRoles = [
+      'admin',
+      'Admin',
+      'SystemAdmin',
+      'SuperAdmin',
+      'TenantAdmin',
+      'Document Control Officer',
+      'Records Officer',
+    ];
+    accessMode = 'any';
+  } else if (pathname.startsWith('/administration/estate')) {
+    requiredRoles = [
+      'admin',
+      'Admin',
+      'SystemAdmin',
+      'SuperAdmin',
+      'TenantAdmin',
+    ];
+  } else if (pathname.startsWith('/administration/legal')) {
+    requiredRoles = [
+      'admin',
+      'Admin',
+      'SystemAdmin',
+      'SuperAdmin',
+      'TenantAdmin',
+    ];
+  } else if (pathname.startsWith('/administration/workflow')) {
+    requiredPermissions = ['procurement.workflow.configure'];
+    requiredRoles = [
+      'admin',
+      'Admin',
+      'SystemAdmin',
+      'SuperAdmin',
+      'TenantAdmin',
+      'WorkflowAdmin',
+    ];
+    accessMode = 'any';
+  } else if (
+    /^\/administration\/project-management\/(quantity-survey-config|quantity-survey-catalogues)(\/|$)/.test(
+      pathname
+    )
+  ) {
     requiredPermissions = ['quantity-survey.configuration.read'];
-  } else if (/^\/administration\/project-management\/quantity-survey-rate-library(\/|$)/.test(pathname)) {
+  } else if (
+    /^\/administration\/project-management\/quantity-survey-rate-library(\/|$)/.test(
+      pathname
+    )
+  ) {
     requiredPermissions = ['quantity-survey.workspace.read'];
   } else if (pathname.startsWith('/administration/project-management')) {
     requiredPermissions = ['admin.project-management'];
   } else if (
     pathname.startsWith('/administration/fleet-management') ||
-    pathname.startsWith('/administration/maintenance/fleet-trip-destinations') ||
-    pathname.startsWith('/administration/maintenance/fleet-compliance-templates')
+    pathname.startsWith(
+      '/administration/maintenance/fleet-trip-destinations'
+    ) ||
+    pathname.startsWith(
+      '/administration/maintenance/fleet-compliance-templates'
+    )
   ) {
     requiredPermissions = ['admin.fleet-management'];
   } else if (pathname.startsWith('/administration/maintenance')) {
@@ -37,7 +92,10 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
     // family rather than admin.hr: the tree is not HR's, and an Estate or Sales administrator
     // curating districts should not need an HR grant. Either tier admits — admins hold both,
     // the HR role holds Write.
-    requiredPermissions = ['Reference.Geography.Write', 'Reference.Geography.Admin'];
+    requiredPermissions = [
+      'Reference.Geography.Write',
+      'Reference.Geography.Admin',
+    ];
   } else if (pathname.startsWith('/administration/hr')) {
     // Seeded to SuperAdmin/TenantAdmin/Admin and to HR (+ legacy "HR User") — HR
     // practitioners maintain their own reference data (leave types, org structures).
@@ -47,7 +105,11 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
   }
 
   return (
-    <AuthGuard requiredPermissions={requiredPermissions}>
+    <AuthGuard
+      requiredPermissions={requiredPermissions}
+      requiredRoles={requiredRoles}
+      accessMode={accessMode}
+    >
       <DashboardLayout>{children}</DashboardLayout>
     </AuthGuard>
   );

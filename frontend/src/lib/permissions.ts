@@ -73,3 +73,15 @@ export const hasAllPermissionsAccess = (
     normalizedPermissions.has(normalize(permission))
   );
 };
+
+export const hasAnyRoleAccess = (
+  user: User | null | undefined,
+  roles: string[]
+) => {
+  if (roles.length === 0) {
+    return true;
+  }
+
+  const normalizedRoles = getNormalizedRoles(user);
+  return roles.some((role) => normalizedRoles.has(normalize(role)));
+};

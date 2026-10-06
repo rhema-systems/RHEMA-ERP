@@ -51,6 +51,11 @@ const nextConfig = {
   
   // Webpack configuration
   webpack: (config, { buildId, dev, isServer, defaultLoaders, webpack }) => {
+    if (!dev && !isServer) {
+      // Build-only dependency: published next start packages omit build scripts.
+      const { preservePdfiumWorker } = require('./scripts/preserve-pdfium-worker');
+      preservePdfiumWorker(config);
+    }
     if (!dev && !isServer && process.env.NEXT_DISABLE_CLIENT_MINIFY === 'true') {
       config.optimization.minimize = false;
     }

@@ -117,7 +117,7 @@ describe('submitted bid document requirements', () => {
 
 describe('bid review uploaded document summary', () => {
   function review(files = documents) {
-    render(<BidReviewStep tender={tender as React.ComponentProps<typeof BidReviewStep>['tender']} bidData={{ tenderId: 'tender-1', items: [] }} uploadedDocuments={files as React.ComponentProps<typeof BidReviewStep>['uploadedDocuments']} />);
+    render(<BidReviewStep tender={tender as unknown as React.ComponentProps<typeof BidReviewStep>['tender']} bidData={{ tenderId: 'tender-1', items: [], selectedLotIds: [] }} uploadedDocuments={files as React.ComponentProps<typeof BidReviewStep>['uploadedDocuments']} />);
   }
 
   it('includes both required proposal files in the upload count', () => {

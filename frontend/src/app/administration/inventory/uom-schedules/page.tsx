@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Plus, Search, Edit, Trash2, Layers, Calendar, Package, Save, ArrowRight } from 'lucide-react';
 import { 
   inventoryManagementService, 
@@ -42,6 +43,8 @@ export default function UomSchedulesPage() {
   const [dialogStep, setDialogStep] = useState<DialogStep>('base');
   const [isSavingBase, setIsSavingBase] = useState(false);
   const [newScheduleId, setNewScheduleId] = useState<string | null>(null);
+  const [scheduleToDelete, setScheduleToDelete] = useState<UnitOfMeasureScheduleDto | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Form state for base unit creation
   const [baseUnitForm, setBaseUnitForm] = useState({
@@ -125,7 +128,8 @@ export default function UomSchedulesPage() {
         symbol: baseUnitForm.symbol,
         category: baseUnitForm.category,
         isBaseUnit: true,
-        sortOrder: 0
+        sortOrder: 0,
+        decimalPlaces: formData.quantityDecimals
       });
       
       // Refresh units list
@@ -177,7 +181,8 @@ export default function UomSchedulesPage() {
         symbol: newUnitForm.symbol,
         category: baseUnitForm.category,
         isBaseUnit: false,
-        sortOrder: formData.details.length + 1
+        sortOrder: formData.details.length + 1,
+        decimalPlaces: formData.quantityDecimals
       });
       
       // Refresh units list
@@ -289,14 +294,19 @@ export default function UomSchedulesPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this UoM schedule?')) return;
+  const handleDelete = async (): Promise<void | boolean> => {
+    if (!scheduleToDelete) return false;
+    setIsDeleting(true);
     try {
-      await inventoryManagementService.deleteUomSchedule(id);
-      setSchedules(prev => prev.filter(s => s.id !== id));
+      await inventoryManagementService.deleteUomSchedule(scheduleToDelete.id);
+      setSchedules(prev => prev.filter(s => s.id !== scheduleToDelete.id));
+      setScheduleToDelete(null);
     } catch (err: any) {
       console.error('Error deleting schedule:', err);
       toast.error('Failed to delete UoM schedule');
+      return false;
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -717,7 +727,7 @@ export default function UomSchedulesPage() {
                       </div>
                       <div className="flex items-center space-x-2">
                         <Button size="sm" variant="outline" onClick={() => handleEdit(schedule)}><Edit className="h-4 w-4" /></Button>
-                        <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleDelete(schedule.id)}><Trash2 className="h-4 w-4" /></Button>
+                        <Button size="sm" variant="outline" className="text-red-600" onClick={() => setScheduleToDelete(schedule)}><Trash2 className="h-4 w-4" /></Button>
                       </div>
                     </div>
                     {schedule.details.length > 0 && (
@@ -817,6 +827,16 @@ export default function UomSchedulesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <ConfirmationDialog
+        open={scheduleToDelete !== null}
+        onOpenChange={(open) => { if (!open && !isDeleting) setScheduleToDelete(null); }}
+        title="Delete UoM schedule?"
+        description={scheduleToDelete ? `${scheduleToDelete.scheduleId} will be permanently removed. The server will block deletion when the schedule is in use.` : undefined}
+        confirmText="Delete schedule"
+        variant="destructive"
+        isLoading={isDeleting}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }
