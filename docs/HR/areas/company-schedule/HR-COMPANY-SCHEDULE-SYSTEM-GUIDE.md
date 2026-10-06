@@ -9,9 +9,10 @@ and each lane's *State* says what was built and how it was proved. The guide des
 screen offers something the server refuses, the step says so.
 
 > **⚠ Rewrite in progress (lane 6).** The front matter, the seven rules, the conventions and chapters 1–2 are
-> new (slice 6b, 2026-10-06), and so are chapters 3–7 with the new 3a and 6a (slice 6c). Chapters 8–21 and the
-> appendices still describe round 4 until slices 6d–6e replace them; their live-write numbers will follow on from
-> chapter 6a's 9. Where an old chapter disagrees with the rules or chapter 1, the rules and chapter 1 are right.
+> new (slice 6b, 2026-10-06), and so are chapters 3–7 with the new 3a and 6a (slice 6c), and chapters 8–10B with the
+> new 10C (slice 6d). Chapters 11–21 and the appendices still describe round 4 until slice 6e replaces them; their
+> live-write numbers will follow on from chapter 10C's 13. Where an old chapter disagrees with the rules or chapter 1,
+> the rules and chapter 1 are right.
 >
 > ⚠ **Not yet walked in a browser:** the screens lanes 1–7 changed. The plan lists the walks (lane 5 items
 > 1–8, lane 7 items 9–12); every server rule behind them is proved by the review suite on UAT (1152 assertions,
@@ -1706,104 +1707,83 @@ re-read of what was saved (F-46).
 
 ### 📍 Where you are
 
-**Sidebar:** … → Company Schedule → **Room Bookings** · `/hr/company-schedule/bookings` ·
-as **hr.head** · **4 minutes**
+**Sidebar:** … → Company Schedule → **Room Bookings** · `/hr/company-schedule/bookings` · as **hr.head** · **4
+minutes**
 
 ### 📖 What it is
 
-> *"Every room held, by whom, when and what for — and the approvals still outstanding. This is the
-> screen a receptionist lives on."*
+> *"Every room held, by whom, when and what for — whether the HR desk booked it or a member of staff did from the
+> portal — and the approvals still outstanding. The screen a receptionist lives on."*
 
 ### 👁 On the page
 
-**Header:** *Room bookings* — *"Who has which room, when, and which bookings are still waiting on
-approval."*, back-link, and a **Book a room** button.
+**Header:** *Room bookings* — *"Who has which room, when, and which bookings are still waiting on approval."*, a
+back-link, and two buttons: **Export CSV** and **Book a room**.
 
-**Card header:** a **Status** dropdown (*All statuses* + the five booking statuses) and a
-**Search** box over **booking number, room name, purpose and booker**. Both filter in the browser;
-sorting is fixed to **start date, newest first**.
+**The filters**, each on the server: **Status** (*All statuses* and the five), **From** / **To** (bookings that
+overlap the dates), and a search, *"Number, room, purpose or booker…"*.
 
-**Nine columns:** **Number** *(monospaced)* · **Room** · **From** · **To** *(both full date and
-time, in the browser's locale)* · **Purpose** · **Seats** · **Booked by** · **Status** · ⋯
+**Nine columns:** **Number** (`BK-2026-00001`) · **Room** · **From** · **To** (date and time, in the browser's own
+time) · **Purpose** · **Seats** · **Booked by** · **Status** · ⋯. 25 to a page, *"N bookings · page 1 of 2"* under
+the table. Each row opens the booking.
 
-Rows are clickable into the booking. The ⋯ menu carries:
+**The ⋯ menu:**
 
-| Item | Shown when |
-|---|---|
-| **Approve** | status is *Tentative* and not cancelled |
-| **Cancel** | not cancelled and not *Completed* — opens a dialog needing a **reason** |
-| **Delete** | **only for `HR.Company.Admin`**, in red. ✅ **Hidden from `hr.head` since round 4** |
+| Item | Shown when | Does |
+|---|---|---|
+| **Approve** | *Tentative* | as the booking page's Approve (chapter 10) — ⚠ offered to the booker too, who is then refused: *"You booked BK-…, so somebody else must approve it."* (**F-66**) |
+| **Cancel** | not cancelled and not completed | a dialog — *"\<room\> — the slot is released for someone else."* — with a required **Reason**; the booker is told |
+| **Delete** | **`HR.Company.Admin` only** | *"Cancelling keeps the record and the reason. Deleting removes it entirely."* |
 
-Cancel's dialog: *"\<room\> — the slot is released for someone else."*
-Delete's confirmation, for an administrator: *"Cancelling keeps the record and the reason. Deleting
-removes it entirely."*
+**Export CSV** — the bookings the filters find: *Number · Room · Purpose · Event · Booked by · Starts · Ends ·
+Attendees · Status · Approved · Cancelled because*.
 
 ### ▶ Walk it
 
-**1 — Open the register.** On a clean rebuild, **one** seeded row — plus your own, if you booked a
-clash window in § 2.4.
+**1 — Open the register.**
 
-> *"A room held. The Management Committee has the boardroom for three hours in the morning — with
-> a video link to the Ho office in the requirements."*
+- **Rebuilt:** two rows — the Management Committee's Boardroom morning, booked by `hr.head` at the desk, and the
+  Community 25 design review in Conference Room A, booked by `head.dev` **from the portal** — plus your own clash
+  booking from § 2.4.
+- **UAT:** one row, the Management Committee's, *Completed* — plus your own from § 2.4.
 
-⚠ *(Corrected 2026-09-24.)* This step used to read two rows, the second a *Community 25 design
-review* booked by the Head of Development. **That booking has never existed on a built database.**
-Scenario 110 books it as `head.dev`, who holds no company-schedule permission, and swallows the
-refusal (**R4-2.3**).
+> *"Every room held, and by whom. That one was booked by the Head of Development, from the staff portal — no HR
+> officer involved — under exactly the same rules."* (Rebuilt; on UAT, say it of your own booking in chapter 10C.)
 
-**2 — Point at *Booked by*.**
+**2 — Point at the *Status* column.**
 
-> *"And who booked it is recorded from the account that did it — from the token, not from a field
-> somebody typed. There is no 'booked by' on the form."*
+> *"Confirmed, because none of these rooms needs approval. Completed, once its time is over — the hourly pass closes
+> it, and a facilities manager can mark one that was held and never used a no-show. Every status on this list is
+> reached by something now."*
 
-Booking is `HR.Company.Write`, so on this database it is an HR desk action. If you are asked
-whether a head of department books their own rooms, the honest answer is *"not with the roles as
-seeded — that is a permission TDC decides in role setup."*
+**3 — Narrow it:** **From** today, **To** a week on.
 
-**3 — Point at the *Status* column.** It reads **Confirmed**.
+> *"Searched, filtered and paged on the server — and the same filters export to a spreadsheet."*
 
-> *"Confirmed, because that room is not set to need approval. Which is a per-room decision, and I
-> will show you what changes when you turn it on."*
-
-**4 — Open the *Status* filter** and read the five values.
-
-> *"Tentative, Confirmed, Completed, Cancelled, No show. The last two matter to a facilities
-> manager more than anyone else — a room held and not used is a room somebody else could have
-> had."*
-
-⚠ Do not promise *Completed* or *No show* will ever appear — nothing sets them (**C-8**).
-
-**5 — Open the ⋯ menu.** Since round 4 it offers **Approve** and **Cancel** and nothing else to
-`hr.head`: Delete is an administrator's, and it is no longer shown to anybody who is not one.
-
-> *"Cancel, and no delete. Cancelling keeps the record and the reason — which is an HR officer's
-> action. Deleting removes it entirely, and that is an administrator's."*
-
-**6 — Press *Book a room*** and continue into chapter 9.
+**4 — Press *Book a room*** and continue into chapter 9.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| The grid | `GET api/CompanySchedule/bookings` | `HR.Company.Read` |
-| Approve | `POST …/bookings/{id}/approve` *(empty body)* | `HR.Company.Write` |
-| Cancel | `POST …/bookings/{id}/cancel` | `HR.Company.Write` |
-| Delete | `DELETE …/bookings/{id}` | **`HR.Company.Admin`** |
+| The table | `GET api/CompanySchedule/bookings/search?text&status&from&to&page&pageSize` | `HR.Company.Read` |
+| **Export CSV** | `GET …/bookings/export` with the same filters | `HR.Company.Read` |
+| **Approve** | `POST …/bookings/{id}/approve` — the engine names the approver; the booker is refused | `HR.Company.Write` |
+| **Cancel** | `POST …/bookings/{id}/cancel` — with a reason; the booker told | `HR.Company.Write` |
+| **Delete** | `DELETE …/bookings/{id}` | **`HR.Company.Admin`** |
 
-Table: `RoomBookings`, with `Room` and `BookedBy` included. The API also offers paged, by room, by
-booker, by date range, by status and pending-approvals reads — the screen uses none of them except
-pending-approvals, on the landing page (**C-25**).
+Table: `RoomBookings`. Every booking read is scoped to the tenant inside its query (F-30), and a booking's times come
+back marked as UTC, so a browser outside Ghana shows them right (F-50).
 
 ### ⚠ Known gaps
 
-> **Round 4:** the Delete is hidden from `hr.head` (C-1). No new finding on this screen; the seeded
-> booking that never existed is **R4-2.3**, in § 21.
-
 | Gap | |
 |---|---|
-| **C-25 · Unpaged and filtered client-side**, like the events register, with six unused server reads including a date range | |
-| **C-8 · *Completed* and *No show* are unreachable.** Nothing marks a booking used or unused after the fact, so the facilities question the status enum was built to answer cannot be asked | |
-| **C-26 · No room view.** There is no "show me the boardroom's week", though `bookings/room/{roomId}` exists. This is the single most requested view of a booking register and it is one screen away | |
+| ✅ ~~**C-8** · *Completed* and *No show* unreachable~~ | **Fixed in lane 3b-2** — the sweep completes; the desk marks a no-show (chapter 10) |
+| ✅ ~~**C-25** · unpaged, filtered in the browser~~ | **Fixed in lane 2g-1** |
+| ✅ ~~**C-26** · no room view~~ | **Fixed in lane 7** — the calendar's room picker (chapter 3a), and the portal's day board (chapter 10C) |
+| ✅ ~~**R4-2.3** · the second seeded booking never existed~~ | **Fixed in lane 6a** — `head.dev`'s, from the portal |
+| **F-66** · the row menu's **Approve** is offered to the booker | The booking page hides it from them; the server refuses them either way, with the reason. Found while rewriting (lane 6) |
 
 ---
 
@@ -1811,174 +1791,137 @@ pending-approvals, on the landing page (**C-25**).
 
 ### 📍 Where you are
 
-**From:** the register → **Book a room** · `/hr/company-schedule/bookings/new` ·
-as **hr.head** · **6 minutes** — **the best chapter in the module**
+**From:** the register → **Book a room**; an event's Rooms card → **Book a room** (the event chosen, its hours and
+name filled in); the calendar's room view → **Book this room** (the room and the day, 09:00–10:00) ·
+`/hr/company-schedule/bookings/new` · as **hr.head** · **6 minutes** — **the best chapter in the module**
 
 ### 📖 What it is
 
-> *"Booking a room the right way round: say when you need it and how many of you there are, and
-> the system tells you what is free. Not a list of every room and a disappointment at the end."*
+> *"Booking a room the right way round: say when you need it and how many of you there are, and the system tells you
+> what is free — free, big enough, and within the room's own rules. Not a list of every room and a disappointment at
+> the end."*
 
 ### 👁 On the page
 
-**Header:** *Book a room* — **"You are recorded as the person booking."**, back-link.
+**Header:** *Book a room* — *"You are recorded as the person booking."*, back-link.
 
-**Card 1 — When and how many**
-- **From** *(date and time, required)* · **To** *(date and time, required — refused if not after
-  the start)*
-- **Expected attendees** *(required, at least 1)*
-- **Find free rooms** button — **disabled until there is a valid window**
+**A result card** appears at the top after booking a series (below).
 
-**Card 2 — Which room** — three states:
+**Card 1 — When and how many:** **From** and **To** *(date and time, required; the end after the start)* ·
+**Expected attendees** *(required, at least one)* · **Find free rooms** — disabled until there is a window. Arriving
+from the calendar, the search has already run; from an event, the window is filled in and waits for **Find free
+rooms**.
+
+**Card 2 — Which room:**
 
 | State | Shows |
 |---|---|
-| before the search | *"Set the window first — rooms are offered once there is a start and an end to check them against."* |
-| searching | *"Checking what is free…"* with a spinner |
-| nothing free | *"Nothing free in that window — try a different time, or a smaller number of attendees."* |
-| rooms free | a **Room** dropdown (`Boardroom · Tema Head Office · seats 18`) **and** the same rooms as badges below it with their capacities |
+| before the search | *"Set the window first — Rooms are offered once there is a start and an end to check them against."* |
+| searching | *"Checking what is free…"* |
+| nothing free | *"Nothing free in that window — Try a different time, or a smaller number of attendees."* |
+| rooms free | a **Room** list — *"Boardroom · Tema Head Office · seats 18"* — and the same rooms as badges with their seats |
 
-**Card 3 — What for**
-- **Purpose** *(required, ≤500)*
-- **Linked event** *(a dropdown of the next 120 days' events, `EVT-2026-00001 — Board of
-  Directors…`, clearable: "Not linked to an event")*
-- **Special requirements** · **Catering**
-- **Notes**
+**Only a room this booking may have is offered** (lane 3a, R4-9.1): free for the whole window, in use, open for
+booking, seating the party, and within its own longest booking and days-ahead limit.
 
-**Footer:** **Cancel** · **Book room**. The toast names the booking number and, when the room
-needs approval, adds *"It needs approval before it is confirmed."*
+**Card 3 — What for:** **Purpose** *(required)* · **Linked event** — the events of the next 120 days, *"EVT-… — name"*,
+or *"Not linked to an event"* · on a date of a series, **Which dates** (*"Book the room for its other dates too, each at
+the same time relative to its own start; the dates the room cannot take are listed and the rest booked."*) ·
+**Special requirements** · **Catering** · **Notes**.
 
-The failure toast carries the **server's own sentence**: the clash, or since round 4 the room's own
-rule — *"Boardroom seats 18; this booking expects 40."* Only when the server gives no sentence does it
-fall back to the line written for the race: *"The room may have been taken while you were filling
-this in."*
+**Footer:** **Cancel** · **Book room** (**Book the dates** for a series).
+- One booking: the toast *"Room booked — BK-2026-… — Boardroom."*, adding *"It needs approval before it is
+  confirmed."* where the room needs approval, and you land on the booking.
+- A series: the result card — *"Booked for N dates"*, each `BK-…` with its window and status (*awaiting approval* where
+  the room needs it, with *"… asks for all of them, and its decision covers the rest"*), then *Not booked* — each date
+  the room could not take, with why — and the dates already begun, completed or cancelled, left alone.
+- A refusal shows the server's sentence — *"Heads of Unit — Q4 planning runs …; a booking for it must fall on its
+  days."*, *"Boardroom seats 18; this booking expects 40."*, *"Huddle Room 1 may be booked for at most 2 hour(s) at a
+  time; this booking is 3. …"* — or, with none, *"The room may have been taken while you were filling this in."*
 
 ### ▶ Walk it
 
-This is the chapter to slow down on. Do the refusal first — it is more convincing than the success.
+**1 — Press *Book a room*** from the register. Point at Card 2's empty state before touching anything.
 
-**1 — Press *Book a room*.** Point at Card 2's empty state before touching anything.
+> *"Notice what it will not do. There is no room list yet, because 'which room' has no answer until you have said
+> when. Offering every room and letting the booking fail at the end is the same screen built backwards."*
 
-> *"Notice what it will not do. There is no room dropdown yet, because the question 'which room'
-> has no answer until you have said when. Offering every room and letting the booking fail at the
-> end is the same screen built backwards."*
+**2 — Ask for the window you wrote down in § 2.4** — the Boardroom's busy morning — for **12** people, and press
+**Find free rooms**.
 
-**2 — Now demonstrate the clash. Set From and To to the window you wrote down in § 2.4** — the
-Boardroom's busy morning. Expected attendees **12**.
+> *"Conference Room A is offered; the Boardroom is not, because it is held then. And the Huddle Room is not, because it
+> seats six. The system is not warning me — it is not offering them."*
 
-**3 — Press *Find free rooms*.**
+**3 — Book the room for the event chapter 5 made.** Go back to that event (chapter 6), and on its **Rooms** card press
+**Book a room**. The form arrives with the event chosen, its hours filled in and its name as the purpose. Set
+**Expected attendees** to **12** and press **Find free rooms**.
 
-> *"Three rooms in this building, and the boardroom is not on the list — because the Management
-> Committee has it. The system is not warning me; it is not offering it."*
+> *"And this is where the two halves of the module meet: the room is held for the event, and the booking knows what it
+> is for."*
 
-**4 — Now force the refusal, which is the moment worth having.** Change **To** to extend an hour
-past the existing booking — so the window still overlaps — and press **Find free rooms** again.
-The boardroom is still absent. Then say:
+**4 — Choose the Boardroom** and read its option aloud — *"Boardroom · Tema Head Office · seats 18"*.
 
-> *"And if I got round the picker — pasted a room id, used the API directly, had two people
-> booking at the same instant — the server refuses it anyway. The clash check runs on the way in,
-> not just on the way out, and it runs again on every edit. A room in this system genuinely cannot
-> be double-booked."*
+**5 — 🔴 LIVE WRITE 10 — press *Book room*.**
 
-⚠ **Do not try to actually force a 409 in front of the room.** The picker will not let you select
-an excluded room, so there is nothing to click; describing it is the honest version and it lands
-just as well.
+- *With Beat B's switch on (§ 2.5):* *"Room booked — BK-2026-… — Boardroom. It needs approval before it is
+  confirmed."*
 
-**5 — Now book something real. Set a window that is free** — a different day, 14:00 to 16:00.
-Expected attendees **10**. Press **Find free rooms**.
+  > *"It needs approval because the room does — the rule is on the room, not on the person. The engine has asked the
+  > HR desk, and I booked it, so I cannot be the one to approve it."*
 
-**6 — Read the dropdown option aloud.**
+- *Without:* *"Room booked — BK-2026-… — Boardroom."* — confirmed at once.
 
-> *"'Boardroom · Tema Head Office · seats 18.' The site and the capacity are on the option, so
-> nobody books a huddle room for a management meeting by accident."*
+You land on the booking (chapter 10). Back on the event, its **Rooms** card lists it. *Undo:* **Cancel**, with a
+reason (chapter 19).
 
-**7 — Pick a room, fill in Card 3.** Purpose *"Quarterly Heads of Unit meeting"*. **Link it to the
-event you created in chapter 5** from the *Linked event* dropdown.
+**6 — *(optional)* The room's own rule.** With the Huddle Room's *Longest booking* at 2 (§ 2.5), search a three-hour
+window for **four** people. The Huddle Room is not offered.
 
-> *"And this is where the two halves of the module meet. The room is held for the event — one
-> record, and the booking knows what it is for."*
+> *"The search applies the room's own rules — not only whether it is free and big enough. You cannot pick a room the
+> booking would be refused."*
 
-**8 — 🔴 LIVE WRITE 7 — press *Book room*.**
-
-*If you did the § 2.3 switch on the Boardroom, the toast reads:*
-
-> *"'BK-2026-00002 — Boardroom. It needs approval before it is confirmed.' Because that room is set
-> to need approval, and the booking came out Tentative rather than Confirmed. A room that does not
-> need approval books straight through. Same form, different room, different outcome — and the
-> rule is on the room, not on the person."*
-
-*If you did not:*
-
-> *"'BK-2026-00002 — Boardroom.' Confirmed immediately, because that room does not require
-> approval. Turn that setting on for a room and the same booking comes out Tentative and waits for
-> somebody — I will show you the switch in a moment."*
-
-*(The number is `BK-2026-00002` on a clean rebuild, which seeds one booking — or `00003` if you
-booked a clash window yourself in § 2.4.)*
-
-*Undo:* chapter 19 — **Cancel** it, with a reason.
-
-**9 — *(optional, round 4)* The room's own rule.** Only if you set the Huddle Room's longest booking
-in § 2.3. Search a three-hour window for **four** people. The Huddle Room **is** offered — say so
-before you pick it:
-
-> *"The search asks whether the room is free and big enough. It does not yet ask the room's own
-> limits — watch."*
-
-Pick it and press **Book room**. It is refused with *"Huddle Room 1 may be booked for at most 2
-hour(s) at a time; this booking is 3. Shorten it, or book a room without that limit."* Nothing is
-written. ⚠ Not browser-walked.
+**7 — *(optional, 🔴 LIVE WRITE 10b)* A room for every date of a series** — only if you made chapter 5's three-date
+series. From its first date's Rooms card, press **Book for this and following dates**, choose a room, **Book the dates**.
+The result card lists a booking per date, and any date the room could not take.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| **Find free rooms** | `GET api/CompanySchedule/rooms/available?startDateTime&endDateTime&minCapacity` | `HR.Company.Read` |
-| Linked-event dropdown | `GET api/CompanySchedule/events/upcoming?daysAhead=120` | `HR.Company.Read` |
-| **Book** | `POST api/CompanySchedule/bookings` | `HR.Company.Write` |
+| **Find free rooms** | `GET api/CompanySchedule/rooms/available?startDateTime&endDateTime&minCapacity` — every room rule applied | `HR.Company.Read` |
+| Linked-event list | `GET …/events/upcoming?daysAhead=120` (and the chosen event on its own) | `HR.Company.Read` |
+| **Book room** | `POST …/bookings` | `HR.Company.Write` |
+| **Book the dates** | `POST …/bookings/series` | `HR.Company.Write` |
 
-Tables: `MeetingRooms`, `RoomBookings`.
-
-**What availability actually does:** collects the room ids with any booking that is not cancelled
-and whose window overlaps the requested one, then returns the rooms that are **active**,
-**bookable**, not in that list, and — when a capacity is given — big enough. Ordered by name.
-⚠ It does **not** apply the room's longest booking or days-ahead limit (**R4-9.1**).
-
-**What create does:** loads the room and refuses it if it is not bookable; **since round 4, applies
-the room's own rules** — the end must be after the start, and then longest booking, days ahead and
-seats, each skipped when the room leaves it blank; runs the same overlap test again; generates the
-booking number from the shared sequence; and sets the status from the **room's** `RequiresApproval`
-— *Tentative* if it needs one, *Confirmed* if it does not. Then re-reads before mapping, for the
-same navigation reason as events. **Edit** applies the same rules and the same overlap test, with
-the booking's own id excluded.
-
-**The overlap test**, in full, because somebody will ask:
+**What a booking checks** (lane 3a), in one transaction under an application lock per room, so two people pressing
+*Book* at the same moment cannot both have it (F-47): the room is this tenant's, in use and open for booking (*"… is
+not in use, so it cannot be booked."*); the window has an end after its start; the room's own rules — longest booking,
+days ahead, seats, counting the larger of the booking's attendees and its event's estimate; a linked event is this
+tenant's, still to happen, and holds the booking on its days; and **no live booking overlaps** it:
 
 ```
     same room
-      AND not cancelled
+      AND not cancelled, and Tentative or Confirmed
       AND existing.Start <  requested.End
       AND existing.End   >  requested.Start
 ```
 
-Which is the correct half-open interval test: a booking ending at 12:00 and one starting at 12:00
-do **not** clash.
+— a booking ending at 12:00 and one starting at 12:00 do not clash. The refusal names the other booking: *"Boardroom is
+already booked then: BK-2026-…, Wednesday 7 October 2026, 09:00–12:00."* A room needing approval makes the booking
+*Tentative* and asks the engine; otherwise it is *Confirmed*.
+
+**A series** (lane 3d-1, D-12): each date still to come is booked at the same distance from its own start, through the
+same checks; on a room needing approval the first date carries the request and its decision covers the rest; the
+booker is told once.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: one new finding.**
->
-> | | Now |
-> |---|---|
-> | **R4-9.1** | **The search offers rooms the booking will refuse.** Round 4 put the room's longest booking and days-ahead limit on create and edit, and not on `rooms/available`. A room limited to two hours is offered for a three-hour window, and the refusal arrives at **Book room**. The screen was built on the opposite principle — ask what is free, then offer only that — so the search should apply the same three rules. Seats are consistent: the search already filtered on them. |
-
 | Gap | |
 |---|---|
-| ✅ ~~**C-4 · The room's max duration and advance-booking window are not enforced**~~ **Fixed in round 4**, on create and edit (Rule 4) — but see R4-9.1 | |
-| ✅ ~~**C-27 · Capacity is a filter, not a rule.**~~ **Fixed in round 4** — create and edit refuse a booking that expects more people than the room seats | |
-| **C-28 · The availability query is not tenant-filtered.** The repository collects booked room ids across every tenant before the service filters the *rooms* by tenant. Harmless — room ids do not collide across tenants — but it is the only read in the module that does not scope explicitly | |
-| ✅ ~~**C-6 · The booking number counts live rows**~~ **Fixed in round 4** (Rule 6) | |
-| **C-29 · A linked event is a label, not a link with consequences.** Cancelling the event does not touch the booking, and cancelling the booking does not touch the event | |
+| ✅ ~~**R4-9.1, F-15** · the search offered rooms the booking would refuse~~ | **Fixed in lane 3a** |
+| ✅ ~~**C-28** · the availability read not scoped to the tenant~~ | **Fixed in lane 3a** |
+| ✅ ~~**C-29, F-38, F-39** · a linked event was a label~~ | **Fixed in lane 2a** — its rooms move, cancel and delete with it |
+| ✅ ~~**F-7, F-47** · an inactive room bookable; two bookings at one instant~~ | **Fixed in lane 3a** |
 
 ---
 
@@ -1986,299 +1929,386 @@ do **not** clash.
 
 ### 📍 Where you are
 
-**From:** any row of the bookings register · `/hr/company-schedule/bookings/[id]` ·
-as **hr.head** · **4 minutes**
+**From:** any row of the bookings register, the event's Rooms card, the calendar's **Open**, or a notice ·
+`/hr/company-schedule/bookings/[id]` · window A as **hr.head**, window B as **hr.officer** · **4 minutes**
 
 ### 📖 What it is
 
-> *"One held room, with everything about it editable in place while it is still open — except the
-> room itself."*
+> *"One held room — approved or not, used or not — with everything about it editable in place while it holds the room,
+> except the room itself."*
 
 ### 👁 On the page
 
-**Header:** the **room name** as the title, subtitle `BK-2026-00001 · booked by Akosua Mensah`,
-back-link, and up to two buttons:
+**Header:** the **room** as the title, *"BK-2026-… · booked by …"*, back-link, and the actions:
 
-| Button | Appears when |
-|---|---|
-| **Approve** | status is *Tentative* and the booking is open |
-| **Cancel** | the booking is open — dialog needing a **reason** |
+| Button | Appears when | Does |
+|---|---|---|
+| **Approve** · **Not approve** | *Tentative* and open — **never to its booker**, who reads instead *"You booked this, so somebody else must approve it."* | Approve: *"Booking approved — The booker is told."* (or *"Approval recorded — Another approval stage is still to come."*). Not approve: a dialog — *"It is cancelled and the room released. \<booker\> is told, with your reason."* — with a required **Reason** |
+| **Cancel** | it holds its room — *Tentative* or *Confirmed* | a dialog — *"The slot is released for someone else."* — with a required **Reason**; the booker is told, unless it is their own act |
+| **Mark no-show** | *Confirmed* or *Completed*, and its start has passed | a confirmation — *"The room was held and not used. This cannot be undone, and \<booker\> is told."* |
+| **Delete** | **`HR.Company.Admin` only** | *"BK-… will be removed from the register. Cancel it instead to keep it on record."* |
 
-There is **no Delete on this page** — it is only on the register's row menu. *(Which is arguably
-backwards, but it means the dangerous button is not next to the ones you want.)*
+**Booking card:** Status · Booked on · From · To · Linked event · Approved by (name and when) · and, when cancelled,
+*Cancelled* with the date and the reason (*"Not approved before it started."* for one the sweep lapsed).
 
-**Booking card** — a four-column grid: **Status** · **Booked on** · **From** · **To** ·
-**Linked event** · **Approved by** *(name and date)* · and, when cancelled, **Cancelled** with its
-date and reason.
-
-**Details card** — and this is the interesting part: it is **a live edit form while the booking is
-open**, and a read-only grid once it is cancelled or completed.
-
-*While open:*
-- a grey note: *"To move this to a different room, cancel it and book again — that is the only way
-  the availability check runs against the new room."*
-- **From** · **To** *(date and time, required, end must be after start)*
-- **Purpose** *(required)* · **Expected attendees** *(required, ≥1)*
-- **Special requirements** · **Catering** · **Notes**
-- **Save changes**
-
-*Once closed:* the same five values as plain read-only rows.
-
-> ⚠ **The room is not on the form, deliberately.** `UpdateRoomBookingDto` has no `roomId`, so
-> rendering a room picker would be rendering a field the server ignores. **Editing the times *does*
-> re-run the clash check** — so you can extend a booking into a free hour and be refused if you
-> extend into a taken one. **Since round 4 every save also re-applies the room's own rules** — its
-> seats, its longest booking and how far ahead — so a booking that breaks a rule set after it was
-> made cannot be saved again, even for a change to its notes, until it complies.
+**Details card** — **a form while the booking holds its room**, read-only once it is cancelled, completed or a no-show:
+*"To move this to a different room, cancel it and book again — that is the only way the availability check runs against
+the new room."* · **From** · **To** · **Purpose** · **Expected attendees** · **Special requirements** · **Catering** ·
+**Notes** · **Save changes**. A save runs every booking check again (chapter 9), with this booking left out of the
+clash; a new time on a room needing approval sends an approved booking back for approval.
 
 ### ▶ Walk it
 
-**1 — Open the booking you created in chapter 9.**
-
-**2 — Read the Booking card.**
+**1 — You are on the booking chapter 9 made.** Read the Booking card.
 
 > *"The number, when it was booked, the window, and the event it is held for."*
 
-**3 — 🔴 LIVE WRITE 8 — if it is Tentative, press *Approve*.** The status flips to **Confirmed**
-and *Approved by* fills with your name and the time.
+**2 — With Beat B's switch on, it is *Tentative*,** and the header says *"You booked this, so somebody else must
+approve it."*
 
-> *"Approved, and the room is now held firmly rather than provisionally. Same caveat as an event:
-> this is a decision recorded in place, not a routed approval — and for a meeting room that is the
-> right weight."*
+**3 — 🔴 LIVE WRITE 11 — Window B (`hr.officer`): open the same booking** (from the engine's notice in the bell, or the
+register) **and press *Approve*.** *"Booking approved — The booker is told."*; *Approved by* fills. Window A's
+bell: approved.
 
-**4 — Move to the *Details* card and read the grey note aloud.** It is a good design statement:
+> *"Approved by somebody else — the engine asked the HR desk, and the person who booked it could not decide it. The
+> booker is told, in the app and by email where there is a mail server."*
 
-> *"'To move this to a different room, cancel it and book again — that is the only way the
-> availability check runs against the new room.' Which is a decision, not a limitation. If you
-> could swap the room in a dropdown here, the only thing standing between you and a double booking
-> would be the same check running again in a different place. Making it a cancel-and-rebook means
-> there is exactly one path into a room, and it is the one with the availability search on it."*
+**4 — The clash, for real.** Open the Boardroom booking you made for § 2.4 (the morning after the demo). In *Details*,
+set **From** and **To** to the event's day and hours — the window the booking you just approved holds — and press
+**Save changes**. It is refused:
 
-**5 — Extend the booking by an hour** — change **To** — and press **Save changes**.
+> *"Boardroom is already booked then: BK-2026-…, … 09:00–12:00."*
 
-> *"And changing the window re-runs the clash check — and the room's own limits. Those are not
-> create-time rules, they are the rules."*
+> *"Not a warning — a refusal, naming the booking in the way. It runs on every save and every booking, under a lock,
+> so not even two people pressing Book at the same instant can both have the room."*
 
-*(Counts as part of LIVE WRITE 8; undo with the same cancel.)*
+Nothing is written. Put the times back, or leave the page.
 
-**6 — Show *Cancel* without pressing it** — unless you are resetting now, in which case this is
-your undo. The dialog needs a reason:
+**5 — Read the grey note on *Details* aloud.**
 
-> *"Cancelling releases the slot for somebody else, and it needs a reason. The booking stays on the
-> record with that reason on it — which is the difference between cancelling and deleting, and it
-> is why one of those is an HR officer's job."*
+> *"To move this to a different room, cancel it and book again. Which is a decision, not a limitation: there is exactly
+> one way into a room, and it is the one with the availability search on it."*
+
+**6 — *(UAT)* Open the Management Committee booking** (*BK-2026-00001*, *Completed*). **Mark no-show** is offered —
+open it, read its sentence, and press **Cancel** in the dialog.
+
+> *"Completed by the hourly pass once its time was over. And if a room was held and nobody came, the desk can say so —
+> once, for good, and the booker is told."*
+
+🚫 **Do not confirm it**: it cannot be undone.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
 | The page | `GET api/CompanySchedule/bookings/{id}` | `HR.Company.Read` |
-| Save changes | `PUT api/CompanySchedule/bookings/{id}` | `HR.Company.Write` |
-| Approve | `POST …/{id}/approve` *(empty body)* | `HR.Company.Write` |
-| Cancel | `POST …/{id}/cancel` | `HR.Company.Write` |
+| **Save changes** | `PUT …/bookings/{id}` — every booking check again, under the room's lock | `HR.Company.Write` |
+| **Approve** · **Not approve** | `POST …/bookings/{id}/approve` · `…/reject` — the engine names the approver; the booker is refused | `HR.Company.Write` |
+| **Cancel** | `POST …/bookings/{id}/cancel` | `HR.Company.Write` |
+| **Mark no-show** | `POST …/bookings/{id}/no-show` | `HR.Company.Write` |
+| **Delete** | `DELETE …/bookings/{id}` | **`HR.Company.Admin`** |
 
-Table: `RoomBookings`. Update re-runs `HasConflictingBookingAsync` with the booking's **own id
-excluded**, so saving an unchanged window does not clash with itself. Since round 4 it first runs
-`EnforceRoomRules` against the booking's room, the same method create uses.
+The state guards are the server's (lane 3a, F-8): approving needs a *Tentative* booking; changing or cancelling needs
+one that holds its room; a no-show needs a confirmed or completed one whose start has passed. Each refusal is a
+sentence — *"BK-… is cancelled, so it can no longer be changed."*
 
 ### ⚠ Known gaps
 
 | Gap | |
 |---|---|
-| **C-30 · Approve has no guard.** The screen shows it only on a *Tentative* booking; the service will confirm anything, including an already-cancelled booking | |
-| **C-31 · Cancel does not check the status either.** A cancelled booking can be cancelled again, overwriting the first reason and date | |
-| **C-32 · There is no delete on the detail page**, only on the register — inconsistent, though in practice a helpful accident | |
+| ✅ ~~**C-30, C-31** · approve and cancel had no guard~~ | **Fixed in lane 3a** |
+| ✅ ~~**C-32** · no Delete here~~ | **Fixed in lane 3a** — Admin only |
+| ✅ ~~**C-8, F-48** · nothing completed, lapsed or marked a no-show~~ | **Fixed in lane 3b-2** |
+| ✅ ~~**F-34** · the booker told nothing~~ | **Fixed in lane 3b-1** — every outcome, in the app and by email |
 
 ---
 
-## 10A. `/hr/company-schedule/my-schedule` — one person's diary *(round 4)*
+## 10A. `/hr/company-schedule/my-schedule` — one person's diary
 
 ### 📍 Where you are
 
-**Sidebar:** Human Resources → Time & Leave → Company Schedule → **My Schedule** ·
-`/hr/company-schedule/my-schedule` · as **hr.head** — or as anybody: it needs no HR permission ·
-**3 minutes**
+**Sidebar:** Human Resources → Time & Leave → Company Schedule → **My Schedule** · `/hr/company-schedule/my-schedule` ·
+as **hr.head** — or as anybody: it needs no HR permission · **3 minutes**
 
 ### 📖 What it is
 
-> *"Everything the organisation has me down for, in one place: the meetings I am invited to, the
-> rooms I have booked, the interview panels I sit on, my training, my leave and my travel. Before
-> this, that was five screens in five modules, and none of them knew about the others."*
+> *"Everything the organisation has me down for, in one place: the meetings I am invited to or that are for me, the
+> rooms I have booked, the interview panels I sit on, my training, my leave and my travel, and the days the office is
+> shut. Before this, that was five screens in five modules, and none of them knew about the others."*
 
 ### 👁 On the page
 
-**Header:** *My schedule* — *"Everything you are down for — meetings, rooms you have booked,
-interview panels you sit on, training, leave and travel."*, back-link to the landing.
+**Header:** *My schedule* — *"Everything you are down for — meetings, rooms you have booked, interview panels you sit
+on, training, leave and travel."*, back-link to the landing.
 
-**The range card:** **From** and **To** *(dates — today to thirteen days on, by default)*, and two
-buttons, **Next fortnight** and **This week**. The page reads as soon as both dates are set.
+**The range card:** **From** and **To** *(today to thirteen days on, by default)*, **Next fortnight** and **This week**.
+The page reads as soon as both dates are set; more than sixty days, or a range that runs backwards, is refused with
+the server's own sentence.
 
-**One card per day**, earliest first, headed with the date. Each entry is one line: an icon for its
-kind, the label, the time — or *"All day"* for anything recorded by the day — its reference, and a
-badge naming the kind.
+**If a source could not be read**, a red banner says so: *"This schedule is incomplete — The leave could not be read
+just now, so none of it is shown. A gap here is not free time — reload the page to try again."* (lane 5b, R4-10A.3)
+
+**One card per day**, earliest first. **An entry over several days sits under every day it covers**, each saying the
+run — *"· 14 Oct to 18 Oct"* — and one that began before the range starts on its first day (lane 5b, F-23). Each line:
+an icon, the label, the time — or *"All day"* for anything recorded by the day — the reference, and a badge for its
+kind.
 
 | Kind | The label reads, for example | Comes from |
 |---|---|---|
-| Interview | *Interview panel for Senior Procurement Officer* · INT-000025 | interviews you sit on — scheduled, rescheduled or in progress |
-| Event | *Board of Directors — Q3 meeting (Scheduled, invitation Sent)* · EVT-2026-00001 | events you are **invited to**, unless you declined or it was cancelled — not events you only organise (**R4-6.7**) |
-| Room booking | *Booked Boardroom (Confirmed)* · BK-2026-00001 | rooms **you booked** |
-| Training | the programme's name and the nomination's status · its number | nominations approved, confirmed or waitlisted, with the session's hours where the day has one |
-| Leave | *Casual Leave (Pending)* · LV2026000011 | leave approved, pending or in progress |
-| Travel | *Travel (Approved)* · the request number | travel approved, submitted or in progress |
-| Closure · Holiday | *Business closure: Year-end stocktake* · *Public holiday: …* | every closure and public holiday in the range (**R4-10A.4**) |
+| Event | *Board of Directors — Q3 meeting (Scheduled, invitation Sent)* · `EVT-…`; or *Fire drill — Head Office (Scheduled, for all staff)* | events you are invited to (not declined), you **organise**, or are the **audience** of — an event shown on the company calendar, read through its scope and visibility (lane 2c); a several-day timed event on each of its days |
+| Room booking | *Booked Boardroom (Confirmed)* · `BK-…` | rooms you booked |
+| Interview | *Interview panel for Senior Procurement Officer* · `INT-…` | interview panels you sit on |
+| Training | the course and the nomination's status | an approved nomination: every timed session of the course in the range, or the course's days |
+| Leave | *Annual Leave (Approved)* · `LV…` | leave approved, pending or under way |
+| Travel | *Travel (Approved)* · `TR-…` | travel approved, submitted or under way |
+| Closure · Holiday | *Business closure: Year-end stocktake*, *Partial closure (a working day): …* · *Public holiday: Christmas Day*, *Day off in lieu of Boxing Day* | the closures that **cover you** (your site, your unit — lane 1a, R4-13.1), and the default holiday calendar's active days |
 
-**Empty:** *"Nothing in this range — No meetings, bookings, panels, training, leave or travel
-between those dates."*
-
-**A range over sixty days, or one that runs backwards,** is refused, and the page shows the
-server's own sentence: *"Sixty days is the most that can be read at once — narrow the range."*
+**Empty:** *"Nothing in this range — No meetings, bookings, panels, training, leave or travel between those dates."*
 
 ### ▶ Walk it
 
-**1 — Open My Schedule.** As `hr.head`, the next fortnight. Measured on UAT on 2026-09-24:
+**1 — Open My Schedule** as `hr.head`, the next fortnight.
 
-- three interview panels, with their times;
-- a day of casual leave, still pending, marked *All day*;
-- the fire drill;
-- the board meeting.
+- **UAT (from 6 October):** the fire drill on 8 October and the board meeting on 12 October — each *invitation Sent* —
+  and any interview panels or leave that fall in the fortnight.
+- **Rebuilt:** the seeded events, the persona's interview panels and leave, moved with the build.
 
-On a rebuild the dates move with the build, but the kinds are the same.
+> *"This is my next fortnight, and I did not put any of it here. The interview panels come from recruitment, the leave
+> from the leave module, the meetings from the company schedule. Several modules, one list — and nobody copied
+> anything into a calendar."*
 
-> *"This is my next fortnight, and I did not put any of it here. The interview panels come from
-> recruitment, the leave from the leave module, the drill and the board meeting from the company
-> schedule. Five modules, one list — and nobody had to copy anything into a calendar."*
+**2 — Point at an event's times and a day's *All day*.**
 
-**2 — Point at the leave day's *All day* and an interview's times.**
+> *"And it knows the difference between 'away that day' and 'in a room from nine to eleven'. Leave is recorded by the
+> day, so it says all day rather than inventing hours — and a week's leave sits under every day of the week."*
 
-> *"And it knows the difference between 'she is away that day' and 'she is in a room from nine to
-> eleven'. Leave is recorded by the day, so it says all day rather than inventing hours."*
+**3 — Window C (`staff`): the same page.** On UAT: the fire drill — *"(Scheduled, for all staff)"* — and their approved
+leave on 14 October.
 
-**3 — Press *This week*.**
-
-> *"And it is the same question the interview scheduler asks — 'what is this person committed
-> to?' — over a fortnight instead of an hour. It is literally the same code, so the day somebody
-> teaches the system about another kind of commitment, both learn it at once."*
-
-**4 — *(optional)* In a window as `staff`, open the same page.** A different person, their own
-diary, and no HR permission needed.
-
-> *"Nobody gave this person a permission for it. The system takes who you are from your sign-in,
-> and there is no way to ask it for somebody else's diary from here — that is the next screen, and
-> it is HR's."*
-
-⚠ In that window, **stay on this page**. The *Company Schedule* group header above it opens a
-landing that tells `staff` there is nothing scheduled (**R4-3.1**).
+> *"Nobody gave this person a permission for it. It takes who they are from their sign-in. The fire drill is there not
+> because they were invited, but because it is for all staff — so to an interview scheduler they look committed that
+> morning. And there is no way to ask from here for somebody else's diary; that is the next screen."*
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| The diary | `GET api/CompanySchedule/my-schedule?from&to` | **no HR permission** — any signed-in internal user linked to an employee record. The employee is taken **from the token**; there is no id in the URL, and there must not be |
+| The diary | `GET api/CompanySchedule/my-schedule?from&to` | **no HR permission** — any internal login linked to an employee; the employee is taken **from the token**, never the address |
 
-`PersonalScheduleService.GetForEmployeeAsync` asks the seven registered
-`IPanelistCommitmentSource` implementations — the same classes the interview clash check uses —
-about one employee over the range. Each answer carries its kind, a hardness, the label, start and
-end, whether it is recorded by the day, and the reference.
+`PersonalScheduleService` asks the seven `IPanelistCommitmentSource` implementations — the same classes the interview
+clash check uses — about one employee over the range: interviews, leave, travel, meetings and events, room bookings,
+training, and closures with public holidays. Each answer carries its kind, a hardness, the label, start and end,
+whether it is recorded by the day, and the reference.
 
-*Hard* means confirmed and exact to the minute: another interview, a confirmed booking, a confirmed
-meeting the person accepted. In a diary, hardness refuses nothing; the team view shades by it.
-
-A user with no employee link gets a 400, *"Your user account is not linked to an employee
-record."* A source that throws is logged at Error and left out (**R4-10A.3**).
+*Hard* means confirmed and exact to the minute — another interview, a confirmed booking, a settled meeting the person
+accepted. *Soft* is worth knowing — leave, travel, a course, a closure, an event they are only the audience of. In a
+diary, hardness refuses nothing; the team view shades by it. A source that fails is named in `incompleteSources`, and a
+cancelled request is never counted as one.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: a new screen, and five findings.**
->
-> | | Now |
-> |---|---|
-> | **R4-10A.1** | **A multi-day entry is filed under its first day only.** A week's leave appears on Monday's card and nowhere else. Leave that began before the range is filed under its own start, a card dated before the range. Each source reports a commitment once, at its start; a course with several sessions in the range shows its first. |
-> | **R4-10A.2** | **A timed event that spans days counts on its first day only — here and in the interview clash check.** The event source places a timed event on its start date, so a panelist on day two of a two-day timed meeting reads as free. All-day events are found on every day they cover, but reported with the first day's date. |
-> | **R4-10A.3** | **A source that fails leaves the diary silently short.** It is logged at Error, and the page cannot say so. The clash check returns the list of sources that answered (`sourcesConsulted`); the diary does not. |
-> | **R4-10A.4** | **Closures and public holidays are everybody's.** Every closure is attributed to every person, whatever its site or department (**R4-13.1**). Public holidays are every calendar the tenant keeps, and inactive ones too: the source filters on neither `HolidayCalendarId` nor `IsActive`. |
-> | **R4-10A.5** | **Not browser-walked.** Proved by harness (lane D-2's suite asserts an ordinary employee reads their own diary and is refused the team's) and by reading the page. |
+| Gap | |
+|---|---|
+| ✅ ~~**R4-10A.1, F-23** · a several-day entry on its first day only~~ | **Fixed in lane 5b** |
+| ✅ ~~**R4-10A.2** · a timed several-day event on its first day only~~ | **Fixed in lane 2a** — here and in the clash check |
+| ✅ ~~**R4-10A.3** · a failed source left the diary silently short~~ | **Fixed in lane 5b** — the banner |
+| ✅ ~~**R4-10A.4, R4-13.1** · every closure and holiday was everybody's~~ | **Fixed in lane 1a** |
+| ✅ ~~**R4-6.7** · the organiser missing~~ | **Fixed in lane 2a** |
+| **R4-10A.5** · not walked in a browser | The plan's lane 5 walk, items 6–8 |
 
 ---
 
-## 10B. `/hr/company-schedule/team` — a unit's diary, side by side *(round 4)*
+## 10B. `/hr/company-schedule/team` — a unit's diary, side by side
 
 ### 📍 Where you are
 
-**Sidebar:** … → Company Schedule → **Team Schedule** · `/hr/company-schedule/team` · as
-**hr.head** — it needs `HR.Company.Write` · **3 minutes**
+**Sidebar:** … → Company Schedule → **Team Schedule** · `/hr/company-schedule/team` · as **hr.head**; optionally a
+window as **head.dev** · **4 minutes**. The menu entry is open to everybody; the server decides which units each
+person may read (lane 5b, the user's ruling).
 
 ### 📖 What it is
 
-> *"What a unit and everybody under it are already committed to, side by side — so that when you
-> pick a time for something, you can see who you are about to double-book."*
+> *"What a unit and everybody under it are already committed to, side by side — so that when you pick a time for
+> something, you can see who you are about to double-book. For HR, any unit. For a head of unit, their own."*
 
 ### 👁 On the page
 
-**Header:** *Team schedule* — *"What a unit and everyone under it are already committed to —
-before you pick a time."*, back-link to the landing.
+**Header:** *Team schedule* — *"What a unit and everyone under it are already committed to — before you pick a time."*,
+back-link, and — for the HR desk — **Schedule for this unit**, which opens the new-event form with *Department*, the
+unit and the first day filled in (chapter 5).
 
-**The picker card:** **Organisation unit** *(every unit)* · **From** · **To** *(today to six days
-on, by default)*.
+**The picker card:** **Organisation unit** — the units **you may read**, each by its path (*"Board of Directors ›
+Managing Director's Office › … › Development Department"*), with a line under it: *"Every unit — you are on the HR
+desk."* or *"The units you head, and every unit beneath them."* A head opens on their own unit. **From** and **To**
+*(today to six days on)*.
 
-**Until a unit is chosen:** *"Choose a unit — Pick an organisation unit to see what it and
-everything under it are committed to."*
+**Somebody who heads nothing, and is not on the HR desk,** gets one card instead: *"A team schedule shows other people's
+leave and travel, so it is for the HR desk and for the head of a unit (who sees their unit and every unit beneath it).
+You are not recorded as heading a unit."*, with a link to **My Schedule**.
 
-**The grid:** a card headed *"N people"* with the key *"red = confirmed · amber = worth
-knowing"*.
-- One row per person: every **active** employee in the unit **and every unit beneath it**,
-  alphabetically.
-- One column per day.
-- Each cell shows up to two entries, then *"+N more"*, and hovering lists them all.
-- A cell with anything hard is shaded red, otherwise amber. An empty day is a dashed box.
+**The grid**, in a card:
+- **Sub-unit** — *"All of \<unit\> and beneath"*, or one sub-unit — and **Direct members only**; the title counts
+  *"12 people"*, or *"4 of 12 people"*, with the key *"red = confirmed · amber = worth knowing"*.
+- One row per **active** person in the unit and every unit beneath it, their own unit under their name when it is not
+  the one chosen.
+- One column per day; for the HR desk each day's heading opens the new-event form for that day.
+- Each cell shows up to two entries, then *"+N more"*; hovering lists them all. A cell with anything hard is red,
+  otherwise amber; an empty day is a dashed box. **An entry over several days is drawn on every day it covers.**
 
-**Nobody there:** *"Nobody in this unit — The unit and its subtree have no active employees."*
+The incomplete-sources banner (chapter 10A) appears here too.
 
 ### ▶ Walk it
 
-**1 — Choose a small unit — a section, not a directorate.** ⚠ The subtree is the point, and also the
-trap. On UAT, *HR / Administration Department* is **363 people**, 360 of them with an empty
-fortnight (**R4-10B.4**).
+**1 — As `hr.head`, choose *HR / Administration Department*.** The list offers every unit — 451 on UAT.
 
-> *"A head about to call a unit meeting. Everybody in the section and everything under it — and
-> before you pick a time, you can see who is on leave, who is on a course and who is on an
-> interview panel."*
+- **UAT:** *12 people* across five units; every row has the fire drill on 8 October — the all-staff audience (§ 1.1,
+  point 3) — and the managers the board meeting on the 12th.
 
-**2 — Point at a red cell and an amber one.**
+> *"A head about to call a unit meeting. Everybody in the department and everything under it — and before I pick a
+> time, I can see who is on leave, who is on a course, who is on an interview panel, and which mornings are already
+> spoken for."*
 
-> *"Red is fixed — an interview, a confirmed meeting they have accepted. Amber is worth knowing —
-> leave, travel, a course, a closure. Leave is amber because it is recorded by the day: somebody on
-> leave may well come in for an hour, and the system does not overrule them."*
+**2 — Choose one sub-unit**, then switch **Direct members only** on: the title reads *"n of 12 people"*.
 
-⚠ **Do not read an empty cell as "free" out loud.** A week's leave is drawn on its first day only,
-and leave that began before the range is not drawn at all (**R4-10B.2**).
+**3 — Point at a red cell and an amber one.**
 
-**3 — Say what the screen does not do.**
+> *"Red is fixed — an interview, a confirmed meeting they accepted. Amber is worth knowing — leave, a course, a closure,
+> a company event they are the audience of. Leave is amber because it is recorded by the day: somebody on leave may
+> come in for an hour, and the system does not overrule them."*
 
-> *"This shows you the clashes. It does not yet book the meeting for you — you still create the
-> event and invite people one at a time, and the invitation form does not flag a clash. That is
-> the next step, and the data it needs is all here."*
+**4 — Press *Schedule for this unit*** — the new-event form opens with *Department*, the unit and the day in it. Press
+**Cancel** there.
+
+> *"And when the time is chosen, the event is made for this unit from here, with the clash check on the form."*
+
+**5 — *(optional)* A window as `head.dev`.** The page opens on the *Development Department* — 18 people across six
+units on UAT — and offers only that and the units beneath it; no *Schedule for this unit*.
+
+> *"A head of unit sees their own, without being on the HR desk. Headship is data — who the organisation records as
+> heading the unit — not a role somebody hands out."*
+
+**6 — Window C (`staff`): open Team Schedule.** The card says who the page is for, and links My Schedule.
 
 ### ⚙ Behind the page
 
 | Element | Endpoint | Permission |
 |---|---|---|
-| Unit picker | `GET` the organisation units | lookup |
-| The grid | `GET api/CompanySchedule/team-schedule/{organizationUnitId}?from&to` | **`HR.Company.Write`** — Write, not Read, because it shows other people's leave and travel |
+| The unit list | `GET api/CompanySchedule/team-schedule/units` — every active unit for the HR desk; otherwise the units the caller heads and every unit beneath them | any internal login |
+| The grid | `GET …/team-schedule/{organizationUnitId}?from&to` — the desk (`HR.Company.Write`, checked per request) any unit; the head of the unit, or of a unit above it, theirs; anybody else refused with the reason | any internal login |
 
-`PersonalScheduleService.GetForUnitAsync` walks the unit's subtree (`UnitSubtreeAsync`, which
-returns **unit** ids), takes the active employees in those units, and asks the same seven sources
-about all of them at once. The same sixty-day limit applies.
+`PersonalScheduleService` reads the unit tree once a request (451 units on UAT), takes the active employees in the
+subtree, and asks the same seven sources about all of them at once; each member carries their own unit. The same
+sixty-day limit applies. Who heads a unit is `OrganizationUnit.HeadEmployeeId` — on UAT 39 of 451 active units have
+one recorded, so a unit with none is readable by the desk only.
 
 ### ⚠ Known gaps
 
-> **Round 4, 2026-09-24: a new screen, and four findings.**
->
-> | | Now |
-> |---|---|
-> | **R4-10B.1** | **It reads; it does not schedule.** The round 4 plan's D5 asked for a head to schedule an event *for* the unit: participants pre-filled from the subtree, and a clash flag on each person **at the point of selection**. Only the read was built. An event still gets its participants one at a time, with no availability shown (C-15 stands). |
-> | **R4-10B.2** | **The grid draws each entry on its start day only.** A week's leave marks Monday and leaves Tuesday to Friday as dashed, empty boxes. Leave that began before the range is keyed to a day that is not a column, so it is **not drawn at all**. For a screen whose purpose is "who is free", that is the wrong way to fail. |
-> | **R4-10B.3** | **Any Company Write holder can read any unit, and a head without it cannot read their own.** The gate is the HR desk's permission, not "this is my unit". As seeded, only HR sees this screen. That is defensible, but it is not the plan's picture of a head scheduling for their team. |
-> | **R4-10B.4** | **A directorate is hundreds of rows.** The whole active subtree is drawn, so *HR / Administration Department* is 363 rows, and seven reads are made across all 363 people. There is no paging and no "only people with something on". |
+| Gap | |
+|---|---|
+| ✅ ~~**R4-10B.1** · it read, and did not schedule~~ | **Fixed in lane 5b** — *Schedule for this unit*, and each day's heading |
+| ✅ ~~**R4-10B.2, F-23** · each entry on its start day only~~ | **Fixed in lane 5b** |
+| ✅ ~~**R4-10B.3** · any Write holder any unit; a head not their own~~ | **Fixed in lane 5b** — the desk and the unit's head |
+| ✅ ~~**R4-10B.4** · a directorate is hundreds of rows~~ | **Fixed in lane 5b** — the sub-unit filter and *Direct members only* |
+
+---
+
+## 10C. `/me/room-bookings` — staff book a room themselves
+
+### 📍 Where you are
+
+**Portal:** **Company → Room Bookings** · `/me/room-bookings` (+ `new`, `[id]`) · window C as **staff** · **4 minutes**.
+Any member of staff with a login linked to their employee record (lane 3c, decision D-13).
+
+### 📖 What it is
+
+> *"A member of staff books a meeting room for themselves — the same rooms, the same rules, the same approval where a
+> room needs one — and sees when the rooms are held without seeing anybody else's business."*
+
+### 👁 On the page
+
+**The list** (`/me/room-bookings`) — *Room bookings — "Book a meeting room, and keep track of your bookings."*, a
+back-link to the portal, and **Book a room**.
+- **When the rooms are held** — the **day board**: one row per bookable room, its held times as blocks across 07:00 to
+  19:00 (wider when something falls outside). **Your own bookings are coloured and open their page; anybody else's is a
+  grey block — no purpose, no booker, no number.** **‹**, a date, **›** and **Today**.
+- **Your bookings** — **Upcoming (N)** and **Past and cancelled (N)**: *Number* (opens it) · *Room* · *When* · *Purpose*
+  · *Status*.
+
+**Book a room** (`/me/room-bookings/new`) — *"You are recorded as the person booking. A room that needs approval waits
+until the HR desk approves it."*
+- **When and how many** — **From**, **To**, **Expected attendees**, **Find free rooms**.
+- **When the rooms are held — \<day\>** — the day board again, with the window you are asking for drawn over each room:
+  green where the room is free then, red where it is held.
+- **Which room** — the rooms this booking may have (the desk's search, every rule applied): *"Boardroom · Tema Head
+  Office · seats 18 · needs approval"*. Choosing one shows its card — where it is, the seats, its facilities, *Needs
+  approval*, and *"At most 2 hour(s) at a time, up to 30 day(s) ahead."* where it has limits. Nothing free: *"Nothing
+  free then — Try another time or fewer people — or a shorter booking, or one nearer today, as some rooms limit both."*
+- **What for** — **Purpose**, **Special requirements**, **Catering**, **Notes**. **No linked event**: a room for a
+  company event is the HR desk's (the user's ruling).
+- **Book room**: *"Room booked — BK-… — \<room\>."*, adding *"It waits for approval; you will be told either way."* on a
+  room needing approval.
+
+**One booking** (`/me/room-bookings/[id]`) — the room as the title, *"BK-… · \<purpose\>"*, and **Cancel booking**
+while it holds its room. A waiting booking says *"This booking waits for the HR desk to approve it. You will be told
+either way; one still waiting when its time comes is cancelled."* The *Booking* card: Status · From · To · Booked on ·
+Approved by · For the event (one the desk linked) · Cancelled. **Change it** — the times, purpose, attendees and the
+rest (*"To use another room, cancel this booking and book again."*, and on a room needing approval *"a new time waits
+for approval again"*), with **The room that day** board. **Cancel booking** asks *"Why"*; on a waiting booking, *"Its
+approval is withdrawn."* Somebody else's booking: *"That booking could not be found among yours."*
+
+**Two rules are the portal's alone, fixed in code:** a booking from here is never linked to an event, and its start may
+not be more than fifteen minutes past — *"… has passed — a booking made here starts from now on. The HR desk can record
+one after the fact."* An unchanged start on a booking already under way is allowed, so it can be extended.
+
+### ▶ Walk it
+
+**1 — Window C (`staff`): *Company → Room Bookings*.** Move the day board to tomorrow.
+
+> *"When are the rooms held? That grey block is somebody's booking. Not whose, not what for — just that the room is
+> taken then. Mine would be in colour."*
+
+On UAT the board is empty until a booking exists; use tomorrow, after § 2.4's booking, so the Boardroom shows grey.
+
+**2 — 🔴 LIVE WRITE 12 — *Book a room*:** tomorrow, 14:00 to 15:00, **4** people. **Find free rooms**; the board draws
+the window green over each free room. Choose the **Huddle Room 1**, purpose *"Project team catch-up"*, **Book room**.
+
+- A room with no approval: *"Room booked — BK-2026-… — Huddle Room 1."* — confirmed.
+- *With Beat B's switch on, choose the Boardroom instead:* *"It waits for approval; you will be told either way."* Then
+  **🔴 LIVE WRITE 12b — window B (`hr.officer`)** approves it on the desk's booking page (chapter 10), and window C's
+  bell says so.
+
+> *"A member of staff booked a room — no HR officer involved — under exactly the same rules: the room's seats, its
+> limits, the clash check, and an approval where the room needs one."*
+
+**3 — Window A (`hr.head`): the bookings register** lists it, booked by `staff`, in full.
+
+**4 — 🔴 LIVE WRITE 13 — window C: open it, *Cancel booking*, with a reason.** *"Booking cancelled — The room is free
+for someone else."*
+
+### ⚙ Behind the page
+
+| Element | Endpoint | Permission |
+|---|---|---|
+| The rooms | `GET api/CompanySchedule/me/rooms` — the rooms in use and open for booking, with their rules | any internal login linked to an employee |
+| The day board | `GET …/me/rooms/busy?from&to` — every booking's room and time, and whether it is yours; at most 31 days a read | the same |
+| **Find free rooms** | `GET …/me/rooms/available?startDateTime&endDateTime&minCapacity` | the same |
+| Your bookings | `GET …/me/room-bookings` · `GET …/me/room-bookings/{id}` — your own, or a 404 | the same |
+| **Book room** · **Change it** · **Cancel booking** | `POST …/me/room-bookings` · `PUT …/me/room-bookings/{id}` · `POST …/me/room-bookings/{id}/cancel` | the same |
+
+`CompanyScheduleMeController` takes the booker from the token and has none of the desk's acts — no approve, no
+no-show, no delete, no event link — by construction. The bookings go through the desk's own service: the same rules,
+the same lock, the same approval on the engine, and the same notices to the booker (§ 1.6).
+
+### ⚠ Known gaps
+
+| Gap | |
+|---|---|
+| ✅ ~~**D-13** · staff could not book a room~~ | **Built in lane 3c** |
+| *By design* · staff never link a booking to an event | The user's ruling: a room for a company event is the HR desk's |
+
+---
+
+## 11. `/administration/hr/company-schedule` — the setup hub
 
 ### 📍 Where you are
 

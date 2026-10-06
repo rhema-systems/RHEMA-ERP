@@ -57,9 +57,9 @@ has not started (the user: "don't start the actual development yet").
    week, the room view, the staff event page, the menus), built and proved. ✅ Lane 7's code is done (2026-10-06); its
    browser walk (lane 7 State, items 9–12) is the user's. **Lane 6** is source-checked and its four questions settled
    (lane 6 State, L6-1…L6-4), in six slices; 6a, the harness (the discipline deadline driven, `NOLOCK` reads, scenario
-   110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, and 6c, its
-   event chapters (3, 3a, 4–7, 6a), written. Next: **6d**, the bookings, diaries and staff booking (8–10, 10A–10C), then
-   6e and 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   110's staff booking), built and proved; 6b, the guide's front, seven rules, conventions and § 1–2, 6c, its event
+   chapters (3, 3a, 4–7, 6a), and 6d, its bookings, diaries and staff booking (8–10, 10A–10C), written. Next: **6e**, the
+   setup chapters, the company profile, § 18–21 and the appendices, then 6f, which closes the plan.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -339,7 +339,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
 | **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ◐ code done 2026-10-06: 7a (1147/1147 ×2), 7b (1147/1147 ×2, layout tests 7/7); the browser walk (items 9–12) is the user's | calendar block, two logins |
-| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2) and 6c (its event chapters) written; 6d–6f, the rest of the guide and the docs, to do | both suites green twice |
+| **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ◐ source-checked, L6-1…L6-4 settled; 6a (the harness) built and proved 2026-10-06 (1152/1152 ×2; net 191/191); 6b (the guide's front, rules, § 1–2), 6c (its event chapters) and 6d (bookings, diaries, staff booking) written; 6e–6f, the rest of the guide and the docs, to do | both suites green twice |
 
 ---
 
@@ -3629,6 +3629,28 @@ of three events, the audience counts (Everyone 5,001; Management 493).
 
   All four are small; recorded, not fixed (lane 6 is docs).
 
+*6d — what was written (2026-10-06): the bookings, the diaries and staff booking — chapters 8, 9, 10, 10A, 10B and the new
+10C (`/me/room-bookings`). Docs only.* Every screen re-read in full (the register, the desk's form, the booking page,
+both diaries, the team page, the three portal pages, the day board), with the server's refusal sentences. UAT read
+through the API as `hr.head`, `head.dev` and `staff` (read-only; the API started and stopped for it):
+- each diary's fortnight: `hr.head` the fire drill and the board meeting; `staff` the drill *"(for all staff)"* and their
+  leave on 14 October;
+- the team views: HR / Administration 12 people in five units; `head.dev` six units, Development 18 people;
+- the free rooms for twelve people (Boardroom and Conference Room A — the Huddle Room seats six);
+- the register's one booking, *Completed*.
+- **The walks** carry the live writes on to 13:
+  - 10, the room for chapter 5's event from its Rooms card (10b, optional: a room for a series);
+  - 11, `hr.officer` approves it (Beat B);
+  - 12, `staff` books from the portal (12b, optional: approved on the desk);
+  - 13, `staff` cancels.
+
+  **The clash is now shown for real**: moving the § 2.4 booking onto the event's booking is refused, naming it. Mark
+  no-show is shown on UAT's completed booking and not confirmed (it cannot be undone).
+- **Fixed in the guide while writing:** the old chapter 11 had no heading — its sections ran on from 10B — restored
+  (its body is 6e's).
+- **Found while writing:** **F-66** — the register's row menu offers **Approve** to the booking's own booker (the
+  booking page hides it from them; the server refuses them with the reason).
+
 ---
 
 ## 5. Residual register
@@ -4250,3 +4272,10 @@ built API, so no web host and no seeders).
   `hr.head` and `staff`. Findings F-59…F-61 (6b) numbered; F-62…F-65 found.
 
   Next: 6d — the bookings, the diaries and staff booking (8–10, 10A–10C).
+- **2026-10-06, later** — **6c committed. Slice 6d written** — the guide's bookings (8 the register on the server; 9 the
+  form, every room rule in the search, the lock; 10 one booking, approve on the engine and never by its booker, the
+  clash shown for real, no-show), the diaries (10A every day an entry covers, the banner; 10B the desk and unit heads,
+  sub-units, *Schedule for this unit*) and the new 10C (staff booking from the portal, the day board). What UAT shows
+  read through the API as `hr.head`, `head.dev` and `staff`. The old chapter 11's missing heading restored. F-66 found.
+
+  Next: 6e — the setup chapters (11–17), § 18–21 and the appendices.
