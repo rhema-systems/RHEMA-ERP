@@ -10,6 +10,34 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceConcurrencyHardeningTests
 {
+    [Fact]
+    [Trait("Category", "Architecture")]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    public void CashPostingTransaction_ShouldStartInsideSqlServerExecutionStrategy()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root,
+            "src",
+            "ErpSystem.Api",
+            "Services",
+            "Finance",
+            "Cash",
+            "CashTransactionService.cs"));
+        var posting = ExtractMember(
+            source,
+            "private Task<CashTransactionDto> PostAsync",
+            "public async Task<CashTransactionTraceDto?> GetTraceAsync");
+
+        var strategyIndex = posting.IndexOf("CreateExecutionStrategy()", StringComparison.Ordinal);
+        var transactionIndex = posting.IndexOf("BeginTransactionAsync", StringComparison.Ordinal);
+
+        strategyIndex.Should().BeGreaterThan(-1, "SQL Server retry handling must own the complete cash posting unit");
+        transactionIndex.Should().BeGreaterThan(strategyIndex, "the serializable posting transaction must be created inside the execution strategy");
+        posting.Should().Contain("PostWithinExecutionStrategyAsync", "the public posting path must delegate the whole transaction to the retry strategy");
+        posting.Should().Contain("IsolationLevel.Serializable", "cash posting and GL evidence must remain serialized");
+    }
+
     [Theory]
     [InlineData("ExchangeRate", true)]
     [InlineData("Invoice", true)]

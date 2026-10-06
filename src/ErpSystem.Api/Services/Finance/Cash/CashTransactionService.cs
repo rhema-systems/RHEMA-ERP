@@ -993,7 +993,14 @@ public class CashTransactionService : ICashTransactionService
         return PostAsync(id, producer, cancellationToken);
     }
 
-    private async Task<CashTransactionDto> PostAsync(
+    private Task<CashTransactionDto> PostAsync(
+        Guid id,
+        FinancePostingProducerContext? requestedProducer,
+        CancellationToken cancellationToken) =>
+        _context.Database.CreateExecutionStrategy().ExecuteAsync(
+            () => PostWithinExecutionStrategyAsync(id, requestedProducer, cancellationToken));
+
+    private async Task<CashTransactionDto> PostWithinExecutionStrategyAsync(
         Guid id,
         FinancePostingProducerContext? requestedProducer,
         CancellationToken cancellationToken)

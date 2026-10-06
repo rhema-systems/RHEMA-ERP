@@ -31,6 +31,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Rematch evidence: reconciliation `7585ce3e-1843-4dbf-a53d-c967cec6ff28` retains soft-deleted match `bdbc26b7-94fe-4d68-9d3f-7165c0c0b520`; the statement line is reopened, but the unfiltered unique statement-line index rejects the replacement match. Classification: confirmed persistence-contract defect. Uniqueness must apply to active (`IsDeleted = 0`) matches so audit history and one-active-match governance coexist.
 - Adjustment-action evidence: ABC Bank has a valid GL link in UAT, and the entered amount and replacement offset account were valid. The page loads `/finance/bank-accounts/active`, but `GetActiveAccountsAsync` omitted `GLAccountId` from its DTO projection. The hidden bank-GL prerequisite therefore arrived as undefined and silently disabled posting. Classification: confirmed API projection / UI contract defect, not user input error.
 - Account `DEFAULT-6600` remains ineligible as an offset because it is configured `IsControlAccount = true` and `AllowDirectPosting = false`. Reclassifying that account is a separate configuration-governance decision; this workstream does not mutate UAT master data.
+- Adjustment posting then exposed a separate SQL Server transaction-strategy defect: `CashTransactionService.PostAsync` opened its serializable user transaction directly even though production uses `SqlServerRetryingExecutionStrategy`. Classification: confirmed backend transaction-boundary defect. The entire cash posting unit now runs through `Database.CreateExecutionStrategy().ExecuteAsync(...)`, with the transaction created inside that retry scope.
 
 ## Changed files
 
@@ -39,11 +40,13 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - `frontend/src/app/finance/cash/reconciliation/reconciliation-matching.test.ts`
 - `src/ErpSystem.Api/Services/Finance/Cash/BankReconciliationService.cs`
 - `src/ErpSystem.Api/Services/Finance/Cash/BankAccountService.cs`
+- `src/ErpSystem.Api/Services/Finance/Cash/CashTransactionService.cs`
 - `src/ErpSystem.Data/ApplicationDbContext.cs`
 - `src/ErpSystem.Data/Migrations/20261006010000_AllowBankReconciliationRematchAfterUnmatch.cs`
 - `src/ErpSystem.Data/Migrations/ApplicationDbContextModelSnapshot.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/BankAccountTenantIsolationTests.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/BankReconciliationPostingMigrationTests.cs`
+- `tests/ErpSystem.Api.Tests/Services/Finance/FinanceConcurrencyHardeningTests.cs`
 
 ## Migrations and application state
 
@@ -64,6 +67,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Focused ESLint after replacing the silent adjustment disable guard with explicit submit validation: passed.
 - Exact rematch migration contract `RematchMigration_ShouldLimitUniquenessToActiveMatches`: passed (1/1).
 - Combined focused regressions for the rematch migration and active-bank-account GL projection: passed (2/2).
+- Cash posting execution-strategy architecture regression `CashPostingTransaction_ShouldStartInsideSqlServerExecutionStrategy`: passed (1/1); the build completed with baseline warnings and no errors.
 - Exact backend parallel-book regression `BookBalance_ShouldExcludeParallelBookReplicaOfSameBankMovement`: passed (1/1).
 - Full `BankReconciliationPostingMigrationTests` class: 7 passed and 12 failed before reconciliation assertions because the legacy test fixture does not provide the now-required governed source-book authority (`SOURCE_BOOK_AUTHORITY_MISSING`). The new regression is independent of that fixture failure and passes in isolation.
 - `git diff --check`: passed; Git reported only expected LF-to-CRLF working-copy warnings.
