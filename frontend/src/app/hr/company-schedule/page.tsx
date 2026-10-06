@@ -3,13 +3,13 @@
 import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
 import { ordinal } from '@/components/hr/company-schedule/milestoneWords';
-import { CalendarCheck, CalendarDays, CalendarClock, CalendarRange, DoorOpen, Flag, Loader2 } from 'lucide-react';
+import { CalendarCheck, CalendarDays, CalendarClock, CalendarRange, DoorOpen, Flag, Loader2, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useAuth } from '@/hooks/use-auth';
-import { companyEventService } from '@/services/hr/company-schedule.service';
+import { companyEventService, personalScheduleService } from '@/services/hr/company-schedule.service';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 
@@ -32,6 +32,13 @@ export default function CompanySchedulePage() {
     retry: (count, e: any) => e?.status !== 403 && count < 2,
   });
   const refused = (!authLoading && !!user && !canRead) || (error as any)?.status === 403;
+  // Lane 5b: a unit head is offered their team's schedule too (the units they may read; none for anyone else).
+  const { data: teamUnits } = useQuery({
+    queryKey: ['hr', 'team-schedule', 'units'],
+    queryFn: () => personalScheduleService.getTeamScheduleUnits(),
+    enabled: refused,
+    staleTime: 5 * 60 * 1000,
+  });
   const events = dashboard?.upcomingEvents;
   const pending = dashboard?.pendingBookings;
   const closures = dashboard?.upcomingClosures;
@@ -53,6 +60,14 @@ export default function CompanySchedulePage() {
             >
               <CalendarRange className="h-4 w-4" /> My Schedule — your meetings, events, bookings, leave and closures
             </Link>
+            {(teamUnits?.units.length ?? 0) > 0 && (
+              <Link
+                href="/hr/company-schedule/team"
+                className="flex items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Users className="h-4 w-4" /> Team Schedule — the units you head, and everyone beneath them
+              </Link>
+            )}
           </CardContent>
         </Card>
       </div>

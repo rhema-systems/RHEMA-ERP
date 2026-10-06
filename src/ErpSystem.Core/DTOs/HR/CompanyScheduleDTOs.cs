@@ -2103,22 +2103,63 @@ public class PersonalScheduleDto
 {
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>The person's own unit — on a team schedule, which sub-unit they sit in (lane 5b, R4-10B.4).</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
+
     public DateOnly From { get; set; }
     public DateOnly To { get; set; }
     public List<PersonalScheduleEntryDto> Entries { get; set; } = new();
+
+    /// <summary>
+    /// The sources that could not be read (lane 5b, R4-10A.3) — "leave", "training"… A diary with a gap must say so: a
+    /// missing source otherwise reads as a free afternoon somebody does not have. Empty when every source answered.
+    /// </summary>
+    public List<string> IncompleteSources { get; set; } = new();
 }
 
 /// <summary>The same for a whole organisation unit and everything beneath it.</summary>
 /// <remarks>
 /// ⚠ The SUBTREE. A head scheduling for their directorate means everybody under them; a unit-only
-/// read would quietly leave out the sections reporting into it.
+/// read would quietly leave out the sections reporting into it. Each member carries their own unit, so the page can
+/// narrow to a sub-unit or to the unit's direct members (lane 5b, R4-10B.4).
 /// </remarks>
 public class TeamScheduleDto
 {
     public Guid OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public DateOnly From { get; set; }
     public DateOnly To { get; set; }
     public List<PersonalScheduleDto> Members { get; set; } = new();
+
+    /// <summary>The sources that could not be read, for every member (lane 5b, R4-10A.3).</summary>
+    public List<string> IncompleteSources { get; set; } = new();
+}
+
+/// <summary>
+/// The units whose team schedule the caller may read (lane 5b, R4-10B.3, the user's ruling): every active unit for the
+/// HR desk (<c>HR.Company.Write</c>); for anyone else, the units they head and every unit beneath those — none for
+/// somebody who heads nothing.
+/// </summary>
+public class TeamScheduleUnitsDto
+{
+    /// <summary>The HR desk: every unit.</summary>
+    public bool CanReadEveryUnit { get; set; }
+    public List<TeamScheduleUnitDto> Units { get; set; } = new();
+}
+
+public class TeamScheduleUnitDto
+{
+    public Guid Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public Guid? ParentUnitId { get; set; }
+
+    /// <summary>The unit's place in the tree, root first ("TDC › Finance › Payroll"), for a list a person can read.</summary>
+    public string Path { get; set; } = string.Empty;
+
+    /// <summary>The caller heads this unit themselves (not only one above it).</summary>
+    public bool HeadedByCaller { get; set; }
 }
 
 /// <summary>

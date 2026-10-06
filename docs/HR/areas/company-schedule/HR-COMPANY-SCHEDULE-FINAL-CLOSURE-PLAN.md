@@ -50,8 +50,9 @@ has not started (the user: "don't start the actual development yet").
    its sequence), and 4c, the company profile (the logo a versioned image, the Logo URL retired, PNG/JPEG of at most
    2 MB, the image buttons gated), built and proved. ✅ Lane 4 is done (2026-10-06). **Lane 5** (the screens) is
    source-checked and its four questions settled (lane 5 State), in two slices; 5a, the screens' removes, dates, landing,
-   site pickers and sidebar test, built and proved (no server change). Next 5b: the diaries and the team schedule; then
-   lane 5's browser walk (the user's).** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
+   site pickers and sidebar test (no server change), and 5b, the diaries and the team schedule (unit heads read theirs),
+   built and proved. ✅ Lane 5's code is done (2026-10-06); its browser walk (lane 5 State, items 1–8) is the user's.
+   Next: lane 7, the company calendar — source-check first; its decisions to the user.** *As planned:* Lane 0 (§ 6): first count on UAT, read-only, the rows the migration must decide about (legacy
    department scopes, closures that disagree with D-1, duplicate participant and attendance rows —
    F-45, F-53). Then the user scaffolds the one migration, it is rewritten as guarded SQL, the user
    builds, it is applied to UAT. Nothing in lanes 1–7 can be verified before this.
@@ -329,7 +330,7 @@ hold. The event service is `CompanyEventService` (`CompanyScheduleService.cs:18-
 | **2** | Events: validation, lifecycle guards, recurrence series, audience, in-app and email notices, attachments on the gate | — (D-10, D-11, D-14, D-16 ✅) | ✅ 2a–2h built and proved (759/759 ×2; round-4 net 210/210); 2e-3's migration on UAT (144); screens await lane 5's walk | events block |
 | **3** | Rooms and bookings: rules, availability, guards, the booking lock, lapses, retirement, staff booking | D-13 ✅, D-18 ✅ (D-10 ✅) | ✅ 2026-10-06: 3a, 3b-1, 3b-2, 3c, 3d-1, 3d-2 built and proved (1002/1002 ×2; round-4 net 212/212); screens await lane 5's walk | rooms block |
 | **4** | Milestones: documents, recurring projection. Fiscal: Finance's calendar, HR's retired. Company profile | — | ✅ done 2026-10-06: 4a (1027/1027 ×2), 4b (1066/1066 ×2), 4c (1094/1094 ×2) built and proved | milestones + fiscal block |
-| **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ☐ | browser walk |
+| **5** | Screens: the shared select re-test (F-27, in HEAD), removes, event page, diaries, landing, site picker, the sidebar gate test (F-57) | — | ◐ code done 2026-10-06: 5a (1101/1101 ×2), 5b (1116/1116 ×2); the browser walk (items 1–8) is the user's | browser walk |
 | **7** | The company calendar (HR, staff, portal), the staff event view and the self-service reply | D-13 (D-16 ✅) | ☐ | calendar block, two logins |
 | **6** | Harness (`run-final-review.mjs`, regression net), guide, registers, memory | every lane | ☐ | both suites green twice |
 
@@ -3182,6 +3183,46 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
 - **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
   running; the R4D requisition's notices withdrawn. The API and the scanner stub are stopped.
 
+*5b — what was built (2026-10-06): the diaries and the team schedule (R4-10A.1/3, R4-10B.1–4, F-23). No migration.*
+- **Who reads a team schedule (R4-10B.3, the user's ruling):** `team-schedule/{unitId}` drops its Write policy — the HR
+  desk (`HR.Company.Write`, checked per request) reads any unit, a unit's head (`HeadEmployeeId`, of the unit or of any
+  unit above it, active units only) reads theirs; anyone else is refused with the reason. New `GET
+  team-schedule/units`: every active unit for the desk, else the units the caller heads and everything beneath them
+  (with a readable path, and which they head themselves). The tree is read once per request (451 units on UAT).
+- **What a diary carries (R4-10A.3, R4-10B.4):** `incompleteSources` on both diaries — each source that failed, by name
+  (a cancelled request is now thrown, not counted as a failure); each member's own unit (id and name), and the team's
+  unit name.
+- **The training source (F-23):** every timed session of a course in the window, in date order (it reported one, from an
+  unordered read); without a timed session, the course's hours on each of its days in the window; without hours, the
+  course's own days — never the whole window. One day, as the clash check asks, answers as before.
+- **Screens:** both diaries draw an entry on every day of the range it covers, one begun before the range from its first
+  day (`diaryDays.ts`), My Schedule naming the run ("7 Oct to 11 Oct"); `IncompleteDiaryBanner` on both. The team page
+  lists only the units the caller may read (a head opens on theirs; somebody who heads nothing is told who the page is
+  for and pointed to My Schedule), a sub-unit filter and "Direct members only" with "n of m people", each member's unit
+  under their name; for the desk, "Schedule for this unit" and each day's heading open the event form pre-filled
+  (`events/new?scope=Department&unit=&date=` — the form reads it). The sidebar entry opens to everybody and joins
+  `KEEP_OPEN`; the landing's "for the HR desk" card links Team Schedule for a head.
+- **Suites:** `run-final-review.mjs` block 5b (fixture A made head of the run's own unit, which gains a child; one
+  temporary Approved nomination for H on a real course with several timed sessions — UAT's 33 nominations are all
+  Submitted, which the diary does not show).
+
+*5b — proof (UAT, API in Staging):*
+- `run-final-review.mjs` blocks 1a–5b: **1116/1116 on two clean passes**, first time; 5b has **15 assertions**: nobody's
+  head offered no unit and refused with the reason; the diary's `incompleteSources` empty; the desk offered every
+  active unit (SQL); A, made head of the run's unit, offered it and its new child — nothing else — marked as theirs by
+  path; its schedule every active member of the subtree (SQL), each with their unit, the team named, nothing
+  incomplete; the child read (the ancestor rule); the unit above refused; the head cleared, refused again; an Approved
+  nomination showing every timed session of its course in the window, in order (SQL), then removed.
+- **After the runs, by SQL:** no CSF nomination (33, all UAT's own), no CSF unit live.
+- **Regression:** the round-4 net **191/191**; recruitment **59/59** (its interview clash checks read the training
+  source); the templates probe **42/42**; `run-lane-n` **109/115** (#40); the sidebar test **4/4**. No request answered
+  500; the ERR kinds are the known ones; no diary source failed.
+- **The blocking watcher:** 84 waits, 56 of 2 s or more (longest 7.9 s), all on `Notifications` — none on the unit tree,
+  the employees or training.
+- **After the runs:** every harness login off; no live company-schedule notice to a real login; no RoomBooking approval
+  running; the R4D requisition's notices withdrawn. The API and the scanner stub are stopped.
+- ✅ **Lane 5's code is done (2026-10-06): 5a and 5b built and proved.** What remains is the browser walk below.
+
 *5a — the browser walk (the user's; frontend `npm run dev` against UAT):*
 1. **F-27:** a room's edit page opened cold (a fresh tab) shows its site; Save keeps it. An event edit with "Not tied to a
    site" survives a cold load and a Save.
@@ -3192,6 +3233,16 @@ C-30, C-31, C-32, C-33, C-36; R4-9.1, R4-12.1; D-18).*
    hr.head: the four cards.
 5. The **site picker** on the closure, event and room forms: the eight sites only (no Ghana, no regions). A record saved
    on a region (if any) still shows it when edited.
+
+*5b — the browser walk (the user's):*
+6. **My Schedule** with a week's leave or a multi-day closure in range: it sits under every day it covers, each saying "…
+   to …".
+7. **Team Schedule as hr.head:** every unit offered; a sub-unit filter and "Direct members only" change the "n of m
+   people"; "Schedule for this unit" (and a day's heading) open the new-event form with Department, the unit and the
+   day filled in.
+8. **Team Schedule as a unit head who is not on the HR desk** (UAT: 39 units carry a head — log in as one): their unit
+   opens by itself, only their subtree is offered, no "Schedule for this unit". **As a plain employee:** the page says
+   who it is for and links My Schedule; the landing's card links no Team Schedule.
 
 ### Lane 7 — The company calendar (D-7, D-8, D-13, D-16; C-9, C-26, C-35, R4-6.4)
 
@@ -3849,3 +3900,12 @@ built API, so no web host and no seeders).
     59/59, the probe 42/42, `run-lane-n` 109/115 (#40); the sidebar test 4/4 (the committed one fails on the two).
 
   Next: 5b — the diaries and the team schedule. Then the browser walk of lane 5's screens (the user's).
+- **2026-10-06** — **5a committed. Slice 5b built and proved:** the team schedule read by a unit's head (and above), the
+  readable-units list, each member's unit, the sub-unit filter and direct members, "Schedule for this unit" into a
+  pre-filled event form; both diaries drawing an entry on every day it covers and naming a source they could not read;
+  the training source reporting every session.
+  - **Results:** `run-final-review.mjs` 1101 + 15 = 1116/1116 on two clean passes; the round-4 net 191/191, recruitment
+    59/59, the probe 42/42, `run-lane-n` 109/115 (#40); the sidebar test 4/4. **Lane 5's code is done**; its browser walk
+    (items 1–8) is the user's.
+
+  Next: lane 7 — the company calendar (D-7, D-8, D-13, D-16; C-9, C-26, C-35, R4-6.4). Source-check first.

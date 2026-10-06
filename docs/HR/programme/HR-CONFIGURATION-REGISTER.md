@@ -462,6 +462,11 @@ Finance's start. HR's own fiscal years and periods, and their 16 routes and two 
 until a later migration). Proof: block 4b — the month moved to July and back changes none of the answers on a tenant with
 Finance years (UAT); the "no Finance year" position cannot be reached on UAT.
 
+**Who reads a team schedule — data, not a setting (lane 5b, R4-10B.3, the user's ruling).** `OrganizationUnit.HeadEmployeeId`
+decides it beside the HR desk's `HR.Company.Write`: a unit's head reads that unit and every unit beneath it
+(`team-schedule/{unitId}`, `team-schedule/units`). A unit with no head recorded is readable by the desk only — on UAT, 39 of
+451 active units carry a head. Proof: block 5b, both positions (head vs not; the unit beneath vs the one above).
+
 **The letterhead logo (`CompanyProfile.LogoUrl`, "Logo URL") — retired since lane 4c (F-55); it was a free-text URL
 substituted into six letter types.** The logo is now an uploaded, versioned image (`CompanySealAssetKind.Logo`,
 `POST api/hr/company-profile/seal-assets/Logo`, `HR.Company.Admin`), embedded in letters like the seal and the

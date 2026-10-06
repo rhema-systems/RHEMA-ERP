@@ -420,34 +420,41 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
         var commitments = new List<PanelistCommitment>();
         foreach (var n in rows)
         {
-            // ⚠ Over a range there may be several sessions; the first one in the window is the one
-            // to report, and its own date is what the times hang off.
-            var session = sessions.FirstOrDefault(x => x.ScheduleId == n.ScheduleId);
-            var sessionDay = session?.Date.Date ?? dayStart;
             var name = n.Schedule!.Program?.ProgramName ?? "Training";
-
-            DateTime start, end;
-            bool dayGranular;
-            if (session?.StartTime is { } ss && session.EndTime is { } se)
+            void Add(DateTime start, DateTime end, bool dayGranular)
             {
-                (start, end, dayGranular) = (sessionDay + ss, sessionDay + se, false);
+                if (!dayGranular && !q.Overlaps(start, end)) return;
+                commitments.Add(new PanelistCommitment(
+                    n.EmployeeId, false, CommitmentKind.Training, CommitmentHardness.Soft,
+                    $"{name} ({n.Status})", start, end, dayGranular, n.NominationNumber));
             }
-            else if (n.Schedule.StartTime is { } cs && n.Schedule.EndTime is { } ce)
+
+            // ⚠ Company-schedule lane 5b (F-23): EVERY session in the window, in date order. This reported one session
+            // (`FirstOrDefault` over an unordered read, so not even reliably the first) — enough for the clash check's
+            // hour on one day, but a diary over a fortnight showed one afternoon of a five-session course.
+            var own = sessions.Where(x => x.ScheduleId == n.ScheduleId).OrderBy(x => x.Date).ThenBy(x => x.StartTime).ToList();
+            var timed = own.Where(x => x.StartTime is not null && x.EndTime is not null).ToList();
+            if (timed.Count > 0)
             {
-                // The course's daily hours, on the first day of the asked-about window that it covers.
-                var courseDay = n.Schedule.StartDate.Date > dayStart ? n.Schedule.StartDate.Date : dayStart;
-                (start, end, dayGranular) = (courseDay + cs, courseDay + ce, false);
+                foreach (var s in timed)
+                    Add(s.Date.Date + s.StartTime!.Value, s.Date.Date + s.EndTime!.Value, false);
+                continue;
+            }
+
+            // No timed session in the window: the course's own days, clipped to the window — never the whole window
+            // (a two-day course used to fill a sixty-day diary).
+            var first = n.Schedule.StartDate.Date > dayStart.Date ? n.Schedule.StartDate.Date : dayStart.Date;
+            var last = n.Schedule.EndDate.Date < dayEnd.Date ? n.Schedule.EndDate.Date : dayEnd.Date;
+            if (n.Schedule.StartTime is { } cs && n.Schedule.EndTime is { } ce)
+            {
+                // The course's daily hours, on each of its days in the window.
+                for (var day = first; day <= last; day = day.AddDays(1))
+                    Add(day + cs, day + ce, false);
             }
             else
             {
-                (start, end, dayGranular) = (dayStart, dayEnd, true);
+                Add(first, last.Add(TimeOnly.MaxValue.ToTimeSpan()), true);
             }
-
-            if (!dayGranular && !q.Overlaps(start, end)) continue;
-
-            commitments.Add(new PanelistCommitment(
-                n.EmployeeId, false, CommitmentKind.Training, CommitmentHardness.Soft,
-                $"{name} ({n.Status})", start, end, dayGranular, n.NominationNumber));
         }
 
         return commitments;

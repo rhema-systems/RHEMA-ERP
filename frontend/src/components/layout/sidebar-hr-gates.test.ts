@@ -36,6 +36,8 @@ const KEEP_OPEN = new Set<string>([
   // Added 2026-10-06 with the user's ruling (company-schedule final closure lane 5a, F-57):
   '/hr/company-schedule/my-schedule', // the caller's own diary — the server takes the employee from the token (round 4, D5)
   '/hr/leave/calendar', // "mine" and "my team" are open to all staff; "Everyone" needs HR.Leave.Read on the server
+  // Lane 5b (R4-10B.3, the user's ruling):
+  '/hr/company-schedule/team', // the HR desk, or a unit's head for their own subtree — headship is data, decided per unit on the server
 ]);
 
 const MODULE_GATES = new Set(['hr.access', 'she.access']);

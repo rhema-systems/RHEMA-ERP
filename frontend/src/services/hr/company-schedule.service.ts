@@ -65,6 +65,7 @@ import type {
   RoomBookingSummary,
   RoomBusyTime,
   TeamSchedule,
+  TeamScheduleUnits,
   UpdateBusinessClosure,
   UpdateCompanyEvent,
   UpdateCompanyMilestone,
@@ -758,6 +759,11 @@ class PersonalScheduleService {
   /** A unit and its subtree. Gated on the company-schedule WRITE policy — it exposes other people's leave. */
   getTeamSchedule(organizationUnitId: string, from: string, to: string): Promise<TeamSchedule> {
     return apiService.get<TeamSchedule>(`${this.baseUrl}/team-schedule/${organizationUnitId}`, { from, to });
+  }
+
+  /** Lane 5b: the units whose team schedule the caller may read — all for the HR desk, a head's own subtree otherwise. */
+  getTeamScheduleUnits(): Promise<TeamScheduleUnits> {
+    return apiService.get<TeamScheduleUnits>(`${this.baseUrl}/team-schedule/units`);
   }
 }
 

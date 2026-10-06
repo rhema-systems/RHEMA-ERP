@@ -1326,17 +1326,33 @@ export interface PersonalScheduleEntry {
 export interface PersonalSchedule {
   employeeId: string;
   employeeName: string;
+  /** The person's own unit — on a team schedule, which sub-unit they sit in (lane 5b). */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   from: string;
   to: string;
   entries: PersonalScheduleEntry[];
+  /** Sources that could not be read ("leave", "training"…) — the diary is incomplete when any are named (lane 5b). */
+  incompleteSources: string[];
 }
 
 /** A unit and everything beneath it — what a head needs before scheduling for their team. */
 export interface TeamSchedule {
   organizationUnitId: string;
+  organizationUnitName?: string | null;
   from: string;
   to: string;
   members: PersonalSchedule[];
+  incompleteSources: string[];
+}
+
+/**
+ * The units whose team schedule the caller may read (lane 5b, the user's ruling): every active unit for the HR desk; the
+ * units a head heads and everything beneath them; none for anyone else.
+ */
+export interface TeamScheduleUnits {
+  canReadEveryUnit: boolean;
+  units: { id: string; name: string; parentUnitId?: string | null; path: string; headedByCaller: boolean }[];
 }
 
 /** One pass of the reminder sweep (round 4, lane N-b2) — the scheduled run and run-now return the same. */

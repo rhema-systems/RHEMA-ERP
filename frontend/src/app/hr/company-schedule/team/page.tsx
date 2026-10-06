@@ -7,20 +7,27 @@
  * moment it changes a decision: finding out afterwards that four of your six people are on a course
  * that morning is finding out too late.
  *
- * ⚠ This exposes other people's leave and travel, so it is gated on the company-schedule WRITE
- * permission rather than Read. Your own diary is `/hr/company-schedule/my-schedule`, which takes the
- * employee from the token and needs no permission at all.
+ * ⚠ This exposes other people's leave and travel. The HR desk (`HR.Company.Write`) reads any unit; since company-schedule
+ * lane 5b (R4-10B.3, the user's ruling) a unit's head — or the head of a unit above it — reads theirs too, without that
+ * permission. The unit list is the server's answer to "which may I read" (`team-schedule/units`), so nobody is offered a
+ * unit they would be refused; somebody who heads nothing is told who the page is for. Your own diary is
+ * `/hr/company-schedule/my-schedule`, which takes the employee from the token and needs no permission at all.
  *
- * ⚠ The SUBTREE, not the unit: a head scheduling for their directorate means everybody under them.
+ * ⚠ The SUBTREE, not the unit: a head scheduling for their directorate means everybody under them. Lane 5b (R4-10B.4):
+ * narrow it to one sub-unit, or to the unit's direct members, with the count shown; (R4-10B.1) "Schedule for this unit"
+ * opens the event form for the unit and the day, for whoever may schedule events.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarClock, Loader2, Users } from 'lucide-react';
+import { CalendarClock, CalendarPlus, CalendarRange, Loader2, Users } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import {
   Select,
   SelectContent,
@@ -30,25 +37,27 @@ import {
 } from '@/components/ui/select';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { IncompleteDiaryBanner } from '@/components/hr/company-schedule/IncompleteDiaryBanner';
+import { addDay, byDay } from '@/components/hr/company-schedule/diaryDays';
+import { useAuth } from '@/hooks/use-auth';
 import { formatDate, formatTime } from '@/lib/hr/attendance-format';
 import { personalScheduleService } from '@/services/hr/company-schedule.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import type { PersonalSchedule, PersonalScheduleEntry } from '@/types/hr/company-schedule';
 
-const addDays = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-};
+const today = () => new Date().toISOString().slice(0, 10);
+const ALL = '__all__';
 
 /** The days in the range, so every member's row spans the same columns. */
 function daysBetween(from: string, to: string): string[] {
   const out: string[] = [];
-  const start = new Date(`${from}T00:00:00`);
-  const end = new Date(`${to}T00:00:00`);
-  for (let d = start; d <= end; d.setDate(d.getDate() + 1)) out.push(d.toISOString().slice(0, 10));
+  if (!from || !to) return out;
+  for (let d = from; d <= to && out.length < 62; d = addDay(d)) out.push(d);
   return out;
 }
+
+/** The event form, for a unit and a day (R4-10B.1). */
+const scheduleHref = (unitId: string, day: string) =>
+  `/hr/company-schedule/events/new?scope=Department&unit=${encodeURIComponent(unitId)}&date=${day}`;
 
 function DayCell({ entries }: { entries: PersonalScheduleEntry[] }) {
   if (entries.length === 0) {
@@ -85,14 +94,28 @@ function DayCell({ entries }: { entries: PersonalScheduleEntry[] }) {
 }
 
 export default function TeamSchedulePage() {
+  const { hasPermission } = useAuth();
+  // Scheduling an event is the HR desk's (POST events is Write); a head who is not on the desk reads, and does not schedule.
+  const canSchedule = hasPermission('HR.Company.Write');
   const [unitId, setUnitId] = useState('');
-  const [from, setFrom] = useState(addDays(0));
-  const [to, setTo] = useState(addDays(6));
+  const [subUnit, setSubUnit] = useState(ALL);
+  const [directOnly, setDirectOnly] = useState(false);
+  const [from, setFrom] = useState(today());
+  const [to, setTo] = useState(addDay(today(), 6));
 
   const units = useQuery({
-    queryKey: ['hr', 'organization-units', 'active'],
-    queryFn: () => organizationUnitService.getAll(),
+    queryKey: ['hr', 'team-schedule', 'units'],
+    queryFn: () => personalScheduleService.getTeamScheduleUnits(),
+    staleTime: 5 * 60 * 1000,
   });
+  const readable = useMemo(() => units.data?.units ?? [], [units.data]);
+
+  // A head opens on the unit they head (the top-most, by path); the desk chooses.
+  useEffect(() => {
+    if (unitId || !units.data || units.data.canReadEveryUnit) return;
+    const own = readable.find((u) => u.headedByCaller) ?? readable[0];
+    if (own) setUnitId(own.id);
+  }, [units.data, readable, unitId]);
 
   const team = useQuery({
     queryKey: ['hr', 'team-schedule', unitId, from, to],
@@ -102,20 +125,69 @@ export default function TeamSchedulePage() {
   });
 
   const days = useMemo(() => daysBetween(from, to), [from, to]);
+  const members = useMemo(() => team.data?.members ?? [], [team.data]);
 
-  /** member id → day → entries, so the grid is a lookup rather than a scan per cell. */
+  /** The sub-units the result holds, for the filter — the units its members actually sit in. */
+  const subUnits = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const m of members) {
+      if (m.organizationUnitId && !seen.has(m.organizationUnitId)) seen.set(m.organizationUnitId, m.organizationUnitName ?? 'Unit');
+    }
+    return [...seen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [members]);
+
+  const shown = useMemo(
+    () =>
+      members.filter((m) =>
+        directOnly ? m.organizationUnitId === unitId : subUnit === ALL || m.organizationUnitId === subUnit,
+      ),
+    [members, directOnly, subUnit, unitId],
+  );
+
+  /** member id → day → entries — each entry under every day of the range it covers (lane 5b, F-23). */
   const grid = useMemo(() => {
     const map = new Map<string, Map<string, PersonalScheduleEntry[]>>();
-    for (const m of team.data?.members ?? []) {
-      const byDay = new Map<string, PersonalScheduleEntry[]>();
-      for (const e of m.entries) {
-        const key = e.start.slice(0, 10);
-        byDay.set(key, [...(byDay.get(key) ?? []), e]);
-      }
-      map.set(m.employeeId, byDay);
-    }
+    const range = { from: (team.data?.from ?? from).slice(0, 10), to: (team.data?.to ?? to).slice(0, 10) };
+    for (const m of members) map.set(m.employeeId, byDay(m.entries, range.from, range.to));
     return map;
-  }, [team.data]);
+  }, [members, team.data, from, to]);
+
+  const chooseUnit = (id: string) => {
+    setUnitId(id);
+    setSubUnit(ALL);
+    setDirectOnly(false);
+  };
+  const scheduleFor = directOnly || subUnit === ALL ? unitId : subUnit;
+
+  if (units.isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (!units.isError && readable.length === 0) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Team schedule" description="What a unit and everyone under it are already committed to." backHref="/hr/company-schedule" />
+        <Card>
+          <CardContent className="space-y-3 p-6 text-sm">
+            <p>
+              A team schedule shows other people&apos;s leave and travel, so it is for the HR desk and for the head of a
+              unit (who sees their unit and every unit beneath it). You are not recorded as heading a unit.
+            </p>
+            <Link
+              href="/hr/company-schedule/my-schedule"
+              className="inline-flex items-center gap-2 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <CalendarRange className="h-4 w-4" /> My Schedule — your own diary
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -123,24 +195,38 @@ export default function TeamSchedulePage() {
         title="Team schedule"
         description="What a unit and everyone under it are already committed to — before you pick a time."
         backHref="/hr/company-schedule"
+        actions={
+          canSchedule && unitId ? (
+            <Button asChild>
+              <Link href={scheduleHref(scheduleFor, from)}>
+                <CalendarPlus className="mr-2 h-4 w-4" /> Schedule for this unit
+              </Link>
+            </Button>
+          ) : undefined
+        }
       />
 
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 pt-6">
           <div className="min-w-64 flex-1 space-y-1.5">
             <Label>Organisation unit</Label>
-            <Select value={unitId} onValueChange={setUnitId}>
+            <Select value={unitId} onValueChange={(v) => v && chooseUnit(v)}>
               <SelectTrigger>
                 <SelectValue placeholder="Choose a unit" />
               </SelectTrigger>
               <SelectContent>
-                {(units.data ?? []).map((u: any) => (
+                {readable.map((u) => (
                   <SelectItem key={u.id} value={u.id}>
-                    {u.name}
+                    {u.path || u.name}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              {units.data?.canReadEveryUnit
+                ? 'Every unit — you are on the HR desk.'
+                : 'The units you head, and every unit beneath them.'}
+            </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="from">From</Label>
@@ -152,6 +238,8 @@ export default function TeamSchedulePage() {
           </div>
         </CardContent>
       </Card>
+
+      <IncompleteDiaryBanner sources={team.data?.incompleteSources} />
 
       {!unitId ? (
         <Card>
@@ -173,7 +261,7 @@ export default function TeamSchedulePage() {
             {(team.error as any)?.message ?? 'The team schedule could not be read.'}
           </CardContent>
         </Card>
-      ) : (team.data?.members ?? []).length === 0 ? (
+      ) : members.length === 0 ? (
         <Card>
           <CardContent className="py-12">
             <EmptyState
@@ -185,9 +273,35 @@ export default function TeamSchedulePage() {
         </Card>
       ) : (
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="space-y-3 pb-2">
+            <div className="flex flex-wrap items-end gap-4">
+              {subUnits.length > 1 && (
+                <div className="min-w-56 space-y-1.5">
+                  <Label>Sub-unit</Label>
+                  <Select value={subUnit} onValueChange={(v) => v && setSubUnit(v)} disabled={directOnly}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL}>All of {team.data?.organizationUnitName ?? 'the unit'} and beneath</SelectItem>
+                      {subUnits.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="flex items-center gap-2 pb-2">
+                <Switch id="direct" checked={directOnly} onCheckedChange={(c) => setDirectOnly(c === true)} />
+                <Label htmlFor="direct">Direct members only</Label>
+              </div>
+            </div>
             <CardTitle className="text-sm">
-              {(team.data?.members ?? []).length} people
+              {shown.length === members.length
+                ? `${members.length} ${members.length === 1 ? 'person' : 'people'}`
+                : `${shown.length} of ${members.length} people`}
               <Badge variant="outline" className="ml-2 text-[10px]">
                 red = confirmed · amber = worth knowing
               </Badge>
@@ -200,15 +314,30 @@ export default function TeamSchedulePage() {
                   <th className="w-44 text-left font-medium">Person</th>
                   {days.map((d) => (
                     <th key={d} className="min-w-28 text-left font-medium">
-                      {formatDate(d)}
+                      {canSchedule ? (
+                        <Link
+                          href={scheduleHref(scheduleFor, d)}
+                          className="hover:underline"
+                          title="Schedule something for this unit on this day"
+                        >
+                          {formatDate(d)}
+                        </Link>
+                      ) : (
+                        formatDate(d)
+                      )}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {(team.data?.members ?? []).map((m: PersonalSchedule) => (
+                {shown.map((m: PersonalSchedule) => (
                   <tr key={m.employeeId}>
-                    <td className="align-top text-sm font-medium">{m.employeeName}</td>
+                    <td className="align-top text-sm font-medium">
+                      {m.employeeName}
+                      {m.organizationUnitName && m.organizationUnitId !== unitId && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">{m.organizationUnitName}</span>
+                      )}
+                    </td>
                     {days.map((d) => (
                       <td key={d} className="align-top">
                         <DayCell entries={grid.get(m.employeeId)?.get(d) ?? []} />

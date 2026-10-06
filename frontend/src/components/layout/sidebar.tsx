@@ -1329,12 +1329,13 @@ export const navigationItems: NavItem[] = [
                 icon: CalendarClock,
               },
               {
-                // ⚠ Company WRITE, not Read: the team view exposes other people's leave and
-                // travel, which is desk information rather than general reading.
+                // ⚠ NO permission since company-schedule lane 5b (R4-10B.3, the user's ruling): the HR desk
+                // (HR.Company.Write) reads any unit, and a unit's head reads theirs without it — headship is data,
+                // not a role. The server decides per unit; the page lists only what the caller may read, and
+                // tells somebody who heads nothing who it is for. Listed in the sidebar test's KEEP_OPEN.
                 title: 'Team Schedule',
                 href: '/hr/company-schedule/team',
                 icon: Users,
-                permissions: ['HR.Company.Write'],
               },
             ],
           },

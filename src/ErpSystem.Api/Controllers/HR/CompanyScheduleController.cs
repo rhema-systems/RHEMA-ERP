@@ -384,14 +384,39 @@ public class CompanyScheduleController : HrControllerBase
     /// scheduling something for their team.
     /// </summary>
     /// <remarks>
-    /// ⚠ Gated on the company-schedule WRITE policy rather than Read: this exposes other people's
-    /// leave and travel, which is desk information, not general reading.
+    /// ⚠ This exposes other people's leave and travel, which is desk information, not general reading: the HR desk
+    /// (the company-schedule WRITE policy) reads any unit; since lane 5b (R4-10B.3, the user's ruling) a unit's head —
+    /// or the head of a unit above it — reads theirs without that permission. Nobody else: not a line manager, not a
+    /// member of the unit.
     /// </remarks>
     [HttpGet("team-schedule/{organizationUnitId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<TeamScheduleDto>> GetTeamSchedule(
         Guid organizationUnitId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
-        => Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
+    {
+        if (!await IsHrDeskAsync()
+            && !await _personalSchedule.HeadsUnitOrAncestorAsync(CurrentUser.EmployeeId, organizationUnitId, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "A team schedule is for the HR desk and the unit's head (or the head of a unit above it).",
+            });
+        return Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
+    }
+
+    /// <summary>
+    /// The units whose team schedule the caller may read (lane 5b): every active unit for the HR desk; the units a head
+    /// heads and every unit beneath them; none for anyone else — the page says so rather than offering units it would
+    /// refuse.
+    /// </summary>
+    [HttpGet("team-schedule/units")]
+    public async Task<ActionResult<TeamScheduleUnitsDto>> GetTeamScheduleUnits(CancellationToken ct)
+        => Ok(await _personalSchedule.GetReadableUnitsAsync(CurrentUser.EmployeeId, await IsHrDeskAsync(), ct));
+
+    /// <summary>The HR desk for the team schedule: the company-schedule WRITE policy, checked per request.</summary>
+    private async Task<bool> IsHrDeskAsync()
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, HrPermissions.CompanyWritePolicy)).Succeeded;
+    }
 
     /// <summary>
     /// Chases everybody who has not answered their invitation (round 4, D6) — answering who it was for and who it
