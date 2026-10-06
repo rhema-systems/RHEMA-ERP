@@ -10,16 +10,19 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { BarChart3, ChevronRight, Landmark, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2, ShieldCheck, Pencil, Trash2 } from 'lucide-react';
+import { BarChart3, Check, ChevronRight, ChevronsUpDown, Landmark, Lock, FileText, CheckCircle, XCircle, Clock, Plus, UserRoundPlus, Loader2, ShieldCheck, Pencil, Trash2 } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { budgetDataService } from '@/services/finance/budget-data.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { cn } from '@/lib/utils';
 import type { BudgetScenario, BudgetReturn, BudgetAssignee, BudgetAuditEvent, CreateBudgetReturnDto, UpdateBudgetScenarioDto } from '@/types/budget';
 import type { FinanceDimensionDefinition, FiscalYear, SegmentStructure } from '@/types/finance';
 
@@ -63,6 +66,7 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
         rowVersion: '',
     });
     const [selectedDimensionId, setSelectedDimensionId] = useState<string>('');
+    const [assigneePickerOpen, setAssigneePickerOpen] = useState(false);
     const [newReturnData, setNewReturnData] = useState<CreateBudgetReturnDto>({
         budgetScenarioId: id,
         distributionDimensionValueId: undefined,
@@ -617,25 +621,65 @@ export default function ScenarioDetailsPage({ params }: PageProps) {
                                         {canAssignReturns && (
                                             <div className="space-y-2">
                                                 <Label htmlFor="assignee">Assign To</Label>
-                                                <Select
-                                                    value={newReturnData.assignedToUserId || 'unassigned'}
-                                                    onValueChange={(value) => setNewReturnData(prev => ({
-                                                        ...prev,
-                                                        assignedToUserId: value === 'unassigned' ? undefined : value,
-                                                    }))}
-                                                >
-                                                    <SelectTrigger id="assignee">
-                                                        <SelectValue placeholder="Select User" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="unassigned">Leave unassigned</SelectItem>
-                                                        {assignees.map(user => (
-                                                            <SelectItem key={user.id} value={user.id}>
-                                                                {user.displayName}{user.email ? ` - ${user.email}` : ''}
-                                                            </SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                                <Popover modal open={assigneePickerOpen} onOpenChange={setAssigneePickerOpen}>
+                                                    <PopoverTrigger asChild>
+                                                        <Button
+                                                            id="assignee"
+                                                            type="button"
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            aria-expanded={assigneePickerOpen}
+                                                            className="w-full justify-between font-normal"
+                                                        >
+                                                            <span className="truncate text-left">
+                                                                {newReturnData.assignedToUserId
+                                                                    ? (() => {
+                                                                        const assignee = assignees.find(user => user.id === newReturnData.assignedToUserId);
+                                                                        return assignee
+                                                                            ? `${assignee.displayName}${assignee.email ? ` - ${assignee.email}` : ''}`
+                                                                            : 'Select User';
+                                                                    })()
+                                                                    : 'Leave unassigned'}
+                                                            </span>
+                                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                        </Button>
+                                                    </PopoverTrigger>
+                                                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                                                        <Command>
+                                                            <CommandInput placeholder="Search name or email..." />
+                                                            <CommandList>
+                                                                <CommandEmpty>No eligible user found.</CommandEmpty>
+                                                                <CommandGroup>
+                                                                    <CommandItem
+                                                                        value="leave unassigned"
+                                                                        onSelect={() => {
+                                                                            setNewReturnData(prev => ({ ...prev, assignedToUserId: undefined }));
+                                                                            setAssigneePickerOpen(false);
+                                                                        }}
+                                                                    >
+                                                                        <Check className={cn('mr-2 h-4 w-4', !newReturnData.assignedToUserId ? 'opacity-100' : 'opacity-0')} />
+                                                                        Leave unassigned
+                                                                    </CommandItem>
+                                                                    {assignees.map(user => (
+                                                                        <CommandItem
+                                                                            key={user.id}
+                                                                            value={`${user.displayName} ${user.email ?? ''}`.trim()}
+                                                                            onSelect={() => {
+                                                                                setNewReturnData(prev => ({ ...prev, assignedToUserId: user.id }));
+                                                                                setAssigneePickerOpen(false);
+                                                                            }}
+                                                                        >
+                                                                            <Check className={cn('mr-2 h-4 w-4', user.id === newReturnData.assignedToUserId ? 'opacity-100' : 'opacity-0')} />
+                                                                            <span className="truncate">
+                                                                                {user.displayName}{user.email ? ` - ${user.email}` : ''}
+                                                                            </span>
+                                                                        </CommandItem>
+                                                                    ))}
+                                                                </CommandGroup>
+                                                            </CommandList>
+                                                        </Command>
+                                                    </PopoverContent>
+                                                </Popover>
                                             </div>
                                         )}
                                         <div className="space-y-2">

@@ -31,6 +31,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - `COMPANY` is an account-code segment in the current RHEMA model. It is not automatically equivalent to the tenant/legal-entity context and must not be removed or suppressed on that assumption.
 - `SegmentValueId` remains an active control input: revisions, commitments, and budget-control matching consume it. The current UI exposes only `DistributionDimensionValueId`, so the training flow identifies a genuine missing segment-selection path rather than merely stale wording.
 - Recommended compatibility path: retain segment-based budgeting, restore a governed segment structure/value selector for returns that require it, and keep Finance dimension distribution as a separate selector. The server must validate both values against the tenant and the scenario's configured budget grain.
+- Budget Return assignee lists can be large; the create dialog now uses a searchable name/email combobox while retaining the explicit `Leave unassigned` option and the existing assignee ID contract.
 
 ## Changed files
 
@@ -60,6 +61,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - `frontend/src/app/finance/budgeting/scenarios/[id]/page.tsx`
   - Restores Segment Type -> Segment Value before the separate Distribution Dimension -> Dimension Value selection.
   - Shows Edit/Delete only for a permissioned Draft with no returned rows; the server remains authoritative.
+  - Makes the Create Budget Return `Assign To` control searchable by display name or email.
 - `tests/ErpSystem.Api.Tests/Services/Finance/BudgetServiceHardeningTests.cs`
   - Adds hybrid-scope, combined-grain, unused-Draft edit/delete, and dependency-lock regressions.
 - `tests/ErpSystem.Api.Tests/Controllers/Finance/FinanceControllerSecurityTests.cs`
@@ -84,6 +86,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - `dotnet test ... --filter FullyQualifiedName~BudgetSegmentMigration_UsesSqlServerCompatibleCombinedScopeFilter`: 1 passed, 0 failed; the contract asserts the exact combined key and rejects a filtered-index predicate containing `OR`.
 - `dotnet test ... --filter FullyQualifiedName~CriticalFinanceActions_ShouldMapToExpectedPermissions`: 92 passed, 0 failed.
 - Changed-file ESLint for both scenario pages, the budget service, and budget types: passed.
+- Focused ESLint after converting Create Budget Return `Assign To` to a searchable combobox: passed.
 - `npm run type-check`: repository-wide baseline remains red on unrelated existing development, portal, HR, inventory, reporting, and test fixture errors; no error references the changed budgeting files.
 - Corrected migration SQL generated idempotently from immediate predecessor `20261005211546_ReorderBankDepositAcknowledgementBeforePosting`; the isolated script contains only the intended control table, legacy backfill, and combined-index operations, with `WHERE [IsDeleted] = 0` on the combined unique index.
 - First local startup application attempt failed before completion because SQL Server rejected the original filtered-index predicate containing `OR` (`Error 156`). The corrected migration uses `[IsDeleted] = 0`; no restart or repeat application was performed by this task.
