@@ -55,6 +55,7 @@ public interface IBankReconciliationService
     Task<ReconciliationAdjustmentDto> CreateAndPostAdjustmentAsync(Guid reconciliationId, CreateReconciliationAdjustmentDto dto, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> FinalizeReconciliationAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> CancelReconciliationAsync(Guid id, string reason, CancellationToken cancellationToken = default);
+    Task<decimal> ValidateApprovalBalanceAsync(Guid id, CancellationToken cancellationToken = default);
     Task<BankReconciliationDto> ApproveReconciliationAsync(Guid id);
     Task<ReconciliationSummaryDto> GetSummaryAsync(Guid id);
 }

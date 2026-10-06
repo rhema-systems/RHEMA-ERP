@@ -952,10 +952,8 @@ public class BankReconciliationService : IBankReconciliationService
             if (reconciliation.Status != ReconciliationStatus.Completed)
                 throw new Exception("Reconciliation must be completed before approval");
 
-            reconciliation.BookBalance = await CalculatePostedBookBalanceAsync(reconciliation.BankAccountId, reconciliation.ReconciliationDate);
+            reconciliation.BookBalance = await ValidateApprovalBalanceAsync(id);
             reconciliation.Difference = RoundMoney(reconciliation.StatementBalance - reconciliation.BookBalance);
-            if (RoundMoney(reconciliation.Difference) != 0m)
-                throw new InvalidOperationException("Reconciliation cannot be approved while the statement and posted GL book balance differ.");
 
             if (reconciliation.ReconciledBy.HasValue && reconciliation.ReconciledBy.Value == CurrentUserId)
             {
@@ -1019,6 +1017,32 @@ public class BankReconciliationService : IBankReconciliationService
 
         _context.ChangeTracker.Clear();
         return await GetByIdAsync(id) ?? throw new Exception("Failed to approve reconciliation");
+    }
+
+    public async Task<decimal> ValidateApprovalBalanceAsync(
+        Guid id,
+        CancellationToken cancellationToken = default)
+    {
+        var tenantId = TenantId;
+        var reconciliation = await _context.Set<BankReconciliation>()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == id && !item.IsDeleted,
+                cancellationToken)
+            ?? throw new InvalidOperationException("Reconciliation not found");
+        if (reconciliation.Status != ReconciliationStatus.Completed)
+            throw new InvalidOperationException("Reconciliation must be completed before approval");
+
+        var bookBalance = await CalculatePostedBookBalanceAsync(
+            reconciliation.BankAccountId,
+            reconciliation.ReconciliationDate);
+        if (RoundMoney(reconciliation.StatementBalance - bookBalance) != 0m)
+        {
+            throw new InvalidOperationException(
+                "Reconciliation cannot be approved while the statement and posted GL book balance differ.");
+        }
+
+        return bookBalance;
     }
 
     public async Task<ReconciliationSummaryDto> GetSummaryAsync(Guid id)

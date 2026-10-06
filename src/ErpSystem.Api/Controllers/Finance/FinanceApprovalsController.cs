@@ -104,6 +104,7 @@ public class FinanceApprovalsController : ControllerBase
     private readonly IFinanceBudgetControlService? _budgetControl;
     private readonly ILeaseAccountingService? _leaseAccountingService;
     private readonly IBankingSettlementService? _bankingSettlementService;
+    private readonly IBankReconciliationService? _bankReconciliationService;
 
     public FinanceApprovalsController(
         ApplicationDbContext db,
@@ -122,7 +123,8 @@ public class FinanceApprovalsController : ControllerBase
         IVendorPaymentService? vendorPaymentService = null,
         IFinanceBudgetControlService? budgetControl = null,
         ILeaseAccountingService? leaseAccountingService = null,
-        IBankingSettlementService? bankingSettlementService = null)
+        IBankingSettlementService? bankingSettlementService = null,
+        IBankReconciliationService? bankReconciliationService = null)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -141,6 +143,7 @@ public class FinanceApprovalsController : ControllerBase
         _budgetControl = budgetControl;
         _leaseAccountingService = leaseAccountingService;
         _bankingSettlementService = bankingSettlementService;
+        _bankReconciliationService = bankReconciliationService;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -839,15 +842,32 @@ public class FinanceApprovalsController : ControllerBase
             }
         }
 
-        var workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
-            tenantId,
-            entityType,
-            instance.EntityId,
-            currentUserId.Value,
-            action,
-            comments,
-            invoicePaymentSodControlEventId,
-            cancellationToken);
+        WorkflowExecutionResult workflowResult;
+        try
+        {
+            workflowResult = await ProcessWorkflowAndOutcomeAtomicallyAsync(
+                tenantId,
+                entityType,
+                instance.EntityId,
+                currentUserId.Value,
+                action,
+                comments,
+                invoicePaymentSodControlEventId,
+                cancellationToken);
+        }
+        catch (InvalidOperationException exception) when (
+            string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("BankReconciliation"))
+        {
+            return BadRequest(new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = instance.CurrentStepId,
+                Message = exception.Message
+            });
+        }
 
         if (!workflowResult.Success)
         {
@@ -1060,6 +1080,15 @@ public class FinanceApprovalsController : ControllerBase
     {
         async Task<WorkflowExecutionResult> ProcessAndApplyAsync()
         {
+            if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+                Normalize(entityType) == Normalize("BankReconciliation"))
+            {
+                if (_bankReconciliationService == null)
+                    throw new InvalidOperationException(
+                        "The authoritative bank reconciliation service is unavailable.");
+                await _bankReconciliationService.ValidateApprovalBalanceAsync(entityId, cancellationToken);
+            }
+
             var result = await _workflowService.ProcessApprovalStepAsync(
                 entityType,
                 entityId,
@@ -1124,7 +1153,7 @@ public class FinanceApprovalsController : ControllerBase
     }
 
     internal static bool RequiresSerializableOutcomeTransaction(string entityType)
-        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE";
+        => Normalize(entityType) is "EXCHANGERATE" or "INVOICE" or "VENDORINVOICE" or "BANKRECONCILIATION";
 
     internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
         string entityType,

@@ -1024,6 +1024,84 @@ public sealed class BankReconciliationPostingMigrationTests
             .WithMessage("Maker-checker control: the user who finalized this bank reconciliation cannot approve it.");
     }
 
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public async Task ApprovalBalanceValidation_ShouldRejectPostFinalizationBookMovement()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = SeedBankSetup(db, tenantId, "BANK-DRIFT", 0m);
+        var period = db.FiscalPeriods.Local.Single(item => item.TenantId == tenantId);
+        var primaryBook = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
+        var reconciliation = new BankReconciliation
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BankAccountId = setup.BankAccount.Id,
+            ReconciliationDate = new DateTime(2026, 7, 6),
+            StatementBalance = 0m,
+            BookBalance = 0m,
+            Difference = 0m,
+            Status = ReconciliationStatus.Completed,
+            ReconciledBy = Guid.NewGuid(),
+            ReconciledAt = DateTime.UtcNow
+        };
+        var journal = new JournalEntry
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryNumber = "JE-POST-FINAL-001",
+            JournalType = "Bank Deposit",
+            EntryDate = new DateTime(2026, 7, 6),
+            PostingDate = new DateTime(2026, 7, 6),
+            Description = "Movement posted after reconciliation finalization",
+            SourceModule = "CASHBANK",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentType = "BankDepositBatch",
+            TotalDebitAmount = 100m,
+            TotalCreditAmount = 100m,
+            IsBalanced = true,
+            FiscalPeriodId = period.Id,
+            AccountingBookId = primaryBook.Id,
+            BookClassification = primaryBook.Code,
+            PostingStatus = "Posted"
+        };
+        db.Set<BankReconciliation>().Add(reconciliation);
+        db.JournalEntries.Add(journal);
+        db.AccountTransactions.Add(new AccountTransaction
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            JournalEntryId = journal.Id,
+            AccountingBookId = primaryBook.Id,
+            AccountId = setup.BankGlAccount.Id,
+            FiscalPeriodId = period.Id,
+            TransactionDate = new DateTime(2026, 7, 6),
+            DebitAmount = 100m,
+            CreditAmount = 0m,
+            FunctionalCurrencyCode = "GHS",
+            TransactionCurrency = "GHS",
+            TransactionDebitAmount = 100m,
+            TransactionCreditAmount = 0m,
+            PostingStatus = "Posted",
+            BookClassification = primaryBook.Code,
+            LineNumber = 1,
+            SourceModule = "CASHBANK",
+            SourceDocumentId = journal.SourceDocumentId,
+            SourceDocumentType = journal.SourceDocumentType
+        });
+        await db.SaveChangesAsync();
+        var service = CreateReconciliationService(db, tenantId);
+
+        var act = () => service.ValidateApprovalBalanceAsync(reconciliation.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*statement and posted GL book balance differ*");
+        (await db.Set<BankReconciliation>().AsNoTracking().SingleAsync(item => item.Id == reconciliation.Id))
+            .Status.Should().Be(ReconciliationStatus.Completed);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

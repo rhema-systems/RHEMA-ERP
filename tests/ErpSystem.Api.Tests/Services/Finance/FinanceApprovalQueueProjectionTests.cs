@@ -24,6 +24,68 @@ public sealed class FinanceApprovalQueueProjectionTests
 {
     [Fact]
     [Trait("Batch", "FinanceApprovalActiveQueue")]
+    public async Task Bank_reconciliation_workbench_approval_should_preserve_pending_workflow_when_balance_changes()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var checkerId = Guid.NewGuid();
+        var approvalId = AddApprovalGraph(
+            db,
+            tenantId,
+            WorkflowInstanceStatus.InProgress,
+            WorkflowStepInstanceStatus.Pending,
+            approvalIsForCurrentStep: true,
+            entityCode: "BankReconciliation",
+            initiatorId: makerId,
+            approverRole: "Financial Controller");
+        var instance = db.WorkflowApprovals.Local.Single(item => item.Id == approvalId)
+            .StepInstance.WorkflowInstance;
+        db.Set<BankReconciliation>().Add(new BankReconciliation
+        {
+            Id = instance.EntityId,
+            TenantId = tenantId,
+            BankAccountId = Guid.NewGuid(),
+            ReconciliationDate = new DateTime(2026, 10, 5),
+            StatementBalance = 2_880m,
+            BookBalance = 2_880m,
+            Difference = 0m,
+            Status = ReconciliationStatus.Completed,
+            ReconciledBy = makerId,
+            ReconciledAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var workflow = new Mock<IWorkflowService>();
+        var reconciliationService = new Mock<IBankReconciliationService>();
+        reconciliationService
+            .Setup(service => service.ValidateApprovalBalanceAsync(instance.EntityId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "Reconciliation cannot be approved while the statement and posted GL book balance differ."));
+        var controller = CreateQueueController(
+            db,
+            tenantId,
+            checkerId,
+            workflowOverride: workflow,
+            bankReconciliationService: reconciliationService.Object);
+
+        var response = await controller.Approve(
+            approvalId,
+            new FinanceApprovalsController.FinanceApprovalActionRequest { Comments = "Approve" },
+            CancellationToken.None);
+
+        response.Result.Should().BeOfType<BadRequestObjectResult>();
+        (await db.WorkflowApprovals.AsNoTracking().SingleAsync(item => item.Id == approvalId))
+            .Status.Should().Be(WorkflowApprovalStatus.Pending);
+        (await db.Set<BankReconciliation>().AsNoTracking().SingleAsync(item => item.Id == instance.EntityId))
+            .Status.Should().Be(ReconciliationStatus.Completed);
+        workflow.Verify(service => service.ProcessApprovalStepAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceApprovalActiveQueue")]
     public async Task Pending_queue_should_return_only_active_current_step_approvals_for_the_tenant()
     {
         await using var db = CreateContext();
@@ -538,7 +600,9 @@ public sealed class FinanceApprovalQueueProjectionTests
         ApplicationDbContext db,
         Guid tenantId,
         Guid userId,
-        IReadOnlyCollection<string>? roles = null)
+        IReadOnlyCollection<string>? roles = null,
+        Mock<IWorkflowService>? workflowOverride = null,
+        IBankReconciliationService? bankReconciliationService = null)
     {
         var user = new Mock<ICurrentUserService>();
         user.SetupGet(value => value.UserId).Returns(userId.ToString());
@@ -549,7 +613,7 @@ public sealed class FinanceApprovalQueueProjectionTests
                 It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
                 It.IsAny<object?>(), It.IsAny<string>()))
             .ReturnsAsync(AuthorizationResult.Success());
-        var workflow = new Mock<IWorkflowService>();
+        var workflow = workflowOverride ?? new Mock<IWorkflowService>();
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookLifecycle", It.IsAny<Guid>(), userId))
             .ReturnsAsync(true);
         workflow.Setup(value => value.CanUserApproveAsync("AccountingBookPeriodLifecycle", It.IsAny<Guid>(), userId))
@@ -572,7 +636,8 @@ public sealed class FinanceApprovalQueueProjectionTests
             display.Object, Mock.Of<IJournalEntryService>(),
             Mock.Of<IInvoiceService>(),
             Mock.Of<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService>(),
-            null!, NullLogger<FinanceApprovalsController>.Instance)
+            null!, NullLogger<FinanceApprovalsController>.Instance,
+            bankReconciliationService: bankReconciliationService)
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
