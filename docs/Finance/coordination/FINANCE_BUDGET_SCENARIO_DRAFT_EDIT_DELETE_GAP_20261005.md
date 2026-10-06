@@ -12,6 +12,7 @@ Implement governed hybrid account-segment + Finance-dimension Budget Return scop
 - Implementation base commit: `5389fe6bcb28db3a37f7a21fe41fee93b3fc9909`
 - Completed implementation commit: `90a2c4ad1` (`feat(finance): govern budget return scope and draft lifecycle`)
 - Corrective migration commit: `ae42e678c` (`fix(finance): use compatible budget return index filter`)
+- Searchable assignee follow-up commit: `dfae8481b` (`fix(finance): make budget return assignee searchable`)
 - Pull request: no PR creation, update, or push is authorized for this workstream yet.
 
 ## Product decisions and evidence
