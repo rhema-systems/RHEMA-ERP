@@ -2,7 +2,7 @@
 
 ## Objective and scope
 
-Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor manually match the posted deposit `DEP-202610-0001` against imported statement line `LQE-202610-00002`, and determine whether the displayed GHS 5,760 book balance is authoritative.
+Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor manually match the posted deposit `DEP-202610-0001` against imported statement line `LQE-202610-00002`, determine whether the displayed GHS 5,760 book balance is authoritative, and correct the subsequent rematch and adjustment-posting blockers found during UAT.
 
 ## Branch and worktree
 
@@ -27,6 +27,9 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Product-model decision: reconciliation remains anchored to the physical bank account and its operational cash transactions. The tenant's default primary accounting book is the authoritative GL context for the displayed book balance; parallel-book replicas must not be aggregated or reconciled independently against the same bank statement.
 - Industry comparison: Microsoft Dynamics 365 Finance and Business Central reconcile statement lines to bank-account transactions / bank-account ledger entries within the legal-entity context, while Oracle recommends a unique GL cash account per bank account for book-to-bank reconciliation. This supports bank-account-first reconciliation with one authoritative ledger context, not an all-books balance.
 - Follow-up adjustment UX: the reconciliation-adjustment offset account used a plain select over as many as 1,000 active accounts. It now uses the existing Command/Popover searchable-combobox pattern, searches account number and name, and preserves the existing posting-account eligibility filter and selected account ID payload.
+- Rematch evidence: reconciliation `7585ce3e-1843-4dbf-a53d-c967cec6ff28` retains soft-deleted match `bdbc26b7-94fe-4d68-9d3f-7165c0c0b520`; the statement line is reopened, but the unfiltered unique statement-line index rejects the replacement match. Classification: confirmed persistence-contract defect. Uniqueness must apply to active (`IsDeleted = 0`) matches so audit history and one-active-match governance coexist.
+- Adjustment-action evidence: ABC Bank has a valid GL link in UAT, and the entered amount and replacement offset account were valid. The page loads `/finance/bank-accounts/active`, but `GetActiveAccountsAsync` omitted `GLAccountId` from its DTO projection. The hidden bank-GL prerequisite therefore arrived as undefined and silently disabled posting. Classification: confirmed API projection / UI contract defect, not user input error.
+- Account `DEFAULT-6600` remains ineligible as an offset because it is configured `IsControlAccount = true` and `AllowDirectPosting = false`. Reclassifying that account is a separate configuration-governance decision; this workstream does not mutate UAT master data.
 
 ## Changed files
 
@@ -34,11 +37,17 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - `frontend/src/app/finance/cash/reconciliation/reconciliation-matching.ts`
 - `frontend/src/app/finance/cash/reconciliation/reconciliation-matching.test.ts`
 - `src/ErpSystem.Api/Services/Finance/Cash/BankReconciliationService.cs`
+- `src/ErpSystem.Api/Services/Finance/Cash/BankAccountService.cs`
+- `src/ErpSystem.Data/ApplicationDbContext.cs`
+- `src/ErpSystem.Data/Migrations/20261006010000_AllowBankReconciliationRematchAfterUnmatch.cs`
+- `src/ErpSystem.Data/Migrations/ApplicationDbContextModelSnapshot.cs`
+- `tests/ErpSystem.Api.Tests/Services/Finance/BankAccountTenantIsolationTests.cs`
 - `tests/ErpSystem.Api.Tests/Services/Finance/BankReconciliationPostingMigrationTests.cs`
 
 ## Migrations and application state
 
-- No migration is expected for these fixes.
+- Migration `20261006010000_AllowBankReconciliationRematchAfterUnmatch` changes the cash-transaction and bank-statement-line unique indexes to filtered unique indexes over active matches (`[IsDeleted] = 0`).
+- The migration is included locally but has not been applied to any database.
 - No UAT data was changed during diagnosis.
 
 ## Verification evidence
@@ -51,6 +60,9 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 - Frontend direction contract: 6 tests passed.
 - Targeted frontend ESLint: passed.
 - Focused ESLint after converting the adjustment offset account to a searchable combobox: passed.
+- Focused ESLint after replacing the silent adjustment disable guard with explicit submit validation: passed.
+- Exact rematch migration contract `RematchMigration_ShouldLimitUniquenessToActiveMatches`: passed (1/1).
+- Combined focused regressions for the rematch migration and active-bank-account GL projection: passed (2/2).
 - Exact backend parallel-book regression `BookBalance_ShouldExcludeParallelBookReplicaOfSameBankMovement`: passed (1/1).
 - Full `BankReconciliationPostingMigrationTests` class: 7 passed and 12 failed before reconciliation assertions because the legacy test fixture does not provide the now-required governed source-book authority (`SOURCE_BOOK_AUTHORITY_MISSING`). The new regression is independent of that fixture failure and passes in isolation.
 - `git diff --check`: passed; Git reported only expected LF-to-CRLF working-copy warnings.
@@ -58,6 +70,7 @@ Diagnose why the 2026-10-05 ABC Bank reconciliation could neither auto-match nor
 ## Remaining work
 
 - Repair the legacy bank-reconciliation test fixture's source-book-authority setup in its own atomic test-maintenance change; the production reconciliation fix does not bypass that governance requirement.
+- Decide separately whether `DEFAULT-6600 Bank Charges` should cease being a protected control account and allow direct posting; no seed or UAT configuration change is included here.
 - Do not alter the conservative auto-match threshold without a separate policy decision; manual matching is the intended reviewed fallback for this pair.
 
 ## Authorization boundaries

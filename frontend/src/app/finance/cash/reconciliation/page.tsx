@@ -884,7 +884,14 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
             toast({ title: 'Bank GL account required', description: 'Link the bank account to a posting account before recording an adjustment.', variant: 'destructive' });
             return;
         }
-        if (!offsetAccountId || !Number.isFinite(numericAmount) || numericAmount <= 0) return;
+        if (!offsetAccountId) {
+            toast({ title: 'Offset account required', description: 'Select the posting account for the other side of the adjustment.', variant: 'destructive' });
+            return;
+        }
+        if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+            toast({ title: 'Positive amount required', description: 'Enter an adjustment amount greater than zero.', variant: 'destructive' });
+            return;
+        }
         mutation.mutate({
             adjustmentType,
             transactionDate: new Date(`${transactionDate}T12:00:00`).toISOString(),
@@ -1017,7 +1024,7 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-                    <Button onClick={submit} disabled={mutation.isPending || !bankGlAccountId || !offsetAccountId || Number(amount) <= 0}>
+                    <Button onClick={submit} disabled={mutation.isPending}>
                         {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Post adjustment
                     </Button>
                 </DialogFooter>

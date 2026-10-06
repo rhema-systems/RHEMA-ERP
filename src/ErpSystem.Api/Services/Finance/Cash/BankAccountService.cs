@@ -132,6 +132,7 @@ public class BankAccountService : IBankAccountService
                 BankBranch = a.BankBranch,
                 Currency = a.Currency,
                 AccountType = a.AccountType,
+                GLAccountId = a.GLAccountId,
                 CurrentBalance = a.CurrentBalance,
                 AvailableBalance = a.AvailableBalance,
                 IsActive = a.IsActive

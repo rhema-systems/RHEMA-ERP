@@ -6264,6 +6264,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(e => e.TenantId);
             entity.HasIndex(e => new { e.TenantId, e.ReconciliationId });
+            entity.HasIndex(e => e.CashTransactionId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => e.BankStatementLineId)
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
 
             entity.HasOne(rm => rm.BankStatementLine)
                 .WithOne(bsl => bsl.ReconciliationMatch)

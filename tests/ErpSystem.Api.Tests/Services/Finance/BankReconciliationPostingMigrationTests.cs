@@ -11,11 +11,14 @@ using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
+using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -24,6 +27,23 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class BankReconciliationPostingMigrationTests
 {
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankReconciliation")]
+    [Trait("Category", "CashBank")]
+    public void RematchMigration_ShouldLimitUniquenessToActiveMatches()
+    {
+        var operations = new ExposedRematchMigration().BuildOperations();
+        var indexes = operations.OfType<CreateIndexOperation>()
+            .Where(operation => operation.Table == "ReconciliationMatch")
+            .ToDictionary(operation => operation.Name);
+
+        indexes.Should().ContainKeys(
+            "IX_ReconciliationMatch_BankStatementLineId",
+            "IX_ReconciliationMatch_CashTransactionId");
+        indexes.Values.Should().OnlyContain(operation =>
+            operation.IsUnique && operation.Filter == "[IsDeleted] = 0");
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankReconciliation")]
     [Trait("Category", "CashBank")]
@@ -1060,6 +1080,16 @@ public sealed class BankReconciliationPostingMigrationTests
             .Options;
 
         return new ApplicationDbContext(options);
+    }
+
+    private sealed class ExposedRematchMigration : AllowBankReconciliationRematchAfterUnmatch
+    {
+        public IReadOnlyList<MigrationOperation> BuildOperations()
+        {
+            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+            Up(builder);
+            return builder.Operations;
+        }
     }
 
     private static BankReconciliationService CreateReconciliationService(
