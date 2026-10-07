@@ -34,7 +34,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { authService } from '@/services/auth';
 import { isCandidateUser, isConsultantClientUser } from '@/lib/auth-routing';
-import { useRouter } from 'next/navigation';
 import type { Tenant } from '@/types';
 
 interface MenuItem {
@@ -249,7 +248,6 @@ const consultantClientMenuItems: MenuItem[] = [
 
 export function ExternalSidebar() {
   const pathname = usePathname() ?? '';
-  const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const user = authService.getStoredUser();
@@ -319,11 +317,6 @@ export function ExternalSidebar() {
     window.addEventListener('tenant-changed', handler as any);
     return () => window.removeEventListener('tenant-changed', handler as any);
   }, []);
-
-  const handleLogout = () => {
-    authService.logout();
-    router.push('/login');
-  };
 
   return (
     <div

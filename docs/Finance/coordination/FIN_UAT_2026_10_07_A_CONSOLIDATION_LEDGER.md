@@ -1,16 +1,17 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: pr_open
+integration_status: merged_hotfix_in_progress
 integration_decision: include
-candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007-v2
-candidate_head: 905eed2c3
-base_commit: 28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7
+candidate_branch: codex/fix-external-logout-finance-build
+candidate_head: working_tree
+base_commit: f25faf38ee08fb2954746f689125e386eb014c39
 target_ref: origin/master
 depends_on: none
 migration_status: generated_and_applied_to_named_local_uat_only
-verification_status: passed_with_documented_baseline_drift
-integration_commit: 8372d2847
+verification_status: hotfix_frontend_build_and_focused_tests_passed
+integration_commit: 0875a5a3e30
 pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/364
+hotfix_pull_request: pending
 ---
 
 # Finance UAT consolidation: bank reconciliation and transaction FX overrides
@@ -54,12 +55,22 @@ Unrelated primary-checkout changes, generated local artifacts, historical worktr
 - `git diff --cached --check`: passed before integration commit.
 - EF reports 12 pending operations, but a model-differ probe identified only pre-existing Security/Audit/Estate operations. No pending operation touches `FinanceExchangeRateOverrideRequests` or this PR's migration.
 
+## Post-merge build regression and recovery
+
+- PR #364 was merged as `0875a5a3e30` and was included in `master` at `f25faf38ee08fb2954746f689125e386eb014c39`.
+- The Windows VPS workflow's Next.js production build then failed because `frontend/src/app/finance/cash/reconciliation/page.tsx` declared `requestedReconciliationId` and `requestedReconciliationQuery` twice.
+- Recovery branch: `codex/fix-external-logout-finance-build`, based exactly on `f25faf38ee08fb2954746f689125e386eb014c39`.
+- The duplicated declaration, query, and effect were removed; the retained query still loads a requested reconciliation and selects its bank account.
+- The same recovery also fixes an external-portal logout race in which navigation reached `/login` before asynchronous token cleanup, allowing the login page to redirect the stale session to `/tenant-select`. Tenant selection now handles missing or rejected authentication as a direct login redirect and suppresses expected `/auth/me` 401 console noise.
+- Focused tenant-selection regression coverage: 7/7 passed.
+- Targeted ESLint: passed for all seven changed frontend files.
+- Next.js 15.5.24 production build: passed, including compilation, page-data collection, static-page generation, and build-trace collection.
+- `git diff --check`: passed.
+
 ## Remaining work
 
-Review PR #364 and await an explicit merge/deployment decision. Workflow provisioning and any further database action remain separately authorized follow-ups.
+Commit and publish the focused recovery branch, open and merge its pull request after required checks, then trigger the Windows VPS workflow from the exact merged `master` revision.
 
 ## Authorization boundaries
 
-Authorized: scoped commits, clean integration worktree/branch, push, and PR creation.
-
-Not authorized: merge, deploy, additional database mutation or migration application, workflow provisioning, destructive cleanup, or deletion of branches/worktrees.
+The original cycle stopped at PR creation. The user subsequently authorized merging the combined work and deploying through the GitHub Actions Windows VPS workflow. This recovery remains limited to the failed frontend build and external-portal logout/session behavior. No database mutation, migration application, destructive cleanup, or unrelated-file collection is authorized.

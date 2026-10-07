@@ -547,8 +547,8 @@ class ApiService {
     }
   }
 
-  public async getCurrentUser(): Promise<UserInfo> {
-    return this.privateRequest<UserInfo>('/auth/me');
+  public async getCurrentUser(options: { silent?: boolean } = {}): Promise<UserInfo> {
+    return this.privateRequest<UserInfo>('/auth/me', {}, true, options.silent ?? false);
   }
 
   // Public request method for admin service

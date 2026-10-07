@@ -24,7 +24,7 @@ export function useAuth() {
     enabled: typeof window !== 'undefined' && authService.isAuthenticated(),
     retry: (failureCount, error: any) => {
       // Don't retry on 401 errors
-      if (error?.response?.status === 401) {
+      if (error?.status === 401 || error?.response?.status === 401) {
         return false;
       }
       return failureCount < 2;

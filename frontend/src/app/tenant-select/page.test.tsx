@@ -5,17 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
+  replace: vi.fn(),
   setCurrentTenantCode: vi.fn(),
   getCurrentUser: vi.fn(),
   publicRequest: vi.fn(),
   selectTenant: vi.fn(),
   getStoredUser: vi.fn(),
+  isAuthenticated: vi.fn(),
   logout: vi.fn(),
   completeTransition: vi.fn(),
 }));
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: mocks.push }),
+  useRouter: () => ({ push: mocks.push, replace: mocks.replace }),
 }));
 
 vi.mock('../../contexts/TenantContext', () => ({
@@ -36,6 +38,7 @@ vi.mock('../../services/tenant', () => ({
 vi.mock('../../services/auth', () => ({
   authService: {
     getStoredUser: mocks.getStoredUser,
+    isAuthenticated: mocks.isAuthenticated,
     logout: mocks.logout,
   },
 }));
@@ -77,14 +80,16 @@ const currentUser = {
   permissions: [],
 };
 
-const renderPage = (initialUser = currentUser) => {
+const renderPage = (initialUser: typeof currentUser | undefined = currentUser) => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false, structuralSharing: false },
       mutations: { retry: false },
     },
   });
-  queryClient.setQueryData(['currentUser'], initialUser);
+  if (initialUser) {
+    queryClient.setQueryData(['currentUser'], initialUser);
+  }
 
   const view = render(
     <QueryClientProvider client={queryClient}>
@@ -103,6 +108,7 @@ describe('tenant selection transition', () => {
     mocks.publicRequest.mockResolvedValue({});
     mocks.selectTenant.mockResolvedValue(undefined);
     mocks.getStoredUser.mockReturnValue(currentUser);
+    mocks.isAuthenticated.mockReturnValue(true);
     mocks.logout.mockResolvedValue(undefined);
     mocks.completeTransition.mockResolvedValue(undefined);
   });
@@ -196,5 +202,26 @@ describe('tenant selection transition', () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /Second Organization/i })).toBeEnabled();
     expect(mocks.selectTenant).not.toHaveBeenCalled();
+  });
+
+  it('returns an unauthenticated visitor to login without requesting tenants', async () => {
+    mocks.isAuthenticated.mockReturnValue(false);
+
+    renderPage(undefined);
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/login'));
+    expect(mocks.getCurrentUser).not.toHaveBeenCalled();
+    expect(screen.queryByText('Failed to load tenants. Please try logging in again.')).not.toBeInTheDocument();
+  });
+
+  it('redirects an expired session without showing the tenant loading error', async () => {
+    const unauthorized = Object.assign(new Error('HTTP 401'), { status: 401 });
+    mocks.getCurrentUser.mockRejectedValue(unauthorized);
+
+    renderPage(undefined);
+
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledWith({ silent: true }));
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith('/login'));
+    expect(screen.queryByText('Failed to load tenants. Please try logging in again.')).not.toBeInTheDocument();
   });
 });
