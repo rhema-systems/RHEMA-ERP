@@ -65,7 +65,6 @@ chrome.stderr.resume();
 
 let socket;
 let sequence = 0;
-let lastNetworkEventAt = Date.now();
 const pendingCommands = new Map();
 const requests = new Map();
 const current = {
@@ -124,7 +123,6 @@ function send(method, params = {}) {
 
 function resetPageSignals() {
   requests.clear();
-  lastNetworkEventAt = Date.now();
   for (const key of Object.keys(current)) current[key].length = 0;
 }
 
@@ -140,14 +138,15 @@ async function evaluate(expression) {
   return response.result.value;
 }
 
-async function waitForNetworkSettle(timeoutMs = 20_000) {
+async function waitForEvaluation(expression, predicate, description, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
+  let lastValue;
   while (Date.now() < deadline) {
-    // Long-polling and forced browser extensions can remain open indefinitely.
-    if (Date.now() - lastNetworkEventAt >= 1_000) return;
-    await delay(100);
+    lastValue = await evaluate(expression);
+    if (predicate(lastValue)) return lastValue;
+    await delay(200);
   }
-  throw new Error(`Network did not settle; ${requests.size} request(s) remained open.`);
+  throw new Error(`${description} timed out. Last state: ${JSON.stringify(lastValue)}`);
 }
 
 async function navigate(relativeUrl) {
@@ -159,16 +158,28 @@ async function navigate(relativeUrl) {
 
   const deadline = Date.now() + 30_000;
   let ready = false;
+  let lastState;
   while (Date.now() < deadline) {
-    const state = await evaluate(`({ readyState: document.readyState, href: location.href })`);
-    if (state.readyState === 'complete' && state.href !== 'about:blank') {
+    lastState = await evaluate(`({
+      readyState: document.readyState,
+      href: location.href,
+      hasDocumentElement: Boolean(document.documentElement),
+    })`);
+    // Next.js can progressively render a usable page while the document remains
+    // in "loading" because a streamed response or nonessential asset is open.
+    // Route-specific UI checks below are the authoritative readiness gates.
+    if (lastState.href !== 'about:blank' && lastState.hasDocumentElement) {
       ready = true;
       break;
     }
     await delay(100);
   }
-  if (!ready) throw new Error(`Page readiness timed out for ${relativeUrl}.`);
-  await waitForNetworkSettle();
+  if (!ready) {
+    throw new Error(
+      `Page readiness timed out for ${relativeUrl}. Last state: ${JSON.stringify(lastState)}`,
+    );
+  }
+  await delay(250);
   return evaluate('location.href');
 }
 
@@ -196,20 +207,16 @@ try {
     }
 
     if (message.method === 'Network.requestWillBeSent') {
-      lastNetworkEventAt = Date.now();
       requests.set(message.params.requestId, message.params.request.url);
     } else if (message.method === 'Network.loadingFinished') {
-      lastNetworkEventAt = Date.now();
       requests.delete(message.params.requestId);
     } else if (message.method === 'Network.loadingFailed') {
-      lastNetworkEventAt = Date.now();
       const url = requests.get(message.params.requestId) ?? '(unknown request)';
       requests.delete(message.params.requestId);
       if (!message.params.canceled) {
         current.failedRequests.push({ url, error: message.params.errorText });
       }
     } else if (message.method === 'Network.responseReceived') {
-      lastNetworkEventAt = Date.now();
       const { status, url } = message.params.response;
       if (status >= 400) current.errorResponses.push({ status, url });
     } else if (message.method === 'Runtime.consoleAPICalled'
@@ -234,7 +241,7 @@ try {
 
   const results = {};
   results.loginUrl = await navigate('/login');
-  results.loginUi = await evaluate(`(() => {
+  const loginUiExpression = `(() => {
     const visible = (element) => {
       if (!element) return false;
       const style = getComputedStyle(element);
@@ -245,15 +252,28 @@ try {
     const inputs = [...document.querySelectorAll('input')].filter(visible);
     const buttons = [...document.querySelectorAll('button')].filter(visible);
     return {
+      loginCardPresent: Boolean(document.querySelector('[data-login-card]')),
       userFieldVisible: inputs.some((input) => ['text', 'email'].includes(input.type)),
       passwordFieldVisible: inputs.some((input) => input.type === 'password'),
       signInVisible: buttons.some((button) => button.innerText.trim().toLowerCase() === 'sign in'),
+      inputTypes: inputs.map((input) => input.type),
+      buttonLabels: buttons.map((button) => button.innerText.trim()).filter(Boolean),
+      loadingMessage: document.querySelector('[data-login-loading-style]')?.textContent?.trim() ?? null,
     };
-  })()`);
+  })()`;
+  results.loginUi = await waitForEvaluation(
+    loginUiExpression,
+    (state) => state.loginCardPresent
+      && state.userFieldVisible
+      && state.passwordFieldVisible
+      && state.signInVisible,
+    'Login form readiness',
+  );
+  await delay(500);
   results.loginSignals = snapshotSignals();
 
   results.supplierUrl = await navigate('/supplier-application');
-  results.supplierUi = await evaluate(`(() => {
+  const supplierUiExpression = `(() => {
     const visible = (element) => {
       if (!element) return false;
       const style = getComputedStyle(element);
@@ -267,20 +287,31 @@ try {
       applyForTokenVisible: tabs.includes('Apply for token'),
       tokenLoginVisible: tabs.includes('Token login'),
     };
-  })()`);
+  })()`;
+  results.supplierUi = await waitForEvaluation(
+    supplierUiExpression,
+    (state) => state.applyForTokenVisible && state.tokenLoginVisible,
+    'Supplier application tabs',
+  );
+  await delay(500);
   results.supplierSignals = snapshotSignals();
 
   results.portalRedirectUrl = await navigate('/supplier-application/portal');
-  const portalRedirectDeadline = Date.now() + 10_000;
-  while (new URL(results.portalRedirectUrl).pathname === '/supplier-application/portal'
-    && Date.now() < portalRedirectDeadline) {
-    await delay(100);
-    results.portalRedirectUrl = await evaluate('location.href');
-  }
-  await waitForNetworkSettle();
+  results.portalRedirectUrl = await waitForEvaluation(
+    'location.href',
+    (href) => new URL(href).pathname === '/supplier-application',
+    'Supplier portal redirect',
+  );
+  await delay(500);
   results.portalSignals = snapshotSignals();
   results.adminRedirectUrl = await navigate(
     '/administration/procurement/supplier-applicant-access');
+  results.adminRedirectUrl = await waitForEvaluation(
+    'location.href',
+    (href) => new URL(href).pathname === '/login',
+    'Protected administration redirect',
+  );
+  await delay(500);
   results.adminSignals = snapshotSignals();
 
   const allSignals = [
