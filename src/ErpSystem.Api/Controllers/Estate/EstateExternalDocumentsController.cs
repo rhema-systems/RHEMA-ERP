@@ -1528,7 +1528,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     TenantId = tenantId,
                     ProcedureCaseId = linkedLegalCase.Id,
                     Name = "Customer signed agreement",
-                    RequiredFrom = "Head of Legal Signature",
+                    RequiredFrom = "Customer Signature Return",
                     ProvidedBy = "Customer",
                     IsMandatory = true,
                     CreatedAt = now,

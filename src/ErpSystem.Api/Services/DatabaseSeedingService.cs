@@ -38,6 +38,8 @@ namespace ErpSystem.Web.Services
         Task SeedHrWorkflowDefinitionsAsync();
         Task SeedFinanceWorkflowDefinitionsAsync();
         Task SeedEstateAcquisitionLandBankParcelsAsync();
+        Task SeedPropertyManagementListingWorkflowAsync();
+        Task SeedPortalPropertyRequestExamplesAsync();
         Task SeedTestUsersAsync();
         Task SeedMaintenanceE2ETestDataAsync();
         Task<bool> HasSeedDataAsync();
@@ -145,7 +147,8 @@ namespace ErpSystem.Web.Services
             string TaskActionType = "estate-sop-example",
             string DocumentType = "EstateSopEvidence",
             string? Instructions = null,
-            IReadOnlyList<string>? FieldKeys = null);
+            IReadOnlyList<string>? FieldKeys = null,
+            WorkflowSignaturePolicyDto? SignaturePolicy = null);
 
         public DatabaseSeedingService(
             ApplicationDbContext context,
@@ -195,6 +198,117 @@ namespace ErpSystem.Web.Services
         public Task SeedAsync() => SeedCoreAsync(applyMigrations: true);
 
         public Task SeedWithoutMigrationAsync() => SeedCoreAsync(applyMigrations: false);
+
+        public Task SeedPropertyManagementListingWorkflowAsync()
+            => EnsurePropertyManagementListingWorkflowSeededAsync();
+
+        public async Task SeedPortalPropertyRequestExamplesAsync()
+        {
+            var externalUsers = await _context.Users
+                .Where(user => user.IsActive && user.UserName == "external")
+                .OrderBy(user => user.TenantId)
+                .ToListAsync();
+            if (externalUsers.Count == 0)
+            {
+                _logger.LogWarning("Skipping external portal property request examples because the external demo user is missing.");
+                return;
+            }
+
+            foreach (var portalUser in externalUsers.GroupBy(user => user.TenantId).Select(group => group.First()))
+            {
+                var customer = new BusinessPartner
+                {
+                    Id = portalUser.Id,
+                    TenantId = portalUser.TenantId,
+                    PartnerName = "External Portal Demo Customer",
+                    CustomerAccountNumber = "CUS-PORTAL-001"
+                };
+                var now = DateTime.UtcNow;
+
+                foreach (var seed in GetPortalPropertyRequestExampleSeeds())
+                {
+                    var exists = await _context.ProcedureCases.AnyAsync(item =>
+                        item.TenantId == portalUser.TenantId
+                        && !item.IsDeleted
+                        && item.ReferenceNumber == seed.ReferenceNumber);
+                    if (exists)
+                    {
+                        continue;
+                    }
+
+                    var listingReference = seed.DemarcationNumber.HasValue
+                        ? $"{seed.AssetCode}-DEM-{seed.DemarcationNumber.Value:000}"
+                        : seed.AssetCode;
+                    var listing = new PortalPropertyRequestListingSeed(
+                        Guid.NewGuid(),
+                        seed.DemarcationNumber.HasValue ? "EstateLandDemarcation" : "EstateManagedAsset",
+                        listingReference,
+                        listingReference,
+                        "Tema",
+                        null,
+                        null);
+                    var createdAt = now.AddDays(-seed.AgeDays);
+                    var procedureCase = new ProcedureCase
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = portalUser.TenantId,
+                        Module = "PropertyManagement",
+                        EntityType = "EstatePropertyManagementListingApplication",
+                        Title = $"{seed.RequestLabel} - {listing.Name}",
+                        ReferenceNumber = seed.ReferenceNumber,
+                        ApplicantName = customer.PartnerName,
+                        SourceDepartment = "External Portal - Estate Listings",
+                        ReceivedDate = createdAt.Date,
+                        Description = $"{seed.RequestLabel} accepted by Sales for {listing.Reference}. Seeded for Estate intake.",
+                        Status = "Open",
+                        CurrentStageIndex = 0,
+                        CurrentStageName = "Estate intake review",
+                        CurrentStageOwner = "Estate Officer",
+                        CurrentAssignedRole = "Estate Officer",
+                        OpenedById = portalUser.Id,
+                        LastActionById = portalUser.Id,
+                        CreatedById = portalUser.Id,
+                        CreatedBy = "System",
+                        CreatedAt = createdAt,
+                        UpdatedAt = createdAt
+                    };
+
+                    foreach (var field in BuildPortalPropertyRequestFields(seed, listing, customer, createdAt))
+                    {
+                        procedureCase.Fields.Add(new ProcedureCaseField
+                        {
+                            Id = Guid.NewGuid(),
+                            TenantId = portalUser.TenantId,
+                            Key = field.Key,
+                            Label = ToPortalPropertyRequestFieldLabel(field.Key),
+                            FieldType = "text",
+                            Value = field.Value,
+                            CreatedById = portalUser.Id,
+                            CreatedBy = "System",
+                            CreatedAt = createdAt
+                        });
+                    }
+
+                    procedureCase.Activities.Add(new ProcedureCaseActivity
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = portalUser.TenantId,
+                        Action = "Sales handoff received",
+                        StageName = procedureCase.CurrentStageName,
+                        Details = $"Seeded {seed.RequestType.ToLowerInvariant()} request for Estate intake.",
+                        PerformedById = portalUser.Id,
+                        PerformedAt = createdAt,
+                        CreatedById = portalUser.Id,
+                        CreatedBy = "System",
+                        CreatedAt = createdAt
+                    });
+
+                    _context.ProcedureCases.Add(procedureCase);
+                }
+            }
+
+            await _context.SaveChangesAsync();
+        }
 
         private async Task SeedCoreAsync(bool applyMigrations)
         {
@@ -344,6 +458,8 @@ namespace ErpSystem.Web.Services
                 {
                     _logger.LogInformation("Ensuring development test users exist...");
                     await SeedTestUsersAsync();
+                    _logger.LogInformation("Ensuring external portal property request examples are seeded...");
+                    await EnsurePortalPropertyRequestExamplesSeededAsync();
                     _logger.LogInformation("Ensuring Estate SOP example cases are seeded...");
                     await EnsureEstateSopExampleCasesSeededAsync();
                     _logger.LogInformation("Ensuring project demo data is seeded...");
@@ -878,10 +994,10 @@ namespace ErpSystem.Web.Services
                         ["availabilityCheck", "commercialReviewStatus"]),
                     Stage("Management decision", WorkflowStepType.Manual, "Property Manager",
                         ["Decision outcome, date, reason, and conditions are recorded", "Reservation requirement is confirmed only for an approved request"],
-                        ["decisionStatus", "decisionDate", "decisionReason", "reservationStatus"]),
+                        ["decisionStatus", "decisionDate", "decisionReason", "reservationStatus", "agreementSigningLocation"]),
                     Stage("Approved transaction handoff", WorkflowStepType.Manual, "Property Management Officer",
                         ["Owning lease or sale transaction reference is recorded", "Reservation or availability update is linked only after approval"],
-                        ["generatedAgreementReference", "legalAgreementReviewReference", "legalAgreementReviewStatus", "saleInvoiceReference"]),
+                        ["generatedAgreementReference", "agreementSigningLocation", "legalAgreementReviewReference", "legalAgreementReviewStatus", "saleInvoiceReference"]),
                     Stage("Customer update and close", WorkflowStepType.Manual, "Property Management Officer",
                         ["Customer-facing request status reflects the final outcome", "Request is closed with its decision and transaction audit references"],
                         ["applicationStatus", "ownershipTransferStatus"])
@@ -1208,6 +1324,7 @@ namespace ErpSystem.Web.Services
             if (step.StepType == WorkflowStepType.Approval)
             {
                 configuration.ApprovalConfig = BuildApprovalConfig([step.RoleName]);
+                configuration.ApprovalConfig.SignaturePolicy = step.SignaturePolicy;
             }
 
             return JsonSerializer.Serialize(configuration, WorkflowSeedJsonOptions);
@@ -2016,6 +2133,18 @@ namespace ErpSystem.Web.Services
                                 "Legal review note"
                             ]),
                         LegalStep(
+                            "Customer Signature Return",
+                            WorkflowStepType.Manual,
+                            "Legal Admin Assistant",
+                            [
+                                "Confirm agreement is released to the customer portal",
+                                "Confirm customer signed agreement upload",
+                                "Forward returned agreement to Head of Legal"
+                            ],
+                            [
+                                "Customer signed agreement"
+                            ]),
+                        LegalStep(
                             "Head of Legal Signature",
                             WorkflowStepType.Approval,
                             "Head of Legal",
@@ -2025,9 +2154,15 @@ namespace ErpSystem.Web.Services
                                 "Return final signed agreement to Property Management"
                             ],
                             [
-                                "Customer signed agreement",
                                 "Head of Legal signed agreement"
-                            ])
+                            ],
+                            new WorkflowSignaturePolicyDto
+                            {
+                                IsRequired = true,
+                                Method = WorkflowSignatureMethod.Attestation,
+                                RequiredSigningRole = "Head of Legal",
+                                AttestationText = "I confirm that I reviewed the customer-signed agreement and apply the Head of Legal electronic signature."
+                            })
                     ])
             };
 
@@ -2061,7 +2196,8 @@ namespace ErpSystem.Web.Services
                 WorkflowStepType type,
                 string role,
                 IReadOnlyList<string> checks,
-                IReadOnlyList<string> documents)
+                IReadOnlyList<string> documents,
+                WorkflowSignaturePolicyDto? signaturePolicy = null)
                 => new(
                     name,
                     type,
@@ -2071,7 +2207,8 @@ namespace ErpSystem.Web.Services
                     documents,
                     TaskActionType,
                     DocumentType,
-                    $"Complete the {name} task for the property agreement review workflow.");
+                    $"Complete the {name} task for the property agreement review workflow.",
+                    SignaturePolicy: signaturePolicy);
         }
 
         private async Task EnsureFinanceWorkflowsSeededAsync()
@@ -9245,6 +9382,429 @@ namespace ErpSystem.Web.Services
             string SurveyPlanNumber,
             string MapSheetNumber,
             int DemarcationCount);
+
+        private async Task EnsurePortalPropertyRequestExamplesSeededAsync()
+        {
+            var externalUsers = await _context.Users
+                .Where(user => user.IsActive && user.UserName == "external")
+                .OrderBy(user => user.TenantId)
+                .ToListAsync();
+            if (externalUsers.Count == 0)
+            {
+                _logger.LogWarning("Skipping external portal property request examples because the external demo user is missing.");
+                return;
+            }
+
+            foreach (var externalUser in externalUsers.GroupBy(user => user.TenantId).Select(group => group.First()))
+            {
+                await EnsurePortalPropertyRequestExamplesSeededAsync(externalUser.TenantId, externalUser.Id);
+            }
+        }
+
+        private async Task EnsurePortalPropertyRequestExamplesSeededAsync(Guid tenantId, Guid portalUserId)
+        {
+            var now = DateTime.UtcNow;
+            var customer = await _context.BusinessPartners.FirstOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.PartnerCode == "CUST-PORTAL-DEMO");
+            if (customer is null)
+            {
+                customer = new BusinessPartner
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    PartnerCode = "CUST-PORTAL-DEMO",
+                    PartnerName = "External Portal Demo Customer",
+                    PartnerType = "Customer",
+                    LegalName = "External Portal Demo Customer",
+                    PrimaryContactName = "External User",
+                    PrimaryEmail = "external@default.com",
+                    PrimaryPhone = "+233 30 200 1200",
+                    PhysicalAddress = "Community 25, Tema",
+                    PhysicalCity = "Tema",
+                    PhysicalCountry = "Ghana",
+                    Currency = "GHS",
+                    CustomerAccountNumber = "CUS-PORTAL-001",
+                    RegistrationStatus = "Approved",
+                    ApprovalStatus = "Approved",
+                    IsActive = true,
+                    UserId = portalUserId,
+                    ApprovedById = portalUserId,
+                    ApprovedDate = now.AddDays(-10),
+                    Notes = "Seeded customer profile for external portal property request demos.",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                };
+                _context.BusinessPartners.Add(customer);
+            }
+            else
+            {
+                customer.PartnerType = "Customer";
+                customer.RegistrationStatus = "Approved";
+                customer.ApprovalStatus = "Approved";
+                customer.IsActive = true;
+                customer.UserId ??= portalUserId;
+                customer.CustomerAccountNumber ??= "CUS-PORTAL-001";
+                customer.Currency ??= "GHS";
+                customer.UpdatedAt = now;
+                customer.UpdatedBy = "System";
+            }
+
+            var existingLink = await _context.BusinessPartnerUsers.AnyAsync(item =>
+                item.TenantId == tenantId
+                && !item.IsDeleted
+                && item.BusinessPartnerId == customer.Id
+                && item.UserId == portalUserId);
+            if (!existingLink)
+            {
+                _context.BusinessPartnerUsers.Add(new BusinessPartnerUser
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    BusinessPartnerId = customer.Id,
+                    UserId = portalUserId,
+                    Role = "Admin",
+                    IsActive = true,
+                    GrantedAt = now,
+                    GrantedById = portalUserId,
+                    Notes = "Seeded portal customer link for property request demos.",
+                    CreatedAt = now,
+                    CreatedBy = "System"
+                });
+            }
+
+            foreach (var seed in GetPortalPropertyRequestExampleSeeds())
+            {
+                var exists = await _context.ProcedureCases.AnyAsync(item =>
+                    item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.ReferenceNumber == seed.ReferenceNumber);
+                if (exists)
+                {
+                    continue;
+                }
+
+                var listing = await ResolvePortalPropertyRequestListingAsync(
+                    tenantId,
+                    seed.AssetCode,
+                    seed.DemarcationNumber);
+                var createdAt = now.AddDays(-seed.AgeDays);
+                var title = $"{seed.RequestLabel} - {listing.Name}";
+                var description = $"{seed.RequestLabel} accepted by Sales for {listing.Reference} - {listing.Name}. Customer: {customer.PartnerName} ({customer.CustomerAccountNumber}).";
+                var procedureCase = new ProcedureCase
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Module = "PropertyManagement",
+                    EntityType = "EstatePropertyManagementListingApplication",
+                    Title = title,
+                    ReferenceNumber = seed.ReferenceNumber,
+                    ApplicantName = customer.PartnerName,
+                    SourceDepartment = "Sales - Estate Enquiry",
+                    ReceivedDate = createdAt.Date,
+                    Description = description,
+                    Status = "Open",
+                    CurrentStageIndex = 0,
+                    CurrentStageName = "Estate intake review",
+                    CurrentStageOwner = "Estate Officer",
+                    CurrentAssignedRole = "Estate Officer",
+                    OpenedById = portalUserId,
+                    LastActionById = portalUserId,
+                    CreatedById = portalUserId,
+                    CreatedBy = "System",
+                    CreatedAt = createdAt,
+                    UpdatedAt = createdAt
+                };
+
+                foreach (var field in BuildPortalPropertyRequestFields(seed, listing, customer, createdAt))
+                {
+                    procedureCase.Fields.Add(new ProcedureCaseField
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        Key = field.Key,
+                        Label = ToPortalPropertyRequestFieldLabel(field.Key),
+                        FieldType = "text",
+                        Value = field.Value,
+                        CreatedById = portalUserId,
+                        CreatedBy = "System",
+                        CreatedAt = createdAt
+                    });
+                }
+
+                procedureCase.Activities.Add(new ProcedureCaseActivity
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    Action = "Sales handoff received",
+                    StageName = procedureCase.CurrentStageName,
+                    Details = $"Seeded {seed.RequestType.ToLowerInvariant()} request from Sales handoff for external portal demo.",
+                    PerformedById = portalUserId,
+                    PerformedAt = createdAt,
+                    CreatedById = portalUserId,
+                    CreatedBy = "System",
+                    CreatedAt = createdAt
+                });
+
+                _context.ProcedureCases.Add(procedureCase);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private async Task<PortalPropertyRequestListingSeed> ResolvePortalPropertyRequestListingAsync(
+            Guid tenantId,
+            string assetCode,
+            int? demarcationNumber)
+        {
+            if (demarcationNumber.HasValue)
+            {
+                var demarcation = await _context.EstateLandDemarcations
+                    .AsNoTracking()
+                    .Include(item => item.EstateManagedAsset)
+                    .Where(item => item.TenantId == tenantId
+                        && !item.IsDeleted
+                        && item.DemarcationNumber == demarcationNumber.Value
+                        && item.EstateManagedAsset.AssetCode == assetCode
+                        && item.EstateManagedAsset.TenantId == tenantId
+                        && !item.EstateManagedAsset.IsDeleted)
+                    .FirstOrDefaultAsync();
+                if (demarcation is not null)
+                {
+                    var reference = EstateLandDemarcationReference.DisplayReference(
+                        demarcation.ChildFixedAssetReference,
+                        demarcation.EstateManagedAsset.AssetCode,
+                        demarcation.DemarcationNumber);
+                    return new PortalPropertyRequestListingSeed(
+                        demarcation.Id,
+                        "EstateLandDemarcation",
+                        reference,
+                        reference,
+                        demarcation.EstateManagedAsset.Location ?? "Tema",
+                        demarcation.AreaSquareFeet,
+                        "sq ft");
+                }
+            }
+
+            var asset = await _context.EstateManagedAssets
+                .AsNoTracking()
+                .Where(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.AssetCode == assetCode)
+                .FirstOrDefaultAsync();
+            if (asset is not null)
+            {
+                return new PortalPropertyRequestListingSeed(
+                    asset.Id,
+                    "EstateManagedAsset",
+                    asset.AssetCode,
+                    asset.Name,
+                    asset.Location ?? "Tema",
+                    asset.AreaValue,
+                    asset.AreaUnit);
+            }
+
+            return new PortalPropertyRequestListingSeed(
+                Guid.NewGuid(),
+                "EstateManagedAsset",
+                assetCode,
+                assetCode,
+                "Tema",
+                null,
+                null);
+        }
+
+        private static IReadOnlyDictionary<string, string?> BuildPortalPropertyRequestFields(
+            PortalPropertyRequestExampleSeed seed,
+            PortalPropertyRequestListingSeed listing,
+            BusinessPartner customer,
+            DateTime createdAt)
+        {
+            var paidAmount = decimal.Round(seed.AgreedAmount - seed.EstateRemainingAmount, 2, MidpointRounding.AwayFromZero);
+            var paymentStatus = seed.EstateRemainingAmount <= 0m
+                ? "Paid in full"
+                : paidAmount > 0m ? "Part-paid in Sales" : "Pending Estate payment";
+            return new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["applicationReference"] = seed.ReferenceNumber,
+                ["sourceWorkspace"] = "Sales - Estate Enquiry",
+                ["sourceReference"] = customer.Id.ToString(),
+                ["customerAccountReference"] = customer.CustomerAccountNumber,
+                ["customerName"] = customer.PartnerName,
+                ["propertyUnit"] = listing.Reference,
+                ["listingId"] = listing.Id.ToString(),
+                ["listingRecordType"] = listing.RecordType,
+                ["listingReference"] = listing.Reference,
+                ["listingName"] = listing.Name,
+                ["listingLocation"] = listing.Location,
+                ["listingArea"] = listing.Area?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                ["listingAreaUnit"] = listing.AreaUnit,
+                ["listingType"] = seed.ListingType,
+                ["requestType"] = seed.RequestLabel,
+                ["listingPrice"] = seed.AgreedAmount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
+                ["offerAmount"] = seed.RequestType == "Purchase" ? seed.AgreedAmount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+                ["requestedLeaseTerm"] = seed.RequestedTerm,
+                ["currency"] = "GHS",
+                ["salesAmountPaid"] = paidAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                ["salesPaymentReference"] = seed.SalesPaymentReference,
+                ["estateRemainingAmount"] = seed.EstateRemainingAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+                ["salePaymentStatus"] = paymentStatus,
+                ["salePaymentCheckStatus"] = seed.EstateRemainingAmount <= 0m
+                    ? $"Sales recorded GHS {paidAmount:N2}; no Estate balance remains."
+                    : $"Sales recorded GHS {paidAmount:N2}; Estate balance is GHS {seed.EstateRemainingAmount:N2}.",
+                ["requestMessage"] = seed.Message,
+                ["customerValidationStatus"] = "Validated by Sales",
+                ["listingValidationStatus"] = "Pending Estate intake",
+                ["availabilityCheck"] = "Pending",
+                ["commercialReviewStatus"] = "Completed by Sales",
+                ["decisionStatus"] = "Pending Estate review",
+                ["reservationStatus"] = "Sales completed",
+                ["agreementSigningLocation"] = "Legal",
+                ["customerNotificationStatus"] = "Estate handoff notified",
+                ["customerAcceptanceStatus"] = "Accepted in Sales",
+                ["customerAcceptanceDate"] = createdAt.ToString("yyyy-MM-dd"),
+                ["billingStartStatus"] = seed.BillingStatus,
+                ["ownershipTransferStatus"] = seed.OwnershipStatus,
+                ["receivedDate"] = createdAt.ToString("yyyy-MM-dd"),
+                ["applicationStatus"] = "Submitted from Sales",
+                ["salesOpportunityId"] = seed.SalesOpportunityId.ToString(),
+                ["salesReference"] = seed.SalesReference,
+                ["salesCompletedAt"] = createdAt.ToString("O"),
+                ["notes"] = seed.Message
+            };
+        }
+
+        private static string ToPortalPropertyRequestFieldLabel(string key)
+            => key switch
+            {
+                "applicationReference" => "Application reference",
+                "sourceWorkspace" => "Source workspace",
+                "sourceReference" => "Source reference",
+                "customerAccountReference" => "Customer account reference",
+                "customerName" => "Customer name",
+                "propertyUnit" => "Property unit",
+                "listingId" => "Listing id",
+                "listingRecordType" => "Listing record type",
+                "listingReference" => "Listing reference",
+                "listingName" => "Listing name",
+                "listingLocation" => "Listing location",
+                "listingArea" => "Listing area",
+                "listingAreaUnit" => "Listing area unit",
+                "listingType" => "Listing type",
+                "requestType" => "Request type",
+                "listingPrice" => "Listing price",
+                "offerAmount" => "Offer amount",
+                "requestedLeaseTerm" => "Requested lease term",
+                "currency" => "Currency",
+                "salesAmountPaid" => "Sales amount paid",
+                "salesPaymentReference" => "Sales payment reference",
+                "estateRemainingAmount" => "Estate remaining amount",
+                "salePaymentStatus" => "Sale payment status",
+                "salePaymentCheckStatus" => "Sale payment check status",
+                "requestMessage" => "Request message",
+                "customerValidationStatus" => "Customer validation status",
+                "listingValidationStatus" => "Listing validation status",
+                "availabilityCheck" => "Availability check",
+                "commercialReviewStatus" => "Commercial review status",
+                "decisionStatus" => "Decision status",
+                "reservationStatus" => "Reservation status",
+                "agreementSigningLocation" => "Agreement signing location",
+                "customerNotificationStatus" => "Customer notification status",
+                "customerAcceptanceStatus" => "Customer acceptance status",
+                "customerAcceptanceDate" => "Customer acceptance date",
+                "billingStartStatus" => "Billing start status",
+                "ownershipTransferStatus" => "Ownership transfer status",
+                "receivedDate" => "Received date",
+                "applicationStatus" => "Application status",
+                "salesOpportunityId" => "Sales opportunity id",
+                "salesReference" => "Sales reference",
+                "salesCompletedAt" => "Sales completed at",
+                "notes" => "Notes",
+                _ => key
+            };
+
+        private static IReadOnlyList<PortalPropertyRequestExampleSeed> GetPortalPropertyRequestExampleSeeds() =>
+        [
+            new(
+                ReferenceNumber: "PORTAL-SALES-HANDOFF-SALE-001",
+                RequestType: "Purchase",
+                RequestLabel: "Purchase enquiry",
+                ListingType: "Sale",
+                AssetCode: "TDC-PORTAL-LAND-001",
+                DemarcationNumber: 1,
+                SalesReference: "SO-PORTAL-SALE-001",
+                SalesOpportunityId: Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc96401"),
+                AgreedAmount: 850000m,
+                EstateRemainingAmount: 600000m,
+                RequestedTerm: null,
+                SalesPaymentReference: "RCT-PORTAL-SALE-001",
+                BillingStatus: "Estate balance pending",
+                OwnershipStatus: "Blocked - Estate balance and Legal conveyance required",
+                Message: "Demo sale request handed from Sales to Estate intake.",
+                AgeDays: 2),
+            new(
+                ReferenceNumber: "PORTAL-SALES-HANDOFF-LEASE-001",
+                RequestType: "Lease",
+                RequestLabel: "Lease enquiry",
+                ListingType: "Lease",
+                AssetCode: "TDC-PORTAL-LAND-002",
+                DemarcationNumber: 1,
+                SalesReference: "SO-PORTAL-LEASE-001",
+                SalesOpportunityId: Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc96402"),
+                AgreedAmount: 120000m,
+                EstateRemainingAmount: 90000m,
+                RequestedTerm: "50 years",
+                SalesPaymentReference: "RCT-PORTAL-LEASE-001",
+                BillingStatus: "Blocked - agreement pending",
+                OwnershipStatus: null,
+                Message: "Demo lease request handed from Sales to Estate intake.",
+                AgeDays: 1),
+            new(
+                ReferenceNumber: "PORTAL-SALES-HANDOFF-RENT-001",
+                RequestType: "Rent",
+                RequestLabel: "Rent enquiry",
+                ListingType: "Rent",
+                AssetCode: "TDC-PORTAL-LAND-003",
+                DemarcationNumber: 1,
+                SalesReference: "SO-PORTAL-RENT-001",
+                SalesOpportunityId: Guid.Parse("6f9619ff-8b86-d011-b42d-00c04fc96403"),
+                AgreedAmount: 4500m,
+                EstateRemainingAmount: 0m,
+                RequestedTerm: "12 months",
+                SalesPaymentReference: "RCT-PORTAL-RENT-001",
+                BillingStatus: "Ready for billing - first month rent covered by Sales",
+                OwnershipStatus: null,
+                Message: "Demo rent request handed from Sales to Estate intake.",
+                AgeDays: 0)
+        ];
+
+        private sealed record PortalPropertyRequestListingSeed(
+            Guid Id,
+            string RecordType,
+            string Reference,
+            string Name,
+            string Location,
+            decimal? Area,
+            string? AreaUnit);
+
+        private sealed record PortalPropertyRequestExampleSeed(
+            string ReferenceNumber,
+            string RequestType,
+            string RequestLabel,
+            string ListingType,
+            string AssetCode,
+            int? DemarcationNumber,
+            string SalesReference,
+            Guid SalesOpportunityId,
+            decimal AgreedAmount,
+            decimal EstateRemainingAmount,
+            string? RequestedTerm,
+            string SalesPaymentReference,
+            string BillingStatus,
+            string? OwnershipStatus,
+            string Message,
+            int AgeDays);
 
         private async Task EnsureEstateSopExampleCasesSeededAsync()
         {

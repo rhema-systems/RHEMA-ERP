@@ -89,6 +89,7 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
         new("customerAcceptanceDate", "Customer acceptance date", "date"),
         new("agreementTemplateReference", "Agreement template reference", "text"),
         new("generatedAgreementReference", "Generated agreement reference", "text"),
+        new("agreementSigningLocation", "Agreement signing location", "select", ["Legal", "Estate"]),
         new("signedAgreementReference", "Signed agreement reference", "text"),
         new("agreementExecutionStatus", "Agreement execution status", "text"),
         new("internalApprovalStatus", "Internal agreement approval status", "text"),

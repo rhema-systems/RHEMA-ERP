@@ -7,7 +7,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
     private static readonly LegalProcedureCatalogItem[] Procedures =
     [
         new("General Legal Matters", "LegalProcedure", "BookOpen", 6, "slate"),
-        new("Property Agreement Reviews", "LegalPropertyAgreementReview", "FileCheck2", 3, "emerald"),
+        new("Property Agreement Reviews", "LegalPropertyAgreementReview", "FileCheck2", 4, "emerald"),
         new("Legal Opinions / Advisory", "LegalOpinionAdvisory", "MessageSquare", 5, "indigo"),
         new("External Counsel Management", "LegalExternalCounsel", "Briefcase", 5, "zinc"),
         new("Mortgages", "LegalMortgage", "FileSignature", 6, "cyan"),
@@ -51,6 +51,7 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
             [
                 Stage("Legal Intake", "Legal Admin Assistant", "The linked property transaction and draft agreement are registered in Legal.", ["Confirm Estate source reference", "Confirm draft agreement is attached", "Assign Legal Officer"]),
                 Stage("Agreement Vetting", "Legal Officer", "The Legal Officer checks parties, property particulars, commercial terms, obligations, execution blocks, and legal risk before the customer signs.", ["Verify parties and property", "Review clauses and schedules", "Release vetted agreement to customer or return for correction"]),
+                Stage("Customer Signature Return", "Legal Admin Assistant", "The vetted agreement is available in the customer portal and Legal waits for the customer-signed upload.", ["Confirm agreement is released to the customer portal", "Confirm customer signed agreement upload", "Forward returned agreement to Head of Legal"]),
                 Stage("Head of Legal Signature", "Head of Legal", "After the customer returns the signed agreement, the Head of Legal applies the final Legal signature.", ["Confirm customer signed agreement", "Apply Head of Legal signature", "Return final signed agreement to Property Management"])
             ];
         }
@@ -201,6 +202,16 @@ public sealed class LegalProcedureCatalogService : ILegalProcedureCatalogService
 
     private static IReadOnlyList<LegalWorkspaceDocument> BuildDocuments(string entityType)
     {
+        if (string.Equals(entityType, "LegalPropertyAgreementReview", StringComparison.OrdinalIgnoreCase))
+        {
+            return UniqueDocuments([
+                Doc("Generated draft agreement", "Legal Intake", true),
+                Doc("Legal review note", "Agreement Vetting", true),
+                Doc("Customer signed agreement", "Customer Signature Return", true),
+                Doc("Head of Legal signed agreement", "Head of Legal Signature", true)
+            ]);
+        }
+
         if (string.Equals(entityType, "LegalCourtProcess", StringComparison.OrdinalIgnoreCase)
             || string.Equals(entityType, "LegalOtherCourtProcess", StringComparison.OrdinalIgnoreCase))
         {

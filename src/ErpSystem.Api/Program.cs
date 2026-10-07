@@ -149,6 +149,28 @@ if (args.Length > 0 && args[0] == "seed-estate-land-bank")
     return;
 }
 
+// Seed the three external portal property-request examples without applying unrelated migrations.
+if (args.Length > 0 && args[0] == "seed-portal-property-requests")
+{
+    var tempBuilder = CreateSeedBuilder(args);
+    tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemIdentity();
+    tempBuilder.Services.AddDatabaseSeeding();
+
+    var tempApp = tempBuilder.Build();
+
+    using (var scope = tempApp.Services.CreateScope())
+    {
+        var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
+        await seedingService.SeedPropertyManagementListingWorkflowAsync();
+        await seedingService.SeedPortalPropertyRequestExamplesAsync();
+    }
+
+    Console.WriteLine("External portal property requests and their published Estate workflow seeded successfully.");
+    return;
+}
+
 // Check for seed command
 if (args.Length > 0 && args[0] == "seed")
 {
@@ -623,7 +645,8 @@ if (args.Length > 0 && !args[0].StartsWith("--", StringComparison.Ordinal))
         $"Unknown command '{args[0]}'. Valid commands: seed, seed-civil-e2e, seed-tender-e2e, "
         + "seed-maintenance, seed-maintenance-e2e, seed-db, seed-deployment-uat, seed-operational-uat, seed-qs-uat, seed-workflows, "
         + "seed-supplier-onboarding-e2e, seed-hr-all, seed-hr-org-authority, seed-hr-demo, "
-        + "seed-finance-baseline, seed-finance-demo-dimensions, seed-estate-land-bank, rebuild-db, repair-finance-po-schema.");
+        + "seed-finance-baseline, seed-finance-demo-dimensions, seed-estate-land-bank, seed-portal-property-requests, "
+        + "rebuild-db, repair-finance-po-schema.");
     return;
 }
 

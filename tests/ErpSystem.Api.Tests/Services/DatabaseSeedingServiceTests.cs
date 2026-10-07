@@ -428,6 +428,90 @@ public partial class DatabaseSeedingServiceTests
     }
 
     [Fact]
+    public async Task PortalPropertyRequestSeeder_ShouldCreateSalesHandoffRequestsForExternalPortal()
+    {
+        await using var context = CreateContext();
+        var tenant = new Tenant
+        {
+            Id = Guid.NewGuid(),
+            Name = "Default Portal Tenant",
+            Code = "DEFAULT",
+            Status = TenantStatus.Active,
+            ContactEmail = "portal@test.local",
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        var external = new ApplicationUser
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenant.Id,
+            UserName = "external",
+            NormalizedUserName = "EXTERNAL",
+            Email = "external@default.com",
+            NormalizedEmail = "EXTERNAL@DEFAULT.COM",
+            FirstName = "External",
+            LastName = "User",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = "Tests"
+        };
+        context.Tenants.Add(tenant);
+        context.Users.Add(external);
+        await context.SaveChangesAsync();
+
+        var service = new DatabaseSeedingService(
+            context,
+            CreateUserManager(),
+            CreateRoleManager(),
+            NullLogger<DatabaseSeedingService>.Instance,
+            CreateEnvironment());
+        await service.SeedEstateAcquisitionLandBankParcelsAsync();
+
+        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
+            "EnsurePortalPropertyRequestExamplesSeededAsync",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            binder: null,
+            types: Type.EmptyTypes,
+            modifiers: null);
+        seedMethod.Should().NotBeNull();
+
+        await (Task)seedMethod!.Invoke(service, null)!;
+        await (Task)seedMethod.Invoke(service, null)!;
+
+        var customer = await context.BusinessPartners.SingleAsync(item =>
+            item.TenantId == tenant.Id && item.PartnerCode == "CUST-PORTAL-DEMO");
+        customer.UserId.Should().Be(external.Id);
+        customer.CustomerAccountNumber.Should().Be("CUS-PORTAL-001");
+        (await context.BusinessPartnerUsers.CountAsync(item =>
+            item.TenantId == tenant.Id
+            && item.BusinessPartnerId == customer.Id
+            && item.UserId == external.Id
+            && item.IsActive)).Should().Be(1);
+
+        var cases = await context.ProcedureCases
+            .Include(item => item.Fields)
+            .Where(item => item.TenantId == tenant.Id
+                && item.ReferenceNumber != null
+                && item.ReferenceNumber.StartsWith("PORTAL-SALES-HANDOFF-"))
+            .OrderBy(item => item.ReferenceNumber)
+            .ToListAsync();
+        cases.Should().HaveCount(3);
+        cases.Should().OnlyContain(item =>
+            item.Module == "PropertyManagement"
+            && item.EntityType == "EstatePropertyManagementListingApplication"
+            && item.SourceDepartment == "Sales - Estate Enquiry"
+            && item.CurrentStageName == "Estate intake review");
+        cases.SelectMany(item => item.Fields)
+            .Where(field => field.Key == "requestType")
+            .Select(field => field.Value)
+            .Should().BeEquivalentTo("Purchase enquiry", "Lease enquiry", "Rent enquiry");
+        cases.Should().OnlyContain(item => item.Fields.Any(field =>
+            field.Key == "sourceReference" && field.Value == customer.Id.ToString()));
+        cases.Should().OnlyContain(item => item.Fields.Any(field =>
+            field.Key == "applicationStatus" && field.Value == "Submitted from Sales"));
+    }
+
+    [Fact]
     public async Task SeedDefaultTenantModulesAsync_ShouldEnableProjectsForQsAndCivilReports()
     {
         await using var context = CreateContext();
@@ -482,12 +566,8 @@ public partial class DatabaseSeedingServiceTests
 
         var service = new DatabaseSeedingService(context, CreateUserManager(), CreateRoleManager(),
             NullLogger<DatabaseSeedingService>.Instance, CreateEnvironment());
-        var seedMethod = typeof(DatabaseSeedingService).GetMethod(
-            "EnsurePropertyManagementListingWorkflowSeededAsync", BindingFlags.Instance | BindingFlags.NonPublic);
-        seedMethod.Should().NotBeNull();
-
-        await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
-        await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
+        await service.SeedPropertyManagementListingWorkflowAsync();
+        await service.SeedPropertyManagementListingWorkflowAsync();
 
         var definitions = await context.WorkflowDefinitions
             .Include(item => item.EntityType)
