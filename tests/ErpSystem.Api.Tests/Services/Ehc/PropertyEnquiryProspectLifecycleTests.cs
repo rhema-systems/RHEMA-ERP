@@ -3,6 +3,7 @@ using System.Text.Json;
 using ErpSystem.Api.Controllers.Ehc;
 using ErpSystem.Api.Services.Ehc;
 using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
@@ -519,6 +520,163 @@ public sealed class PropertyEnquiryProspectLifecycleTests
             read?.GetCustomAttribute<AuthorizeAttribute>()?.Policy);
         Assert.NotNull(typeof(PropertyProspectDepositPolicyDto)
             .GetProperty(nameof(PropertyProspectDepositPolicyDto.DepositLiabilityAccountId)));
+    }
+
+    [Fact]
+    public async Task Recording_a_deposit_notifies_active_tenant_users_with_the_finance_receipt_permission()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var financeUserId = Guid.NewGuid();
+        var salesUnitId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+        var demarcationId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var ticketId = Guid.NewGuid();
+        var prospectId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
+        var permissionId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+
+        db.AddRange(
+            new OrganizationUnit
+            {
+                Id = salesUnitId,
+                TenantId = tenantId,
+                OrganizationLevelId = Guid.NewGuid(),
+                Name = "Sales",
+                Code = "DEPT-SALES",
+                Path = "/SALES",
+                IsActive = true
+            },
+            new EstateManagedAsset
+            {
+                Id = assetId,
+                TenantId = tenantId,
+                AssetCode = "LAND-001",
+                Name = "Public land",
+                AssetType = EstateManagedAssetType.Land
+            },
+            new SalesSaleableSource
+            {
+                Id = sourceId,
+                TenantId = tenantId,
+                Code = "LAND",
+                DisplayName = "Land Management",
+                SourceType = "LandManagement",
+                AdapterKey = "land-management",
+                DefaultCurrency = "GHS",
+                IsActive = true
+            });
+        var ticket = new EhcTicket
+        {
+            Id = ticketId,
+            TenantId = tenantId,
+            TicketNumber = "EHC-DEPOSIT-001",
+            Subject = "Deposit notification",
+            Description = "Qualified public property prospect",
+            TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged,
+            AssignedOrganizationUnitId = salesUnitId,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public land", "Sale", "GHS",
+                "Accra", 100000m, assetId, demarcationId, null, "Ama Mensah", "Ama Mensah",
+                "ama@example.test", "+233245550101"))
+        };
+        db.AddRange(
+            ticket,
+            new EhcPropertyEnquiryProspect
+            {
+                Id = prospectId,
+                TenantId = tenantId,
+                TicketId = ticketId,
+                OpportunityId = Guid.NewGuid(),
+                Status = EhcPropertyProspectStatuses.Opportunity,
+                AgreedAmount = 100000m,
+                Currency = "GHS",
+                DepositRequirementType = ProspectDepositRequirementTypes.Percentage,
+                DepositPercentage = 20m
+            },
+            new EhcPropertyProspectDepositPolicy
+            {
+                TenantId = tenantId,
+                SalesSaleableSourceId = sourceId,
+                RequirementType = ProspectDepositRequirementTypes.Percentage,
+                Percentage = 20m,
+                DepositLiabilityAccountId = Guid.NewGuid(),
+                DefaultBankAccountId = Guid.NewGuid(),
+                IsActive = true
+            },
+            new ApplicationUser
+            {
+                Id = financeUserId,
+                TenantId = tenantId,
+                UserName = "finance.receipts",
+                NormalizedUserName = "FINANCE.RECEIPTS",
+                FirstName = "Finance",
+                LastName = "Receipts",
+                IsActive = true
+            },
+            new ApplicationRole("Receipts Controller")
+            {
+                Id = roleId,
+                NormalizedName = "RECEIPTS CONTROLLER"
+            },
+            new Permission
+            {
+                Id = permissionId,
+                Name = FinancePermissions.ReceiveCustomerPayments,
+                DisplayName = "Receive Customer Payments",
+                Category = FinancePermissions.CategoryAccountsReceivable,
+                IsSystemPermission = true
+            },
+            new ApplicationUserRole { UserId = financeUserId, RoleId = roleId },
+            new RolePermission { RoleId = roleId, PermissionId = permissionId });
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserId).Returns(actorId.ToString());
+        currentUser.SetupGet(user => user.UserName).Returns("sales.manager");
+        var notifications = new Mock<INotificationService>();
+        notifications.Setup(service => service.CreateInAppNotificationAsync(
+                financeUserId,
+                "Prospect deposit awaiting clearance",
+                It.IsAny<string>(),
+                "sales.property-enquiry.deposit-recorded",
+                It.IsAny<Dictionary<string, object>>(),
+                tenantId))
+            .Returns(Task.CompletedTask);
+        var service = new PropertyEnquiryProspectService(
+            db,
+            currentUser.Object,
+            Mock.Of<IBusinessPartnerService>(),
+            Mock.Of<IOpportunityService>(),
+            Mock.Of<ISalesAllocationService>(),
+            Mock.Of<IProspectDepositFinancePostingService>(),
+            notifications.Object,
+            Mock.Of<IEhcTicketService>(),
+            NullLogger<PropertyEnquiryProspectService>.Instance);
+
+        var receipt = await service.RecordDepositAsync(ticketId, new RecordProspectDepositRequest
+        {
+            Amount = 2000m,
+            Currency = "GHS",
+            PaymentMethod = "BankTransfer",
+            TransactionReference = "BANK-001"
+        });
+
+        Assert.Equal(ProspectDepositReceiptStatuses.Pending, receipt.Status);
+        notifications.Verify(service => service.CreateInAppNotificationAsync(
+            financeUserId,
+            "Prospect deposit awaiting clearance",
+            It.Is<string>(message => message.Contains(ticket.TicketNumber) && message.Contains(receipt.ReceiptNumber)),
+            "sales.property-enquiry.deposit-recorded",
+            It.Is<Dictionary<string, object>>(data =>
+                data["ActionUrl"].Equals($"/sales/property-enquiries?id={ticketId}") &&
+                data["EntityId"].Equals(receipt.Id)),
+            tenantId), Times.Once);
     }
 
     [Fact]

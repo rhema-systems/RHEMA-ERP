@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,18 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   toast: vi.fn(),
   prospectStatus: 'New',
+  depositThresholdMet: false,
+  handoffReady: false,
+  queueError: '',
+  partnerMatches: [] as Array<{
+    id: string;
+    partnerCode: string;
+    partnerName: string;
+    email: string;
+    phone: string;
+    matchedOn: string[];
+    approvalStatus: string;
+  }>,
 }));
 
 vi.mock('next/navigation', () => ({
@@ -45,6 +58,10 @@ describe('property enquiry contact linkage', () => {
   beforeEach(() => {
     vi.stubGlobal('React', React);
     mocks.prospectStatus = 'New';
+    mocks.depositThresholdMet = false;
+    mocks.handoffReady = false;
+    mocks.queueError = '';
+    mocks.partnerMatches = [];
     mocks.toast.mockReset();
     mocks.request.mockReset();
     mocks.request.mockImplementation(
@@ -63,11 +80,50 @@ describe('property enquiry contact linkage', () => {
         if (endpoint.endsWith('/prospect/opportunity') && options?.method === 'POST') {
           throw new Error('This property already has an active reservation.');
         }
+        if (endpoint.endsWith('/prospect/business-partner-matches')) {
+          return { success: true, data: mocks.partnerMatches };
+        }
         if (endpoint.includes('?page=')) {
+          if (mocks.queueError) throw new Error(mocks.queueError);
           return { success: true, data: [], totalCount: 0 };
         }
+        if (endpoint.endsWith('/estate-handoff') && options?.method === 'POST') {
+          return {
+            success: true,
+            data: {
+              procedureCaseId: 'estate-case-42',
+              referenceNumber: 'EST-042',
+              alreadyExists: false,
+            },
+          };
+        }
         if (endpoint.endsWith('/estate-handoff')) {
-          return { success: true, data: { canHandoff: false } };
+          return {
+            success: true,
+            data: mocks.handoffReady
+              ? {
+                  canHandoff: true,
+                  opportunity: {
+                    id: 'opportunity-42',
+                    stage: 'Won',
+                    isWon: true,
+                    amount: 10000,
+                    currency: 'GHS',
+                    actualCloseDate: '2026-10-07T10:00:00Z',
+                  },
+                  salesOrder: {
+                    id: 'sales-order-42',
+                    reference: 'SO-000042',
+                    status: 'Completed',
+                    agreedAmount: 10000,
+                    amountPaid: 10000,
+                    currency: 'GHS',
+                    completedAt: '2026-10-07T10:00:00Z',
+                    paymentReference: 'PAY-042',
+                  },
+                }
+              : { canHandoff: false },
+          };
         }
         if (endpoint.endsWith('/prospect')) {
           return {
@@ -80,8 +136,9 @@ describe('property enquiry contact linkage', () => {
               currency: 'GHS',
               depositRequirementType: 'Full',
               requiredDeposit: 10000,
-              clearedDeposit: 0,
-              depositThresholdMet: false,
+              clearedDeposit: mocks.depositThresholdMet ? 10000 : 0,
+              depositThresholdMet: mocks.depositThresholdMet,
+              businessPartnerId: mocks.handoffReady ? 'customer-42' : null,
             },
           };
         }
@@ -200,6 +257,96 @@ describe('property enquiry contact linkage', () => {
       variant: 'destructive',
     }));
     expect(screen.queryByText('This property already has an active reservation.')).not.toBeInTheDocument();
+    client.clear();
+  });
+
+  it('checks for an existing customer and opens creation when the deposit threshold is met', async () => {
+    mocks.prospectStatus = 'Qualified';
+    mocks.depositThresholdMet = true;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <PropertyEnquiriesPage />
+      </QueryClientProvider>
+    );
+
+    const createCustomer = await screen.findByRole('button', {
+      name: 'Create customer',
+    });
+    expect(createCustomer).toBeEnabled();
+    fireEvent.click(createCustomer);
+
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        '/ehc/internal/property-enquiries/enquiry-42/prospect/business-partner-matches',
+        { method: 'GET' }
+      )
+    );
+    expect(
+      await screen.findByRole('heading', {
+        name: 'Create customer Business Partner',
+      })
+    ).toBeInTheDocument();
+    client.clear();
+  });
+
+  it('disables Estate handoff immediately after a successful handoff', async () => {
+    mocks.prospectStatus = 'Converted';
+    mocks.depositThresholdMet = true;
+    mocks.handoffReady = true;
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <PropertyEnquiriesPage />
+      </QueryClientProvider>
+    );
+
+    const handoffButton = await screen.findByRole('button', {
+      name: 'Hand off to Estate',
+    });
+    await waitFor(() => expect(handoffButton).toBeEnabled());
+    fireEvent.click(handoffButton);
+    const confirmation = await screen.findByRole('dialog');
+    fireEvent.click(
+      within(confirmation).getByRole('button', { name: 'Hand off to Estate' })
+    );
+
+    const completedButton = await screen.findByRole('button', {
+      name: 'Handed to Estate',
+    });
+    expect(completedButton).toBeDisabled();
+    expect(mocks.request).toHaveBeenCalledWith(
+      '/ehc/internal/property-enquiries/enquiry-42/estate-handoff',
+      expect.objectContaining({ method: 'POST' })
+    );
+    client.clear();
+  });
+
+  it('reports query failures through a toast instead of a page-top error', async () => {
+    mocks.queueError = 'The enquiry register is temporarily unavailable.';
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    render(
+      <QueryClientProvider client={client}>
+        <PropertyEnquiriesPage />
+      </QueryClientProvider>
+    );
+
+    await waitFor(() =>
+      expect(mocks.toast).toHaveBeenCalledWith({
+        title: 'Property enquiry request failed',
+        description: 'The enquiry register is temporarily unavailable.',
+        variant: 'destructive',
+      })
+    );
+    expect(
+      screen.queryByText('The enquiry register is temporarily unavailable.')
+    ).not.toBeInTheDocument();
     client.clear();
   });
 });
