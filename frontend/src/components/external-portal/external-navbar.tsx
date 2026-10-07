@@ -16,9 +16,11 @@ import { useNotifications } from '@/hooks/useNotifications';
 import { formatDistanceToNow } from 'date-fns';
 import { useRouter } from 'next/navigation';
 import { authService } from '@/services/auth';
+import { useAuth } from '@/hooks/use-auth';
 
 export function ExternalNavbar() {
   const router = useRouter();
+  const { logout, isLoggingOut } = useAuth();
   const user = authService.getStoredUser();
   const {
     notifications,
@@ -39,8 +41,7 @@ export function ExternalNavbar() {
   };
 
   const handleLogout = () => {
-    authService.logout();
-    router.push('/login');
+    logout();
   };
 
   return (
@@ -182,9 +183,13 @@ export function ExternalNavbar() {
                 Settings
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleLogout} className="text-red-600">
+              <DropdownMenuItem
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="text-red-600"
+              >
                 <LogOut className="mr-2 h-4 w-4" />
-                Logout
+                {isLoggingOut ? 'Logging out...' : 'Logout'}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

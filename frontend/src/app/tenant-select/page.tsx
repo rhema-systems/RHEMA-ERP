@@ -31,14 +31,24 @@ export default function TenantSelectPage() {
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const selectionStartedRef = useRef(false);
   const autoSelectionAttemptedRef = useRef(false);
+  const isAuthenticated = authService.isAuthenticated();
 
   // Fetch current user info including accessible tenants
   const { data: userInfo, isLoading, error } = useQuery({
     queryKey: ['currentUser'],
-    queryFn: () => apiService.getCurrentUser(),
-    enabled: !isAutoSelecting && !isManuallySelecting,
+    queryFn: () => apiService.getCurrentUser({ silent: true }),
+    enabled: isAuthenticated && !isAutoSelecting && !isManuallySelecting,
+    retry: (failureCount, queryError: unknown) =>
+      (queryError as { status?: number } | null)?.status !== 401 && failureCount < 2,
     refetchOnWindowFocus: false,
   });
+  const isUnauthorized = (error as { status?: number } | null)?.status === 401;
+
+  useEffect(() => {
+    if (!isAuthenticated || isUnauthorized) {
+      router.replace('/login');
+    }
+  }, [isAuthenticated, isUnauthorized, router]);
 
   const { data: publicSettingsRaw } = useQuery({
     queryKey: ['publicSecuritySettingsRaw'],
@@ -168,7 +178,7 @@ export default function TenantSelectPage() {
     );
   }
 
-  if (isLoading) {
+  if (!isAuthenticated || isUnauthorized || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />

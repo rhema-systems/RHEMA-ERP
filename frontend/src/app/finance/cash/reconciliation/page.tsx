@@ -110,7 +110,6 @@ export default function BankReconciliationPage() {
     const [notes, setNotes] = useState('');
     const [accountPickerOpen, setAccountPickerOpen] = useState(false);
     const [importDialogOpen, setImportDialogOpen] = useState(false);
-    const requestedReconciliationId = searchParams.get('reconciliation') ?? '';
 
     const requestedReconciliationQuery = useQuery({
         queryKey: ['bank-reconciliation', requestedReconciliationId],
@@ -129,19 +128,6 @@ export default function BankReconciliationPage() {
         queryKey: ['bank-accounts', 'active'],
         queryFn: () => cashManagementDataService.getActiveBankAccounts(),
     });
-
-    const requestedReconciliationQuery = useQuery({
-        queryKey: ['bank-reconciliation', requestedReconciliationId],
-        queryFn: () => cashManagementDataService.getBankReconciliationById(requestedReconciliationId),
-        enabled: Boolean(requestedReconciliationId),
-    });
-
-    useEffect(() => {
-        const bankAccountId = requestedReconciliationQuery.data?.bankAccountId;
-        if (bankAccountId && bankAccountId !== selectedAccountId) {
-            setSelectedAccountId(bankAccountId);
-        }
-    }, [requestedReconciliationQuery.data?.bankAccountId, selectedAccountId]);
 
     const statementsQuery = useQuery({
         queryKey: ['bank-statements', selectedAccountId],
