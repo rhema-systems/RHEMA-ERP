@@ -277,6 +277,13 @@ public interface INHISService
 
 #region Medical Expense Claim Service
 
+/// <remarks>
+/// <b>Drafts (2026-10-07).</b> A claim an employee files on self-service starts as
+/// <see cref="ClaimStatus.Draft"/> — their own working copy until they submit it. Every HR-facing
+/// method treats a draft as not existing (lists skip it, by-id answers NotFound). The methods both
+/// sides share (<see cref="GetClaimByIdAsync"/>, items, documents) stay neutral, and each controller
+/// applies its side's rule; the <c>…Own…</c> methods are the claimant's and check ownership themselves.
+/// </remarks>
 public interface IMedicalExpenseClaimService
 {
     Task<MedicalExpenseClaimDto> GetClaimByIdAsync(Guid id, CancellationToken cancellationToken = default);
@@ -306,6 +313,18 @@ public interface IMedicalExpenseClaimService
     Task<MedicalExpenseClaimNoteDto> AddNoteAsync(AddMedicalExpenseClaimNoteDto createDto, Guid tenantId, Guid authorEmployeeId, Guid createdByUserId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MedicalExpenseClaimNoteDto>> GetNotesAsync(Guid claimId, CancellationToken cancellationToken = default);
     Task<IEnumerable<MedicalExpenseClaimNoteDto>> GetInternalNotesAsync(Guid claimId, CancellationToken cancellationToken = default);
+
+    // ── The claimant's own (self-service). Somebody else's claim is NotFound, never Forbidden. ──
+    /// <summary>The employee's own claims, drafts included.</summary>
+    Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetOwnClaimsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>Files a claim as a <see cref="ClaimStatus.Draft"/>; HR sees nothing until it is submitted.</summary>
+    Task<MedicalExpenseClaimDto> FileOwnDraftAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default);
+    /// <summary>Replaces what was filed, field for field as filing takes it; a draft only.</summary>
+    Task<MedicalExpenseClaimDto> UpdateOwnDraftAsync(Guid id, Guid employeeId, CreateMedicalExpenseClaimDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>Draft → Pending, refused until a document is attached; the filed date becomes today.</summary>
+    Task<MedicalExpenseClaimDto> SubmitOwnDraftAsync(Guid id, Guid employeeId, Guid updatedByUserId, CancellationToken cancellationToken = default);
+    /// <summary>Deletes the employee's own draft; a submitted claim is not theirs to delete.</summary>
+    Task<bool> DiscardOwnDraftAsync(Guid id, Guid employeeId, CancellationToken cancellationToken = default);
 }
 
 #endregion

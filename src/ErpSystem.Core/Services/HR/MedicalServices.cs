@@ -2513,7 +2513,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetWithFullDetailsAsync(id);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
 
         return entity.ToDetailDto();
@@ -2522,15 +2522,23 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     public async Task<MedicalExpenseClaimDto?> GetClaimByNumberAsync(string claimNumber, CancellationToken cancellationToken = default)
     {
         var entity = await _claimRepository.GetByClaimNumberAsync(claimNumber);
-        return entity == null || entity.TenantId != GetTenantId() ? null : entity.ToDto();
+        return entity == null || entity.TenantId != GetTenantId() || IsDraft(entity) ? null : entity.ToDto();
     }
 
+    /// <summary>The desk's read of one employee's claims — drafts excluded (see <see cref="GetOwnClaimsAsync"/>).</summary>
     public async Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetClaimsByEmployeeAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _claimRepository.GetByEmployeeIdAsync(employeeId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId && !IsDraft(e)).ToSummaryDtoList();
     }
+
+    /// <summary>
+    /// A self-service draft is the claimant's working copy until they submit it (2026-10-07), so
+    /// every desk read skips it and every desk write answers NotFound — the same as a claim never
+    /// filed. The claimant's own methods (<c>…Own…</c>) are the only ones that reach a draft.
+    /// </summary>
+    private static bool IsDraft(MedicalExpenseClaim claim) => claim.Status == ClaimStatus.Draft;
 
     /// <summary>
     /// Loads a claim with every navigation its DTO resolves a name from.
@@ -2555,7 +2563,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     public async Task<PagedResult<MedicalExpenseClaimSummaryDto>> GetClaimsPagedAsync(int pageNumber, int pageSize, ClaimStatus? status = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
-        var query = _claimRepository.GetQueryable().Where(c => c.TenantId == tenantId);
+        var query = _claimRepository.GetQueryable()
+            .Where(c => c.TenantId == tenantId && c.Status != ClaimStatus.Draft);
 
         if (status.HasValue)
             query = query.Where(c => c.Status == status.Value);
@@ -2594,14 +2603,22 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var tenantId = GetTenantId();
         var entities = await _claimRepository.GetFlaggedForReviewAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return entities.Where(e => e.TenantId == tenantId && !IsDraft(e)).ToSummaryDtoList();
     }
 
-    public async Task<MedicalExpenseClaimDto> CreateClaimAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+    /// <summary>HR files on an employee's behalf: the claim reaches the desk at once, as Pending.</summary>
+    public Task<MedicalExpenseClaimDto> CreateClaimAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        => CreateAsync(createDto, employeeId, tenantId, createdByUserId, ClaimStatus.Pending, cancellationToken);
+
+    public Task<MedicalExpenseClaimDto> FileOwnDraftAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, CancellationToken cancellationToken = default)
+        => CreateAsync(createDto, employeeId, tenantId, createdByUserId, ClaimStatus.Draft, cancellationToken);
+
+    private async Task<MedicalExpenseClaimDto> CreateAsync(CreateMedicalExpenseClaimDto createDto, Guid employeeId, Guid tenantId, Guid createdByUserId, ClaimStatus initialStatus, CancellationToken cancellationToken)
     {
         EnsureTenant(tenantId);
         var entity = createDto.ToEntity(tenantId, createdByUserId);
         entity.EmployeeId = employeeId;
+        entity.Status = initialStatus;
         entity.ClaimNumber = $"MC-{DateTime.UtcNow:yyyyMMddHHmmssfff}";
 
         await _claimRepository.AddAsync(entity);
@@ -2620,8 +2637,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId} with {ItemCount} item(s)",
-            entity.ClaimNumber, employeeId, createDto.Items?.Count ?? 0);
+        _logger.LogInformation("Medical expense claim created: {ClaimNumber} for employee {EmployeeId} as {Status} with {ItemCount} item(s)",
+            entity.ClaimNumber, employeeId, initialStatus, createDto.Items?.Count ?? 0);
 
         // Re-read so the response carries resolved names. A freshly-constructed entity has no
         // navigations loaded, so returning it directly answered the caller with blank employee and
@@ -2635,7 +2652,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(updateDto.Id);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{updateDto.Id}' not found.");
 
         // A claim whose approval or payment is in Finance's ledger is not edited into a different
@@ -2661,8 +2678,9 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         // approved, and the approval row was then stamped with the caller's tenant. The ORDER
         // matters as much as the check: answering "already processed" for a claim the caller may
         // not see turns the endpoint into an oracle for which ids exist elsewhere. A foreign claim
-        // must be indistinguishable from one that does not exist.
-        if (claim == null || claim.TenantId != GetTenantId())
+        // must be indistinguishable from one that does not exist — and so must an unsubmitted draft,
+        // which before 2026-10-07 could be approved before its claimant had finished it.
+        if (claim == null || claim.TenantId != GetTenantId() || IsDraft(claim))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{processDto.ClaimId}' not found.");
 
         // A claim is adjudicated exactly once; this keeps insurance utilization consistent.
@@ -2716,7 +2734,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(paymentDto.ClaimId);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{paymentDto.ClaimId}' not found.");
 
         // Only an approved, unpaid claim can be paid. This read "any status" before lane 8; a
@@ -2745,7 +2763,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(flagDto.ClaimId);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{flagDto.ClaimId}' not found.");
 
         flagDto.ApplyTo(entity, updatedByUserId);
@@ -2760,7 +2778,7 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(unflagDto.ClaimId);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{unflagDto.ClaimId}' not found.");
 
         unflagDto.ApplyTo(entity, updatedByUserId);
@@ -2775,7 +2793,8 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
     {
         var entity = await _claimRepository.GetByIdAsync(id);
 
-        if (entity == null || entity.TenantId != GetTenantId())
+        // A draft is its claimant's to discard (DiscardOwnDraftAsync), not the desk's to see.
+        if (entity == null || entity.TenantId != GetTenantId() || IsDraft(entity))
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
 
         await GuardNotPostedAsync(entity.Id, "Deleting this claim", cancellationToken);
@@ -2989,6 +3008,91 @@ public class MedicalExpenseClaimService : IMedicalExpenseClaimService
         var entities = await _noteRepository.GetInternalNotesAsync(claimId);
         return entities.Where(e => e.TenantId == tenantId).ToDtoList();
     }
+
+    // ── The claimant's own (self-service drafts, 2026-10-07) ─────────────────────────────────────
+    //
+    // Filing used to BE submitting: a claim landed in the desk's queue as Pending the moment it was
+    // filed, before its receipt was attached, and the claimant could neither correct nor withdraw it.
+    // A self-service claim now starts as a Draft — edited, given its lines and receipts, then submitted
+    // (refused without a receipt) or discarded. Lines freeze at submission; receipts can still be added
+    // until the decision (the self-service controller enforces both, on the owned claim it loaded).
+
+    public async Task<IEnumerable<MedicalExpenseClaimSummaryDto>> GetOwnClaimsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var entities = await _claimRepository.GetByEmployeeIdAsync(employeeId);
+        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+    }
+
+    public async Task<MedicalExpenseClaimDto> UpdateOwnDraftAsync(Guid id, Guid employeeId, CreateMedicalExpenseClaimDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await LoadOwnDraftAsync(id, employeeId, "edited");
+
+        dto.ApplyOwnDraftEdit(entity, updatedByUserId);
+
+        await _claimRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return ((await LoadClaimWithNamesAsync(id)) ?? entity).ToDto();
+    }
+
+    public async Task<MedicalExpenseClaimDto> SubmitOwnDraftAsync(Guid id, Guid employeeId, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await LoadOwnDraftAsync(id, employeeId, "submitted");
+
+        // HR cannot assess a claim without its receipt, so none reaches the desk without one.
+        var documents = await _documentRepository.GetByClaimIdAsync(id);
+        if (!documents.Any(d => d.TenantId == entity.TenantId))
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"Attach your receipt to {entity.ClaimNumber} before submitting it — HR cannot assess a claim without one.");
+
+        entity.Status = ClaimStatus.Pending;
+        // The filed date is when the desk received it: a draft started last week reaches the queue
+        // today, and the queue is ordered by this date.
+        entity.ClaimDate = DateTime.UtcNow;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = updatedByUserId.ToString();
+
+        await _claimRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Medical expense claim submitted by its claimant: {ClaimNumber}", entity.ClaimNumber);
+
+        return ((await LoadClaimWithNamesAsync(id)) ?? entity).ToDto();
+    }
+
+    public async Task<bool> DiscardOwnDraftAsync(Guid id, Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var entity = await LoadOwnDraftAsync(id, employeeId, "discarded");
+
+        // A soft delete, as the desk's own delete is; nothing was ever posted for a draft.
+        await _claimRepository.DeleteAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        return true;
+    }
+
+    /// <summary>
+    /// The claimant's own draft. Somebody else's claim reads exactly like a missing one (NotFound,
+    /// never Forbidden); their own submitted claim is refused by name, so they know why.
+    /// </summary>
+    /// <remarks>Loaded without navigations: these paths write foreign keys (facility, physician), and
+    /// a loaded reference beside a changed key is how a write quietly keeps the old one.</remarks>
+    private async Task<MedicalExpenseClaim> LoadOwnDraftAsync(Guid id, Guid employeeId, string action)
+    {
+        var entity = await _claimRepository.GetByIdAsync(id);
+
+        if (entity == null || entity.TenantId != GetTenantId() || entity.EmployeeId != employeeId)
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical expense claim with ID '{id}' not found.");
+
+        if (!IsDraft(entity))
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{entity.ClaimNumber} has already been submitted to HR; only a draft can be {action}.");
+
+        return entity;
+    }
 }
 
 #endregion
@@ -3045,9 +3149,10 @@ public class MedicalDashboardService : IMedicalDashboardService
     {
         var tenantId = GetTenantId();
 
-        // Lightweight scalar projection of every claim for in-memory aggregation.
+        // Lightweight scalar projection of every claim for in-memory aggregation. A self-service draft
+        // has not reached the desk yet (2026-10-07), so it is in no count and no spotlight.
         var claims = await _claimRepository.GetQueryable()
-            .Where(c => c.TenantId == tenantId)
+            .Where(c => c.TenantId == tenantId && c.Status != ClaimStatus.Draft)
             .Select(c => new ClaimRow
             {
                 Status = c.Status,
@@ -3115,7 +3220,7 @@ public class MedicalDashboardService : IMedicalDashboardService
 
         // Spotlights — recent and pending claims (with employee name).
         dto.RecentClaims = await _claimRepository.GetQueryable()
-            .Where(c => c.TenantId == tenantId)
+            .Where(c => c.TenantId == tenantId && c.Status != ClaimStatus.Draft)
             .Include(c => c.Employee)
             .OrderByDescending(c => c.ClaimDate)
             .Take(5)

@@ -50,7 +50,11 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<MedicalExpenseClaimDto>> GetById(Guid id, CancellationToken ct)
-        => Ok(await _service.GetClaimByIdAsync(id, ct));
+    {
+        // The service's by-id read is shared with self-service, which must reach its own drafts.
+        if (await IsDraftAsync(id, ct)) return NotFound();
+        return Ok(await _service.GetClaimByIdAsync(id, ct));
+    }
 
     [HttpGet("{id:guid}/details")]
     public async Task<ActionResult<MedicalExpenseClaimDetailDto>> GetWithDetails(Guid id, CancellationToken ct)
@@ -196,7 +200,10 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalExpenseItemDto>>> GetItems(
         Guid claimId,
         CancellationToken ct)
-        => Ok(await _service.GetItemsAsync(claimId, ct));
+    {
+        if (await IsDraftAsync(claimId, ct)) return NotFound();
+        return Ok(await _service.GetItemsAsync(claimId, ct));
+    }
 
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/items")]
@@ -208,6 +215,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         dto.ClaimId = claimId;
         if (!ModelState.IsValid) return BadRequest(ModelState);
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
+        if (await IsDraftAsync(claimId, ct)) return NotFound();
 
         var created = await _service.AddItemAsync(dto, tenantId, userId, ct);
         return CreatedAtAction(nameof(GetById), new { id = claimId }, created);
@@ -242,7 +250,10 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
     public async Task<ActionResult<IEnumerable<MedicalExpenseDocumentDto>>> GetDocuments(
         Guid claimId,
         CancellationToken ct)
-        => Ok(await _service.GetDocumentsAsync(claimId, ct));
+    {
+        if (await IsDraftAsync(claimId, ct)) return NotFound();
+        return Ok(await _service.GetDocumentsAsync(claimId, ct));
+    }
 
     /// <summary>Uploads a supporting document — typically a receipt — against a claim.</summary>
     /// <remarks>
@@ -267,7 +278,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         if (TryGetWriteContext(out var tenantId, out var userId) is { } error) return error;
 
         var claim = await LoadClaimInTenantAsync(claimId, tenantId, ct);
-        if (claim is null) return NotFound("Medical expense claim not found.");
+        if (claim is null || claim.Status == ClaimStatus.Draft) return NotFound("Medical expense claim not found.");
 
         return await MedicalClaimDocumentUpload.ExecuteAsync(
             this, _hrDocuments, _service, claimId, file, type, description,
@@ -301,6 +312,18 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
             .SingleOrDefaultAsync(
                 item => item.Id == claimId && item.TenantId == tenantId && !item.IsDeleted, ct);
 
+    /// <summary>
+    /// A self-service draft is its claimant's working copy until they submit it (2026-10-07): to this
+    /// desk it does not exist yet, the same 404 as a claim never filed. The service refuses drafts on
+    /// its desk-only methods itself; this covers the routes whose service methods both sides share
+    /// (the by-id read) or that take only a claim id (lines, documents, notes). The item- and
+    /// document-id routes are not covered: their ids are only ever read off a claim the desk can open.
+    /// </summary>
+    private Task<bool> IsDraftAsync(Guid claimId, CancellationToken ct)
+        => _db.Set<MedicalExpenseClaim>()
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == claimId && !item.IsDeleted && item.Status == ClaimStatus.Draft, ct);
+
     [Authorize(Policy = HrPermissions.MedicalAdminPolicy)]
     [HttpDelete("documents/{id:guid}")]
     public async Task<IActionResult> DeleteDocument(Guid id, CancellationToken ct)
@@ -318,9 +341,12 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         Guid claimId,
         [FromQuery] bool internalOnly = false,
         CancellationToken ct = default)
-        => Ok(internalOnly
+    {
+        if (await IsDraftAsync(claimId, ct)) return NotFound();
+        return Ok(internalOnly
             ? await _service.GetInternalNotesAsync(claimId, ct)
             : await _service.GetNotesAsync(claimId, ct));
+    }
 
     [Authorize(Policy = HrPermissions.MedicalWritePolicy)]
     [HttpPost("{claimId:guid}/notes")]
@@ -334,6 +360,7 @@ public class MedicalExpenseClaimsController : MedicalControllerBase
         // AuthorId is an Employee FK — a note has to be attributable to a person, not an account.
         if (TryGetEmployeeWriteContext(out var tenantId, out var userId, out var employeeId,
                 "Adding a note to a claim") is { } error) return error;
+        if (await IsDraftAsync(claimId, ct)) return NotFound();
 
         var created = await _service.AddNoteAsync(dto, tenantId, employeeId, userId, ct);
         return Ok(created);

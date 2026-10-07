@@ -42,6 +42,12 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <para>Receipts are uploaded as multipart content through the same controlled gate the HR endpoint
 /// uses — scanned, registered in the DMS, and stored outside the web root. Ownership is checked
 /// before the file is accepted, so an unowned claim id cannot even cause a file to be scanned.</para>
+///
+/// <para><b>Drafts (2026-10-07).</b> Filing creates a <see cref="ClaimStatus.Draft"/> the desk cannot
+/// see. While it is a draft the claimant may edit it, add lines, attach and remove receipts, discard
+/// it, or submit it — refused until a receipt is attached. Submission freezes the details and lines
+/// (the desk decides on exactly what was claimed); receipts can still be added until the decision,
+/// for when HR asks for one.</para>
 /// </remarks>
 [ApiController]
 [Route("api/medical/me")]
@@ -76,7 +82,7 @@ public class MedicalSelfServiceController : MedicalControllerBase
         _db = db;
     }
 
-    /// <summary>Files a claim for the authenticated employee.</summary>
+    /// <summary>Files a claim for the authenticated employee, as a draft only they can see.</summary>
     [HttpPost("expense-claims")]
     public async Task<IActionResult> FileOwnClaim(
         [FromBody] CreateMedicalExpenseClaimDto dto,
@@ -90,18 +96,59 @@ public class MedicalSelfServiceController : MedicalControllerBase
         // than rejected, because the field is shared with the HR endpoint where it is required.
         dto.EmployeeId = employeeId;
 
-        var created = await _claims.CreateClaimAsync(dto, employeeId, tenantId, userId, ct);
+        var created = await _claims.FileOwnDraftAsync(dto, employeeId, tenantId, userId, ct);
         return CreatedAtAction(nameof(GetOwnClaim), new { id = created.Id }, Project(created));
     }
 
-    /// <summary>Lists the authenticated employee's own claims.</summary>
+    /// <summary>Replaces the details of one of the employee's own drafts — the same shape as filing.</summary>
+    [HttpPut("expense-claims/{id:guid}")]
+    public async Task<IActionResult> UpdateOwnDraft(
+        Guid id,
+        [FromBody] CreateMedicalExpenseClaimDto dto,
+        CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Editing your own medical claim") is { } error) return error;
+
+        dto.EmployeeId = employeeId;
+
+        // The service checks ownership itself (somebody else's claim is a 404) and refuses a
+        // submitted one by name (422).
+        var updated = await _claims.UpdateOwnDraftAsync(id, employeeId, dto, userId, ct);
+        return Ok(Project(updated));
+    }
+
+    /// <summary>Submits one of the employee's own drafts to HR. Refused until a receipt is attached.</summary>
+    [HttpPost("expense-claims/{id:guid}/submit")]
+    public async Task<IActionResult> SubmitOwnDraft(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out var userId, out var employeeId,
+                "Submitting your own medical claim") is { } error) return error;
+
+        var submitted = await _claims.SubmitOwnDraftAsync(id, employeeId, userId, ct);
+        return Ok(Project(submitted));
+    }
+
+    /// <summary>Discards one of the employee's own drafts. A submitted claim is not theirs to delete.</summary>
+    [HttpDelete("expense-claims/{id:guid}")]
+    public async Task<IActionResult> DiscardOwnDraft(Guid id, CancellationToken ct)
+    {
+        if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
+                "Discarding your own medical claim") is { } error) return error;
+
+        await _claims.DiscardOwnDraftAsync(id, employeeId, ct);
+        return NoContent();
+    }
+
+    /// <summary>Lists the authenticated employee's own claims, drafts included.</summary>
     [HttpGet("expense-claims")]
     public async Task<IActionResult> GetOwnClaims(CancellationToken ct)
     {
         if (TryGetEmployeeWriteContext(out _, out _, out var employeeId,
                 "Listing your own medical claims") is { } error) return error;
 
-        var claims = await _claims.GetClaimsByEmployeeAsync(employeeId, ct);
+        var claims = await _claims.GetOwnClaimsAsync(employeeId, ct);
         // IsFlaggedForReview is on the summary DTO and is deliberately NOT projected: telling a
         // claimant their claim has been flagged for review would defeat the point of flagging it.
         return Ok(claims.Select(claim => new
@@ -162,6 +209,12 @@ public class MedicalSelfServiceController : MedicalControllerBase
         var owned = await LoadOwnClaimAsync(id, ct);
         if (owned.Error != null) return owned.Error;
 
+        // Lines freeze at submission: the desk decides on exactly what was claimed.
+        if (owned.Claim!.Status != ClaimStatus.Draft)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{owned.Claim.ClaimNumber} has already been submitted to HR; lines can only be added to a draft.");
+
         dto.ClaimId = id;
 
         var created = await _claims.AddItemAsync(dto, tenantId, userId, ct);
@@ -206,9 +259,45 @@ public class MedicalSelfServiceController : MedicalControllerBase
         var owned = await LoadOwnClaimAsync(id, ct);
         if (owned.Error != null) return owned.Error;
 
+        // A receipt can follow a submitted claim (HR may ask for one), but not a decided one.
+        if (DecidedStatuses.Contains(owned.Claim!.Status))
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{owned.Claim.ClaimNumber} has been decided ({owned.Claim.Status}); no more receipts can be attached.");
+
         return await MedicalClaimDocumentUpload.ExecuteAsync(
             this, _hrDocuments, _claims, id, file, type, description,
             tenantId, userId, CurrentUser.UserName, ct);
+    }
+
+    /// <summary>Removes a receipt from one of the employee's own drafts — the wrong file, before HR sees it.</summary>
+    /// <remarks>A draft only: once submitted, what was put to the desk stays on the record.</remarks>
+    [HttpDelete("expense-claims/{id:guid}/documents/{documentId:guid}")]
+    public async Task<IActionResult> RemoveOwnDraftDocument(
+        Guid id,
+        Guid documentId,
+        CancellationToken ct)
+    {
+        if (TryGetWriteContext(out var tenantId, out _) is { } contextError) return contextError;
+
+        var owned = await LoadOwnClaimAsync(id, ct);
+        if (owned.Error != null) return owned.Error;
+
+        if (owned.Claim!.Status != ClaimStatus.Draft)
+            throw new MedicalWorkflowException(
+                MedicalWorkflowFailureReason.InvalidState,
+                $"{owned.Claim.ClaimNumber} has already been submitted to HR; its receipts stay on the claim.");
+
+        // Resolved through the owned claim, as the download is — a document id from somebody
+        // else's claim is a lookup miss.
+        var belongs = await _db.Set<MedicalExpenseDocument>()
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == documentId && item.ClaimId == id &&
+                              item.TenantId == tenantId && !item.IsDeleted, ct);
+        if (!belongs) return NotFound();
+
+        await _claims.DeleteDocumentAsync(documentId, ct);
+        return NoContent();
     }
 
     /// <summary>Streams a document attached to one of the authenticated employee's own claims.</summary>
@@ -464,6 +553,16 @@ public class MedicalSelfServiceController : MedicalControllerBase
 
         return (claim, null);
     }
+
+    /// <summary>Statuses after which the desk has decided a claim and its paperwork is closed.</summary>
+    private static readonly HashSet<ClaimStatus> DecidedStatuses = new()
+    {
+        ClaimStatus.Approved,
+        ClaimStatus.PartiallyApproved,
+        ClaimStatus.Rejected,
+        ClaimStatus.Paid,
+        ClaimStatus.Cancelled,
+    };
 
     /// <summary>
     /// The claim fields a claimant may see. Projected explicitly rather than returning the DTO, so

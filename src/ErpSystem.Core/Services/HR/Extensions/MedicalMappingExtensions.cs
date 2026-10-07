@@ -2431,6 +2431,39 @@ public static class MedicalMappingExtensions
         };
     }
 
+    /// <summary>
+    /// The claimant's edit of their own draft (2026-10-07): every field filing takes, replaced as
+    /// filing would set it — keep in step with <see cref="ToEntity(CreateMedicalExpenseClaimDto, Guid, Guid)"/>.
+    /// Not the subject, number, status or filed date; and not <c>Items</c>, which are added one by one.
+    /// </summary>
+    public static void ApplyOwnDraftEdit(this CreateMedicalExpenseClaimDto dto, MedicalExpenseClaim entity, Guid userId)
+    {
+        entity.IsForDependent = dto.IsForDependent;
+        entity.DependentId = dto.DependentId;
+        entity.ServiceDate = dto.ServiceDate;
+        entity.ServiceEndDate = dto.ServiceEndDate;
+        entity.ExpenseType = dto.ExpenseType;
+        entity.Description = dto.Description;
+        entity.FacilityId = dto.FacilityId;
+        entity.PhysicianId = dto.PhysicianId;
+        entity.Diagnosis = dto.Diagnosis;
+        entity.ICDCode = dto.ICDCode;
+        entity.TreatmentReceived = dto.TreatmentReceived;
+        entity.IsEmergency = dto.IsEmergency;
+        entity.RequiredHospitalization = dto.RequiredHospitalization;
+        entity.AdmissionStart = dto.AdmissionStart;
+        entity.AdmissionEnd = dto.AdmissionEnd;
+        entity.PreAuthorizationId = dto.PreAuthorizationId;
+        entity.ReferralId = dto.ReferralId;
+        entity.TotalAmount = dto.TotalAmount;
+        entity.AmountRequested = dto.AmountRequested;
+        entity.InsurancePolicyId = dto.InsurancePolicyId;
+        entity.LeaveRequestId = dto.LeaveRequestId;
+        entity.AdditionalNotes = dto.AdditionalNotes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = userId.ToString();
+    }
+
     public static MedicalExpenseClaim ToEntity(this CreateMedicalExpenseClaimDto dto, Guid tenantId, Guid userId)
     {
         return new MedicalExpenseClaim

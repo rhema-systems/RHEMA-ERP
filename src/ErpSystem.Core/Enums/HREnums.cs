@@ -5141,7 +5141,15 @@ public enum ClaimStatus
     AdditionalInfoRequired = 10,
 
     [Description("Cancelled")]
-    Cancelled = 11
+    Cancelled = 11,
+
+    /// <summary>
+    /// Filed by the employee on self-service and not yet submitted (2026-10-07): their own working
+    /// copy, which the HR desk does not see. Submitting moves it to <see cref="Pending"/>. Appended
+    /// rather than numbered first — the column stores the number, and every existing row keeps its own.
+    /// </summary>
+    [Description("Draft")]
+    Draft = 12
 }
 
 public enum ClaimPreAuthorizationStatus
