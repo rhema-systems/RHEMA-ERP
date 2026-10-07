@@ -4,6 +4,7 @@ using System.Text.Json;
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.DTOs.Sales;
+using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -14,6 +15,7 @@ using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Sales;
 using ErpSystem.Data;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Ehc;
@@ -445,7 +447,7 @@ public sealed class PropertyEnquiryProspectService(
         RecordProspectDepositRequest request,
         CancellationToken cancellationToken = default)
     {
-        await LoadTicketAsync(ticketId, cancellationToken);
+        var (ticket, property) = await LoadTicketAsync(ticketId, cancellationToken);
         var prospect = await ProspectQuery(tracking: true).SingleOrDefaultAsync(x => x.TicketId == ticketId, cancellationToken)
             ?? throw new InvalidOperationException("Qualify this enquiry before recording a deposit.");
         if (!prospect.OpportunityId.HasValue)
@@ -456,7 +458,6 @@ public sealed class PropertyEnquiryProspectService(
         if (!string.Equals(Currency(request.Currency), prospect.Currency, StringComparison.Ordinal))
             throw new InvalidOperationException($"Deposit currency must be {prospect.Currency}.");
 
-        var (_, property) = await LoadTicketAsync(ticketId, cancellationToken);
         var source = await ResolveSaleableSourceAsync(property, cancellationToken);
         var policy = await db.Set<EhcPropertyProspectDepositPolicy>().AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId
             && !x.IsDeleted && x.IsActive && x.SalesSaleableSourceId == source.Id, cancellationToken)
@@ -487,7 +488,75 @@ public sealed class PropertyEnquiryProspectService(
         };
         db.Set<ProspectDepositReceipt>().Add(receipt);
         await db.SaveChangesAsync(cancellationToken);
+        await NotifyFinanceOfPendingDepositAsync(ticket, receipt, cancellationToken);
         return ToReceiptDto(receipt);
+    }
+
+    private async Task NotifyFinanceOfPendingDepositAsync(
+        EhcTicket ticket,
+        ProspectDepositReceipt receipt,
+        CancellationToken cancellationToken)
+    {
+        List<Guid> recipientIds;
+        try
+        {
+            var now = DateTime.UtcNow;
+            recipientIds = await db.Users
+                .IgnoreQueryFilters()
+                .AsNoTracking()
+                .Where(user =>
+                    user.IsActive &&
+                    (user.TenantId == TenantId ||
+                     user.UserTenants.Any(userTenant =>
+                         userTenant.TenantId == TenantId &&
+                         !userTenant.IsDeleted &&
+                         userTenant.Status == UserTenantStatus.Active &&
+                         (!userTenant.ExpiresAt.HasValue || userTenant.ExpiresAt > now))) &&
+                    user.UserRoles.Any(userRole =>
+                        userRole.Role.RolePermissions.Any(rolePermission =>
+                            !rolePermission.Permission.IsDeleted &&
+                            rolePermission.Permission.Name == FinancePermissions.ReceiveCustomerPayments)))
+                .Select(user => user.Id)
+                .Distinct()
+                .ToListAsync(cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception,
+                "Could not resolve Finance recipients for property enquiry deposit {ReceiptNumber} in tenant {TenantId}.",
+                receipt.ReceiptNumber, TenantId);
+            return;
+        }
+
+        foreach (var recipientId in recipientIds)
+        {
+            try
+            {
+                await notifications.CreateInAppNotificationAsync(
+                    recipientId,
+                    "Prospect deposit awaiting clearance",
+                    $"{receipt.Currency} {receipt.Amount:N2} was recorded for property enquiry {ticket.TicketNumber} under receipt {receipt.ReceiptNumber}. Review and clear the receipt in Sales.",
+                    "sales.property-enquiry.deposit-recorded",
+                    new Dictionary<string, object>
+                    {
+                        ["EntityType"] = nameof(ProspectDepositReceipt),
+                        ["EntityId"] = receipt.Id,
+                        ["ActionUrl"] = $"/sales/property-enquiries?id={ticket.Id}",
+                        ["TicketId"] = ticket.Id,
+                        ["ReceiptNumber"] = receipt.ReceiptNumber,
+                        ["Amount"] = receipt.Amount,
+                        ["Currency"] = receipt.Currency,
+                        ["Status"] = receipt.Status
+                    },
+                    TenantId);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception,
+                    "Could not notify Finance user {UserId} about property enquiry deposit {ReceiptNumber} in tenant {TenantId}.",
+                    recipientId, receipt.ReceiptNumber, TenantId);
+            }
+        }
     }
 
     public async Task<IReadOnlyList<ProspectDepositReceiptDto>> GetDepositsAsync(

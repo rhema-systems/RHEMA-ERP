@@ -95,3 +95,16 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Role UI: a control beside permission search now collapses or expands all currently visible module accordions. Search results remain controllable instead of being forced open.
 - Verification scope: backend authorization policy tests cover the CRM and Sales permission hierarchies. Roles UI tests cover CRM/Sales catalogue display, permission selection, per-module selection, and expand/collapse-all behavior.
 - Authorization boundary requiring confirmation: applying the new Sales capabilities across every existing Sales controller would change production access for a large endpoint family. An automatic approval review rejected a heuristic all-controller convention due to the risk of misclassifying endpoints and denying valid users. The proposed explicit mapping is GET/read -> `sales.read`, create/edit/lifecycle -> `sales.manage`, approval/confirmation/closing -> `sales.approve`, setup writes -> `sales.configure`, and reports -> `sales.reports.read`. Endpoint-by-endpoint enforcement remains pending explicit user approval of that access change.
+
+## Follow-up: property enquiry customer action, Estate handoff, Finance alert, and error UX
+
+- Branch/worktree: `codex/fix-property-customer-action` in the retained `sales-opportunities-roles` worktree.
+- Exact base: `4c32bbb258fe77e3a80899c650cbc3dcb19dff02` (`origin/master`, merged PR #371).
+- Customer action: when the cleared deposit threshold is met, `Create customer` now runs the existing-customer match check itself. It opens customer creation only when no approved match is returned and directs the operator to the matches when a possible duplicate exists.
+- Estate handoff: a successful handoff immediately changes the action to disabled `Handed to Estate`; persisted Estate case or handoff timestamp also keeps it disabled after reload.
+- Finance notification: recording a pending prospect deposit now sends an in-app alert to active, unexpired tenant users whose dynamically named role grants `Finance.AR.Payments.Receive`. The alert carries the receipt, ticket, amount, currency, status, and a direct property-enquiry URL. Notification delivery is best effort after the receipt commit so a channel failure cannot duplicate or undo the deposit.
+- Error UX: the page-top aggregate error banner was removed. Query and mutation failures now use destructive toasts with the server message, while the contextual Sales Order source alert remains beside its retry action.
+- Migrations: none.
+- Verification: focused property-enquiry Vitest passed 7/7; focused ESLint passed; full frontend TypeScript check passed; focused `PropertyEnquiryProspectLifecycleTests` passed 18/18 with .NET SDK 9.0.315; `git diff --check` passed.
+- Known constraints: the backend build still emits the repository's existing warning set; no new warning or test failure was introduced by this change.
+- Remaining work: commit, refresh from `origin/master`, publish and merge the focused PR, then dispatch the authorized test VPS workflow.

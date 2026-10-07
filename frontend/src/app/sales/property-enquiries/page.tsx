@@ -196,6 +196,7 @@ function PropertyEnquiries() {
   });
   const salesAmountPaidEditedRef = useRef(false);
   const [confirmHandoff, setConfirmHandoff] = useState(false);
+  const lastQueryErrorAtRef = useRef(0);
   const client = useQueryClient();
   const { toast } = useToast();
   const { hasPermission } = useAuth();
@@ -266,6 +267,16 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      toast({
+        title: 'Email could not be sent',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The enquiry email could not be sent. Please try again.',
+        variant: 'destructive',
+      });
+    },
   });
   const submitHandoff = useMutation({
     mutationFn: () =>
@@ -310,6 +321,17 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      setConfirmHandoff(false);
+      toast({
+        title: 'Estate handoff could not be completed',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The enquiry could not be handed to Estate. Please try again.',
+        variant: 'destructive',
+      });
+    },
   });
 
   const refreshSelected = async () => {
@@ -338,6 +360,34 @@ function PropertyEnquiries() {
     enabled: Boolean(selectedId && detail.data?.prospect?.opportunityId),
     queryFn: () => propertyEnquiryService.listDeposits(selectedId),
   });
+  const latestQueryFailure = [
+    { error: queue.error, updatedAt: queue.errorUpdatedAt },
+    { error: detail.error, updatedAt: detail.errorUpdatedAt },
+    { error: handoff.error, updatedAt: handoff.errorUpdatedAt },
+    { error: depositReceipts.error, updatedAt: depositReceipts.errorUpdatedAt },
+    { error: partnerMatches.error, updatedAt: partnerMatches.errorUpdatedAt },
+  ].reduce<{ error: unknown; updatedAt: number }>(
+    (latest, failure) =>
+      failure.error && failure.updatedAt > latest.updatedAt ? failure : latest,
+    { error: null, updatedAt: 0 }
+  );
+  useEffect(() => {
+    if (
+      !latestQueryFailure.error ||
+      latestQueryFailure.updatedAt <= lastQueryErrorAtRef.current
+    )
+      return;
+    lastQueryErrorAtRef.current = latestQueryFailure.updatedAt;
+    toast({
+      title: 'Property enquiry request failed',
+      description:
+        latestQueryFailure.error instanceof Error &&
+        latestQueryFailure.error.message.trim()
+          ? latestQueryFailure.error.message
+          : 'The property enquiry data could not be loaded. Please try again.',
+      variant: 'destructive',
+    });
+  }, [latestQueryFailure.error, latestQueryFailure.updatedAt, toast]);
   const depositCurrency = resolveOpportunityCurrency(
     detail.data?.prospect?.currency ||
       handoff.data?.opportunity?.currency ||
@@ -385,6 +435,16 @@ function PropertyEnquiries() {
         title: 'Prospect disqualified',
         description: 'The reason was added to the enquiry audit history.',
         variant: 'success',
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: 'Prospect could not be disqualified',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The disqualification could not be saved. Please try again.',
+        variant: 'destructive',
       });
     },
   });
@@ -443,6 +503,17 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      setConfirmLink(false);
+      toast({
+        title: 'Customer could not be linked',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The selected customer could not be linked. Please try again.',
+        variant: 'destructive',
+      });
+    },
   });
 
   const createPartner = useMutation({
@@ -465,6 +536,16 @@ function PropertyEnquiries() {
         description:
           'The customer Business Partner remains governed by the existing approval process.',
         variant: 'success',
+      });
+    },
+    onError: (mutationError) => {
+      toast({
+        title: 'Customer registration could not be submitted',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The customer Business Partner could not be created. Please try again.',
+        variant: 'destructive',
       });
     },
   });
@@ -603,29 +684,50 @@ function PropertyEnquiries() {
         variant: 'success',
       });
     },
+    onError: (mutationError) => {
+      toast({
+        title: 'Customer conversion could not be finalized',
+        description:
+          mutationError instanceof Error && mutationError.message.trim()
+            ? mutationError.message
+            : 'The approved customer could not be finalized. Please try again.',
+        variant: 'destructive',
+      });
+    },
   });
-  const error =
-    queue.error ||
-    detail.error ||
-    handoff.error ||
-    sendEmail.error ||
-    qualify.error ||
-    disqualify.error ||
-    addActivity.error ||
-    linkPartner.error ||
-    createPartner.error ||
-    depositReceipts.error ||
-    finalizePartner.error ||
-    partnerMatches.error ||
-    submitHandoff.error;
   const ticket = detail.data;
   const leadStatus = ticket?.prospect?.status || 'New';
   const prospect = ticket?.prospect;
   const depositThresholdMet = Boolean(prospect?.depositThresholdMet);
   const canMatchExistingCustomer = canSearchOrLinkExistingCustomer(prospect);
+  const openCreatePartnerAfterMatchCheck = async () => {
+    if (!selectedId || !depositThresholdMet || !canMatchExistingCustomer) {
+      return;
+    }
+
+    setShowMatches(true);
+    const matchResult = await partnerMatches.refetch();
+    if (matchResult.isError) return;
+
+    if ((matchResult.data?.length ?? 0) > 0) {
+      toast({
+        title: 'Possible existing customer found',
+        description:
+          'Review and link the matching customer instead of creating a duplicate record.',
+      });
+      return;
+    }
+
+    setCreatePartnerOpen(true);
+  };
   const handoffState = handoff.data;
   const opportunity = handoffState?.opportunity;
   const salesOrder = handoffState?.salesOrder;
+  const handoffCompleted = Boolean(
+    submitHandoff.isSuccess ||
+      handoffState?.estateCase ||
+      handoffState?.estateListingApplicationHandedOffAt
+  );
   const listingType = ticket?.propertyListing?.listingType || '';
   const handoffRequiresDuration =
     listingType === 'Rent' ||
@@ -699,7 +801,8 @@ function PropertyEnquiries() {
     handoffState?.estateCase?.id,
   ]);
   const handoffDraftIsValid = Boolean(
-    canSubmitPropertyEstateHandoff(
+    !handoffCompleted &&
+      canSubmitPropertyEstateHandoff(
       prospect,
       Boolean(handoffState?.canHandoff)
     ) &&
@@ -760,15 +863,6 @@ function PropertyEnquiries() {
           deposit and then register or link the customer.
         </p>
       </div>
-      {error && (
-        <Alert variant="destructive">
-          <AlertDescription>
-            {error instanceof Error
-              ? error.message
-              : 'Could not load or update the enquiry.'}
-          </AlertDescription>
-        </Alert>
-      )}
       <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1.75fr)]">
         <section className="min-w-0 space-y-3" aria-label="Property enquiry queue">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1525,9 +1619,10 @@ function PropertyEnquiries() {
                 <div>
                   <h3 className="font-semibold">Customer Business Partner</h3>
                   <p className="text-sm text-slate-600">
-                    Match qualified prospects against approved existing
-                    customers first. Creating a new customer remains locked
-                    until the cleared deposit threshold is met.
+                    The system checks qualified prospects against approved
+                    existing customers before creating a new record. Customer
+                    creation remains locked until the cleared deposit threshold
+                    is met.
                   </p>
                 </div>
                 {prospect?.businessPartnerId ? (
@@ -1667,16 +1762,17 @@ function PropertyEnquiries() {
                           : 'Find existing customer'}
                       </Button>
                       <Button
-                        onClick={() => setCreatePartnerOpen(true)}
+                        onClick={openCreatePartnerAfterMatchCheck}
                         disabled={
                           !depositThresholdMet ||
-                          !showMatches ||
-                          partnerMatches.isLoading ||
-                          partnerMatches.data === undefined ||
+                          !canMatchExistingCustomer ||
+                          partnerMatches.isFetching ||
                           Boolean(partnerMatches.data?.length)
                         }
                       >
-                        Create customer
+                        {partnerMatches.isFetching
+                          ? 'Checking customers…'
+                          : 'Create customer'}
                       </Button>
                     </div>
                     {showMatches ? (
@@ -2084,7 +2180,9 @@ function PropertyEnquiries() {
                     >
                       {submitHandoff.isPending
                         ? 'Handing off…'
-                        : 'Hand off to Estate'}
+                        : handoffCompleted
+                          ? 'Handed to Estate'
+                          : 'Hand off to Estate'}
                     </Button>
                   </div>
                 )}
@@ -2118,7 +2216,12 @@ function PropertyEnquiries() {
         description="This creates or links the Estate listing-application workflow using the verified listing, business partner and closed CRM opportunity."
         confirmText="Hand off to Estate"
         onConfirm={async () => {
-          await submitHandoff.mutateAsync();
+          try {
+            await submitHandoff.mutateAsync();
+          } catch {
+            // The mutation shows the server error in a toast and closes this prompt.
+            return false;
+          }
         }}
         isLoading={submitHandoff.isPending}
         confirmDisabled={!handoffDraftIsValid}
