@@ -25,6 +25,12 @@ import {
 import { Input } from '../../../../components/ui/input';
 import { Textarea } from '../../../../components/ui/textarea';
 import { Checkbox } from '../../../../components/ui/checkbox';
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '../../../../components/ui/accordion';
 import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -176,6 +182,7 @@ export default function RolesPage() {
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   const [deleteRole, setDeleteRole] = useState<Role | null>(null);
   const [permissionSearch, setPermissionSearch] = useState('');
+  const [expandedPermissionCategories, setExpandedPermissionCategories] = useState<string[]>([]);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -264,6 +271,12 @@ export default function RolesPage() {
       .reduce((total, category) => total + category.permissions.length, 0),
     [filteredPermissionCategories]
   );
+
+  React.useEffect(() => {
+    if (isDialogOpen) {
+      setExpandedPermissionCategories(Object.keys(permissionCategories));
+    }
+  }, [isDialogOpen, permissionCategories]);
 
   // Create/Update role mutation
   const createRoleMutation = useMutation({
@@ -620,50 +633,101 @@ export default function RolesPage() {
                                 No permissions match &ldquo;{permissionSearch.trim()}&rdquo;.
                               </div>
                             )}
-                          {Object.entries(filteredPermissionCategories).map(([category, config]) => {
-                            const Icon = config.icon;
-                            return (
-                              <div key={category} className="space-y-3">
-                                <div className="flex items-center gap-2">
-                                  <Icon className="h-4 w-4 text-primary" />
-                                  <h4 className="font-medium text-sm">{category}</h4>
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 ml-6">
-                                  {config.permissions.map((permission) => (
-                                    <div
-                                      key={permission.id}
-                                      className="flex items-start space-x-2 p-2 rounded border"
-                                    >
+                          <Accordion
+                            type="multiple"
+                            value={permissionSearch.trim()
+                              ? Object.keys(filteredPermissionCategories)
+                              : expandedPermissionCategories}
+                            onValueChange={setExpandedPermissionCategories}
+                            className="space-y-3"
+                          >
+                            {Object.entries(filteredPermissionCategories).map(([category, config]) => {
+                              const Icon = config.icon;
+                              const categoryPermissionIds = permissionCategories[category]?.permissions
+                                .map(permission => permission.id) ?? [];
+                              const categoryPermissionIdSet = new Set(categoryPermissionIds);
+                              const selectedCount = categoryPermissionIds
+                                .filter(permissionId => field.value.includes(permissionId)).length;
+                              const allSelected = categoryPermissionIds.length > 0 &&
+                                selectedCount === categoryPermissionIds.length;
+                              const someSelected = selectedCount > 0 && !allSelected;
+                              const selectAllId = `select-all-${category.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`;
+
+                              return (
+                                <AccordionItem key={category} value={category} className="rounded-lg border px-3">
+                                  <div className="flex items-center gap-3">
+                                    <AccordionTrigger className="min-w-0 flex-1 py-3 text-left hover:no-underline">
+                                      <span className="flex min-w-0 items-center gap-2">
+                                        <Icon className="h-4 w-4 shrink-0 text-primary" />
+                                        <span className="truncate text-sm">{category}</span>
+                                        <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                                          {selectedCount} of {categoryPermissionIds.length} selected
+                                        </span>
+                                      </span>
+                                    </AccordionTrigger>
+                                    <div className="flex shrink-0 items-center gap-2">
                                       <Checkbox
-                                        id={permission.id}
-                                        checked={field.value.includes(permission.id)}
+                                        id={selectAllId}
+                                        aria-label={`Select all ${category} permissions`}
+                                        checked={allSelected ? true : someSelected ? 'indeterminate' : false}
                                         onCheckedChange={(checked) => {
                                           if (checked) {
-                                            field.onChange([...field.value, permission.id]);
+                                            field.onChange(Array.from(new Set([
+                                              ...field.value,
+                                              ...categoryPermissionIds,
+                                            ])));
                                           } else {
                                             field.onChange(
-                                              field.value.filter((p) => p !== permission.id)
+                                              field.value.filter(permissionId =>
+                                                !categoryPermissionIdSet.has(permissionId))
                                             );
                                           }
                                         }}
                                       />
-                                      <div className="space-y-1">
-                                        <label
-                                          htmlFor={permission.id}
-                                          className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                                        >
-                                          {permission.name}
-                                        </label>
-                                        <p className="text-xs text-muted-foreground">
-                                          {permission.description}
-                                        </p>
-                                      </div>
+                                      <label htmlFor={selectAllId} className="cursor-pointer text-xs font-medium">
+                                        Select all
+                                      </label>
                                     </div>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          })}
+                                  </div>
+                                  <AccordionContent className="pb-3">
+                                    <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                                      {config.permissions.map((permission) => (
+                                        <div
+                                          key={permission.id}
+                                          className="flex items-start space-x-2 rounded border p-2"
+                                        >
+                                          <Checkbox
+                                            id={permission.id}
+                                            checked={field.value.includes(permission.id)}
+                                            onCheckedChange={(checked) => {
+                                              if (checked) {
+                                                field.onChange(Array.from(new Set([...field.value, permission.id])));
+                                              } else {
+                                                field.onChange(
+                                                  field.value.filter((p) => p !== permission.id)
+                                                );
+                                              }
+                                            }}
+                                          />
+                                          <div className="space-y-1">
+                                            <label
+                                              htmlFor={permission.id}
+                                              className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                                            >
+                                              {permission.name}
+                                            </label>
+                                            <p className="text-xs text-muted-foreground">
+                                              {permission.description}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              );
+                            })}
+                          </Accordion>
                         </div>
                       </FormControl>
                       <FormDescription>

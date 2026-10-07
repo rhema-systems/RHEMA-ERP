@@ -180952,6 +180952,10 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("InternalAttendeeEmployeeIdsJson")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
 

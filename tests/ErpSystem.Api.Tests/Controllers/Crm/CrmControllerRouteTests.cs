@@ -2,12 +2,15 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using ErpSystem.Api.Middleware;
+using ErpSystem.Api.Controllers.Crm;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Crm;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Crm;
+using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -25,6 +28,16 @@ namespace ErpSystem.Api.Tests.Controllers.Crm;
 
 public class CrmControllerRouteTests
 {
+    [Fact]
+    public void OpportunityStageRoutes_ShouldUseDynamicCrmPermissions()
+    {
+        var controller = typeof(CrmController);
+        controller.GetMethod(nameof(CrmController.GetOpportunityStages))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CrmPermissions.Read);
+        controller.GetMethod(nameof(CrmController.UpdateOpportunityStages))!
+            .GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(CrmPermissions.Manage);
+    }
+
     [Fact]
     public async Task GetOverview_ShouldAllowLocalInternalUsers()
     {

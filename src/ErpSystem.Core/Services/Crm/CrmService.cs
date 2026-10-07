@@ -1,6 +1,8 @@
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Crm;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
 using ErpSystem.Core.Entities.Sales;
@@ -3413,7 +3415,8 @@ public class CrmService : ICrmService
             }
         }
 
-        return MapActivityDetail(activity, opportunityLookup, businessPartnerLookup, leadLookup);
+        var internalAttendees = await ResolveActivityEmployeeAttendeesAsync(activity, tenantId);
+        return MapActivityDetail(activity, opportunityLookup, businessPartnerLookup, leadLookup, internalAttendees);
     }
 
     public async Task<CrmActivityDetailDto> CreateActivityAsync(CreateCrmActivityDto dto)
@@ -3430,6 +3433,9 @@ public class CrmService : ICrmService
             tenantId);
 
         ValidateActivityAssociations(resolvedBusinessPartnerId, linkedLead, linkedOpportunity);
+        var internalAttendeeEmployeeIds = await ValidateActivityEmployeeAttendeesAsync(
+            dto.InternalAttendeeEmployeeIds,
+            tenantId);
 
         var activity = new Activity
         {
@@ -3447,7 +3453,8 @@ public class CrmService : ICrmService
             CustomerId = resolvedBusinessPartnerId,
             OpportunityId = linkedOpportunity?.Id,
             Location = CleanNullable(dto.Location),
-            Attendees = CleanNullable(dto.Attendees),
+            Attendees = NormalizeExternalAttendees(dto.ExternalAttendees ?? dto.Attendees),
+            InternalAttendeeEmployeeIdsJson = SerializeActivityEmployeeAttendeeIds(internalAttendeeEmployeeIds),
             Outcome = CleanNullable(dto.Outcome),
             Notes = CleanNullable(dto.Notes),
             RequiresFollowUp = dto.RequiresFollowUp,
@@ -3482,6 +3489,9 @@ public class CrmService : ICrmService
             tenantId);
 
         ValidateActivityAssociations(resolvedBusinessPartnerId, linkedLead, linkedOpportunity);
+        var internalAttendeeEmployeeIds = dto.InternalAttendeeEmployeeIds is null
+            ? DeserializeActivityEmployeeAttendeeIds(activity.InternalAttendeeEmployeeIdsJson)
+            : await ValidateActivityEmployeeAttendeesAsync(dto.InternalAttendeeEmployeeIds, tenantId);
 
         activity.Subject = dto.Subject.Trim();
         activity.ActivityType = CleanRequiredText(dto.ActivityType, activity.ActivityType);
@@ -3496,7 +3506,8 @@ public class CrmService : ICrmService
         activity.CustomerId = resolvedBusinessPartnerId;
         activity.OpportunityId = linkedOpportunity?.Id;
         activity.Location = CleanNullable(dto.Location);
-        activity.Attendees = CleanNullable(dto.Attendees);
+        activity.Attendees = NormalizeExternalAttendees(dto.ExternalAttendees ?? dto.Attendees);
+        activity.InternalAttendeeEmployeeIdsJson = SerializeActivityEmployeeAttendeeIds(internalAttendeeEmployeeIds);
         activity.Outcome = CleanNullable(dto.Outcome);
         activity.Notes = CleanNullable(dto.Notes);
         activity.RequiresFollowUp = dto.RequiresFollowUp;
@@ -7398,7 +7409,8 @@ public class CrmService : ICrmService
         Activity activity,
         IReadOnlyDictionary<Guid, Opportunity> opportunityLookup,
         IReadOnlyDictionary<Guid, string> businessPartnerLookup,
-        IReadOnlyDictionary<Guid, Lead> leadLookup)
+        IReadOnlyDictionary<Guid, Lead> leadLookup,
+        IReadOnlyList<CrmActivityEmployeeAttendeeDto> internalAttendees)
     {
         var listItem = MapActivityListItem(activity, opportunityLookup, businessPartnerLookup, leadLookup);
 
@@ -7429,6 +7441,8 @@ public class CrmService : ICrmService
             Duration = activity.Duration,
             Location = activity.Location,
             Attendees = activity.Attendees,
+            ExternalAttendees = activity.Attendees,
+            InternalAttendees = internalAttendees,
             Outcome = activity.Outcome,
             Notes = activity.Notes
         };
@@ -8782,6 +8796,103 @@ public class CrmService : ICrmService
 
     private static string? CleanNullable(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private async Task<IReadOnlyList<Guid>> ValidateActivityEmployeeAttendeesAsync(
+        IReadOnlyList<Guid>? employeeIds,
+        Guid tenantId)
+    {
+        var requestedIds = (employeeIds ?? [])
+            .Where(id => id != Guid.Empty)
+            .Distinct()
+            .ToList();
+
+        if (requestedIds.Count > 25)
+        {
+            throw new InvalidOperationException("An activity can include no more than 25 internal attendees.");
+        }
+
+        if (requestedIds.Count == 0)
+        {
+            return requestedIds;
+        }
+
+        var employees = await _unitOfWork.Repository<Employee>().FindAsync(employee =>
+            employee.TenantId == tenantId && requestedIds.Contains(employee.Id));
+        var foundIds = employees.Select(employee => employee.Id).ToHashSet();
+        if (requestedIds.Any(id => !foundIds.Contains(id)))
+        {
+            throw new InvalidOperationException("One or more internal attendees are not employees in this tenant.");
+        }
+
+        return requestedIds;
+    }
+
+    private async Task<IReadOnlyList<CrmActivityEmployeeAttendeeDto>> ResolveActivityEmployeeAttendeesAsync(
+        Activity activity,
+        Guid tenantId)
+    {
+        var attendeeIds = DeserializeActivityEmployeeAttendeeIds(activity.InternalAttendeeEmployeeIdsJson);
+        if (attendeeIds.Count == 0)
+        {
+            return [];
+        }
+
+        var employees = await _unitOfWork.Repository<Employee>().FindAsync(employee =>
+            employee.TenantId == tenantId && attendeeIds.Contains(employee.Id));
+        var employeeLookup = employees.ToDictionary(employee => employee.Id);
+
+        return attendeeIds
+            .Where(employeeLookup.ContainsKey)
+            .Select(employeeId =>
+            {
+                var employee = employeeLookup[employeeId];
+                return new CrmActivityEmployeeAttendeeDto
+                {
+                    EmployeeId = employee.Id,
+                    EmployeeNumber = employee.EmployeeNumber,
+                    DisplayName = employee.FullName
+                };
+            })
+            .ToList();
+    }
+
+    private static string? NormalizeExternalAttendees(string? value)
+    {
+        var attendees = (value ?? string.Empty)
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var normalized = attendees.Count == 0 ? null : string.Join(", ", attendees);
+        if (normalized?.Length > 1000)
+        {
+            throw new InvalidOperationException("External attendees cannot exceed 1000 characters.");
+        }
+
+        return normalized;
+    }
+
+    private static string? SerializeActivityEmployeeAttendeeIds(IReadOnlyList<Guid> employeeIds)
+        => employeeIds.Count == 0 ? null : JsonSerializer.Serialize(employeeIds);
+
+    private static IReadOnlyList<Guid> DeserializeActivityEmployeeAttendeeIds(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<Guid>>(value)?
+                .Where(id => id != Guid.Empty)
+                .Distinct()
+                .ToList() ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
 
     private static string CleanRequiredText(string? value, string fallback)
         => string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();

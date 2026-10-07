@@ -127,6 +127,7 @@ export default function CreateSalesOrderPage() {
     const sourceContext = parseSaleableSourceContextFromParams(params);
     const propertyEnquiryId = params.get('propertyEnquiryId');
     const sourceIsLocked = params.get('saleableSourceLocked') === 'true';
+    const isPropertyEnquirySource = sourceIsLocked && Boolean(propertyEnquiryId);
     const crmContext: CrmHandoffContext = {
       contextLabel: params.get('crmContext') || undefined,
       quoteId: params.get('quoteId') || undefined,
@@ -158,8 +159,12 @@ export default function CreateSalesOrderPage() {
             locationId: sourceContext.locationId,
             quantity: 1,
             unitPrice: sourceContext.estimatedValue ?? first.unitPrice,
-            unitOfMeasure: sourceContext.unitOfMeasure || (sourceContext.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'EA')),
-            unit: sourceContext.unitOfMeasure || first.unit,
+            unitOfMeasure: isPropertyEnquirySource
+              ? 'Each'
+              : sourceContext.unitOfMeasure || (sourceContext.areaSquareMeters ? 'Unit' : (first.unitOfMeasure || 'EA')),
+            // EA is the tenant UOM code for Each. Keep the human label in the
+            // form while the API receives the stable code used by Inventory.
+            unit: isPropertyEnquirySource ? 'EA' : sourceContext.unitOfMeasure || first.unit,
           };
 
           return current.map((line, index) => index === 0 ? { ...updatedFirst, key: line.key } : line);
@@ -849,7 +854,12 @@ export default function CreateSalesOrderPage() {
                     <Input type="number" min={1} value={line.quantity} onChange={(e) => updateLine(line.key, 'quantity', parseFloat(e.target.value) || 0)} />
                   </TableCell>
                   <TableCell>
-                    <Input placeholder="EA" value={line.unitOfMeasure || ''} onChange={(e) => updateLine(line.key, 'unitOfMeasure', e.target.value)} />
+                    <Input
+                      placeholder="EA"
+                      value={line.unitOfMeasure || ''}
+                      disabled={Boolean(propertyEnquirySourceLock)}
+                      onChange={(e) => updateLine(line.key, 'unitOfMeasure', e.target.value)}
+                    />
                   </TableCell>
                   <TableCell>
                     <Input type="number" min={0} step={0.01} value={line.unitPrice} onChange={(e) => updateLine(line.key, 'unitPrice', parseFloat(e.target.value) || 0)} />

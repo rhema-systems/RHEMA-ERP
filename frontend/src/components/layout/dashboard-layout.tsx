@@ -5,7 +5,6 @@ import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { SessionTimeoutProvider } from '../../contexts/session-timeout-context';
 import { authService } from '../../services/auth';
-import { EnvironmentBanner } from '../environment/EnvironmentBanner';
 
 interface DashboardLayoutProps {
   children: ReactNode;
@@ -21,7 +20,6 @@ export function DashboardLayout({ children, defaultSidebarCollapsed = false }: D
       data-interface-style="immersive"
       className="flex h-screen flex-col bg-[radial-gradient(circle_at_top_right,rgba(96,165,250,0.12),transparent_34%),linear-gradient(145deg,#f4f8ff,#f8fafc_45%,#effaf7)] transition-colors dark:bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.14),transparent_34%),linear-gradient(145deg,#101010,#151515_48%,#111b18)]"
     >
-      <EnvironmentBanner />
       <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
         <Sidebar defaultCollapsed={defaultSidebarCollapsed} />

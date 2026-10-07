@@ -3160,7 +3160,8 @@ public sealed class EhcTicketService : IEhcTicketService
             RequesterName = string.IsNullOrWhiteSpace(requesterName)
                 ? ticket.RequesterUser?.UserName ?? publicContact?.ContactEmail
                 : requesterName,
-            RequesterAuthenticationProvider = ticket.RequesterUser?.AuthenticationProvider.ToString()
+            RequesterAuthenticationProvider = ticket.RequesterUser?.AuthenticationProvider.ToString(),
+            IsPublicSiteSubmission = ticket.PublicPropertyEnquiryContactId.HasValue
         };
     }
 

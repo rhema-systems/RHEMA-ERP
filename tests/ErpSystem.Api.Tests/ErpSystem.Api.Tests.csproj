@@ -59,6 +59,7 @@
     <Compile Include="Services\Finance\InventorySupplierReturnGroupReadTests.cs" />
     <Compile Include="Controllers\Inventory\StockMovementCurrencyTests.cs" />
     <Compile Include="Authorization\FinancePermissionAuthorizationHandlerTests.cs" />
+    <Compile Include="Authorization\CrmPermissionAuthorizationTests.cs" />
     <Compile Include="Configuration\StartupInitializationPolicyTests.cs" />
     <Compile Include="Configuration\CandidatePortalOptionsTests.cs" />
     <Compile Include="Authorization\StructuredAuthorizationMiddlewareResultHandlerTests.cs" />
@@ -76,6 +77,7 @@
     <Compile Include="Controllers\Sales\SalesReferenceControllerTests.cs" />
     <Compile Include="Controllers\DocumentsAndSequencesSecurityTests.cs" />
     <Compile Include="Controllers\WorkflowEvidenceControllerTests.cs" />
+    <Compile Include="Controllers\WorkflowEntitySummaryTests.cs" />
     <Compile Include="Controllers\DocumentManagement\PaymentDocumentScopeTests.cs" />
     <Compile Include="Services\DocumentManagement\CentralDocumentWordConversionTests.cs" />
     <Compile Include="Controllers\Estate\EstateManagedAssetImportTests.cs" />

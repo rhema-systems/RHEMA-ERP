@@ -72,6 +72,7 @@ export default function UsersPage() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteUser, setDeleteUser] = useState<User | null>(null);
   const [roleFilter, setRoleFilter] = useState<string>('all');
+  const [roleSearch, setRoleSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [lastLoginFromDate, setLastLoginFromDate] = useState<string>('');
   const [lastLoginToDate, setLastLoginToDate] = useState<string>('');
@@ -155,6 +156,7 @@ export default function UsersPage() {
       setIsDialogOpen(false);
       setEditingUser(null);
       setPhoneNumber('');
+      setRoleSearch('');
       form.reset();
       toast({
         title: 'Success',
@@ -193,6 +195,7 @@ export default function UsersPage() {
   const handleAdd = () => {
     setEditingUser(null);
     setPhoneNumber('');
+    setRoleSearch('');
     form.reset({
       username: '',
       email: '',
@@ -208,6 +211,7 @@ export default function UsersPage() {
 
   const handleEdit = (user: User) => {
     setEditingUser(user);
+    setRoleSearch('');
     const userPhoneNumber = user.phoneNumber?.trim() ?? '';
     setPhoneNumber(userPhoneNumber);
     form.reset({
@@ -540,6 +544,7 @@ export default function UsersPage() {
           setIsDialogOpen(open);
           if (!open) {
             setPhoneNumber('');
+            setRoleSearch('');
           }
         }}>
           <DialogContent className="max-w-2xl">
@@ -673,6 +678,13 @@ export default function UsersPage() {
                           description: 'Currently assigned role',
                         })),
                     ];
+                    const normalizedRoleSearch = roleSearch.trim().toLocaleLowerCase();
+                    const filteredRoleOptions = normalizedRoleSearch
+                      ? roleOptions.filter((role) =>
+                          [role.name, role.description]
+                            .filter((value): value is string => Boolean(value))
+                            .some((value) => value.toLocaleLowerCase().includes(normalizedRoleSearch)))
+                      : roleOptions;
 
                     const isSelected = (roleName: string) => selectedRoles.some((selectedRole) =>
                       normalizeRoleName(selectedRole) === normalizeRoleName(roleName));
@@ -697,6 +709,16 @@ export default function UsersPage() {
                             {selectedRoles.length} selected
                           </Badge>
                         </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="user-role-search">Search roles</Label>
+                          <Input
+                            id="user-role-search"
+                            type="search"
+                            value={roleSearch}
+                            onChange={(event) => setRoleSearch(event.target.value)}
+                            placeholder="Search roles by name or description..."
+                          />
+                        </div>
                         <ClientOnly fallback={
                           <div className="h-28 bg-muted/50 rounded-md border" />
                         }>
@@ -712,7 +734,20 @@ export default function UsersPage() {
                                 <p className="px-2 py-3 text-sm text-muted-foreground">
                                   No roles are available. Create a role before assigning this user.
                                 </p>
-                              ) : roleOptions.map((role) => {
+                              ) : filteredRoleOptions.length === 0 ? (
+                                <div className="space-y-2 px-2 py-3 text-sm text-muted-foreground">
+                                  <p>No roles match &ldquo;{roleSearch.trim()}&rdquo;.</p>
+                                  <Button
+                                    type="button"
+                                    variant="link"
+                                    size="sm"
+                                    className="h-auto p-0"
+                                    onClick={() => setRoleSearch('')}
+                                  >
+                                    Clear role search
+                                  </Button>
+                                </div>
+                              ) : filteredRoleOptions.map((role) => {
                                 const checkboxId = `user-role-${role.id}`;
                                 return (
                                   <label
@@ -778,6 +813,7 @@ export default function UsersPage() {
                     onClick={() => {
                       setIsDialogOpen(false);
                       setPhoneNumber('');
+                      setRoleSearch('');
                     }}
                   >
                     Cancel
