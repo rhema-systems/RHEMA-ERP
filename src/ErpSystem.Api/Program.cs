@@ -912,6 +912,7 @@ app.UseMiddleware<ProcurementGhanepsProblemDetailsMiddleware>();
 app.UseAuthentication();
 app.UseMiddleware<JwtBlacklistMiddleware>();
 app.UseMiddleware<HrIdentityAccessMiddleware>();
+app.UseMiddleware<TenantAccessValidationMiddleware>();
 
 // Rate limiting depends on authenticated user claims for ERP/external users.
 // Auth endpoints remain anonymous here, so login/password-reset throttling still applies by IP.

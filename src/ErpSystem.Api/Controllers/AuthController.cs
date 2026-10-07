@@ -259,43 +259,73 @@ namespace ErpSystem.Api.Controllers
                 });
             }
 
-            // Determine the effective tenant ID for this login session
-            var effectiveTenantId = tenant?.Id ?? user.TenantId;
+            var allRelationships = (await _userTenantService.GetAllUserTenantsAsync(user.Id)).ToList();
+            var activeRelationships = allRelationships
+                .Where(item => item.Status == UserTenantStatus.Active &&
+                               (!item.ExpiresAt.HasValue || item.ExpiresAt.Value > DateTime.UtcNow))
+                .OrderByDescending(item => item.IsDefault)
+                .ThenBy(item => item.GrantedAt)
+                .ToList();
 
-            // If effectiveTenantId is still empty, try to get from UserTenants table
-            if (effectiveTenantId == Guid.Empty)
+            UserTenant? selectedRelationship;
+            if (tenant is not null)
             {
-                // Get active user tenants ordered by IsDefault
-                var userTenants = await _context.UserTenants
-                    .Where(ut => ut.UserId == user.Id && !ut.IsDeleted && ut.Status == UserTenantStatus.Active)
-                    .OrderByDescending(ut => ut.IsDefault)
-                    .ToListAsync();
-
-                if (userTenants.Any())
+                selectedRelationship = activeRelationships.FirstOrDefault(item => item.TenantId == tenant.Id);
+                var isUnmigratedLegacyPrimary = allRelationships.Count == 0 && user.TenantId == tenant.Id;
+                if (selectedRelationship is null && !isUnmigratedLegacyPrimary)
                 {
-                    effectiveTenantId = userTenants.First().TenantId;
-                    var isDefault = userTenants.First().IsDefault;
-                    _logger.LogInformation("Using {TenantType} tenant {TenantId} from UserTenants for user {Username}",
-                        isDefault ? "default" : "first active", effectiveTenantId, user.UserName);
+                    _logger.LogWarning(
+                        "Login denied because user {UserId} has no active access to tenant {TenantId}",
+                        user.Id,
+                        tenant.Id);
+                    return Unauthorized(new
+                    {
+                        message = "You do not have active access to this tenant. Contact an administrator.",
+                        code = "TENANT_ACCESS_DENIED"
+                    });
+                }
+            }
+            else
+            {
+                selectedRelationship = activeRelationships.FirstOrDefault(item => item.TenantId == user.TenantId) ??
+                                       activeRelationships.FirstOrDefault();
+
+                if (selectedRelationship is not null)
+                {
+                    tenant = selectedRelationship.Tenant ??
+                             await _tenantService.GetTenantByIdAsync(selectedRelationship.TenantId);
+                }
+                else if (allRelationships.Count > 0 || user.TenantId == Guid.Empty)
+                {
+                    _logger.LogWarning("User {Username} has no active tenant mapping", user.UserName);
+                    return Unauthorized(new
+                    {
+                        message = "You do not have active access to any tenant. Contact an administrator.",
+                        code = "TENANT_ACCESS_DENIED"
+                    });
                 }
                 else
                 {
-                    _logger.LogWarning("User {Username} has no tenant assigned in User.TenantId or UserTenants table", user.UserName);
-                    return Unauthorized(new { message = "User has no tenant assigned. Please contact administrator." });
+                    // Compatibility for users created before UserTenant mappings became authoritative.
+                    tenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
                 }
-
-                // Update user's TenantId field for future logins
-                user.TenantId = effectiveTenantId;
-                await _userManager.UpdateAsync(user);
-                _logger.LogInformation("Updated user {Username} TenantId to {TenantId}", user.UserName, effectiveTenantId);
             }
 
-            // Update user's current tenant if tenant was specified in login
-            if (tenant != null && user.TenantId != tenant.Id)
+            if (tenant is null || tenant.Status != TenantStatus.Active)
             {
-                user.TenantId = tenant.Id;
+                return Unauthorized(new
+                {
+                    message = "Your assigned tenant is inactive or unavailable. Contact an administrator.",
+                    code = "TENANT_ACCESS_DENIED"
+                });
+            }
+
+            var effectiveTenantId = tenant.Id;
+            if (user.TenantId != effectiveTenantId)
+            {
+                user.TenantId = effectiveTenantId;
                 await _userManager.UpdateAsync(user);
-                _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, tenant.Id);
+                _logger.LogInformation("Updated user {Username} tenant to {TenantId}", user.UserName, effectiveTenantId);
             }
 
             // Get security settings for concurrent login prevention from user's tenant
@@ -627,6 +657,13 @@ namespace ErpSystem.Api.Controllers
                                 return StatusCode(500, new { message = "Failed to create user account" });
                             }
 
+                            await _userTenantService.GrantUserAccessToTenantAsync(
+                                user.Id,
+                                provisionTenantId,
+                                UserTenantAccessLevel.Standard,
+                                "ldap-auto-provision",
+                                notes: "Granted during LDAP auto-provisioning.");
+
                             // Exact-match auto-link on provision. One unambiguous
                             // match links the account and grants the Employee role; anything
                             // else leaves the user for the HR unlinked-users queue. Never fails
@@ -747,12 +784,15 @@ namespace ErpSystem.Api.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
-                // If tenant code provided, validate that user belongs to the tenant
-                // NOTE: For LDAP-authenticated users we allow login without requiring pre-created UserTenant mappings.
-                if (tenant != null && !isLdapAuthenticated)
+                // If tenant code is provided, an inactive, revoked, or expired mapping must
+                // override the legacy primary-tenant field.
+                if (tenant != null)
                 {
                     var userTenant = await _userTenantService.GetUserTenantRelationshipAsync(user.Id, tenant.Id);
-                    if (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id))
+                    var allUserTenants = await _userTenantService.GetAllUserTenantsAsync(user.Id);
+                    var isUnmigratedLegacyPrimary = !allUserTenants.Any() && user.TenantId == tenant.Id;
+                    if (!isUnmigratedLegacyPrimary &&
+                        (userTenant == null || !await _userTenantService.HasActiveAccessAsync(user.Id, tenant.Id)))
                     {
                         var statusMessage = userTenant == null ? "not assigned" : "no active access";
                         _logger.LogWarning("Login failed: User {Username} {Status} for tenant {TenantCode}",
@@ -913,7 +953,6 @@ namespace ErpSystem.Api.Controllers
                     _logger.LogInformation("2FA verification successful for user {Username}", request.Username);
                 }
 
-                // For LDAP logins without an explicit tenant selection, use the default tenant context in the session/response.
                 var sessionTenant = isLdapAuthenticated ? (defaultTenant ?? tenantForLdap) : tenant;
                 return await CompleteSuccessfulLoginAsync(user, sessionTenant, request.Username, "Login successful");
             }
@@ -949,6 +988,21 @@ namespace ErpSystem.Api.Controllers
                 if (user == null)
                 {
                     return Unauthorized(new { message = "Invalid token" });
+                }
+
+                var allRelationships = await _userTenantService.GetAllUserTenantsAsync(parsedUserId);
+                var isUnmigratedLegacyPrimary = storedRefreshToken.TenantId.HasValue &&
+                                                !allRelationships.Any() &&
+                                                user.TenantId == storedRefreshToken.TenantId.Value;
+                if (!storedRefreshToken.TenantId.HasValue ||
+                    (!isUnmigratedLegacyPrimary &&
+                     !await _userTenantService.HasActiveAccessAsync(parsedUserId, storedRefreshToken.TenantId.Value)))
+                {
+                    return Unauthorized(new
+                    {
+                        message = "Your access to this tenant has expired or been removed.",
+                        code = "TENANT_ACCESS_DENIED"
+                    });
                 }
 
                 var accessDecision = await _hrIdentityAccessService.EvaluateAsync(user.Id, HttpContext.RequestAborted);
@@ -1263,8 +1317,10 @@ namespace ErpSystem.Api.Controllers
                     }
                 }
 
-                // If no explicit UserTenant relationships exist, include the user's primary tenant
-                if (!tenantInfoList.Any() && user.TenantId != Guid.Empty)
+                // Compatibility applies only when the user has never had a mapping. A revoked,
+                // suspended, or expired relationship must not fall back to ApplicationUser.TenantId.
+                var allRelationships = await _userTenantService.GetAllUserTenantsAsync(user.Id);
+                if (!tenantInfoList.Any() && !allRelationships.Any() && user.TenantId != Guid.Empty)
                 {
                     var primaryTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
                     if (primaryTenant?.Status == TenantStatus.Active)
@@ -1340,8 +1396,8 @@ namespace ErpSystem.Api.Controllers
                     }
                 }
 
-                // If no explicit UserTenant relationships exist, include the user's primary tenant
-                if (!accessibleTenants.Any() && user.TenantId != Guid.Empty)
+                var allRelationships = await _userTenantService.GetAllUserTenantsAsync(user.Id);
+                if (!accessibleTenants.Any() && !allRelationships.Any() && user.TenantId != Guid.Empty)
                 {
                     var primaryTenant = await _tenantService.GetTenantByIdAsync(user.TenantId);
                     if (primaryTenant?.Status == TenantStatus.Active)
@@ -1431,12 +1487,12 @@ namespace ErpSystem.Api.Controllers
                     }
                 }
 
-                // Validate user has access to this tenant
-                // Check both explicit UserTenant relationships and user's primary tenant
+                // An explicit inactive relationship always overrides the legacy primary tenant.
                 var hasExplicitAccess = await _userTenantService.HasActiveAccessAsync(Guid.Parse(userId), tenant.Id);
-                var isPrimaryTenant = user.TenantId == tenant.Id;
+                var allRelationships = await _userTenantService.GetAllUserTenantsAsync(Guid.Parse(userId));
+                var isUnmigratedLegacyPrimary = !allRelationships.Any() && user.TenantId == tenant.Id;
 
-                if (!hasExplicitAccess && !isPrimaryTenant)
+                if (!hasExplicitAccess && !isUnmigratedLegacyPrimary)
                 {
                     _logger.LogWarning("User {UserId} attempted to access tenant {TenantCode} without permission", userId, request.TenantCode);
                     return BadRequest(new { message = "User does not have access to this tenant" });

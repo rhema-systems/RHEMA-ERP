@@ -109,7 +109,8 @@ public sealed class UserTenantMappingsController : ControllerBase
         if (!TryGetActor(out _, out var actor)) return Forbid();
         if (request.UserId == Guid.Empty || request.TenantId == Guid.Empty)
             return Invalid("USER_TENANT_MAPPING_REQUIRED", "UserId and TenantId are required.");
-        if (request.ExpiresAt.HasValue && request.ExpiresAt.Value <= DateTime.UtcNow)
+        var expiresAt = NormalizeExpiry(request.ExpiresAt);
+        if (expiresAt.HasValue && expiresAt.Value <= DateTime.UtcNow)
             return Invalid("USER_TENANT_EXPIRY_INVALID", "ExpiresAt must be in the future.");
 
         var tenant = await _tenantService.GetTenantByIdAsync(request.TenantId);
@@ -126,7 +127,7 @@ public sealed class UserTenantMappingsController : ControllerBase
             request.TenantId,
             UserTenantAccessLevel.Standard,
             actor,
-            request.ExpiresAt,
+            expiresAt,
             string.IsNullOrWhiteSpace(request.Reason)
                 ? "Granted through tenant administration."
                 : request.Reason.Trim());
@@ -159,8 +160,19 @@ public sealed class UserTenantMappingsController : ControllerBase
 
     private bool CanManageTenant(Guid tenantId) =>
         _currentUser.IsAuthenticated &&
-        _currentUser.TenantId.HasValue &&
-        _currentUser.TenantId.Value == tenantId;
+        (_currentUser.IsInRole(Constants.Roles.SuperAdmin) ||
+         (_currentUser.TenantId.HasValue && _currentUser.TenantId.Value == tenantId));
+
+    private static DateTime? NormalizeExpiry(DateTime? value)
+    {
+        if (!value.HasValue) return null;
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
+    }
 
     private bool TryGetActor(out Guid actorId, out string actor)
     {

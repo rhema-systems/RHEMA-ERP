@@ -66,6 +66,7 @@
     <Compile Include="Middleware\ExternalUserAccessMiddlewareTenderBidTests.cs" />
     <Compile Include="Middleware\SystemExceptionResultLoggingFilterTests.cs" />
     <Compile Include="Middleware\SecurityHeadersMiddlewareTests.cs" />
+    <Compile Include="Middleware\TenantAccessValidationMiddlewareTests.cs" />
     <Compile Include="Controllers\Auth\AuthControllerRouteTests.cs" />
     <Compile Include="Controllers\Settings\LoginAppearanceSettingsControllerTests.cs" />
     <Compile Include="Controllers\Administration\UserTenantMappingsControllerTests.cs" />
