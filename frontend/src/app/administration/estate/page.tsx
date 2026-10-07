@@ -6,6 +6,7 @@ import {
   FileText,
   Globe2,
   ShieldCheck,
+  SlidersHorizontal,
   Workflow,
 } from 'lucide-react';
 
@@ -42,6 +43,13 @@ const links: ModuleSetupLink[] = [
     icon: ShieldCheck,
     description:
       'Control Estate document access, archive periods, and legal-hold review.',
+  },
+  {
+    title: 'Land Plot Setup',
+    href: '/administration/estate/settings',
+    icon: SlidersHorizontal,
+    description:
+      'Set the square meters that equal one plot for land portal listings.',
   },
   {
     title: 'GIS Integration',

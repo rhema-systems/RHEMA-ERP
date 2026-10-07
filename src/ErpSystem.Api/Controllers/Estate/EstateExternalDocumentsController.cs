@@ -1701,6 +1701,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
         var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
+        var squareMetersPerPlot = await EstateSettingsController.GetSquareMetersPerPlotAsync(
+            _db,
+            tenantId,
+            cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1846,6 +1850,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcationQuery,
             normalizedPage,
             normalizedPageSize,
+            squareMetersPerPlot,
             usePublicImageRoute: false,
             cancellationToken);
 
@@ -1895,6 +1900,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedPage = Math.Max(1, page ?? 1);
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
         var activeAllocatedListingIds = await GetActiveSalesAllocationListingIdsAsync(tenantId, cancellationToken);
+        var squareMetersPerPlot = await EstateSettingsController.GetSquareMetersPerPlotAsync(
+            _db,
+            tenantId,
+            cancellationToken);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
             .AsNoTracking())
@@ -1991,6 +2000,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcationQuery,
             normalizedPage,
             normalizedPageSize,
+            squareMetersPerPlot,
             usePublicImageRoute: true,
             cancellationToken);
 
@@ -2015,6 +2025,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         IQueryable<EstateLandDemarcation> demarcationQuery,
         int normalizedPage,
         int normalizedPageSize,
+        decimal? squareMetersPerPlot,
         bool usePublicImageRoute,
         CancellationToken cancellationToken)
     {
@@ -2046,10 +2057,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         var listings = filteredAssets
             .Select(item => (
-                Data: (object)ToExternalListingDto(item, usePublicImageRoute),
+                Data: (object)ToExternalListingDto(item, squareMetersPerPlot, usePublicImageRoute),
                 PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
             .Concat(filteredDemarcations.Select(item => (
-                Data: (object)ToExternalListingDto(item, usePublicImageRoute),
+                Data: (object)ToExternalListingDto(item, squareMetersPerPlot, usePublicImageRoute),
                 PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
             .OrderByDescending(item => item.PublishedAt)
             .Skip(pageOffset)
@@ -3708,7 +3719,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
-    private static object ToExternalListingDto(EstateManagedAsset asset, bool usePublicImageRoute = false)
+    private static object ToExternalListingDto(
+        EstateManagedAsset asset,
+        decimal? squareMetersPerPlot,
+        bool usePublicImageRoute = false)
     {
         var image = asset.Documents
             .Where(document => document.IsListingImage)
@@ -3734,6 +3748,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.AreaSquareMeters,
             asset.AreaValue,
             asset.AreaUnit,
+            SquareMetersPerPlot = squareMetersPerPlot,
+            PlotEquivalentCount = CalculatePlotEquivalent(asset.AreaSquareMeters, squareMetersPerPlot),
             asset.ExternalListingType,
             asset.ExternalListingPrice,
             asset.ExternalSalePrice,
@@ -3768,9 +3784,18 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     ? demarcation.TargetSalePrice
                     : null);
 
-    private static object ToExternalListingDto(EstateLandDemarcation demarcation, bool usePublicImageRoute = false)
+    private static decimal? CalculatePlotEquivalent(decimal? areaSquareMeters, decimal? squareMetersPerPlot)
+        => areaSquareMeters is > 0m && squareMetersPerPlot is > 0m
+            ? Math.Round(areaSquareMeters.Value / squareMetersPerPlot.Value, 2, MidpointRounding.AwayFromZero)
+            : null;
+
+    private static object ToExternalListingDto(
+        EstateLandDemarcation demarcation,
+        decimal? squareMetersPerPlot,
+        bool usePublicImageRoute = false)
     {
         var asset = demarcation.EstateManagedAsset;
+        var areaSquareMeters = demarcation.AreaSquareFeet / 10.7639104167m;
         var image = asset.Documents
             .Where(document => document.IsListingImage)
             .OrderByDescending(document => document.IsPrimaryListingImage)
@@ -3793,9 +3818,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             asset.BlockName,
             asset.FloorLabel,
             UnitType = "Land portion",
-            AreaSquareMeters = demarcation.AreaSquareFeet / 10.7639104167m,
+            AreaSquareMeters = areaSquareMeters,
             AreaValue = demarcation.AreaSquareFeet,
             AreaUnit = "square feet",
+            SquareMetersPerPlot = squareMetersPerPlot,
+            PlotEquivalentCount = CalculatePlotEquivalent(areaSquareMeters, squareMetersPerPlot),
             demarcation.ExternalListingType,
             ExternalListingPrice = ResolveDemarcationLeaseAmount(demarcation),
             demarcation.ExternalSalePrice,

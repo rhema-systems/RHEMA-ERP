@@ -250,6 +250,10 @@ public sealed class EstateManagedAssetsController : ControllerBase
             .Skip(offset)
             .Take(limit)
             .ToListAsync();
+        var squareMetersPerPlot = await EstateSettingsController.GetSquareMetersPerPlotAsync(
+            _db,
+            tenantId,
+            HttpContext.RequestAborted);
         var candidates = demarcations
             .Select(item => new
             {
@@ -282,6 +286,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 AreaValue = item.AreaSquareFeet,
                 AreaUnit = "SqFt",
                 AreaSquareMeters = item.AreaSquareFeet / 10.7639m,
+                SquareMetersPerPlot = squareMetersPerPlot,
+                PlotEquivalentCount = CalculatePlotEquivalent(item.AreaSquareFeet / 10.7639m, squareMetersPerPlot),
                 SurveyorName = item.EstateManagedAsset.SurveyorName,
                 SurveyDate = item.EstateManagedAsset.SurveyDate,
                 BeaconCount = item.BeaconCount,
@@ -885,6 +891,11 @@ public sealed class EstateManagedAssetsController : ControllerBase
 
     private static string BuildExternalReference(string prefix)
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
+
+    private static decimal? CalculatePlotEquivalent(decimal? areaSquareMeters, decimal? squareMetersPerPlot)
+        => areaSquareMeters is > 0m && squareMetersPerPlot is > 0m
+            ? Math.Round(areaSquareMeters.Value / squareMetersPerPlot.Value, 2, MidpointRounding.AwayFromZero)
+            : null;
 
     private static object ToSalesHandoffCaseDto(ProcedureCase procedureCase) => new
     {
