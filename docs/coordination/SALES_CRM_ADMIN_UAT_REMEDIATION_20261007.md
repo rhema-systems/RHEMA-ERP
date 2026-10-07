@@ -83,6 +83,7 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Validation: the linked Business Partner must exist in the tenant, be active, be approved, and have the Customer role before the no-Lead path is allowed.
 - UI: the Sales qualification card states when the linked customer account is being used and that no duplicate Lead will be created. Sales handoff URLs omit `leadId` when the opportunity is customer-only.
 - Verification: the focused backend lifecycle suite passes 17/17, including record-contact, qualification, and Existing Customer opportunity creation with no Lead row or ticket `CrmLeadId`; the frontend property-enquiry suites pass 24/24; the full frontend TypeScript check passes.
+- Release preflight: the nullable-Lead migration's rollback-only guard is source-hash pinned in the canonical CRM migration preflight manifest. `Test-CanonicalMigrationPreflight.ps1` passes with all 42 guarded-migration coverage IDs.
 - Remaining work: commit this follow-up, integrate the separately verified Sales Order workflow-summary correction, refresh from `origin/master`, and publish the authorized consolidated follow-up PR.
 
 ## Follow-up: production CRM and Sales permission catalogues

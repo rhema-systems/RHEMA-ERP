@@ -223,6 +223,11 @@
           "id": "20261004010000_LinkOpportunityCustomerToBusinessPartner",
           "sourceSha256": "709ED4BA4E32E24197CDEC069C114CB7698D0571322A9ED2836229165382E46C",
           "guardKind": "data-precondition"
+        },
+        {
+          "id": "20261007190000_AllowExistingCustomerPropertyProspectsWithoutLead",
+          "sourceSha256": "DC7262AE30BDB28FACCE4641C38154DD44836549AF1DC7B3DACE46476D600696",
+          "guardKind": "down-only"
         }
       ]
     },
