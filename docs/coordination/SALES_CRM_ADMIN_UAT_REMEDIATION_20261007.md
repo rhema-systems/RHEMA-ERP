@@ -107,4 +107,7 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Migrations: none.
 - Verification: focused property-enquiry Vitest passed 7/7; focused ESLint passed; full frontend TypeScript check passed; focused `PropertyEnquiryProspectLifecycleTests` passed 18/18 with .NET SDK 9.0.315; `git diff --check` passed.
 - Known constraints: the backend build still emits the repository's existing warning set; no new warning or test failure was introduced by this change.
-- Remaining work: commit, refresh from `origin/master`, publish and merge the focused PR, then dispatch the authorized test VPS workflow.
+- Publication: implementation commit `f73826d229f9762a7379a855509f99e8d948aea6` was published in PR #372 and merged to `master` as `c8d781c355eaa75767a186f26e3d4e5ffc337347`.
+- Deployment: Windows VPS CI/CD run `37697511362` built and deployed merge commit `c8d781c355eaa75767a186f26e3d4e5ffc337347`. Release-contract validation, immutable build and package upload, application and SQL backups, migration guards and application, service readiness, public API/assets/CORS checks, and headless Chrome smoke all passed. The VPS `/api/health/live` endpoint returned HTTP 200 with `Healthy` after activation.
+- Workflow reporting constraint: the application deployment passed and its evidence was published to the VPS, but the GitHub workflow concluded `failure` because the final `actions/upload-artifact` evidence-retention step hit the repository artifact-storage quota. No application rollback or deployment failure was reported.
+- Remaining work: none for this property-enquiry follow-up. GitHub artifact quota cleanup or expansion remains a repository-administration task if the sanitized evidence must also be retained in GitHub Actions.
