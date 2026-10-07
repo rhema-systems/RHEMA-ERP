@@ -1009,8 +1009,9 @@ function PropertyEnquiries() {
                   <div>
                     <h3 className="font-semibold">Sales qualification</h3>
                     <p className="text-sm text-slate-600">
-                      Work the public enquiry as a prospect. This does not
-                      create an ERP user, employee or customer.
+                      {prospect?.businessPartnerId && !prospect.leadId
+                        ? 'Qualify this enquiry against the linked customer account. A duplicate CRM lead will not be created.'
+                        : 'Work the public enquiry as a prospect. This does not create an ERP user, employee or customer.'}
                     </p>
                   </div>
                   <span className="rounded-full border border-sky-300 bg-white px-3 py-1 text-sm font-medium">
@@ -1609,7 +1610,7 @@ function PropertyEnquiries() {
                               businessPartnerId: prospect.businessPartnerId,
                               businessPartnerName:
                                 prospect.businessPartnerName || undefined,
-                              leadId: prospect.leadId,
+                              leadId: prospect.leadId || undefined,
                               leadName:
                                 ticket.propertyListing?.contactName ||
                                 ticket.subject,
@@ -1636,7 +1637,12 @@ function PropertyEnquiries() {
                   </div>
                 ) : (
                   <>
-                    {!depositThresholdMet ? (
+                    {!depositThresholdMet && prospect?.businessPartnerId ? (
+                      <p className="text-sm text-amber-800">
+                        The configured deposit threshold must still be met
+                        before finalizing this existing customer enquiry.
+                      </p>
+                    ) : !depositThresholdMet ? (
                       <p className="text-sm text-amber-800">
                         New customer registration is locked until a cleared
                         deposit meets the configured threshold. An already

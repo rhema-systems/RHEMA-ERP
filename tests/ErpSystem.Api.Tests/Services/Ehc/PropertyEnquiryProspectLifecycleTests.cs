@@ -4,6 +4,7 @@ using ErpSystem.Api.Controllers.Ehc;
 using ErpSystem.Api.Services.Ehc;
 using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities.Ehc;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
@@ -269,6 +270,89 @@ public sealed class PropertyEnquiryProspectLifecycleTests
     }
 
     [Fact]
+    public async Task Existing_customer_enquiry_qualifies_without_creating_a_duplicate_lead()
+    {
+        var tenantId = Guid.NewGuid();
+        var actorId = Guid.NewGuid();
+        var assetId = Guid.NewGuid();
+        var demarcationId = Guid.NewGuid();
+        await using var db = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        var salesUnit = new OrganizationUnit
+        {
+            TenantId = tenantId, OrganizationLevelId = Guid.NewGuid(), Name = "Sales",
+            Code = "DEPT-SALES", Path = "/SALES", IsActive = true
+        };
+        var customer = new BusinessPartner
+        {
+            TenantId = tenantId, PartnerCode = "CUS-EXISTING-001", PartnerName = "Ama Mensah",
+            PartnerType = "Customer", ApprovalStatus = "Approved", IsActive = true,
+            PrimaryEmail = "ama@example.test"
+        };
+        var asset = new EstateManagedAsset
+        {
+            Id = assetId, TenantId = tenantId, AssetCode = "LAND-001", Name = "Public land",
+            AssetType = EstateManagedAssetType.Land
+        };
+        var source = new SalesSaleableSource
+        {
+            TenantId = tenantId, Code = "LAND", DisplayName = "Land Management",
+            SourceType = "LandManagement", AdapterKey = "land-management",
+            DefaultCurrency = "GHS", IsActive = true
+        };
+        var ticket = new EhcTicket
+        {
+            TenantId = tenantId, TicketNumber = "EHC-EXISTING-001", TicketType = EhcTicketType.Enquiry,
+            Status = EhcTicketStatus.Acknowledged, Description = "Existing customer property enquiry",
+            AssignedOrganizationUnitId = salesUnit.Id,
+            PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
+                "estate-public-listing", Guid.NewGuid(), "LIST-001", "Public land", "Sale", "GHS",
+                "Accra", 100000m, assetId, demarcationId, customer.Id, customer.PartnerName,
+                "Ama Mensah", "ama@example.test", null))
+        };
+        db.AddRange(salesUnit, customer, asset, source, ticket);
+        await db.SaveChangesAsync();
+
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(user => user.TenantId).Returns(tenantId);
+        currentUser.SetupGet(user => user.UserId).Returns(actorId.ToString());
+        currentUser.SetupGet(user => user.UserName).Returns("sales.manager");
+        var opportunityId = Guid.NewGuid();
+        var opportunityService = new Mock<IOpportunityService>();
+        opportunityService.Setup(item => item.CreateAsync(It.IsAny<ErpSystem.Core.DTOs.Sales.CreateOpportunityDto>()))
+            .ReturnsAsync(new ErpSystem.Core.DTOs.Sales.OpportunityDetailDto { Id = opportunityId });
+        var service = new PropertyEnquiryProspectService(db, currentUser.Object,
+            Mock.Of<IBusinessPartnerService>(), opportunityService.Object,
+            Mock.Of<ISalesAllocationService>(), Mock.Of<IProspectDepositFinancePostingService>(),
+            Mock.Of<INotificationService>(), Mock.Of<IEhcTicketService>(),
+            NullLogger<PropertyEnquiryProspectService>.Instance);
+
+        var contacted = await service.RecordContactAsync(ticket.Id, new RecordPropertyEnquiryContactRequest());
+        var qualified = await service.QualifyAsync(ticket.Id, new QualifyPropertyEnquiryRequest
+        {
+            QualificationScore = 80,
+            AgreedAmount = 100000m,
+            Currency = "GHS"
+        });
+        var opportunity = await service.CreateOpportunityAsync(ticket.Id, new CreatePropertyEnquiryOpportunityRequest
+        {
+            Amount = 100000m,
+            ExpectedCloseDate = DateTime.UtcNow.AddDays(14),
+            ReserveProperty = false
+        });
+
+        Assert.Null(contacted.LeadId);
+        Assert.Null(qualified.LeadId);
+        Assert.Null(opportunity.LeadId);
+        Assert.Equal(customer.Id, opportunity.BusinessPartnerId);
+        Assert.Empty(await db.Leads.AsNoTracking().ToListAsync());
+        Assert.Null((await db.EhcTickets.AsNoTracking().SingleAsync(item => item.Id == ticket.Id)).CrmLeadId);
+        opportunityService.Verify(item => item.CreateAsync(It.Is<ErpSystem.Core.DTOs.Sales.CreateOpportunityDto>(dto =>
+            dto.LeadId == null && dto.CustomerId == customer.Id
+            && dto.OpportunityType == "Existing Customer")), Times.Once);
+    }
+
+    [Fact]
     public async Task Finalizing_approved_customer_with_cleared_deposit_closes_linked_opportunity_as_won()
     {
         var tenantId = Guid.NewGuid();
@@ -353,7 +437,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
     }
 
     [Fact]
-    public void Prospect_deposit_requires_an_existing_opportunity_lineage()
+    public void Prospect_deposit_requires_an_opportunity_and_allows_customer_lineage_without_a_lead()
     {
         var opportunity = typeof(ProspectDepositReceipt).GetProperty(nameof(ProspectDepositReceipt.OpportunityId));
         var ticket = typeof(ProspectDepositReceipt).GetProperty(nameof(ProspectDepositReceipt.TicketId));
@@ -361,7 +445,7 @@ public sealed class PropertyEnquiryProspectLifecycleTests
 
         Assert.Equal(typeof(Guid), opportunity?.PropertyType);
         Assert.Equal(typeof(Guid), ticket?.PropertyType);
-        Assert.Equal(typeof(Guid), lead?.PropertyType);
+        Assert.Equal(typeof(Guid?), lead?.PropertyType);
     }
 
     [Fact]

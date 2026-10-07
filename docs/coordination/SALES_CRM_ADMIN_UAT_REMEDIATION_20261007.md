@@ -73,3 +73,14 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 - Regression coverage: frontend property-enquiry test passes for a stage named `Won`; six Estate handoff service tests pass, including the new configured-Won case; the focused property-enquiry controller test passes and verifies `isWon` plus `canHandoff`.
 - Build environment: focused .NET tests used `TdcFastEfBuild=true`, C-drive artifacts, and the installed .NET 10 SDK with runtime roll-forward because the workstation currently lacks the repository-pinned .NET 9 SDK and .NET 8 runtime. The temporary `global.json` change was restored and is not part of the worktree diff.
 - Remaining work: publish this follow-up together with the separate Sales Order workflow-summary correction once that investigation and verification complete.
+
+## Follow-up: existing customer qualification without duplicate Lead
+
+- Decision: a property enquiry already linked to an approved, active Customer Business Partner qualifies against that customer account. It does not create another CRM Lead.
+- Compatibility: enquiries without a linked customer retain the existing Lead lifecycle. Enquiries that already have a Lead keep that lineage even if a customer is linked later.
+- Data model: `EhcPropertyEnquiryProspect.LeadId` and `ProspectDepositReceipt.LeadId` are nullable. Opportunity and allocation creation pass the optional Lead reference and the existing Business Partner reference through their canonical DTOs.
+- Migration: `20261007190000_AllowExistingCustomerPropertyProspectsWithoutLead` makes both Lead foreign keys nullable and filters the tenant/Lead uniqueness index to non-null Lead values. The down migration refuses rollback while customer-only records exist rather than manufacturing fake Lead identifiers.
+- Validation: the linked Business Partner must exist in the tenant, be active, be approved, and have the Customer role before the no-Lead path is allowed.
+- UI: the Sales qualification card states when the linked customer account is being used and that no duplicate Lead will be created. Sales handoff URLs omit `leadId` when the opportunity is customer-only.
+- Verification: the focused backend lifecycle suite passes 17/17, including record-contact, qualification, and Existing Customer opportunity creation with no Lead row or ticket `CrmLeadId`; the frontend property-enquiry suites pass 24/24; the full frontend TypeScript check passes.
+- Remaining work: commit this follow-up, integrate the separately verified Sales Order workflow-summary correction, refresh from `origin/master`, and publish the authorized consolidated follow-up PR.

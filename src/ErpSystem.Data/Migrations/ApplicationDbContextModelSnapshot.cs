@@ -3445,7 +3445,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("LeadId")
+                    b.Property<Guid?>("LeadId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("OpportunityId")
@@ -3490,7 +3490,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TicketId");
 
                     b.HasIndex("TenantId", "LeadId")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[LeadId] IS NOT NULL");
 
                     b.HasIndex("TenantId", "OpportunityId")
                         .IsUnique()
@@ -5187,7 +5188,7 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<Guid>("LeadId")
+                    b.Property<Guid?>("LeadId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("LiquidityAccountId")
@@ -189959,8 +189960,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Sales.Lead", "Lead")
                         .WithMany()
                         .HasForeignKey("LeadId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Sales.Opportunity", "Opportunity")
                         .WithMany()
@@ -190513,8 +190513,7 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Sales.Lead", null)
                         .WithMany()
                         .HasForeignKey("LeadId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Sales.Opportunity", null)
                         .WithMany()
