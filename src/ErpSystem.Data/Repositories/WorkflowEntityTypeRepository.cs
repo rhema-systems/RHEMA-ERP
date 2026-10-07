@@ -22,6 +22,15 @@ public class WorkflowEntityTypeRepository : GenericRepository<WorkflowEntityType
             .FirstOrDefaultAsync(et => et.Name == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
         if (exact is not null) return exact;
 
+        // Runtime services normally pass the configured entity code back into this
+        // repository after a page-level alias has been resolved. Prefer that exact
+        // code before the normalized fallback below. Older tenants can contain both
+        // a legacy SalesOrder row and the catalog SALES_ORDER row; treating those as
+        // ambiguous makes otherwise valid entity-summary reads fail with HTTP 500.
+        exact = await _dbSet
+            .FirstOrDefaultAsync(et => et.Code == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
+        if (exact is not null) return exact;
+
         // An entity type may be disabled after an approval has started. Resolve
         // its code/name alias without filtering IsActive so that its in-flight
         // records do not appear to have no workflow. New submissions separately

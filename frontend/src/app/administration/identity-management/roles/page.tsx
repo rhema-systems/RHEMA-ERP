@@ -36,7 +36,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { adminApiService, Role, getAdminProblemMessage } from '../../../../services/admin-api.service';
 import { useToast } from '../../../../hooks/use-toast';
-import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home, Search, AlertCircle, RefreshCw, ShieldCheck, Layers3 } from 'lucide-react';
+import { Shield, Users, Settings, FileText, BarChart3, Package, DollarSign, Briefcase, Wrench, LockKeyhole, Pencil, Trash2, Building2, Home, Search, AlertCircle, RefreshCw, ShieldCheck, Layers3, ChevronsUpDown } from 'lucide-react';
 import { FACILITIES_PERMISSIONS } from '@/lib/facilities-permissions';
 import { PROPERTY_MANAGEMENT_PERMISSIONS } from '@/lib/property-management-permissions';
 import { useAuth } from '../../../../hooks/use-auth';
@@ -271,12 +271,29 @@ export default function RolesPage() {
       .reduce((total, category) => total + category.permissions.length, 0),
     [filteredPermissionCategories]
   );
+  const visiblePermissionCategoryNames = React.useMemo(
+    () => Object.keys(filteredPermissionCategories),
+    [filteredPermissionCategories]
+  );
+  const allVisiblePermissionCategoriesExpanded = visiblePermissionCategoryNames.length > 0 &&
+    visiblePermissionCategoryNames.every(category => expandedPermissionCategories.includes(category));
+
+  const toggleVisiblePermissionCategories = () => {
+    setExpandedPermissionCategories(current => {
+      if (allVisiblePermissionCategoriesExpanded) {
+        const visible = new Set(visiblePermissionCategoryNames);
+        return current.filter(category => !visible.has(category));
+      }
+
+      return Array.from(new Set([...current, ...visiblePermissionCategoryNames]));
+    });
+  };
 
   React.useEffect(() => {
     if (isDialogOpen) {
-      setExpandedPermissionCategories(Object.keys(permissionCategories));
+      setExpandedPermissionCategories(visiblePermissionCategoryNames);
     }
-  }, [isDialogOpen, permissionCategories]);
+  }, [isDialogOpen, permissionSearch, visiblePermissionCategoryNames]);
 
   // Create/Update role mutation
   const createRoleMutation = useMutation({
@@ -603,15 +620,30 @@ export default function RolesPage() {
                       <FormControl>
                         <div className="space-y-6">
                           <div className="space-y-2">
-                            <div className="relative">
-                              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                              <Input
-                                aria-label="Search permissions"
-                                placeholder="Search by category, permission name, code or description..."
-                                value={permissionSearch}
-                                onChange={event => setPermissionSearch(event.target.value)}
-                                className="pl-10"
-                              />
+                            <div className="flex items-center gap-2">
+                              <div className="relative min-w-0 flex-1">
+                                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                  aria-label="Search permissions"
+                                  placeholder="Search by category, permission name, code or description..."
+                                  value={permissionSearch}
+                                  onChange={event => setPermissionSearch(event.target.value)}
+                                  className="pl-10"
+                                />
+                              </div>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                onClick={toggleVisiblePermissionCategories}
+                                disabled={visiblePermissionCategoryNames.length === 0}
+                                aria-label={allVisiblePermissionCategoriesExpanded
+                                  ? 'Collapse all permission modules'
+                                  : 'Expand all permission modules'}
+                                className="shrink-0"
+                              >
+                                <ChevronsUpDown className="mr-2 h-4 w-4" />
+                                {allVisiblePermissionCategoriesExpanded ? 'Collapse all' : 'Expand all'}
+                              </Button>
                             </div>
                             <p className="text-xs text-muted-foreground" aria-live="polite">
                               {permissionSearch.trim()
@@ -635,9 +667,7 @@ export default function RolesPage() {
                             )}
                           <Accordion
                             type="multiple"
-                            value={permissionSearch.trim()
-                              ? Object.keys(filteredPermissionCategories)
-                              : expandedPermissionCategories}
+                            value={expandedPermissionCategories}
                             onValueChange={setExpandedPermissionCategories}
                             className="space-y-3"
                           >

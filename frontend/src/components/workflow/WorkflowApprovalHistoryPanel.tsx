@@ -339,6 +339,7 @@ export function WorkflowApprovalHistoryPanel({
   workflowSummary,
   workflowSummaryLoading,
   workflowSummaryError,
+  loadWorkflowSummary = true,
   canSubmit,
   canApproveReject,
   onSubmit,
@@ -370,19 +371,21 @@ export function WorkflowApprovalHistoryPanel({
       setError(null);
       const [auditData, summaryData] = await Promise.all([
         workflowApiService.getWorkflowEntityAudit(entityType, entityId),
-        workflowSummary
-          ? Promise.resolve(workflowSummary)
-          : workflowApiService.getWorkflowEntitySummary(entityType, entityId),
+        loadWorkflowSummary
+          ? workflowApiService.getWorkflowEntitySummary(entityType, entityId)
+          : Promise.resolve(undefined),
       ]);
 
       setAudit(auditData);
-      setSummary(summaryData);
+      if (summaryData) {
+        setSummary(summaryData);
+      }
     } catch (e: any) {
       setError(e?.message || 'Failed to load workflow details');
     } finally {
       setLoading(false);
     }
-  }, [entityType, entityId, workflowSummary]);
+  }, [entityType, entityId, loadWorkflowSummary]);
 
   React.useEffect(() => {
     loadWorkflow();

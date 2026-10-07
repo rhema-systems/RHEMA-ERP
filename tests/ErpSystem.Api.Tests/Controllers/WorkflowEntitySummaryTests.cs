@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Repositories;
 using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Data;
+using ErpSystem.Data.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,38 @@ namespace ErpSystem.Api.Tests.Controllers;
 
 public sealed class WorkflowEntitySummaryTests
 {
+    [Fact]
+    public async Task EntityTypeRepositoryPrefersExactCodeWhenLegacyAliasAlsoNormalizesToIt()
+    {
+        await using var db = CreateDb();
+        var tenantId = Guid.NewGuid();
+        var canonical = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "SALES_ORDER",
+            Name = "SalesOrder",
+            IsActive = true
+        };
+        var legacy = new WorkflowEntityType
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "SalesOrder",
+            Name = "Sales Order",
+            IsActive = true
+        };
+        db.WorkflowEntityTypes.AddRange(canonical, legacy);
+        await db.SaveChangesAsync();
+
+        var repository = new WorkflowEntityTypeRepository(db);
+
+        var result = await repository.GetByNameAsync("SALES_ORDER", tenantId);
+
+        Assert.NotNull(result);
+        Assert.Equal(canonical.Id, result.Id);
+    }
+
     [Fact]
     public async Task GetEntitySummaryUsesConfiguredCodeForEveryWorkflowServiceLookup()
     {

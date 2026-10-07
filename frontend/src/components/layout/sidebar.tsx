@@ -2869,7 +2869,7 @@ export const navigationItems: NavItem[] = [
       'Sales Officer',
       'Salesperson',
     ],
-    permissions: ['sales.access', 'sales.read', 'sales.orders.read'],
+    permissions: ['sales.access', 'sales.read', 'sales.manage'],
     accessMode: 'any',
     children: [
       { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
@@ -2916,12 +2916,13 @@ export const navigationItems: NavItem[] = [
       { title: 'Commissions', href: '/sales/commissions', icon: Award },
       { title: 'Forecasts', href: '/sales/forecasts', icon: TrendingUp },
       { title: 'Competitors', href: '/sales/competitors', icon: Swords },
-      { title: 'Reports', href: '/sales/reports', icon: BarChart3 },
+      { title: 'Reports', href: '/sales/reports', icon: BarChart3, permissions: ['sales.reports.read', 'sales.manage'], accessMode: 'any' },
       {
         title: 'Journal Templates',
         href: '/sales/journal-templates',
         icon: BookTemplate,
         navigationSurface: 'settings',
+        permissions: ['sales.configure'],
       },
     ],
   },

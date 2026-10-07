@@ -10706,6 +10706,13 @@ namespace ErpSystem.Web.Services
                 permission.Description,
                 permission.Category
             }))
+            .Concat(SalesPermissions.All.Select(permission => new
+            {
+                permission.Name,
+                permission.DisplayName,
+                permission.Description,
+                permission.Category
+            }))
             .Concat(HrPermissions.All.Select(permission => new
             {
                 permission.Name,

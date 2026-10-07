@@ -1554,8 +1554,8 @@ public class WorkflowController : ControllerBase
             foreach (var defaultType in defaults)
             {
                 var match = existing.FirstOrDefault(et =>
-                    string.Equals(et.Name, defaultType.Name, StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(et.Code, defaultType.Code, StringComparison.OrdinalIgnoreCase));
+                    EntityTypeMatches(et, defaultType.Name) ||
+                    EntityTypeMatches(et, defaultType.Code));
                 var isSupported = _workflowStatusAdapterRegistry.TryGetAdapter(defaultType.Name, out _) ||
                     _workflowStatusAdapterRegistry.TryGetAdapter(defaultType.Code, out _);
 
