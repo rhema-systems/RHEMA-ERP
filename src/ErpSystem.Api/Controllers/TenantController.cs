@@ -100,6 +100,26 @@ public class TenantController : ControllerBase
     }
 
     /// <summary>
+    /// Returns the complete tenant register for platform administration, including
+    /// inactive and suspended tenants. The public tenant list remains active-only.
+    /// </summary>
+    [HttpGet("administration")]
+    [Authorize(Roles = Constants.Roles.SuperAdmin)]
+    public async Task<ActionResult<IEnumerable<TenantDto>>> GetAdministrationTenants()
+    {
+        try
+        {
+            var tenants = await _tenantService.GetAllTenantsAsync();
+            return Ok(tenants.Select(MapToTenantDto).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving the administration tenant register");
+            return StatusCode(500, "An error occurred while retrieving the tenant register");
+        }
+    }
+
+    /// <summary>
     /// Get tenant by ID
     /// </summary>
     /// <param name="id">Tenant ID</param>

@@ -194,6 +194,23 @@ public class UserTenantService : IUserTenantService
             revokedAt,
             reason ?? "Access revoked");
 
+        var user = await _userManager.FindByIdAsync(userId.ToString());
+        if (user is not null && user.TenantId == tenantId)
+        {
+            var now = DateTime.UtcNow;
+            var replacement = await _unitOfWork.Repository<UserTenant>()
+                .GetQueryable(item => item.UserId == userId && item.TenantId != tenantId &&
+                                      !item.IsDeleted && item.Status == UserTenantStatus.Active &&
+                                      (!item.ExpiresAt.HasValue || item.ExpiresAt.Value > now))
+                .OrderByDescending(item => item.IsDefault)
+                .ThenBy(item => item.GrantedAt)
+                .FirstOrDefaultAsync();
+            user.TenantId = replacement?.TenantId ?? Guid.Empty;
+            user.UpdatedAt = revokedAt;
+            user.UpdatedBy = actor;
+            await _userManager.UpdateAsync(user);
+        }
+
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Revoked user-tenant relationship: {UserId} -> {TenantId}", userId, tenantId);
     }

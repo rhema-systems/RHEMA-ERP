@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Building2, Search, UserPlus, X, Check, Loader2, CalendarClock } from 'lucide-react';
+import { Search, UserPlus, X, Check, Loader2, CalendarClock, ChevronsUpDown } from 'lucide-react';
 
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
@@ -14,11 +14,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../..
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { Badge } from '../../../components/ui/badge';
+import { Checkbox } from '../../../components/ui/checkbox';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../../../components/ui/command';
+import { ConfirmationDialog } from '../../../components/ui/confirmation-dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
+import { cn } from '../../../lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../../../components/ui/dialog';
 import { useToast } from '../../../hooks/use-toast';
 import { tenantService } from '../../../services/tenant';
 import { userService } from '../../../services/user';
-import { DashboardLayout } from '../../../components/layout/dashboard-layout';
 
 // Import the types from API service
 import type { TenantUserMapping } from '../../../services/api.service';
@@ -28,29 +32,33 @@ type UserTenantMapping = TenantUserMapping;
 
 const addUserToTenantSchema = z.object({
   userId: z.string().min(1, 'User is required'),
-  tenantId: z.string().min(1, 'Tenant is required'),
-  expiresAt: z.string().nullable(),
+  tenantIds: z.array(z.string()).min(1, 'Select at least one tenant'),
+  expiresAt: z.string().optional(),
 });
 
 type AddUserToTenantForm = z.infer<typeof addUserToTenantSchema>;
 
 export default function UserTenantMappingPage() {
   const [selectedTenant, setSelectedTenant] = useState<string>('');
-  const [selectedUser, setSelectedUser] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [userSearchQuery, setUserSearchQuery] = useState('');
   const [showAddDialog, setShowAddDialog] = useState(false);
+  const [userPickerOpen, setUserPickerOpen] = useState(false);
+  const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
+  const [removeTarget, setRemoveTarget] = useState<UserTenantMapping | null>(null);
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
   // Fetch tenants and users
-  const { data: tenants, isLoading: isLoadingTenants } = useQuery({
+  const { data: tenants = [], isLoading: isLoadingTenants } = useQuery({
     queryKey: ['tenants'],
     queryFn: () => tenantService.getAllTenants(),
   });
 
-  const { data: users, isLoading: isLoadingUsers } = useQuery({
-    queryKey: ['users', searchQuery],
-    queryFn: () => userService.searchUsers(searchQuery),
+  const { data: users = [], isLoading: isLoadingUsers } = useQuery({
+    queryKey: ['tenant-mapping-users', userSearchQuery],
+    queryFn: () => userService.searchUsers(userSearchQuery),
+    enabled: showAddDialog,
   });
 
   // Fetch tenant-user mappings
@@ -66,25 +74,42 @@ export default function UserTenantMappingPage() {
     formState: { errors },
     reset,
     setValue,
+    watch,
   } = useForm<AddUserToTenantForm>({
     resolver: zodResolver(addUserToTenantSchema),
+    defaultValues: { userId: '', tenantIds: [], expiresAt: '' },
   });
 
+  const selectedUserId = watch('userId');
+  const selectedTenantIds = watch('tenantIds') ?? [];
+  const selectedUser = users.find(user => user.id === selectedUserId);
+
   const addUserMutation = useMutation({
-    mutationFn: (data: AddUserToTenantForm) => tenantService.addUserToTenant(data),
-    onSuccess: () => {
+    mutationFn: async (data: AddUserToTenantForm) => {
+      const expiresAt = data.expiresAt ? new Date(data.expiresAt).toISOString() : null;
+      const results = await Promise.allSettled(data.tenantIds.map(tenantId =>
+        tenantService.addUserToTenant({ userId: data.userId, tenantId, expiresAt })));
+      const failures = results.filter(result => result.status === 'rejected');
+      if (failures.length > 0) {
+        const firstFailure = failures[0] as PromiseRejectedResult;
+        throw new Error(`${results.length - failures.length} of ${results.length} assignments completed. ${firstFailure.reason?.message || 'One or more assignments failed.'}`);
+      }
+      return results.length;
+    },
+    onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ['userTenants'] });
       toast({
-        title: 'Success',
-        description: 'User has been added to the tenant.',
+        title: 'Access granted',
+        description: `User access was added to ${count} tenant${count === 1 ? '' : 's'}.`,
       });
       setShowAddDialog(false);
-      reset();
+      setUserSearchQuery('');
+      reset({ userId: '', tenantIds: [], expiresAt: '' });
     },
     onError: (error: any) => {
       toast({
-        title: 'Error',
-        description: error.message || 'Failed to add user to tenant.',
+        title: 'Assignment incomplete',
+        description: error.message || 'Failed to add tenant access.',
         variant: 'destructive',
       });
     },
@@ -96,13 +121,27 @@ export default function UserTenantMappingPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['userTenants'] });
       toast({
-        title: 'Success',
-        description: 'User has been removed from the tenant.',
+        title: 'Access removed',
+        description: 'The user can no longer access this tenant.',
       });
+      setRemoveTarget(null);
     },
+    onError: (error: any) => toast({
+      title: 'Removal failed',
+      description: error.message || 'The tenant access could not be removed.',
+      variant: 'destructive',
+    }),
   });
 
-  if (isLoadingTenants || isLoadingUsers) {
+  const filteredMappings = (userTenants ?? []).filter((mapping: UserTenantMapping) => {
+    const term = searchQuery.trim().toLowerCase();
+    if (!term) return true;
+    const name = mapping.user.fullName || `${mapping.user.firstName ?? ''} ${mapping.user.lastName ?? ''}`;
+    return [name, mapping.user.username, mapping.user.email]
+      .some(value => value?.toLowerCase().includes(term));
+  });
+
+  if (isLoadingTenants) {
     return (
       <div className="flex items-center justify-center min-h-screen">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -114,68 +153,130 @@ export default function UserTenantMappingPage() {
     <div className="container mx-auto py-6 space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">User-Tenant Mapping</h1>
+          <h1 className="text-2xl font-bold">User Tenant Access</h1>
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Manage user access to tenants
+            Grant, review, expire, and revoke access from the authoritative tenant mapping register.
           </p>
         </div>
 
-        <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <Dialog open={showAddDialog} onOpenChange={(open) => {
+          setShowAddDialog(open);
+          if (!open && !addUserMutation.isPending) {
+            setUserSearchQuery('');
+            reset({ userId: '', tenantIds: [], expiresAt: '' });
+          }
+        }}>
           <DialogTrigger asChild>
             <Button>
               <UserPlus className="h-4 w-4 mr-2" />
-              Add User to Tenant
+              Add tenant access
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="max-w-xl">
             <DialogHeader>
-              <DialogTitle>Add User to Tenant</DialogTitle>
+              <DialogTitle>Add user to tenants</DialogTitle>
               <DialogDescription>
-                Select a user and tenant to grant access
+                Select one user and one or more tenants. The optional expiry applies to every selection.
               </DialogDescription>
             </DialogHeader>
 
-            <form onSubmit={handleSubmit((data) => addUserMutation.mutate(data))} className="space-y-4">
+            <form onSubmit={handleSubmit((data) => addUserMutation.mutate(data))} className="space-y-5">
               <div className="space-y-2">
-                <Label htmlFor="tenantId">Tenant</Label>
-                <Select
-                  onValueChange={(value) => setValue('tenantId', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a tenant" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {tenants?.map((tenant) => (
-                      <SelectItem key={tenant.id} value={tenant.id}>
-                        {tenant.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.tenantId && (
-                  <p className="text-sm text-red-500">{errors.tenantId.message}</p>
-                )}
+                <Label>User</Label>
+                <Popover open={userPickerOpen} onOpenChange={setUserPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" role="combobox" className="w-full justify-between font-normal">
+                      {selectedUser ? `${selectedUser.username} (${selectedUser.email})` : 'Search and select a user'}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Search by name, username, or email..."
+                        value={userSearchQuery}
+                        onValueChange={setUserSearchQuery}
+                      />
+                      <CommandList>
+                        {isLoadingUsers ? (
+                          <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin" /></div>
+                        ) : (
+                          <>
+                            <CommandEmpty>No matching users found.</CommandEmpty>
+                            <CommandGroup>
+                              {users.map((user) => (
+                                <CommandItem
+                                  key={user.id}
+                                  value={`${user.username} ${user.email} ${user.firstName ?? ''} ${user.lastName ?? ''}`}
+                                  onSelect={() => {
+                                    setValue('userId', user.id, { shouldValidate: true });
+                                    setUserPickerOpen(false);
+                                  }}
+                                >
+                                  <Check className={cn('mr-2 h-4 w-4', selectedUserId === user.id ? 'opacity-100' : 'opacity-0')} />
+                                  <div>
+                                    <div className="font-medium">
+                                      {user.firstName || user.lastName ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() : user.username}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">{user.username} - {user.email}</div>
+                                  </div>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </>
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {errors.userId && <p className="text-sm text-red-500">{errors.userId.message}</p>}
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="userId">User</Label>
-                <Select
-                  onValueChange={(value) => setValue('userId', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {users?.map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
-                        {user.username} ({user.email})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.userId && (
-                  <p className="text-sm text-red-500">{errors.userId.message}</p>
-                )}
+                <Label>Tenants</Label>
+                <Popover open={tenantPickerOpen} onOpenChange={setTenantPickerOpen}>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" role="combobox" className="w-full justify-between font-normal">
+                      {selectedTenantIds.length === 0
+                        ? 'Select one or more tenants'
+                        : selectedTenantIds.length === 1
+                          ? tenants.find(tenant => tenant.id === selectedTenantIds[0])?.name
+                          : `${selectedTenantIds.length} tenants selected`}
+                      <ChevronsUpDown className="ml-2 h-4 w-4 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search tenants..." />
+                      <CommandList>
+                        <CommandEmpty>No tenants found.</CommandEmpty>
+                        <CommandGroup>
+                          {tenants.map((tenant) => {
+                            const checked = selectedTenantIds.includes(tenant.id);
+                            return (
+                              <CommandItem
+                                key={tenant.id}
+                                value={`${tenant.name} ${tenant.code}`}
+                                onSelect={() => setValue(
+                                  'tenantIds',
+                                  checked
+                                    ? selectedTenantIds.filter(id => id !== tenant.id)
+                                    : [...selectedTenantIds, tenant.id],
+                                  { shouldValidate: true }
+                                )}
+                              >
+                                <Checkbox checked={checked} className="mr-2" aria-label={`Select ${tenant.name}`} />
+                                <span className="flex-1 truncate">{tenant.name}</span>
+                                <span className="text-xs text-muted-foreground">{tenant.code}</span>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                {errors.tenantIds && <p className="text-sm text-red-500">{errors.tenantIds.message}</p>}
               </div>
 
               <div className="space-y-2">
@@ -186,7 +287,7 @@ export default function UserTenantMappingPage() {
                   {...register('expiresAt')}
                 />
                 <p className="text-sm text-slate-500">
-                  Leave empty for permanent access
+                  Leave empty for permanent access. Expired access cannot be used to log in or switch tenants.
                 </p>
               </div>
 
@@ -195,6 +296,7 @@ export default function UserTenantMappingPage() {
                   type="button"
                   variant="outline"
                   onClick={() => setShowAddDialog(false)}
+                  disabled={addUserMutation.isPending}
                 >
                   Cancel
                 </Button>
@@ -202,10 +304,10 @@ export default function UserTenantMappingPage() {
                   {addUserMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Adding...
+                      Granting...
                     </>
                   ) : (
-                    'Add User'
+                    'Grant access'
                   )}
                 </Button>
               </div>
@@ -264,9 +366,9 @@ export default function UserTenantMappingPage() {
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
                 </div>
-              ) : userTenants?.length === 0 ? (
+              ) : filteredMappings.length === 0 ? (
                 <div className="text-center py-8 text-slate-500">
-                  No users have access to this tenant
+                  {searchQuery ? 'No mapped users match your search.' : 'No users have active access to this tenant.'}
                 </div>
               ) : (
                 <div className="rounded-md border">
@@ -281,7 +383,7 @@ export default function UserTenantMappingPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {userTenants?.map((mapping: UserTenantMapping) => (
+                      {filteredMappings.map((mapping: UserTenantMapping) => (
                         <TableRow key={mapping.userId}>
                           <TableCell className="font-medium">
                             <div className="flex items-center gap-2">
@@ -315,7 +417,7 @@ export default function UserTenantMappingPage() {
                             {mapping.expiresAt ? (
                               <div className="flex items-center gap-1">
                                 <CalendarClock className="h-4 w-4 text-slate-400" />
-                                {new Date(mapping.expiresAt).toLocaleDateString()}
+                                {new Date(mapping.expiresAt).toLocaleString()}
                               </div>
                             ) : (
                               <span className="text-slate-500">Never</span>
@@ -325,10 +427,8 @@ export default function UserTenantMappingPage() {
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => removeUserMutation.mutate({
-                                userId: mapping.userId,
-                                tenantId: selectedTenant,
-                              })}
+                              aria-label={`Remove ${mapping.user.username} from tenant`}
+                              onClick={() => setRemoveTarget(mapping)}
                               disabled={removeUserMutation.isPending}
                             >
                               {removeUserMutation.isPending ? (
@@ -352,6 +452,30 @@ export default function UserTenantMappingPage() {
           </div>
         </CardContent>
       </Card>
+      <ConfirmationDialog
+        open={Boolean(removeTarget)}
+        onOpenChange={(open) => {
+          if (!open && !removeUserMutation.isPending) setRemoveTarget(null);
+        }}
+        title="Remove tenant access?"
+        description={removeTarget ? (
+          <span>
+            <strong>{removeTarget.user.fullName || removeTarget.user.username}</strong> will no longer be able to log in to or switch to this tenant.
+          </span>
+        ) : undefined}
+        confirmText="Remove access"
+        variant="destructive"
+        isLoading={removeUserMutation.isPending}
+        onConfirm={async () => {
+          if (!removeTarget || !selectedTenant) return false;
+          try {
+            await removeUserMutation.mutateAsync({ userId: removeTarget.userId, tenantId: selectedTenant });
+            return true;
+          } catch {
+            return false;
+          }
+        }}
+      />
       </div>
   );
 }

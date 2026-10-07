@@ -123,6 +123,62 @@ public sealed class UserTenantServiceTests
         mapping.Notes!.Length.Should().BeLessThanOrEqualTo(500);
     }
 
+    [Fact]
+    public async Task ExpiredMappingDoesNotGrantActiveAccess()
+    {
+        await using var context = Context();
+        using var unitOfWork = new UnitOfWork(context);
+        var mapping = new UserTenant
+        {
+            UserId = Guid.NewGuid(),
+            TenantId = Guid.NewGuid(),
+            Status = UserTenantStatus.Active,
+            ExpiresAt = DateTime.UtcNow.AddMinutes(-1)
+        };
+        context.UserTenants.Add(mapping);
+        await context.SaveChangesAsync();
+
+        var service = Service(unitOfWork, CurrentUser(Guid.NewGuid()).Object);
+
+        (await service.HasActiveAccessAsync(mapping.UserId, mapping.TenantId)).Should().BeFalse();
+        (await service.GetActiveUserTenantsAsync(mapping.UserId)).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RevokeMovesPrimaryTenantToAnotherActiveMapping()
+    {
+        await using var context = Context();
+        using var unitOfWork = new UnitOfWork(context);
+        var userId = Guid.NewGuid();
+        var revokedTenantId = Guid.NewGuid();
+        var replacementTenantId = Guid.NewGuid();
+        var user = new ApplicationUser
+        {
+            Id = userId,
+            UserName = "mapped.user",
+            TenantId = revokedTenantId,
+            IsActive = true
+        };
+        context.UserTenants.AddRange(
+            new UserTenant { UserId = userId, TenantId = revokedTenantId, Status = UserTenantStatus.Active },
+            new UserTenant { UserId = userId, TenantId = replacementTenantId, Status = UserTenantStatus.Active, IsDefault = true });
+        await context.SaveChangesAsync();
+
+        var userManager = UserManager();
+        userManager.Setup(item => item.FindByIdAsync(userId.ToString())).ReturnsAsync(user);
+        userManager.Setup(item => item.UpdateAsync(user)).ReturnsAsync(IdentityResult.Success);
+        var service = new UserTenantService(
+            unitOfWork,
+            userManager.Object,
+            NullLogger<UserTenantService>.Instance,
+            CurrentUser(Guid.NewGuid()).Object);
+
+        await service.RevokeUserAccessFromTenantAsync(userId, revokedTenantId, "security.admin", "Access removed");
+
+        user.TenantId.Should().Be(replacementTenantId);
+        userManager.Verify(item => item.UpdateAsync(user), Times.Once);
+    }
+
     private static ApplicationDbContext Context() => new(
         new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))

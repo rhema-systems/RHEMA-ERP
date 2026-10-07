@@ -376,7 +376,7 @@ class AdminApiService {
 
   // Tenant Management (Enhanced from existing TenantController)
   async getTenants(): Promise<Tenant[]> {
-    const tenantDtos = await apiService.getTenants();
+    const tenantDtos = await apiService.request<TenantBackendResponse[]>('/Tenant/administration');
     return tenantDtos.map(dto => ({
       id: dto.id,
       name: dto.name,

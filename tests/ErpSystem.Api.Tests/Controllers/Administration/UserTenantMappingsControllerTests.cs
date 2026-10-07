@@ -39,6 +39,16 @@ public sealed class UserTenantMappingsControllerTests
     }
 
     [Fact]
+    public void CompleteTenantRegisterRequiresSuperAdmin()
+    {
+        var method = typeof(ErpSystem.Api.Controllers.TenantController)
+            .GetMethod(nameof(ErpSystem.Api.Controllers.TenantController.GetAdministrationTenants));
+
+        method.Should().NotBeNull();
+        method!.GetCustomAttribute<AuthorizeAttribute>()!.Roles.Should().Be(Constants.Roles.SuperAdmin);
+    }
+
+    [Fact]
     public async Task GrantRejectsCrossTenantMutationBeforeCallingTheService()
     {
         var fixture = Fixture(Guid.NewGuid());
@@ -53,6 +63,46 @@ public sealed class UserTenantMappingsControllerTests
         fixture.UserTenants.VerifyNoOtherCalls();
         fixture.Tenants.VerifyNoOtherCalls();
         fixture.Users.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task SuperAdminCanGrantAccessToAnotherTenant()
+    {
+        var currentTenantId = Guid.NewGuid();
+        var targetTenantId = Guid.NewGuid();
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid(), TenantId = currentTenantId, UserName = "cross.tenant.user",
+            FirstName = "Cross", LastName = "Tenant", IsActive = true
+        };
+        var fixture = Fixture(currentTenantId, isSuperAdmin: true);
+        fixture.Tenants.Setup(item => item.GetTenantByIdAsync(targetTenantId))
+            .ReturnsAsync(new Tenant
+            {
+                Id = targetTenantId, Name = "Target Tenant", Code = "TARGET", Status = TenantStatus.Active
+            });
+        fixture.Users.Setup(item => item.GetUserByIdAsync(user.Id)).ReturnsAsync(user);
+        fixture.UserTenants.Setup(item => item.GrantUserAccessToTenantAsync(
+                user.Id, targetTenantId, UserTenantAccessLevel.Standard, "ict.admin", null,
+                "Approved cross-tenant mapping"))
+            .ReturnsAsync(new UserTenant
+            {
+                Id = Guid.NewGuid(), UserId = user.Id, TenantId = targetTenantId,
+                Status = UserTenantStatus.Active, GrantedBy = "ict.admin",
+                GrantedAt = DateTime.UtcNow
+            });
+
+        var result = await fixture.Controller.Grant(new SaveTenantUserMappingRequest
+        {
+            UserId = user.Id,
+            TenantId = targetTenantId,
+            Reason = "Approved cross-tenant mapping"
+        }, default);
+
+        result.Should().BeOfType<OkObjectResult>();
+        fixture.UserTenants.Verify(item => item.GrantUserAccessToTenantAsync(
+            user.Id, targetTenantId, UserTenantAccessLevel.Standard, "ict.admin", null,
+            "Approved cross-tenant mapping"), Times.Once);
     }
 
     [Fact]
@@ -135,6 +185,46 @@ public sealed class UserTenantMappingsControllerTests
     }
 
     [Fact]
+    public async Task GrantNormalizesUnspecifiedExpiryToUtc()
+    {
+        var tenantId = Guid.NewGuid();
+        var expiry = DateTime.SpecifyKind(DateTime.UtcNow.AddDays(7), DateTimeKind.Unspecified);
+        var expectedExpiry = DateTime.SpecifyKind(expiry, DateTimeKind.Utc);
+        var user = new ApplicationUser
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, UserName = "expiring.user",
+            FirstName = "Expiring", LastName = "User", IsActive = true
+        };
+        var fixture = Fixture(tenantId);
+        fixture.Tenants.Setup(item => item.GetTenantByIdAsync(tenantId))
+            .ReturnsAsync(new Tenant { Id = tenantId, Name = "Tenant", Code = "TEN", Status = TenantStatus.Active });
+        fixture.Users.Setup(item => item.GetUserByIdAsync(user.Id)).ReturnsAsync(user);
+        fixture.UserTenants.Setup(item => item.GrantUserAccessToTenantAsync(
+                user.Id, tenantId, UserTenantAccessLevel.Standard, "ict.admin", expectedExpiry,
+                "Granted through tenant administration."))
+            .ReturnsAsync(new UserTenant
+            {
+                Id = Guid.NewGuid(), UserId = user.Id, TenantId = tenantId,
+                Status = UserTenantStatus.Active, GrantedBy = "ict.admin",
+                GrantedAt = DateTime.UtcNow, ExpiresAt = expectedExpiry
+            });
+
+        var result = await fixture.Controller.Grant(new SaveTenantUserMappingRequest
+        {
+            UserId = user.Id,
+            TenantId = tenantId,
+            ExpiresAt = expiry
+        }, default);
+
+        result.Should().BeOfType<OkObjectResult>();
+        fixture.UserTenants.Verify(item => item.GrantUserAccessToTenantAsync(
+            user.Id, tenantId, UserTenantAccessLevel.Standard, "ict.admin",
+            It.Is<DateTime?>(value => value.HasValue &&
+                value.Value.Kind == DateTimeKind.Utc && value.Value == expectedExpiry),
+            "Granted through tenant administration."), Times.Once);
+    }
+
+    [Fact]
     public async Task RevokeIsTenantScopedAndUsesTheAuthoritativeIdempotentService()
     {
         var tenantId = Guid.NewGuid();
@@ -164,7 +254,7 @@ public sealed class UserTenantMappingsControllerTests
         fixture.UserTenants.VerifyNoOtherCalls();
     }
 
-    private static TestFixture Fixture(Guid tenantId, Guid? actorId = null)
+    private static TestFixture Fixture(Guid tenantId, Guid? actorId = null, bool isSuperAdmin = false)
     {
         var current = new Mock<ICurrentUserService>();
         current.SetupGet(item => item.IsAuthenticated).Returns(true);
@@ -172,6 +262,7 @@ public sealed class UserTenantMappingsControllerTests
         current.SetupGet(item => item.UserId).Returns((actorId ?? Guid.NewGuid()).ToString());
         current.SetupGet(item => item.UserName).Returns("ict.admin");
         current.SetupGet(item => item.FullName).Returns("ICT Administrator");
+        current.Setup(item => item.IsInRole(Constants.Roles.SuperAdmin)).Returns(isSuperAdmin);
         return new TestFixture(current);
     }
 
