@@ -1,15 +1,15 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: ready
+integration_status: integrated_pr_pending
 integration_decision: include
-candidate_branch: codex/finance-budget-posting-evidence
-candidate_head: dfb38fae0
-base_commit: 5090cf2ae7e29fa8b9a8d5dfab8b4c9b6b63db3d
+candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007-v2
+candidate_head: 905eed2c3
+base_commit: 28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7
 target_ref: origin/master
 depends_on: none
 migration_status: none
-verification_status: passed_with_unrelated_typecheck_baseline
-integration_commit: pending
+verification_status: passed_with_documented_baseline_drift
+integration_commit: 8372d2847
 pull_request: pending
 ---
 
@@ -30,10 +30,10 @@ Close the bank-reconciliation UAT gaps confirmed during the deployed walkthrough
 
 ## Repository state
 
-- Working directory: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP`
-- Branch: `codex/finance-budget-posting-evidence`
-- Exact base: `5090cf2ae7e29fa8b9a8d5dfab8b4c9b6b63db3d`
-- The checkout was substantially dirty before this workstream; only files listed by this ledger belong to this change.
+- Integration worktree: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP\.w\fin-uat-bank-recon-fx-20261007-v2`
+- Branch: `codex/fin-uat-bank-recon-fx-override-20261007-v2`
+- Exact base: `28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7`
+- The primary checkout and the earlier failed candidate worktree are preserved and were not swept into this branch.
 
 ## Confirmed gaps
 
@@ -84,6 +84,7 @@ Close the bank-reconciliation UAT gaps confirmed during the deployed walkthrough
 ## Commits
 
 - `dfb38fae0` — combined scoped implementation commit for bank-reconciliation hardening and transaction-specific FX overrides.
+- `8372d2847` — integration commit resolved against current `origin/master` while retaining current source-book authority controls.
 
 ## Migrations and application status
 
@@ -97,17 +98,16 @@ No migration is currently planned; return reasons can be retained in workflow hi
 
 ## Verification evidence
 
-- Focused backend suite:
-  `dotnet test tests/ErpSystem.Api.Tests/ErpSystem.Api.Tests.csproj --no-restore --filter "FullyQualifiedName~CashBankPermissionContractTests|FullyQualifiedName~FinanceRouteContractTests|FullyQualifiedName~BankReconciliationPostingMigrationTests" --verbosity minimal`
-  — **Passed: 41, Failed: 0, Skipped: 0**.
-- Targeted ESLint across all changed frontend source files — **passed with no findings**.
-- Focused Finance Approval page Vitest — **2 tests passed, 0 failed**.
-- `git diff --check` — **passed**; only existing line-ending conversion warnings were reported.
-- `npm run type-check` — **failed on unrelated pre-existing frontend diagnostics**; no changed workstream file was named.
+- Integrated API build — **passed with 0 errors and 45 existing warnings**.
+- Bank-reconciliation focused backend coverage — **25/25 passed** across the suite rerun and isolated auto-match regression test.
+- Related Finance permission and route tests are included in the additional focused run — **33/33 passed** together with FX override tests.
+- Approval Workbench Vitest — **5/5 passed**.
+- Targeted ESLint — **passed** for the changed reconciliation/report/workbench files.
+- `git diff --cached --check` — **passed** before the integration commit.
 
 ## Remaining work
 
-Deploy and execute the live UAT path only when separately authorized. Database mutation, permission cleanup on the deployed server, commit, push, and PR creation remain outside current authorization.
+Create and review the combined PR. Deploy and execute the live UAT path only when separately authorized.
 
 ## Authorization boundaries
 
@@ -117,6 +117,6 @@ Authorized on 2026-10-07: create scoped commits, push the clean integration bran
 
 Not authorized: deploy, modify the deployed database, apply migrations, merge the pull request, remove worktrees/branches, or remove temporary deployed permissions.
 
-## Adjacent workstream — transaction-specific exchange-rate overrides
+## Related workstream — transaction-specific exchange-rate overrides
 
-Stakeholders additionally requested privileged transaction-only exchange-rate overrides with a mandatory reason and approval workflow. This is deliberately separated because it spans AP, AR, cash, posting snapshots, permissions, workflow, and audit controls. It requires a fresh task and its own coordination ledger before implementation.
+The privileged transaction-only exchange-rate override was implemented under its own ledger and integrated into the same authorized consolidation cycle and pull request.

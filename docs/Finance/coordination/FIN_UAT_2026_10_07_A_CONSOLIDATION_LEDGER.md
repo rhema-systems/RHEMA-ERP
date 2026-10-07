@@ -1,15 +1,15 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: in_progress
+integration_status: integrated_pr_pending
 integration_decision: include
-candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007
-candidate_head: pending
+candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007-v2
+candidate_head: 905eed2c3
 base_commit: 28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7
 target_ref: origin/master
 depends_on: none
 migration_status: generated_and_applied_to_named_local_uat_only
-verification_status: pending_combined_integration
-integration_commit: pending
+verification_status: passed_with_documented_baseline_drift
+integration_commit: 8372d2847
 pull_request: pending
 ---
 
@@ -33,10 +33,10 @@ Unrelated primary-checkout changes, generated local artifacts, historical worktr
 ## Workspace and Git state
 
 - Repository: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP`
-- Integration worktree: pending
-- Integration branch: `codex/fin-uat-bank-recon-fx-override-20261007`
+- Integration worktree: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP\.w\fin-uat-bank-recon-fx-20261007-v2`
+- Integration branch: `codex/fin-uat-bank-recon-fx-override-20261007-v2`
 - Exact target base: `28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7`
-- Working tree status: pending clean integration worktree creation
+- Integrated commits: `8372d2847` (implementation) and `905eed2c3` (initial ledgers), with this ledger update following before push.
 
 ## Migration record
 
@@ -46,11 +46,17 @@ Unrelated primary-checkout changes, generated local artifacts, historical worktr
 
 ## Verification evidence
 
-Pending combined verification on the clean integration branch.
+- API build: passed with 0 errors and 45 existing warnings.
+- Bank-reconciliation focused backend coverage: 25/25 passed across the suite rerun and isolated auto-match regression test.
+- Finance permission/route/FX override focused backend coverage: 33/33 passed.
+- Approval Workbench Vitest: 5/5 passed.
+- Targeted ESLint: passed for every changed frontend file except the AP payment detail page, whose only finding is the pre-existing `@typescript-eslint/no-non-null-assertion` at line 227 on `origin/master`; this PR does not change that line.
+- `git diff --cached --check`: passed before integration commit.
+- EF reports 12 pending operations, but a model-differ probe identified only pre-existing Security/Audit/Estate operations. No pending operation touches `FinanceExchangeRateOverrideRequests` or this PR's migration.
 
 ## Remaining work
 
-Create the clean integration worktree, integrate the scoped source commit, resolve target-branch differences without importing unrelated changes, run combined verification, push, create the PR, and update all three ledgers.
+Push the clean integration branch, create the PR, record its URL, and await review. Workflow provisioning, deployment, merge, and any further database action remain separately authorized follow-ups.
 
 ## Authorization boundaries
 

@@ -1,15 +1,15 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: ready
+integration_status: integrated_pr_pending
 integration_decision: include
-candidate_branch: codex/finance-budget-posting-evidence
-candidate_head: dfb38fae0
-base_commit: 5090cf2ae7e29fa8b9a8d5dfab8b4c9b6b63db3d
+candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007-v2
+candidate_head: 905eed2c3
+base_commit: 28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7
 target_ref: origin/master
 depends_on: none
 migration_status: generated_and_applied_to_named_local_uat_only
-verification_status: passed_with_unrelated_typecheck_baseline
-integration_commit: pending
+verification_status: passed_with_documented_baseline_drift
+integration_commit: 8372d2847
 pull_request: pending
 ---
 
@@ -21,11 +21,10 @@ Implement privileged, transaction-specific numeric exchange-rate overrides for e
 
 ## Repository state
 
-- Repository: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP`
-- Branch: `codex/finance-budget-posting-evidence`
-- Exact base inspected for this workstream: `5090cf2ae7e29fa8b9a8d5dfab8b4c9b6b63db3d`
-- The primary checkout was already substantially dirty. Only files listed in this ledger belong to this workstream.
-- Existing bank-reconciliation changes and every unrelated modified/untracked file are out of scope and must be preserved.
+- Integration worktree: `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP\.w\fin-uat-bank-recon-fx-20261007-v2`
+- Branch: `codex/fin-uat-bank-recon-fx-override-20261007-v2`
+- Exact integration base: `28c067ae2fbe847cc4b1c24a9fa7781a0c420ed7`
+- The primary checkout and the earlier failed candidate worktree are preserved; unrelated changes were not imported.
 
 ## Surface inventory and scope decision
 
@@ -103,6 +102,7 @@ Implement privileged, transaction-specific numeric exchange-rate overrides for e
 ## Commits
 
 - `dfb38fae0` — combined scoped implementation commit for transaction-specific FX overrides and bank-reconciliation hardening.
+- `8372d2847` — integration commit resolved against current `origin/master`.
 
 ## Migrations and application status
 
@@ -114,12 +114,12 @@ Implement privileged, transaction-specific numeric exchange-rate overrides for e
 
 ## Verification evidence
 
-- Full project-reference API build: passed, 0 errors (existing repository warnings remain).
-- Focused backend tests: passed, 5/5.
-- Targeted ESLint on the shared panel/service and seven integrated Finance pages: passed.
-- `git diff --check`: passed; line-ending notices only.
-- Repository-wide frontend `npm run type-check`: blocked by pre-existing errors in unrelated Civil Engineering, Inventory, Procurement, report tests, shared mocks, and other files. No diagnostic referenced the override component/service or integrated Finance pages.
-- EF `migrations has-pending-model-changes`: passed; no model changes remain after the source migration.
+- Integrated API build: passed, 0 errors and 45 existing warnings.
+- Finance permission/route/FX override focused backend run: passed, 33/33.
+- Approval Workbench Vitest: passed, 5/5.
+- Targeted ESLint passed for the shared panel/service and all changed frontend files except AP payment detail; its only finding is the pre-existing non-null assertion at line 227 on `origin/master`, outside this PR's changed lines.
+- `git diff --cached --check`: passed before the integration commit.
+- EF `migrations has-pending-model-changes` reports 12 operations, but the model-differ probe identifies only pre-existing Security/Audit/Estate changes. No pending operation concerns `FinanceExchangeRateOverrideRequests` or this migration.
 - UAT database migration verification on 2026-10-07: passed for `RHEMAERP_BOOKV2_UAT_20260922` (history row, table shape, indexes, and restricted foreign keys).
 
 ## Known failures / risks
@@ -134,6 +134,7 @@ Implement privileged, transaction-specific numeric exchange-rate overrides for e
 ## Remaining work
 
 - Provision the transaction exchange-rate override workflow in the selected UAT tenant(s); workflow provisioning was not part of the migration authorization and remains unapplied.
+- Review and merge the combined PR only when separately authorized; no deployment was performed.
 - UAT requester/checker separation, rejection then resubmission, stale-source supersession, posting consumption, duplicate posting, and audit export after provisioning.
 - Decide separately whether to extend the posting contract to multiple override evidence tuples and whether to add durable Draft lifecycles for asset disposals and subledger adjustments.
 
