@@ -215,10 +215,18 @@ function Invoke-NativeChecked {
     $nativePriorOperationalPassword = [Environment]::GetEnvironmentVariable('UatBootstrap__SharedPassword', 'Process')
     try {
         [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $null, 'Process')
-        & $Command @Arguments
-        if ($LASTEXITCODE -ne 0) {
-            throw "$FailureMessage (exit code $LASTEXITCODE)."
+        $nativeOutput = @(& $Command @Arguments 2>&1)
+        $nativeExitCode = $LASTEXITCODE
+        if ($nativeExitCode -ne 0) {
+            # Invoke-Step captures successful output and only returns it after the
+            # operation completes. Surface native diagnostics before throwing so a
+            # failed browser/build command remains actionable in CI logs.
+            if ($nativeOutput.Count -gt 0) {
+                $nativeOutput | Out-Host
+            }
+            throw "$FailureMessage (exit code $nativeExitCode)."
         }
+        return $nativeOutput
     } finally {
         [Environment]::SetEnvironmentVariable('UatBootstrap__SharedPassword', $nativePriorOperationalPassword, 'Process')
         $nativePriorOperationalPassword = $null
