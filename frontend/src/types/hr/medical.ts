@@ -188,6 +188,7 @@ export interface PhysicianCreateRequest {
   notes?: string | null;
 }
 
+/** No `isVerified`: an edit never changes verification — `verifyPhysician` does (2026-10-07). */
 export interface PhysicianUpdateRequest extends PhysicianCreateRequest {
   id: string;
 }

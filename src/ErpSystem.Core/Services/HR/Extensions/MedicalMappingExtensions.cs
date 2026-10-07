@@ -324,7 +324,9 @@ public static class MedicalMappingExtensions
         entity.PhoneNumber = dto.PhoneNumber;
         entity.Email = dto.Email;
         entity.FacilityId = dto.FacilityId;
-        entity.IsVerified = dto.IsVerified;
+        // ⚠ IsVerified is NOT written here (2026-10-07). It was, from a DTO field the physicians
+        // screen never sent, so every edit un-verified the licence — and any caller could verify one
+        // without the verify endpoint's VerificationDate. Verifying is ApplyTo(VerifyPhysicianDto)'s alone.
         entity.IsActive = dto.IsActive;
         entity.Notes = dto.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
