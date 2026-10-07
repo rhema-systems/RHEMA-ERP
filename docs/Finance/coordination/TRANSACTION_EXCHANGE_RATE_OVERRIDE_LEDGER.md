@@ -1,6 +1,6 @@
 ---
 integration_cycle: FIN-UAT-2026-10-07-A
-integration_status: integrated_pr_pending
+integration_status: pr_open
 integration_decision: include
 candidate_branch: codex/fin-uat-bank-recon-fx-override-20261007-v2
 candidate_head: 905eed2c3
@@ -10,7 +10,7 @@ depends_on: none
 migration_status: generated_and_applied_to_named_local_uat_only
 verification_status: passed_with_documented_baseline_drift
 integration_commit: 8372d2847
-pull_request: pending
+pull_request: https://github.com/rhema-systems/RHEMA-ERP/pull/364
 ---
 
 # Transaction-specific exchange-rate override implementation ledger
