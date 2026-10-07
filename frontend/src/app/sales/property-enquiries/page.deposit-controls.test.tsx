@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   depositThresholdMet: false,
   depositError: null as string | null,
   opportunityStage: 'Qualified',
+  opportunityIsWon: false,
   salesOrderAmountPaid: null as number | null,
 }));
 
@@ -69,6 +70,7 @@ describe('property enquiry deposit controls', () => {
     mocks.depositThresholdMet = false;
     mocks.depositError = null;
     mocks.opportunityStage = 'Qualified';
+    mocks.opportunityIsWon = false;
     mocks.salesOrderAmountPaid = null;
     mocks.request.mockReset();
     mocks.request.mockImplementation(async (endpoint: string, options?: RequestInit) => {
@@ -82,11 +84,12 @@ describe('property enquiry deposit controls', () => {
         return {
           success: true,
           data: {
-            canHandoff: false,
+            canHandoff: mocks.opportunityIsWon,
             opportunity: {
               id: 'opportunity-1',
               referenceNumber: 'OPP-001',
               stage: mocks.opportunityStage,
+              isWon: mocks.opportunityIsWon,
               amount: 10000,
               currency: 'GHS',
             },
@@ -345,6 +348,7 @@ describe('property enquiry deposit controls', () => {
   it('prefills the Estate handover amount from cleared deposits without adding Sales Order payments', async () => {
     mocks.prospectStatus = 'Converted';
     mocks.opportunityStage = 'Closed Won';
+    mocks.opportunityIsWon = true;
     const client = renderPage();
 
     expect(await screen.findByLabelText('Amount paid in Sales')).toHaveValue(2000);
@@ -361,9 +365,21 @@ describe('property enquiry deposit controls', () => {
     client.clear();
   });
 
+  it('recognizes a configured Won stage without requiring the legacy Closed Won label', async () => {
+    mocks.prospectStatus = 'Converted';
+    mocks.opportunityStage = 'Won';
+    mocks.opportunityIsWon = true;
+    const client = renderPage();
+
+    expect(await screen.findByLabelText('Amount paid in Sales')).toBeInTheDocument();
+    expect(screen.queryByText(/Close it as Won before the Estate handoff/)).not.toBeInTheDocument();
+    client.clear();
+  });
+
   it('prefers an existing paid Sales Order amount over the deposit default', async () => {
     mocks.prospectStatus = 'Converted';
     mocks.opportunityStage = 'Closed Won';
+    mocks.opportunityIsWon = true;
     mocks.salesOrderAmountPaid = 3500;
     const client = renderPage();
 

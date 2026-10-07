@@ -62,3 +62,14 @@ Complete the 2026-10-07 non-Finance UAT fixes for CRM opportunity access, CRM ac
 
 - No implementation or verification work remains in this worktree.
 - Do not push, open, or merge a PR until the parent task explicitly proceeds.
+
+## Follow-up: configured Won stage and Estate handoff
+
+- Branch: `codex/fix-estate-won-handoff`
+- Exact base: `22fd949a26e5bbe39bbee4af09a64ab0c6f3c7e3` (`origin/master`, merged PR #370)
+- Defect: the CRM opportunity displayed the tenant-configured stage `Won`, while the property-enquiry page and final Estate handoff service still required the legacy literal `Closed Won`.
+- Resolution: the handoff projection and service now use the linked opportunity stage definition's `IsWon` outcome. Historical opportunities without a stage-definition link retain compatibility for `Won` and `Closed Won`.
+- API response: the estate-handoff opportunity projection now exposes `isWon`; the frontend consumes that governed outcome instead of comparing display text.
+- Regression coverage: frontend property-enquiry test passes for a stage named `Won`; six Estate handoff service tests pass, including the new configured-Won case; the focused property-enquiry controller test passes and verifies `isWon` plus `canHandoff`.
+- Build environment: focused .NET tests used `TdcFastEfBuild=true`, C-drive artifacts, and the installed .NET 10 SDK with runtime roll-forward because the workstation currently lacks the repository-pinned .NET 9 SDK and .NET 8 runtime. The temporary `global.json` change was restored and is not part of the worktree diff.
+- Remaining work: publish this follow-up together with the separate Sales Order workflow-summary correction once that investigation and verification complete.

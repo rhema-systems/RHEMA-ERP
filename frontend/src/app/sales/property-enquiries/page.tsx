@@ -58,6 +58,7 @@ type EstateHandoffState = {
     id: string;
     referenceNumber?: string | null;
     stage: string;
+    isWon: boolean;
     amount: number;
     currency: string;
     actualCloseDate?: string | null;
@@ -1882,7 +1883,7 @@ function PropertyEnquiries() {
                     The enquiry needs a linked CRM opportunity before it can be
                     handed to Estate.
                   </p>
-                ) : opportunity.stage !== 'Closed Won' ? (
+                ) : !opportunity.isWon ? (
                   <div className="space-y-1 text-sm text-amber-800">
                     <p>
                       CRM opportunity:{' '}
@@ -1906,7 +1907,7 @@ function PropertyEnquiries() {
                           ? new Date(
                               opportunity.actualCloseDate
                             ).toLocaleDateString()
-                          : 'Recorded as Closed Won'}
+                          : 'Recorded as won'}
                       </p>
                       <p>
                         <span className="font-medium">Opportunity value:</span>{' '}

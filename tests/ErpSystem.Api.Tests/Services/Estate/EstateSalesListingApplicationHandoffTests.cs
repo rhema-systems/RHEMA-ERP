@@ -54,6 +54,41 @@ public sealed class EstateSalesListingApplicationHandoffTests
     }
 
     [Fact]
+    public async Task SuccessfulHandoffAcceptsConfiguredWonStageWithoutLegacyStageName()
+    {
+        await using var fixture = await RelationalFixture.CreateAsync();
+        var db = fixture.Db;
+        var asset = ManagedAsset(EstateManagedAssetType.Property, "PROPERTY-WON", DateTime.UtcNow.AddDays(-1));
+        var partner = Customer();
+        var wonStage = new OpportunityStageDefinition
+        {
+            TenantId = tenantId,
+            Code = "WON",
+            Name = "Won",
+            SortOrder = 50,
+            IsActive = true,
+            IsClosed = true,
+            IsWon = true,
+            DefaultProbability = 100
+        };
+        var opportunity = ClosedWonOpportunity();
+        opportunity.Stage = wonStage.Name;
+        opportunity.StageDefinition = wonStage;
+        opportunity.StageDefinitionId = wonStage.Id;
+        db.AddRange(asset, partner, wonStage, opportunity);
+        await db.SaveChangesAsync();
+
+        var service = new EstateSalesListingApplicationHandoffService(
+            db,
+            SuccessfulProcedureService().Object,
+            Mock.Of<INotificationService>());
+
+        var result = await service.CreateAsync(tenantId, Request(asset.Id, partner.Id, opportunity.Id));
+
+        Assert.Equal("Estate review", result.CurrentStageName);
+    }
+
+    [Fact]
     public async Task SuccessfulLandHandoffUnpublishesExactDemarcationOnly()
     {
         await using var fixture = await RelationalFixture.CreateAsync(includeDemarcations: true);
@@ -306,6 +341,7 @@ public sealed class EstateSalesListingApplicationHandoffTests
             {
                 typeof(EstateManagedAsset),
                 typeof(BusinessPartner),
+                typeof(OpportunityStageDefinition),
                 typeof(Opportunity),
                 typeof(ProcedureCase),
                 typeof(ProcedureCaseField),

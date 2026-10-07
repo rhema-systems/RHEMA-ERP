@@ -824,6 +824,29 @@ public sealed class PropertyListingEnquiryTests
         var otherPartner = new BusinessPartner { TenantId = tenantId, PartnerCode = "CUS-002", PartnerName = "Buyer Two", PartnerType = "Customer", IsActive = true, ApprovalStatus = "Approved" };
         var listingId = Guid.NewGuid();
         var opportunityId = Guid.NewGuid();
+        var wonStage = new OpportunityStageDefinition
+        {
+            TenantId = tenantId,
+            Code = "WON",
+            Name = "Won",
+            SortOrder = 50,
+            IsActive = true,
+            IsClosed = true,
+            IsWon = true,
+            DefaultProbability = 100
+        };
+        var opportunity = new Opportunity
+        {
+            Id = opportunityId,
+            TenantId = tenantId,
+            Name = "Property enquiry",
+            Stage = wonStage.Name,
+            StageDefinition = wonStage,
+            StageDefinitionId = wonStage.Id,
+            Amount = 1250000m,
+            Currency = "GHS",
+            ActualCloseDate = DateTime.UtcNow
+        };
         var ticket = new EhcTicket
         {
             TenantId = tenantId,
@@ -833,6 +856,8 @@ public sealed class PropertyListingEnquiryTests
             Status = EhcTicketStatus.Acknowledged,
             Description = "I want this plot",
             AssignedOrganizationUnitId = sales.Id,
+            CrmOpportunityId = opportunity.Id,
+            CrmOpportunity = opportunity,
             PropertyListingContextJson = JsonSerializer.Serialize(new EhcPropertyListingContextDto(
                 "estate-public-listing", listingId, "LAND-002-PORTION-002", "Parcel Two", "Sale", "GHS", "Accra", 1250000m,
                 Guid.NewGuid(), listingId, partner.Id, partner.PartnerName, null, null, null))
@@ -933,20 +958,25 @@ public sealed class PropertyListingEnquiryTests
             AgreedAmount = order.TotalAmount,
             Currency = order.Currency
         };
-        db.AddRange(requester, structure, level, sales, partner, otherPartner, ticket, invoice, order,
+        db.AddRange(requester, structure, level, sales, partner, otherPartner, wonStage, opportunity, ticket, invoice, order,
             sameCustomerWrongOpportunity, otherOrder, prospect, payment, allocation, history);
         await db.SaveChangesAsync();
         var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>(), Mock.Of<IPropertyEnquiryProspectService>());
 
         var result = Assert.IsType<OkObjectResult>(await controller.GetEstateHandoff(ticket.Id, default));
         using var document = JsonDocument.Parse(JsonSerializer.Serialize(result.Value));
-        var salesOrder = document.RootElement.GetProperty("data").GetProperty("salesOrder");
+        var data = document.RootElement.GetProperty("data");
+        var salesOrder = data.GetProperty("salesOrder");
+        var opportunityResult = data.GetProperty("opportunity");
 
         Assert.Equal(order.Id, salesOrder.GetProperty("id").GetGuid());
         Assert.Equal("SO-001", salesOrder.GetProperty("reference").GetString());
         Assert.Equal(400000m, salesOrder.GetProperty("amountPaid").GetDecimal());
         Assert.Equal("BANK-REF-001", salesOrder.GetProperty("paymentReference").GetString());
         Assert.Equal(closedAt.Date, salesOrder.GetProperty("completedAt").GetDateTime().Date);
+        Assert.Equal("Won", opportunityResult.GetProperty("Stage").GetString());
+        Assert.True(opportunityResult.GetProperty("IsWon").GetBoolean());
+        Assert.True(data.GetProperty("canHandoff").GetBoolean());
     }
 
     [Fact]
