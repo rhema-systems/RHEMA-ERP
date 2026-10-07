@@ -265,6 +265,16 @@
           "guardKind": "down-only"
         }
       ]
+    },
+    {
+      "sqlFile": "HrCompanyScheduleFinalClosureMigrationPreflight.sql",
+      "migrations": [
+        {
+          "id": "20261004224953_CompanyScheduleFinalReview",
+          "sourceSha256": "2202AC7B322210E71D22A29DDE9AE5B2F4584EE2A4395622587C9C7B91771265",
+          "guardKind": "data-precondition"
+        }
+      ]
     }
   ]
 }

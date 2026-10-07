@@ -1957,6 +1957,15 @@ rule needs a daily run, not one every 30 seconds.
   every workflow submit that raises notifications took 11–13 s — five template submits and a PIP
   submit, 6 of 6, in a regression whose other calls answered in well under a second. The monitor had
   caught one such insert waiting on the claim query's range lock for about 10 s (`LCK_M_RIn_NL`).
+- **Seen again in the company-schedule final closure (2026-10-06), with the table nearly three times the size.**
+  UAT's `Notifications` is now **1.1 GB, 418k rows (293k live)**, and is indexed on `Id` (clustered) and
+  `TenantId` only — so the dispatcher's poll and every read filtered on anything else scan the whole table.
+  At lane 7a the blocking monitor's longest wait in three regression passes was **the poll itself, 11.1 s**
+  (`SELECT TOP … maxRetryAttempts …`, a parallel scan). The HR side took its own share out: the review suite
+  (`dev-harness/hr-company-schedule/run-final-review.mjs`) withdraws its notices by `EntityId` first (lane
+  2g-1), and since lane 6a reads `Notifications` `WITH (NOLOCK)`. After that the monitor logged no blocked
+  request and no wait over 3 s in two passes, and a pass took about 5 minutes (≈11 before). The poll's own
+  index is still owed here.
 
 ### What it blocks
 
@@ -2244,6 +2253,247 @@ Nothing in travel. In Fleet: double-booked vehicles and drivers, and fleet trips
 HR offers a read-only availability read (approved leave and staff travel) for the driver check. The hand-off also asks
 for a Fleet-owned read of a trip's incidents: travel reads the `FleetIncidents` table directly today, because Fleet's
 reads need `MaintenanceRead`.
+
+## 39. Platform (identity) — the HR/Identity reconciliation sweep fails, every run, for anyone whose manager has two logins (2026-10-05)
+
+**Owner:** Platform, identity (`src/ErpSystem.Api/Services/Identity/HrIdentityReconciliationService.cs`, run every 5
+minutes by `HrIdentityReconciliationBackgroundService`; arrived with master's #31). **Severity:** low to medium. The
+sweep goes on past a failure, but the person it fails on is never reconciled. Each failure is logged as an error,
+which buries real errors in the API log. **Found:** HR's company-schedule final closure, lane 1d, reading the API log
+after a harness run.
+
+### What is broken
+
+1. **One login per employee is assumed, and a second login breaks the people that employee manages.**
+   `ReconcileCandidateAsync` looks up the login of the candidate's manager with `ResolveEligibleUserForEmployeeAsync`
+   (l.1054). It reads the manager's active logins with `SingleOrDefaultAsync`. A manager with two active logins
+   throws "Sequence contains more than one element", so each person reporting to them fails. The failure happens
+   again in every run: nothing about the data changes between runs.
+2. **A person removed while a run is under way is reported as a failure.** A run lists its candidates first (l.75–91:
+   logins joined to employees not deleted). It then reconciles them one by one, re-reading each employee with
+   `SingleAsync` (l.472). On UAT a run takes about five minutes for about 3,800 logins. An employee soft-deleted in
+   that window throws "Sequence contains no elements". The person is then recorded as *Failed, eligible for retry*,
+   when they are simply no longer a candidate.
+3. **A run interrupted by a restart stays *Running* for ever.** The `catch` blocks only handle exceptions, so a run
+   whose process stops never reaches a final state. The next 5-minute window starts a new run under a new key, so
+   nothing is blocked. But the runs list keeps one "Running" row for each restart.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, from `HrIdentityReconciliationItems` and `HrIdentityReconciliationRuns`.
+
+**Item 1: 261 failures, all one login.** Every one is `property.manager` (employee TDC/00052, Danquah), from the
+first run after the rebuild (2026-09-29 12:48) to the last (2026-10-05 01:15). Danquah's manager, Stephen Boateng
+(TDC/00007), has two active logins: the demo personas `head.estate` and `authorised.signatory`. He is the only
+employee on UAT with more than one active login.
+
+**Item 2: 273 failures, one per login.** Every one is a harness login: 272 from the travel closure's suites (`e2e_tv_*`,
+from 2026-10-03) and one from the company-schedule suite (`csv_finUK55S6H`, 2026-10-05 01:15:49). Each was caught
+while its suite's teardown deleted the employee.
+
+**Item 3: 57 of 268 runs never completed.** Each was left by an API stop: UAT's API is started and stopped around
+each harness session.
+
+### What it blocks
+
+- **Reconciliation of anyone whose manager has a second login.** On UAT that is one person. In TDC's data it is
+  every report of anyone given a second account, such as a persona or an admin login.
+- **Reading the API log.** Every 5-minute run adds these errors beside the real ones.
+
+### What a fix needs
+
+- **Item 1:** decide whether an employee may have more than one active login.
+  - If yes: resolve the manager's login by a stated rule, for example the most recently signed-in, or the one marked
+    primary.
+  - If no: refuse the second link where logins are linked to employees, and report the existing pairs for an
+    administrator to resolve.
+- **Item 2:** re-read with `SingleOrDefaultAsync`, and record a candidate whose employee or login has gone as
+  *skipped* rather than *failed*.
+- **Item 3:** on start, mark runs left *Running* by an earlier process as *Interrupted*, or give each run a lease
+  that expires.
+
+## 40. Platform (email) — since 2026-10-03 an email sent with nobody signed in finds no mail server: the careers activation email, the password reset and every background send (2026-10-05)
+
+**Owner:** Platform, email settings (`src/ErpSystem.Core/Services/SettingsService.cs`, `GetEmailSettingsAsync`, as
+changed by master `de8ad4fb2` "Fix public verification delivery and dashboard health routing", 2026-10-03; read by
+`ProductionEmailService`). **Severity:** high.
+- A candidate who registers on the careers site, on a server with no working SMS provider, can no longer activate the
+  account: the lock-out round 4 closed is back.
+- On a server with SMTP configured, every email HR sends from a background service fails.
+
+**Found:** HR's company-schedule final closure, lane 2e-1, running `hr-templates/run-lane-n.mjs` (section J).
+
+### What is broken
+
+`GetEmailSettingsAsync` now takes the tenant from the signed-in user (`ICurrentUserService.TenantId`) and returns
+nothing when there is none. Before `de8ad4fb2` it took the first settings row, "even for anonymous requests". With no
+HTTP context, or no signed-in user, `CurrentUserService.TenantId` is null, so the lookup finds no mail server.
+
+HR's senders name the tenant (`TemplatedEmailService.SendForTenantAsync(tenantId, …)`), but the tenant is used only to
+choose the wording. The send goes through `IEmailService` → `ProductionEmailService.SendEmailAsync` → the lookup above.
+So these sends fail:
+- **the careers registration's activation email** (`AuthController.SendCandidateActivationEmailAsync`, anonymous) —
+  proven below;
+- **every send from a background service**: HR's hourly company-schedule reminders and RSVP chases, the other HR
+  sweeps, and the notification dispatcher's emails — read from the code, not run;
+- **the forgotten-password email** (`AuthController.ForgotPassword`, anonymous, through `IEmailService`) — read from
+  the code, not run.
+
+The same commit added `ITenantEmailSender` / `TenantEmailSender`, which takes the tenant explicitly. Only its own
+public path (`EstateExternalDocumentsController`) uses it.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, 11:00–11:01:
+- `run-lane-n` configured a mail sink as the DEFAULT tenant's `EmailSettings` row and registered four careers
+  candidates.
+- Each registration logged "No email settings configured in database", then "Activation email could not be sent to
+  candidate {id}".
+- J2–J8 failed: 6 of the suite's 115. The suite scored 115/115 at round 4 (2026-09-23).
+- Signed-in sends in the same window reached the sink: sections D–I, K and L passed.
+
+### What it blocks
+
+- **Careers self-registration** wherever SMS does not deliver. The activation email is the only other way to
+  activate, as `AuthController`'s own comment on it explains.
+- **Password reset** by email.
+- **Every HR background email** on a server with SMTP: company-schedule reminders and chases, leave, travel and
+  orientation sweeps. They report a failure and send nothing.
+
+UAT shows no change, because it has no mail server at all.
+
+### What a fix needs
+
+- Send with the tenant the caller gives. For example, `TemplatedEmailService` could use `ITenantEmailSender` when a
+  tenant is named, or `SendForTenantAsync` could set an ambient tenant that the settings lookup reads.
+- An anonymous send that knows no tenant, such as the password reset, needs a stated rule: the seeded DEFAULT tenant,
+  as `5d7e57f64` chose for the login page's public settings.
+- HR's senders already name the tenant, so HR needs no change.
+
+## 41. Platform (identity) — the careers sign-up texts a code to whatever number it is given, with no switch for test servers (2026-10-05)
+
+**Owner:** Platform, identity (`AuthController.RegisterCandidate`, l.1912–1934; `TenantSmsSender`), with HR's own
+harness. **Severity:** medium. This is a privacy and cost risk, not a broken function. **Found:** HR's
+company-schedule final closure, lane 2e-1, reading the API log after `hr-templates/run-lane-n.mjs`.
+
+### What is broken
+
+Every careers registration sends a verification code by SMS to the request's phone number, which is required
+(`RegisterRequest.PhoneNumber`). Nothing stops this on a test or staging server: there is no sandbox, no list of
+allowed numbers, and no "log the code instead". So any automated registration texts the numbers it uses: a test
+suite, a load test, or a demo script.
+
+HR's `run-lane-n.mjs` registers with random real-format Ghana numbers: `+23320` and seven random digits (l.262).
+
+### What was proven
+
+On UAT, 2026-10-05, 11:00–11:01, the suite registered four candidates. For each, the log reads:
+- "OTP created … channel=Sms";
+- the Twilio fallback failed;
+- "[SMS:mNotify] Sending to ***6527" (then ***6308, ***7832 and ***8225), and that attempt failed;
+- "Failed to send phone verification OTP".
+
+No phone was reached, only because UAT has no SMS credentials, either the tenant's own or the fallback's.
+
+### What it blocks
+
+Running any suite that registers candidates on a server where SMS credentials are configured.
+
+### What a fix needs
+
+- **Platform:** a guard for non-production servers. Either a sandbox mode that logs the code and sends nothing, or an
+  allowlist of numbers outside production.
+- **HR (owed):** until that guard exists, `run-lane-n.mjs` must not run where SMS credentials are configured. It
+  should refuse to start there. The number cannot simply be left out, because the sign-up requires one.
+
+## 42. Platform (identity) — `PUT /api/User` answers 500 for a login with no email, so such a login cannot be edited or switched off through the API (2026-10-05)
+
+**Owner:** Platform, identity (`UserService.UpdateUserAsync` l.121, `UserController.UpdateUser`). **Severity:** low.
+**Found:** HR's company-schedule final closure, lane 2e-1, switching off `run-lane-n`'s officer with no email after
+the run.
+
+### What is broken
+
+Updating a login whose email is empty sends the empty email back, as the screen and the API echo what they read.
+Identity's validation then refuses it ("Email '' is invalid"). The refusal is thrown as an exception and answered
+**500**, not as a 400 or 422 that says why. Any change to such a login fails, including only switching it off.
+
+### What was proven
+
+On UAT, 2026-10-05, 11:05:28–11:05:40, three `PUT /api/User/5B3768C6-…` calls (login `r4n_hrn_028928`) answered 500.
+The suite's own teardown made one call and HR's switch-off tool made two. Each logged "Failed to update user: Email ''
+is invalid" at `UserService.UpdateUserAsync` l.121. The login was switched off by SQL instead.
+
+The suite removes that login's email itself, by SQL, so it can test an officer with no address. A login can have no
+email by other routes too, such as an import.
+
+### What it blocks
+
+Editing or switching off, through the API or the users screen, any login with no email.
+
+### What a fix needs
+
+- Treat an empty email as no email on update, if a login may have none; or require one everywhere, at creation and on
+  import.
+- Answer Identity's validation failures with a 400 that names the field.
+
+## 43. Platform (email settings) — the SMTP password is written back to the database in plain text by any request that sends an email and then saves (2026-10-05)
+
+**Owner:** Platform, email settings (`src/ErpSystem.Core/Services/SettingsService.cs`, `GetEmailSettingsAsync` l.61–94;
+`src/ErpSystem.Api/Controllers/SettingsController.cs`, the email endpoints l.340–520). **Severity:** high — a
+credential stored at rest in plain text, and shown in plain text. **Found:** HR's company-schedule final closure, lane
+2e-2, reading the send path; then proved. Logged on the user's word (2026-10-05).
+
+### What is broken
+
+1. **Written back in plain text.** `GetEmailSettingsAsync` reads the tenant's `EmailSettings` row through the generic
+   repository, which tracks it, then sets `SmtpPassword` to the decrypted value on that tracked entity. Its comment
+   says "but don't modify the entity"; the code does. The mail sender (`ProductionEmailService`) calls it on every
+   send, in the request's own unit of work. **Any `SaveChanges` later in the same request writes the decrypted
+   password back to the table.** Nearly every module sends and then saves. For example, every company-schedule
+   notice saves its in-app rows after its emails, and so do workflow notices and HR's reminders.
+2. **Shown in plain text.** `GET /api/Settings/email` (TenantAdmin) answers `SmtpPassword` decrypted. Its own comment
+   says "In production, don't return the password".
+3. **Audited in plain text, permanently.** `POST` and `PUT /api/Settings/email` write an `AuditLogs` row:
+   - `NewValues` is the request serialized, password included;
+   - on an update, `OldValues` is the loaded entity, whose password is already decrypted.
+
+   `AuditLogs` is append-only (trigger `TR_AuditLogs_AppendOnly`), so such a row cannot be removed afterwards.
+
+### What was proven
+
+On UAT (`ErpSystemDB_UAT`), 2026-10-05, with `dev-harness/hr-company-schedule/tools/probe-smtp-password-write.mjs`.
+It uses a dummy password and a mail server on a closed port (127.0.0.1:2526), so no email went anywhere:
+- The admin saved the settings through `POST /api/Settings/email`. The stored `SmtpPassword` was 64 characters of
+  ciphertext, not the password.
+- One `AuditLogs` row from that save carried the password in plain text.
+- `GET /api/Settings/email` answered the password in plain text. That read saves nothing, and the stored value was
+  unchanged after it.
+- An HR officer then pressed "Send reminder now" on an event they organise: one email tried and refused, then one
+  in-app notice saved.
+- **Read again, the stored `SmtpPassword` was the password in plain text.**
+- The settings row, the event, the notice, the login (switched off) and the employee were removed afterwards. The
+  audit row could not be removed (append-only) and stays on UAT. It holds only the dummy password, for a server that
+  does not exist.
+
+Under #40 the background senders find no mail settings at all, so today only signed-in sends write the password
+back. Fixing #40 without this would let every background sweep write it back too.
+
+### What it blocks
+
+Storing SMTP credentials safely. Anyone with read access to the database or a backup — or a TenantAdmin through the
+screen — reads the mail account's password, after the first ordinary send on any server with mail configured.
+Decryption keeps working, because the code falls back to "assume plain text" when decrypting fails, so nothing
+visibly breaks.
+
+### What a fix needs
+
+- Return a detached copy from `GetEmailSettingsAsync`: read `AsNoTracking`, or decrypt into a new object. ⚠
+  `UpdateEmailSettingsAsync` calls the same method and relies on the tracked row to save its update, so it needs its
+  own tracked read.
+- Re-encrypt any row already stored in plain text. One way: try to decrypt each row, and encrypt it if that fails.
+- Never answer the password from `GET /api/Settings/email`; answer whether one is set.
+- Leave the password out of the audit's `NewValues` and `OldValues`.
 
 ## How to use this file
 

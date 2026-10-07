@@ -55,6 +55,61 @@ public interface ICompanySealAssetService
     /// by anyone who merely guesses an address.
     /// </remarks>
     Task<string?> GetCurrentAsDataUriAsync(CompanySealAssetKind kind, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="GetCurrentAsDataUriAsync(CompanySealAssetKind, CancellationToken)"/> for a named tenant — for a letter or
+    /// email rendered with nobody signed in to say whose it is (company-schedule final closure lane 4c: the logo).
+    /// </summary>
+    Task<string?> GetCurrentAsDataUriForTenantAsync(Guid tenantId, CompanySealAssetKind kind, CancellationToken ct = default);
+}
+
+/// <summary>
+/// What a logo, seal or signature image must be (company-schedule final closure lane 4c, the user's rulings): a PNG or a
+/// JPEG — by its name, its declared type AND its first bytes, so a renamed file is refused — of at most 2 MB, because
+/// every letter carries it embedded. Checked before a byte is stored; the upload gate's own type list is a tenant
+/// setting and admits documents.
+/// </summary>
+public static class CompanySealAssetRules
+{
+    /// <summary>2 MB: the user's ruling (2026-10-06).</summary>
+    public const long MaxBytes = 2 * 1024 * 1024;
+
+    private static readonly byte[] PngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    private static readonly byte[] JpegSignature = [0xFF, 0xD8, 0xFF];
+
+    /// <summary>How many leading bytes <see cref="RefuseImage"/> needs to see.</summary>
+    public const int HeaderLength = 8;
+
+    /// <summary>
+    /// Why this file cannot be a company image, or null when it can. <paramref name="header"/> is the file's first
+    /// <see cref="HeaderLength"/> bytes (fewer when the file is shorter).
+    /// </summary>
+    public static string? RefuseImage(
+        CompanySealAssetKind kind, string? fileName, string? contentType, long length, ReadOnlySpan<byte> header)
+    {
+        var what = Describe(kind);
+        if (length > MaxBytes)
+            return $"The {what} must be at most 2 MB; this file is {length / (1024.0 * 1024.0):0.#} MB. Every letter carries it.";
+
+        var extension = Path.GetExtension(fileName ?? string.Empty).ToLowerInvariant();
+        var png = extension == ".png";
+        var jpeg = extension is ".jpg" or ".jpeg";
+        var type = (contentType ?? string.Empty).Trim().ToLowerInvariant();
+        var typeOk = png ? type is "image/png" or "" : jpeg && type is "image/jpeg" or "image/jpg" or "image/pjpeg" or "";
+        var bytesOk = png ? header.StartsWith(PngSignature) : jpeg && header.StartsWith(JpegSignature);
+        return (png || jpeg) && typeOk && bytesOk
+            ? null
+            : $"The {what} must be a PNG or JPEG image.";
+    }
+
+    /// <summary>The kind as a person would say it.</summary>
+    public static string Describe(CompanySealAssetKind kind) => kind switch
+    {
+        CompanySealAssetKind.Seal => "company seal",
+        CompanySealAssetKind.Signature => "signature",
+        CompanySealAssetKind.Logo => "logo",
+        _ => "image",
+    };
 }
 
 public class CompanySealAssetService : ICompanySealAssetService
@@ -189,10 +244,15 @@ public class CompanySealAssetService : ICompanySealAssetService
         return true;
     }
 
-    public async Task<string?> GetCurrentAsDataUriAsync(
+    public Task<string?> GetCurrentAsDataUriAsync(
         CompanySealAssetKind kind, CancellationToken ct = default)
+        => GetCurrentAsDataUriForTenantAsync(GetTenantId(), kind, ct);
+
+    public async Task<string?> GetCurrentAsDataUriForTenantAsync(
+        Guid tenantId, CompanySealAssetKind kind, CancellationToken ct = default)
     {
-        var current = await CurrentEntityAsync(GetTenantId(), kind, ct);
+        if (tenantId == Guid.Empty) return null;
+        var current = await CurrentEntityAsync(tenantId, kind, ct);
         if (current is null) return null;
 
         try

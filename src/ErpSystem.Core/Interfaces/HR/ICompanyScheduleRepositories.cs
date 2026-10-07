@@ -5,18 +5,13 @@ namespace ErpSystem.Core.Interfaces.HR;
 
 #region Company Event Repository
 
+/// <remarks>
+/// ⚠ Lane 2a removed the nine custom reads: none filtered by tenant (F-30), the range read wanted
+/// containment rather than overlap, the upcoming read used the server's local date, and three had no
+/// caller. The event service builds its lists on its own tenant-scoped query.
+/// </remarks>
 public interface ICompanyEventRepository : IGenericRepository<CompanyEvent>
 {
-    Task<CompanyEvent?> GetByEventNumberAsync(string eventNumber);
-    Task<IEnumerable<CompanyEvent>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<CompanyEvent>> GetByOrganizerAsync(Guid organizerId);
-    Task<IEnumerable<CompanyEvent>> GetByDepartmentAsync(Guid departmentId);
-    Task<IEnumerable<CompanyEvent>> GetByStatusAsync(EventStatus status);
-    Task<IEnumerable<CompanyEvent>> GetByCategoryAsync(EventCategory category);
-    Task<IEnumerable<CompanyEvent>> GetUpcomingEventsAsync(int daysAhead = 30);
-    Task<IEnumerable<CompanyEvent>> GetActiveEventsAsync(DateTime? asOfDate = null);
-    Task<bool> HasConflictingEventAsync(Guid organizerId, DateTime startDate, DateTime endDate, Guid? excludeEventId = null);
-
     /// <summary>
     /// The next event number, from the shared sequence and probed against the table before it is
     /// used (round 4, D7 — company-schedule defect C-6).
@@ -34,24 +29,24 @@ public interface ICompanyEventRepository : IGenericRepository<CompanyEvent>
 
 #region Event Participant Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventParticipantRepository : IGenericRepository<EventParticipant>
 {
-    Task<IEnumerable<EventParticipant>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventParticipant>> GetByEmployeeIdAsync(Guid employeeId);
-    Task<IEnumerable<EventParticipant>> GetByInvitationStatusAsync(Guid eventId, InvitationStatus status);
-    Task<bool> IsParticipantAsync(Guid eventId, Guid employeeId);
 }
 
 #endregion Event Participant Repository
 
 #region Event Attendance Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventAttendanceRepository : IGenericRepository<EventAttendance>
 {
-    Task<IEnumerable<EventAttendance>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventAttendance>> GetByEmployeeIdAsync(Guid employeeId);
-    Task<EventAttendance?> GetByEventAndEmployeeAsync(Guid eventId, Guid employeeId);
-    Task<int> GetAttendanceCountAsync(Guid eventId);
 }
 
 #endregion Event Attendance Repository
@@ -68,27 +63,25 @@ public interface IEventAttachmentRepository : IGenericRepository<EventAttachment
 
 #region Event Task Repository
 
+/// <remarks>
+/// ⚠ Lane 2d removed the custom reads: none filtered by tenant (F-30), and the event service was their
+/// only caller. It reads guests, attendance and tasks on its own tenant-scoped queries.
+/// </remarks>
 public interface IEventTaskRepository : IGenericRepository<EventTask>
 {
-    Task<IEnumerable<EventTask>> GetByEventIdAsync(Guid eventId);
-    Task<IEnumerable<EventTask>> GetByAssigneeAsync(Guid assignedToId);
-    Task<IEnumerable<EventTask>> GetByStatusAsync(Guid eventId, EventTaskStatus status);
-    Task<IEnumerable<EventTask>> GetPendingTasksAsync(Guid? assignedToId = null);
-    Task<IEnumerable<EventTask>> GetOverdueTasksAsync();
 }
 
 #endregion Event Task Repository
 
 #region Meeting Room Repository
 
+/// <remarks>
+/// ⚠ Lane 3a (F-30, F-15, C-28): the room reads here — by code, by site, available, active, bookable — loaded every
+/// tenant's rows and filtered in memory, and the availability read's booked-room subquery had no tenant at all. Two had
+/// no caller. The room service builds its lists on its own tenant-scoped query, as the event service does since lane 2.
+/// </remarks>
 public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
 {
-    Task<MeetingRoom?> GetByRoomCodeAsync(string roomCode);
-    Task<IEnumerable<MeetingRoom>> GetByLocationAsync(Guid locationId);
-    Task<IEnumerable<MeetingRoom>> GetAvailableRoomsAsync(DateTime startDateTime, DateTime endDateTime, int? minCapacity = null);
-    Task<IEnumerable<MeetingRoom>> GetActiveRoomsAsync();
-    Task<IEnumerable<MeetingRoom>> GetBookableRoomsAsync();
-
     /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
     Task<string> GetNextRoomCodeAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
@@ -97,16 +90,13 @@ public interface IMeetingRoomRepository : IGenericRepository<MeetingRoom>
 
 #region Room Booking Repository
 
+/// <remarks>
+/// ⚠ Lane 3a (F-30): the booking reads here — by number, room, booker, range, status, pending, and a clash check — had
+/// no tenant, and the range read wanted containment, not overlap. The booking service reads on its own tenant-scoped
+/// query.
+/// </remarks>
 public interface IRoomBookingRepository : IGenericRepository<RoomBooking>
 {
-    Task<RoomBooking?> GetByBookingNumberAsync(string bookingNumber);
-    Task<IEnumerable<RoomBooking>> GetByRoomIdAsync(Guid roomId);
-    Task<IEnumerable<RoomBooking>> GetByBookerAsync(Guid bookedById);
-    Task<IEnumerable<RoomBooking>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<RoomBooking>> GetByStatusAsync(BookingStatus status);
-    Task<bool> HasConflictingBookingAsync(Guid roomId, DateTime startDateTime, DateTime endDateTime, Guid? excludeBookingId = null);
-    Task<IEnumerable<RoomBooking>> GetPendingApprovalsAsync();
-
     /// <inheritdoc cref="ICompanyEventRepository.GetNextEventNumberAsync"/>
     Task<string> GetNextBookingNumberAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }
@@ -115,12 +105,13 @@ public interface IRoomBookingRepository : IGenericRepository<RoomBooking>
 
 #region Company Milestone Repository
 
+/// <remarks>
+/// ⚠ Lane 4a: its four custom reads are gone — they loaded every tenant's rows, compared the milestone's own date only (a
+/// yearly one was never upcoming after its first year) and read "today" in server time. The service reads milestones
+/// through its own tenant-scoped query and <c>CompanyMilestoneRules</c>.
+/// </remarks>
 public interface ICompanyMilestoneRepository : IGenericRepository<CompanyMilestone>
 {
-    Task<IEnumerable<CompanyMilestone>> GetByCategoryAsync(MilestoneCategory category);
-    Task<IEnumerable<CompanyMilestone>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<CompanyMilestone>> GetUpcomingMilestonesAsync(int daysAhead = 90);
-    Task<IEnumerable<CompanyMilestone>> GetRecurringMilestonesAsync();
 }
 
 #endregion Company Milestone Repository
@@ -129,37 +120,10 @@ public interface ICompanyMilestoneRepository : IGenericRepository<CompanyMilesto
 
 public interface IBusinessClosureRepository : IGenericRepository<BusinessClosure>
 {
-    Task<IEnumerable<BusinessClosure>> GetByDateRangeAsync(DateTime startDate, DateTime endDate);
-    Task<IEnumerable<BusinessClosure>> GetByTypeAsync(ClosureType type);
-    Task<IEnumerable<BusinessClosure>> GetByLocationAsync(Guid locationId);
-    Task<IEnumerable<BusinessClosure>> GetByDepartmentAsync(Guid departmentId);
-    Task<IEnumerable<BusinessClosure>> GetUpcomingClosuresAsync(int daysAhead = 30);
-    Task<bool> IsClosureDateAsync(DateTime date, Guid? locationId = null, Guid? departmentId = null);
+    // Lane 1: no custom reads — closures are read through BusinessClosureRules and IHrClosureCalendar.
 }
 
 #endregion Business Closure Repository
 
-#region Fiscal Year Repository
-
-public interface IFiscalYearRepository : IGenericRepository<FiscalYear>
-{
-    Task<FiscalYear?> GetByYearAsync(int year);
-    Task<FiscalYear?> GetCurrentFiscalYearAsync();
-    Task<IEnumerable<FiscalYear>> GetByStatusAsync(FiscalYearStatus status);
-    Task<FiscalYear?> GetFiscalYearForDateAsync(DateTime date);
-}
-
-#endregion Fiscal Year Repository
-
-#region Fiscal Period Repository
-
-public interface IFiscalPeriodRepository : IGenericRepository<FiscalPeriod>
-{
-    Task<IEnumerable<FiscalPeriod>> GetByFiscalYearIdAsync(Guid fiscalYearId);
-    Task<FiscalPeriod?> GetByPeriodNumberAsync(Guid fiscalYearId, int periodNumber);
-    Task<FiscalPeriod?> GetCurrentPeriodAsync();
-    Task<FiscalPeriod?> GetPeriodForDateAsync(DateTime date);
-    Task<IEnumerable<FiscalPeriod>> GetOpenPeriodsAsync();
-}
-
-#endregion Fiscal Period Repository
+// ⚠ Company-schedule final closure lane 4b (D-6): HR's fiscal-year and fiscal-period repositories are retired with HR's own
+// calendar — they read every tenant's rows (F-3). HR reads Finance's calendar (IHrFiscalCalendar).

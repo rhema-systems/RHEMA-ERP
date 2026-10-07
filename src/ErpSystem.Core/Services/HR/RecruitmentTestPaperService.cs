@@ -91,7 +91,7 @@ public sealed class RecruitmentTestPaperService : IRecruitmentTestPaperService
         {
             ["CompanyName"] = string.IsNullOrWhiteSpace(company.LegalName) ? "Our Company" : company.LegalName,
             ["CompanyAddress"] = company.RegisteredAddress,
-            ["CompanyLogoUrl"] = company.LogoUrl,
+            ["CompanyLogoUrl"] = await _companyProfile.GetLogoAsync(company.TenantId, cancellationToken), // lane 4c (F-55)
             ["TestName"] = paper.Name,
             ["TestCode"] = paper.TestCode,
             ["DurationText"] = paper.DurationMinutes is { } minutes ? $"{minutes} minutes" : "No time limit",

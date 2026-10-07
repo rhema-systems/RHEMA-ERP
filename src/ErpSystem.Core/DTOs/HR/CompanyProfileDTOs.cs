@@ -44,7 +44,7 @@ public class CompanyProfileDto : BaseDto
     public string? DefaultSignatoryTitle { get; set; }
     public string? SignatureImageUrl { get; set; }
     public string? CompanySealImageUrl { get; set; }
-    public string? LogoUrl { get; set; }
+    // No LogoUrl since company-schedule lane 4c (F-55): the logo is an uploaded image (seal-assets/Logo).
     public string? OfferAcceptanceInstructions { get; set; }
     public string? DocumentFooterText { get; set; }
 }
@@ -92,7 +92,8 @@ public class UpdateCompanyProfileDto
     // an image source in a document sent to a candidate. Both are set by UPLOADING an image to
     // POST seal-assets/{kind}, which is Admin-gated, scanned and versioned. The two columns survive
     // read-only so a tenant that has not uploaded yet keeps rendering what it had.
-    [MaxLength(500)] public string? LogoUrl { get; set; }
+    // ⚠ No LogoUrl either since company-schedule lane 4c (F-55, the user's ruling): the logo is uploaded to
+    // POST seal-assets/Logo like the seal, and letters read that, then Tenant.LogoUrl. A logoUrl still sent is ignored.
     [MaxLength(2000)] public string? OfferAcceptanceInstructions { get; set; }
     [MaxLength(1000)] public string? DocumentFooterText { get; set; }
 }

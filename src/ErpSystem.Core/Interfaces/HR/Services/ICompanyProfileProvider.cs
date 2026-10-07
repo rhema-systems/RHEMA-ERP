@@ -21,4 +21,15 @@ public interface ICompanyProfileProvider
     /// job, an anonymous careers request), which <see cref="GetAsync"/> cannot serve: it throws there.
     /// </summary>
     Task<CompanyProfile> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The logo a letter or email carries (company-schedule final closure lane 4c, F-55): the uploaded logo in force,
+    /// embedded as a data URI like the seal and the signature; else the tenant's own logo URL (<c>Tenant.LogoUrl</c>),
+    /// whether or not a profile row exists; else null. The free-text <c>CompanyProfile.LogoUrl</c> is retired and not read.
+    /// </summary>
+    /// <remarks>
+    /// Separate from the profile read on purpose: every templated email reads the profile for the company's name, and
+    /// that must not load an image each time.
+    /// </remarks>
+    Task<string?> GetLogoAsync(Guid tenantId, CancellationToken cancellationToken = default);
 }

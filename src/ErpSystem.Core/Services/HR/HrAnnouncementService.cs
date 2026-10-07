@@ -223,7 +223,7 @@ public class HrAnnouncementService : IHrAnnouncementService
                 TenantId = tenantId,
                 AnnouncementId = announcement.Id,
                 TargetType = rule.TargetType,
-                TargetId = rule.TargetType == HrAudienceTargetType.AllEmployees ? null : rule.TargetId,
+                TargetId = HrAudienceTargets.NeedsTarget(rule.TargetType) ? rule.TargetId : null,
                 IsExclusion = rule.IsExclusion,
             });
         }
@@ -475,7 +475,8 @@ public class HrAnnouncementService : IHrAnnouncementService
 
         foreach (var rule in dto.Audiences ?? [])
         {
-            if (rule.TargetType != HrAudienceTargetType.AllEmployees && rule.TargetId is null)
+            // Everyone and Management (company-schedule D-16) name no record; every other type does.
+            if (HrAudienceTargets.NeedsTarget(rule.TargetType) && rule.TargetId is null)
                 throw new InvalidOperationException(
                     $"An audience rule for '{rule.TargetType}' must name which one.");
         }
@@ -491,7 +492,7 @@ public class HrAnnouncementService : IHrAnnouncementService
                 TenantId = tenantId,
                 TargetType = rule.TargetType,
                 // AllEmployees needs no id, and storing one would be a lie about the rule.
-                TargetId = rule.TargetType == HrAudienceTargetType.AllEmployees ? null : rule.TargetId,
+                TargetId = HrAudienceTargets.NeedsTarget(rule.TargetType) ? rule.TargetId : null,
                 IsExclusion = rule.IsExclusion,
             });
         }
@@ -603,8 +604,8 @@ public class HrAnnouncementService : IHrAnnouncementService
                 TargetType = x.TargetType,
                 TargetId = x.TargetId,
                 IsExclusion = x.IsExclusion,
-                TargetName = x.TargetType == HrAudienceTargetType.AllEmployees
-                    ? "Everyone"
+                TargetName = !HrAudienceTargets.NeedsTarget(x.TargetType)
+                    ? HrAudienceTargets.TypeLabel(x.TargetType)
                     : x.TargetId is { } t && names.TryGetValue(t, out var n) ? n : null,
             })
             .ToList(),

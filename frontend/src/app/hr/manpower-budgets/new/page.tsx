@@ -15,6 +15,7 @@ import {
   fiscalPeriodFor,
   manpowerBudgetFormIsComplete,
   manpowerBudgetPayload,
+  useFinanceFiscalYears,
 } from '@/components/hr/manpower/ManpowerBudgetFormFields';
 
 const thisYear = new Date().getFullYear();
@@ -44,14 +45,17 @@ export default function NewManpowerBudgetPage() {
     queryFn: () => policySettingsService.get(),
     staleTime: 5 * 60 * 1000,
   });
+  // Lane 4b (D-6): Finance's year of that number, or its sequence continued; the start month only with no Finance year.
+  const financeYears = useFinanceFiscalYears();
   useEffect(() => {
     if (!policy) return;
     const calendar = fiscalPeriodFor(form.fiscalYear, 1);
     if (form.periodStartDate !== calendar.start || form.periodEndDate !== calendar.end) return;
-    const fiscal = fiscalPeriodFor(form.fiscalYear, policy.fiscalYearStartMonth);
-    if (fiscal.start !== calendar.start) setForm((f) => ({ ...f, periodStartDate: fiscal.start, periodEndDate: fiscal.end }));
+    const fiscal = fiscalPeriodFor(form.fiscalYear, policy.fiscalYearStartMonth, financeYears);
+    if (fiscal.start !== calendar.start || fiscal.end !== calendar.end)
+      setForm((f) => ({ ...f, periodStartDate: fiscal.start, periodEndDate: fiscal.end }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [policy]);
+  }, [policy, financeYears]);
 
   const complete = manpowerBudgetFormIsComplete(form);
 

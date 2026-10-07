@@ -18,7 +18,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
-import { fiscalPeriodFor } from '@/components/hr/manpower/ManpowerBudgetFormFields';
+import { fiscalPeriodFor, useFinanceFiscalYears } from '@/components/hr/manpower/ManpowerBudgetFormFields';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { policySettingsService } from '@/services/hr/policy-settings.service';
 
@@ -55,16 +55,18 @@ export function PlanBudgetFromEstablishmentDialog({
     staleTime: 5 * 60 * 1000,
   });
   const startMonth = policy?.fiscalYearStartMonth ?? 1;
+  // Lane 4b (D-6): Finance's year of that number, or its sequence continued; the start month only with no Finance year.
+  const financeYears = useFinanceFiscalYears();
 
   useEffect(() => {
     if (open) setUnitId(initialUnitId ?? '');
   }, [open, initialUnitId]);
 
   useEffect(() => {
-    const p = fiscalPeriodFor(fiscalYear, startMonth);
+    const p = fiscalPeriodFor(fiscalYear, startMonth, financeYears);
     setPeriodStart(p.start);
     setPeriodEnd(p.end);
-  }, [fiscalYear, startMonth]);
+  }, [fiscalYear, startMonth, financeYears]);
 
   const canGo = !!unitId && fiscalYear >= 2000 && fiscalYear <= 2100 && !!periodStart && !!periodEnd && periodEnd >= periodStart;
 

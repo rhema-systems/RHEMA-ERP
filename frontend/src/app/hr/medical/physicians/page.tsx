@@ -60,6 +60,25 @@ const emptyPhysician: PhysicianForm = {
 
 const blank = (v?: string) => (v && v.length > 0 ? v : null);
 
+/** What both writes carry. Neither touches verification — the "Verify licence" action owns that. */
+const toRequest = (values: PhysicianForm) => {
+  const v = physicianSchema.parse(values);
+  return {
+    firstName: v.firstName,
+    lastName: v.lastName,
+    middleName: blank(v.middleName),
+    title: blank(v.title),
+    specialization: blank(v.specialization),
+    medicalLicenseNumber: blank(v.medicalLicenseNumber),
+    licenseExpiryDate: blank(v.licenseExpiryDate),
+    phoneNumber: blank(v.phoneNumber),
+    email: blank(v.email),
+    facilityId: blank(v.facilityId),
+    isActive: v.isActive,
+    notes: blank(v.notes),
+  };
+};
+
 export default function MedicalPhysiciansPage() {
   const { hasAnyPermission } = useAuth();
   const canWrite = hasAnyPermission(['HR.Medical.Write', 'HR.Medical.Admin']);
@@ -71,10 +90,8 @@ export default function MedicalPhysiciansPage() {
     queryFn: () => medicalFacilityService.getFacilities(),
   });
 
-  const facilityOptions = [
-    { value: '', label: 'Not attached to a facility' },
-    ...facilities.map((f) => ({ value: f.id, label: f.facilityName })),
-  ];
+  // The "no facility" choice is SelectField's allowEmpty item: Radix throws on an item whose value is ''.
+  const facilityOptions = facilities.map((f) => ({ value: f.id, label: f.facilityName }));
 
   return (
     <div className="space-y-6 p-6">
@@ -92,37 +109,10 @@ export default function MedicalPhysiciansPage() {
         dialogHint="Attach the doctor to a facility where you can — it is how staff will find them when filing a claim."
         emptyDescription="No physicians have been registered yet. Add the doctors staff are commonly referred to."
         list={() => medicalFacilityService.getPhysicians()}
-        create={(values) => {
-          const v = physicianSchema.parse(values);
-          return medicalFacilityService.createPhysician({
-            ...v,
-            middleName: blank(v.middleName),
-            title: blank(v.title),
-            specialization: blank(v.specialization),
-            medicalLicenseNumber: blank(v.medicalLicenseNumber),
-            licenseExpiryDate: blank(v.licenseExpiryDate),
-            phoneNumber: blank(v.phoneNumber),
-            email: blank(v.email),
-            facilityId: blank(v.facilityId),
-            notes: blank(v.notes),
-          });
-        }}
-        update={(id, values) => {
-          const v = physicianSchema.parse(values);
-          return medicalFacilityService.updatePhysician(id, {
-            id,
-            ...v,
-            middleName: blank(v.middleName),
-            title: blank(v.title),
-            specialization: blank(v.specialization),
-            medicalLicenseNumber: blank(v.medicalLicenseNumber),
-            licenseExpiryDate: blank(v.licenseExpiryDate),
-            phoneNumber: blank(v.phoneNumber),
-            email: blank(v.email),
-            facilityId: blank(v.facilityId),
-            notes: blank(v.notes),
-          });
-        }}
+        create={(values) => medicalFacilityService.createPhysician(toRequest(values))}
+        update={(id, values) =>
+          medicalFacilityService.updatePhysician(id, { id, ...toRequest(values) })
+        }
         // 2026-09-03: reads are open by design; create/edit are HR.Medical.Write, delete is Admin.
         allowCreate={canWrite}
         allowUpdate={canWrite}
@@ -172,9 +162,10 @@ export default function MedicalPhysiciansPage() {
         ]}
         schema={physicianSchema as any}
         emptyForm={emptyPhysician}
+        // The list row is a SUMMARY: one fullName, and no facility, licence, email, middle name or
+        // notes. This only seeds the dialog until `loadForEdit` below replaces it with the record.
         toForm={(p) => ({
           ...emptyPhysician,
-          // The summary row carries a single fullName; first/last are re-collected in the dialog.
           firstName: p.fullName.split(' ')[0] ?? '',
           lastName: p.fullName.split(' ').slice(1).join(' '),
           title: p.title ?? '',
@@ -182,6 +173,25 @@ export default function MedicalPhysiciansPage() {
           phoneNumber: p.phoneNumber ?? '',
           isActive: p.isActive,
         })}
+        // ⚠ Without this an edit saved the summary: the update is a full replace, so it cleared the
+        // facility, licence, expiry, email, middle name and notes.
+        loadForEdit={async (p) => {
+          const full = await medicalFacilityService.getPhysician(p.id);
+          return {
+            firstName: full.firstName,
+            lastName: full.lastName,
+            middleName: full.middleName ?? '',
+            title: full.title ?? '',
+            specialization: full.specialization ?? '',
+            medicalLicenseNumber: full.medicalLicenseNumber ?? '',
+            licenseExpiryDate: full.licenseExpiryDate?.slice(0, 10) ?? '',
+            phoneNumber: full.phoneNumber ?? '',
+            email: full.email ?? '',
+            facilityId: full.facilityId ?? '',
+            isActive: full.isActive,
+            notes: full.notes ?? '',
+          };
+        }}
         renderFields={(form) => (
           <>
             <FieldRow>
@@ -198,6 +208,8 @@ export default function MedicalPhysiciansPage() {
               name="facilityId"
               label="Facility"
               options={facilityOptions}
+              allowEmpty
+              emptyLabel="Not attached to a facility"
             />
             <FieldRow>
               <TextField form={form} name="medicalLicenseNumber" label="Licence number" />

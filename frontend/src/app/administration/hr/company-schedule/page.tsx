@@ -37,9 +37,10 @@ export default function CompanyScheduleSetupPage() {
             icon: Flag,
           },
           {
-            title: 'Fiscal Years',
-            description: 'Reporting windows and the periods inside them.',
-            href: '/administration/hr/company-schedule/fiscal-years',
+            // Lane 4b (D-6): Finance's calendar, read-only.
+            title: 'Fiscal Calendar',
+            description: 'Finance\'s fiscal years and periods, read-only.',
+            href: '/administration/hr/company-schedule/fiscal-calendar',
             icon: CalendarRange,
           },
         ]}

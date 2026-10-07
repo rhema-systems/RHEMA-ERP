@@ -157,14 +157,9 @@ export default function EmployeeHealthProfilePage({
     queryFn: () => medicalFacilityService.getPhysicians(),
   });
 
-  const facilityOptions = [
-    { value: '', label: 'Not recorded' },
-    ...facilities.map((f) => ({ value: f.id, label: f.facilityName })),
-  ];
-  const physicianOptions = [
-    { value: '', label: 'Not recorded' },
-    ...physicians.map((p) => ({ value: p.id, label: p.fullName })),
-  ];
+  // "Not recorded" is SelectField's allowEmpty item: Radix throws on an item whose value is ''.
+  const facilityOptions = facilities.map((f) => ({ value: f.id, label: f.facilityName }));
+  const physicianOptions = physicians.map((p) => ({ value: p.id, label: p.fullName }));
 
   const critical = allergies.filter(
     (a) => a.isActive && (a.severity === 'Anaphylactic' || a.severity === 'Severe'),
@@ -511,12 +506,16 @@ export default function EmployeeHealthProfilePage({
                     name="facilityId"
                     label="Facility"
                     options={facilityOptions}
+                    allowEmpty
+                    emptyLabel="Not recorded"
                   />
                   <SelectField
                     form={form}
                     name="physicianId"
                     label="Examining physician"
                     options={physicianOptions}
+                    allowEmpty
+                    emptyLabel="Not recorded"
                   />
                 </FieldRow>
                 <FieldRow>

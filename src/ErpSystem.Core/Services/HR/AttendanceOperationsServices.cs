@@ -500,6 +500,7 @@ public class HolidayCalendarService : IHolidayCalendarService
     private readonly IPublicHolidayRepository _holidayRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILeaveService _leaveService;
     private readonly ILogger<HolidayCalendarService> _logger;
 
     public HolidayCalendarService(
@@ -507,13 +508,31 @@ public class HolidayCalendarService : IHolidayCalendarService
         IPublicHolidayRepository holidayRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ILeaveService leaveService,
         ILogger<HolidayCalendarService> logger)
     {
         _repository = repository;
         _holidayRepository = holidayRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _leaveService = leaveService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The days a holiday makes a day off, for the leave recount (company-schedule final closure, lane
+    /// 1c: D-15b) — its own days and the day in lieu.
+    /// </summary>
+    /// <remarks>
+    /// The recount reads which days are off from the working-day calculator itself — the default
+    /// calendar, active, Mandatory or SubstituteDay — so a holiday on another calendar, or an optional
+    /// one, changes no count and tells nobody anything.
+    /// </remarks>
+    private static List<(DateOnly From, DateOnly To)> SpansOf(PublicHoliday holiday)
+    {
+        var spans = new List<(DateOnly From, DateOnly To)> { (holiday.DateFrom, holiday.DateTo) };
+        if (holiday.SubstitutionDate is DateOnly inLieu) spans.Add((inLieu, inLieu));
+        return spans;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -619,20 +638,31 @@ public class HolidayCalendarService : IHolidayCalendarService
     public async Task<HolidayCalendarDto> UpdateAsync(UpdateHolidayCalendarDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedCalendarAsync(dto.Id);
+        var (wasActive, wasDefault) = (entity.IsActive, entity.IsDefault);
 
         entity.UpdateEntity(dto, userId);
         await _repository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
-        return entity.ToDto();
+
+        var result = entity.ToDto();
+        // Lane 1c, D-15b: a calendar becoming — or ceasing to be — the one in use changes every holiday
+        // at once, so all granted leave is recounted. A renamed calendar changes nothing.
+        if (wasActive != entity.IsActive || wasDefault != entity.IsDefault)
+            result.LeaveRecharge = await _leaveService.RechargeAllOpenLeaveAsync(entity.TenantId, ct: ct);
+        return result;
     }
 
-    public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
+    /// <summary>Deletes the calendar; when it was active — possibly the one in use — all granted leave is recounted (lane 1c).</summary>
+    public async Task<LeaveRechargeResultDto> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var entity = await GetOwnedCalendarAsync(id);
 
         await _repository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
-        return true;
+
+        return entity.IsActive
+            ? await _leaveService.RechargeAllOpenLeaveAsync(entity.TenantId, ct: ct)
+            : new LeaveRechargeResultDto();
     }
 
     public async Task<PublicHolidayDto> AddHolidayAsync(CreatePublicHolidayDto dto, Guid tenantId, Guid userId, CancellationToken ct = default)
@@ -646,7 +676,12 @@ public class HolidayCalendarService : IHolidayCalendarService
         var entity = dto.ToEntity(current, userId);
         await _holidayRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
-        return entity.ToDto();
+
+        // Lane 1c, D-15b: a holiday added after leave was granted gives the day back.
+        var result = entity.ToDto();
+        result.LeaveRecharge = await _leaveService.RechargeForDaysOffChangeAsync(
+            current, SpansOf(entity), $"a public holiday, {entity.HolidayName}, was added", ct);
+        return result;
     }
 
     public async Task<IEnumerable<PublicHolidaySummaryDto>> GetHolidaysAsync(Guid calendarId, int? year = null, CancellationToken ct = default)
@@ -668,20 +703,31 @@ public class HolidayCalendarService : IHolidayCalendarService
     public async Task<PublicHolidayDto> UpdateHolidayAsync(UpdatePublicHolidayDto dto, Guid userId, CancellationToken ct = default)
     {
         var entity = await GetOwnedHolidayAsync(dto.Id);
+        // The days it covered BEFORE the change: a holiday moved, retired or made optional gives them back.
+        var before = SpansOf(entity);
 
         entity.UpdateEntity(dto, userId);
         await _holidayRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
-        return entity.ToDto();
+
+        var result = entity.ToDto();
+        result.LeaveRecharge = await _leaveService.RechargeForDaysOffChangeAsync(
+            entity.TenantId, before.Concat(SpansOf(entity)).ToList(),
+            $"a public holiday, {entity.HolidayName}, was changed", ct);
+        return result;
     }
 
-    public async Task<bool> DeleteHolidayAsync(Guid holidayId, CancellationToken ct = default)
+    /// <summary>Deletes the holiday, and answers the recount of the leave it covered (lane 1c, D-15b).</summary>
+    public async Task<LeaveRechargeResultDto> DeleteHolidayAsync(Guid holidayId, CancellationToken ct = default)
     {
         var entity = await GetOwnedHolidayAsync(holidayId);
+        var covered = SpansOf(entity);
 
         await _holidayRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(ct);
-        return true;
+
+        return await _leaveService.RechargeForDaysOffChangeAsync(
+            entity.TenantId, covered, $"a public holiday, {entity.HolidayName}, was removed", ct);
     }
 }
 

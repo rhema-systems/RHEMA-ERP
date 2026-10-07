@@ -95,8 +95,8 @@ export function toUpdateRequest(profile: CompanyProfile): UpdateCompanyProfileRe
     defaultSignatoryName: profile.defaultSignatoryName,
     defaultSignatoryTitle: profile.defaultSignatoryTitle,
     // ⚠ signatureImageUrl and companySealImageUrl are NOT sent. They are legacy read-only: a seal
-    // is an instrument of authority, uploaded through the gate and versioned, not typed as a path.
-    logoUrl: profile.logoUrl,
+    // is an instrument of authority, uploaded through the gate and versioned, not typed as a path. Nor is a logo
+    // URL since lane 4c (F-55): the logo is uploaded the same way.
     offerAcceptanceInstructions: profile.offerAcceptanceInstructions,
     documentFooterText: profile.documentFooterText,
   };

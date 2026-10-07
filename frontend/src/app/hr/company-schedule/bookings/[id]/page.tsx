@@ -6,8 +6,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { CheckCircle2, Loader2, Save, XCircle } from 'lucide-react';
+import { Ban, CheckCircle2, Loader2, Save, Trash2, UserX, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Dialog,
@@ -77,8 +79,14 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  // Lane 3a (C-32): Delete here too, beside the register's — Admin only, hidden otherwise. And the booker is never offered
+  // Approve on their own booking: the server refuses it (D-10's guard).
+  const { user, hasPermission } = useAuth();
+  const canDelete = hasPermission('HR.Company.Admin');
+  const myEmployeeId = (user?.employeeId as string | undefined) ?? null;
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const key = ['hr', 'company-schedule', 'bookings', id];
@@ -130,9 +138,43 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     mutationFn: () => roomBookingService.approve(id),
     onSuccess: async () => {
       await refresh();
-      toast({ title: 'Booking approved' });
+      const after = await roomBookingService.getById(id).catch(() => null);
+      toast({
+        title: after?.status === 'Confirmed' ? 'Booking approved' : 'Approval recorded',
+        description: after?.status === 'Confirmed'
+          ? 'The booker is told.'
+          : 'Another approval stage is still to come.',
+      });
     },
     onError: fail('Could not approve the booking'),
+  });
+
+  // Lane 3b-2 (the user's ruling): a confirmed booking whose start has passed — completed too — held and not used.
+  const [noShowOpen, setNoShowOpen] = useState(false);
+  const markNoShow = async () => {
+    try {
+      await roomBookingService.markNoShow(id);
+      await refresh();
+      toast({ title: 'Marked a no-show', description: 'The booker is told.' });
+      return true;
+    } catch (error: any) {
+      fail('Could not mark the booking a no-show')(error);
+      return false;
+    }
+  };
+
+  // Lane 3b-1 (D-10): not approving cancels the booking, and its booker is told why.
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+  const reject = useMutation({
+    mutationFn: () => roomBookingService.reject(id, rejectReason.trim()),
+    onSuccess: async () => {
+      await refresh();
+      setRejectOpen(false);
+      setRejectReason('');
+      toast({ title: 'Booking not approved', description: 'It is cancelled, and the booker is told why.' });
+    },
+    onError: fail('Could not record the decision'),
   });
 
   const cancel = useMutation({
@@ -145,6 +187,19 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     },
     onError: fail('Could not cancel the booking'),
   });
+
+  const remove = async () => {
+    try {
+      await roomBookingService.remove(id);
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'bookings'] });
+      toast({ title: 'Booking deleted' });
+      router.push('/hr/company-schedule/bookings');
+      return true;
+    } catch (error: any) {
+      fail('Could not delete the booking')(error);
+      return false;
+    }
+  };
 
   const onSubmit = form.handleSubmit(async (values) => {
     setSaving(true);
@@ -180,7 +235,12 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
     return <div className="p-6 text-muted-foreground">That booking could not be found.</div>;
   }
 
-  const open = !booking.isCancelled && booking.status !== 'Completed';
+  // Lane 3a (F-8): a booking may be changed or cancelled while it holds its room — not once cancelled, completed or
+  // marked a no-show — as the server now rules.
+  const open = !booking.isCancelled && (booking.status === 'Tentative' || booking.status === 'Confirmed');
+  const mine = !!myEmployeeId && booking.bookedById?.toLowerCase() === myEmployeeId.toLowerCase();
+  const started = new Date(booking.startDateTime).getTime() <= Date.now();
+  const canNoShow = !booking.isCancelled && (booking.status === 'Confirmed' || booking.status === 'Completed') && started;
 
   return (
     <div className="space-y-6 p-6">
@@ -190,19 +250,37 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
         backHref="/hr/company-schedule/bookings"
         actions={
           <div className="flex items-center gap-2">
-            {booking.status === 'Tentative' && open && (
-              <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
-              </Button>
+            {booking.status === 'Tentative' && open && !mine && (
+              <>
+                <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
+                  <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
+                </Button>
+                <Button variant="outline" onClick={() => setRejectOpen(true)}>
+                  <Ban className="mr-2 h-4 w-4" /> Not approve
+                </Button>
+              </>
             )}
             {open && (
               <Button variant="outline" onClick={() => setCancelOpen(true)}>
                 <XCircle className="mr-2 h-4 w-4" /> Cancel
               </Button>
             )}
+            {canNoShow && (
+              <Button variant="outline" onClick={() => setNoShowOpen(true)}>
+                <UserX className="mr-2 h-4 w-4" /> Mark no-show
+              </Button>
+            )}
+            {canDelete && (
+              <Button variant="outline" className="text-destructive" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="mr-2 h-4 w-4" /> Delete
+              </Button>
+            )}
           </div>
         }
       />
+      {booking.status === 'Tentative' && open && mine && (
+        <p className="text-sm text-muted-foreground">You booked this, so somebody else must approve it.</p>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Booking</CardTitle></CardHeader>
@@ -292,6 +370,51 @@ export default function RoomBookingDetailPage({ params }: { params: Promise<{ id
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Not approve this booking</DialogTitle>
+            <DialogDescription>
+              It is cancelled and the room released. {booking.bookedByName} is told, with your reason.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reject-reason">Reason</Label>
+            <Textarea id="reject-reason" rows={3} value={rejectReason} onChange={(e) => setRejectReason(e.target.value)} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>Back</Button>
+            <Button
+              variant="destructive"
+              disabled={!rejectReason.trim() || reject.isPending}
+              onClick={() => reject.mutate()}
+            >
+              {reject.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Not approve
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationDialog
+        open={noShowOpen}
+        onOpenChange={setNoShowOpen}
+        title="Mark this booking a no-show?"
+        description={`The room was held and not used. This cannot be undone, and ${booking.bookedByName} is told.`}
+        confirmText="Mark no-show"
+        onConfirm={markNoShow}
+      />
+
+      <ConfirmationDialog
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+        title="Delete this booking?"
+        description={`${booking.bookingNumber} will be removed from the register. Cancel it instead to keep it on record.`}
+        confirmText="Delete"
+        variant="destructive"
+        onConfirm={remove}
+      />
     </div>
   );
 }

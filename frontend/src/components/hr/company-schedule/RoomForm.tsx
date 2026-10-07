@@ -13,8 +13,7 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
-import { locationService } from '@/services/hr/location.service';
-import { siteOptions } from '@/components/hr/company-schedule/siteOptions';
+import { useSiteOptions } from '@/components/hr/company-schedule/siteOptions';
 import { ROOM_TYPES } from '@/types/hr/company-schedule';
 import type { CreateMeetingRoom, MeetingRoom } from '@/types/hr/company-schedule';
 
@@ -133,10 +132,8 @@ export function useRoomForm(initial: RoomFormValues) {
 }
 
 export function RoomFormFields({ form }: { form: UseFormReturn<RoomFormValues> }) {
-  const { data: locations, isLoading } = useQuery({
-    queryKey: ['hr', 'locations', 'all'],
-    queryFn: () => locationService.getAll(),
-  });
+  // Lane 5a (C-16): the places staff can be placed, not the whole location tree.
+  const sites = useSiteOptions();
 
   const bookable = form.watch('isBookable');
 
@@ -155,8 +152,8 @@ export function RoomFormFields({ form }: { form: UseFormReturn<RoomFormValues> }
               name="locationId"
               label="Site"
               required
-              placeholder={isLoading ? 'Loading sites…' : 'Select…'}
-              options={siteOptions(locations)}
+              placeholder={sites.isLoading ? 'Loading sites…' : 'Select…'}
+              options={sites.optionsFor(form.watch('locationId'))}
             />
             <SelectField
               form={form}

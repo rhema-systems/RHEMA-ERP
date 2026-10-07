@@ -114,8 +114,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IRoomBookingRepository, RoomBookingRepository>();
         services.AddScoped<ICompanyMilestoneRepository, CompanyMilestoneRepository>();
         services.AddScoped<IBusinessClosureRepository, BusinessClosureRepository>();
-        services.AddScoped<IFiscalYearRepository, FiscalYearRepository>();
-        services.AddScoped<IFiscalPeriodRepository, FiscalPeriodRepository>();
+        // Company-schedule final closure lane 4b (D-6): HR's own fiscal years and periods are retired — HR reads Finance's
+        // calendar (IHrFiscalCalendar, below). Their tables stay until a later migration drops them.
         services.AddScoped<IJobDescriptionRepository, JobDescriptionRepository>();
         services.AddScoped<IJobResponsibilityRepository, JobResponsibilityRepository>();
         services.AddScoped<IJobQualificationRepository, JobQualificationRepository>();
@@ -577,7 +577,16 @@ public static class HrModuleServiceRegistration
         // interview clash check fans out over.
         services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService,
             ErpSystem.Core.Services.HR.CompanySchedule.PersonalScheduleService>();
+        // Company-schedule final closure lane 7 (D-7): the company calendar, for HR and for staff, and an event as staff see it.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService,
+            ErpSystem.Core.Services.HR.CompanySchedule.CompanyCalendarService>();
         services.AddScoped<ICompanyEventService, CompanyEventService>();
+        // Who hears what about a company event in the app — one topic per notice and audience
+        // (company-schedule final closure, lane 2e-1). The event service needs it.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.CompanyScheduleNotices>();
+        // A room booking's approval on the engine and telling its booker (lane 3b-1) — the booking, room and event
+        // services all reach one.
+        services.AddScoped<ErpSystem.Core.Services.HR.CompanySchedule.RoomBookingDesk>();
         // ⚠ Round 4, D6. NOT optional: without the catalogue registration TemplatedEmailService has
         // no fallback for the CompanySchedule module, and every invitation, reschedule notice and
         // cancellation throws instead of rendering its shipped default. The same trap lane F
@@ -588,7 +597,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IRoomBookingService, RoomBookingService>();
         services.AddScoped<ICompanyMilestoneService, CompanyMilestoneService>();
         services.AddScoped<IBusinessClosureService, BusinessClosureService>();
-        services.AddScoped<IFiscalYearService, FiscalYearService>();
+        // Lane 4b (D-6): Finance's fiscal calendar, read in-process — the card, requisitions and the manpower budget form.
+        services.AddScoped<IHrFiscalCalendar, ErpSystem.Core.Services.HR.CompanySchedule.HrFiscalCalendar>();
         services.AddScoped<IJobDescriptionService, JobDescriptionService>();
         services.AddScoped<IUnionService, UnionService>();
         services.AddScoped<IJobArchitectureService, JobArchitectureService>();
@@ -745,6 +755,10 @@ public static class HrModuleServiceRegistration
         // design — Monday to Friday less the tenant's public holidays, never the appellant's own
         // roster, or the same deadline would fall on different dates for different people.
         services.AddScoped<IHrWorkingDayCalculator, HrWorkingDayCalculator>();
+        // Company-schedule final closure, lane 1: HR's one reader of business closures — which fall
+        // in a range, whom each covers, whether a date is a closure day. Tenant-explicit, so the
+        // nightly leave paths can use it with nobody signed in.
+        services.AddScoped<IHrClosureCalendar, HrClosureCalendar>();
 
         // FR-HR-181's grievance ladder. Separate from the disciplinary case on purpose: a grievance
         // is raised BY an employee and a case ABOUT one, which gives them opposite read rules.

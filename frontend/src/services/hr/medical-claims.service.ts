@@ -220,9 +220,32 @@ class MedicalSelfServiceClaimService {
     return apiService.get<OwnMedicalClaim>(`${this.baseUrl}/${id}`);
   }
 
-  /** A supplied employeeId is ignored by the API — the token decides the subject. */
+  /**
+   * Files a claim as a DRAFT (2026-10-07) — the desk sees nothing until `submit`. A supplied
+   * employeeId is ignored by the API — the token decides the subject.
+   */
   file(payload: MedicalExpenseClaimCreateRequest): Promise<OwnMedicalClaim> {
     return apiService.post<OwnMedicalClaim>(this.baseUrl, payload);
+  }
+
+  /** Replaces a draft's details, the same shape as filing. A submitted claim answers 422. */
+  updateDraft(id: string, payload: MedicalExpenseClaimCreateRequest): Promise<OwnMedicalClaim> {
+    return apiService.put<OwnMedicalClaim>(`${this.baseUrl}/${id}`, payload);
+  }
+
+  /** Draft → Pending. Refused (422) until a receipt is attached. */
+  submit(id: string): Promise<OwnMedicalClaim> {
+    return apiService.post<OwnMedicalClaim>(`${this.baseUrl}/${id}/submit`, {});
+  }
+
+  /** Deletes a draft. A submitted claim answers 422. */
+  discardDraft(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${id}`);
+  }
+
+  /** Removes a receipt from a draft; once submitted, receipts stay (422). */
+  removeDraftDocument(claimId: string, documentId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/${claimId}/documents/${documentId}`);
   }
 
   getItems(claimId: string): Promise<MedicalExpenseItem[]> {

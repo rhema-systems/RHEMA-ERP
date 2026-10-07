@@ -13,7 +13,9 @@ import {
   roomToForm,
   toRoomPayload,
   useRoomForm,
+  type RoomFormValues,
 } from '@/components/hr/company-schedule/RoomForm';
+import { RoomRetireDialog, roomErrorText } from '@/components/hr/company-schedule/RoomRetireDialog';
 import { meetingRoomService } from '@/services/hr/company-schedule.service';
 
 export default function EditMeetingRoomPage({ params }: { params: Promise<{ id: string }> }) {
@@ -34,22 +36,30 @@ export default function EditMeetingRoomPage({ params }: { params: Promise<{ id: 
     if (room) form.reset(roomToForm(room));
   }, [room]);
 
-  const onSubmit = form.handleSubmit(async (values) => {
+  // D-18 (lane 3a): switching an active room off goes through the retirement dialog, which lists its bookings still to
+  // come and asks before they are cancelled; the form's values wait here meanwhile.
+  const [retiring, setRetiring] = useState<RoomFormValues | null>(null);
+
+  const save = async (values: RoomFormValues, cancelFutureBookings = false) => {
     setSaving(true);
     try {
-      await meetingRoomService.update(id, { id, ...toRoomPayload(values) });
-      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'rooms'] });
+      await meetingRoomService.update(id, { id, ...toRoomPayload(values), cancelFutureBookings });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule'] });
       toast({ title: 'Room updated' });
       router.push('/administration/hr/company-schedule/rooms');
     } catch (error: any) {
-      toast({
-        title: 'Could not update the room',
-        description: error?.response?.data?.detail ?? error?.message ?? 'Please try again.',
-        variant: 'destructive',
-      });
+      toast({ title: 'Could not update the room', description: roomErrorText(error, 'change'), variant: 'destructive' });
     } finally {
       setSaving(false);
     }
+  };
+
+  const onSubmit = form.handleSubmit(async (values) => {
+    if (room?.isActive && !values.isActive) {
+      setRetiring(values);
+      return;
+    }
+    await save(values);
   });
 
   if (isLoading) {
@@ -81,6 +91,14 @@ export default function EditMeetingRoomPage({ params }: { params: Promise<{ id: 
           Save changes
         </Button>
       </div>
+      <RoomRetireDialog
+        room={retiring && room ? { id: room.id, roomName: room.roomName } : null}
+        intent={retiring ? 'deactivate' : null}
+        onClose={() => setRetiring(null)}
+        deactivate={async (cancelFutureBookings) => {
+          if (retiring) await save(retiring, cancelFutureBookings);
+        }}
+      />
     </form>
   );
 }

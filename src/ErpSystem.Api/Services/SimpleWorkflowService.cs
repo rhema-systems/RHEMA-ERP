@@ -1552,6 +1552,45 @@ public class SimpleWorkflowService : IWorkflowService
             context["hasSupportingDocuments"] = !string.IsNullOrWhiteSpace(regularization.SupportingDocuments);
         }
 
+        // Company-schedule final closure, lane 2b (D-10). What a definition could route on: the kind of
+        // event, its money, its reach and who organises it. ⚠ Conditional routing does not route yet
+        // (cross-module #3), so the seeded definition names one authority; these are for when it does.
+        if (IsEntityType(entityTypeRecord, "COMPANY_EVENT", "CompanyEvent", "Company Event"))
+        {
+            var companyEvent = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.CompanySchedule.CompanyEvent>()
+                .FirstOrDefaultAsync(e => e.Id == entityId)
+                ?? throw new InvalidOperationException("Company event not found");
+
+            context["eventNumber"] = companyEvent.EventNumber;
+            context["organizerId"] = companyEvent.OrganizerId;
+            context["category"] = companyEvent.Category.ToString();
+            context["type"] = companyEvent.Type.ToString();
+            context["scope"] = companyEvent.Scope.ToString();
+            context["startDate"] = companyEvent.StartDate;
+            context["hasBudget"] = companyEvent.HasBudget;
+            context["budgetAmount"] = companyEvent.BudgetAmount ?? 0m;
+            context["estimatedAttendees"] = companyEvent.EstimatedAttendees ?? 0;
+            context["organizationUnitId"] = companyEvent.OrganizationUnitId;
+            context["status"] = companyEvent.Status.ToString();
+        }
+
+        // Company-schedule final closure, lane 3b-1 (D-10): what a booking's definition could route on — the room, who
+        // booked it, how many, and whether it is for an event. ⚠ As for events, conditional routing does not route yet (#3).
+        if (IsEntityType(entityTypeRecord, "ROOM_BOOKING", "RoomBooking", "Room Booking"))
+        {
+            var booking = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.CompanySchedule.RoomBooking>()
+                .FirstOrDefaultAsync(b => b.Id == entityId)
+                ?? throw new InvalidOperationException("Room booking not found");
+
+            context["bookingNumber"] = booking.BookingNumber;
+            context["roomId"] = booking.RoomId;
+            context["bookedById"] = booking.BookedById;
+            context["expectedAttendees"] = booking.ExpectedAttendees;
+            context["startDateTime"] = booking.StartDateTime;
+            context["hasEvent"] = booking.EventId != null;
+            context["status"] = booking.Status.ToString();
+        }
+
         if (IsEntityType(entityTypeRecord, "STAFF_OVERTIME_REQUEST", "StaffOvertimeRequest", "Overtime Request"))
         {
             var overtime = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffOvertimeRequest>()

@@ -398,7 +398,16 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {rows.map((item) => (
+                  {rows.map((item) => {
+                    // ⚠ `hasRowMenu` is decided for the whole table, but each row filters its own items — a read-only
+                    // tab whose actions are all hidden for this row, say a closed event's guest list, opened an EMPTY
+                    // menu (company-schedule, 2026-10-06). A row with nothing to offer gets no ⋯ at all.
+                    const rowOpen = !!onOpenItem;
+                    const rowEdit = canEdit && (!canEditItem || canEditItem(item));
+                    const rowActions = actions.filter((a) => (a.visible ? a.visible(item) : true));
+                    const rowRemove = canRemove && (!canRemoveItem || canRemoveItem(item));
+                    const rowAbove = rowOpen || rowEdit || rowActions.length > 0;
+                    return (
                     <TableRow
                       key={getId(item)}
                       className={onOpenItem ? 'cursor-pointer' : undefined}
@@ -413,6 +422,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                         // ⚠ The menu renders in a portal, but React events still bubble through
                         // the component tree — without this, every menu click also opened the row.
                         <TableCell onClick={(e) => e.stopPropagation()}>
+                          {(rowAbove || rowRemove) && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -426,30 +436,28 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                                   {openItemLabel}
                                 </DropdownMenuItem>
                               )}
-                              {canEdit && (!canEditItem || canEditItem(item)) && (
+                              {rowEdit && (
                                 <DropdownMenuItem onClick={() => openEdit(item)}>
                                   <Pencil className="mr-2 h-4 w-4" />
                                   Edit
                                 </DropdownMenuItem>
                               )}
-                              {actions
-                                .filter((a) => (a.visible ? a.visible(item) : true))
-                                .map((a) => {
-                                  const label =
-                                    typeof a.label === 'function' ? a.label(item) : a.label;
-                                  return (
-                                    <DropdownMenuItem
-                                      key={label}
-                                      onClick={() => runAction(a, item)}
-                                      className={a.destructive ? 'text-red-600' : undefined}
-                                    >
-                                      {label}
-                                    </DropdownMenuItem>
-                                  );
-                                })}
-                              {canRemove && (!canRemoveItem || canRemoveItem(item)) && (
+                              {rowActions.map((a) => {
+                                const label =
+                                  typeof a.label === 'function' ? a.label(item) : a.label;
+                                return (
+                                  <DropdownMenuItem
+                                    key={label}
+                                    onClick={() => runAction(a, item)}
+                                    className={a.destructive ? 'text-red-600' : undefined}
+                                  >
+                                    {label}
+                                  </DropdownMenuItem>
+                                );
+                              })}
+                              {rowRemove && (
                                 <>
-                                  <DropdownMenuSeparator />
+                                  {rowAbove && <DropdownMenuSeparator />}
                                   <DropdownMenuItem
                                     className="text-red-600"
                                     onClick={() => setPendingDelete(item)}
@@ -461,10 +469,12 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>
+                          )}
                         </TableCell>
                       )}
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>

@@ -183,7 +183,9 @@ public sealed class AssetTermsLetterService : IAssetTermsLetterService
         AssetAssignment a, CancellationToken cancellationToken)
     {
         var company = await _companyProfile.GetAsync(cancellationToken);
-        var tokens = BuildTokens(a, company);
+        // Lane 4c (F-55): the uploaded logo, embedded; else the tenant's.
+        var logo = await _companyProfile.GetLogoAsync(company.TenantId, cancellationToken);
+        var tokens = BuildTokens(a, company, logo);
 
         var rendered = await _templatedEmail.RenderAsync(
             AssetsEmailCatalog.Module,
@@ -202,7 +204,7 @@ public sealed class AssetTermsLetterService : IAssetTermsLetterService
         return (rendered, tokens);
     }
 
-    private static Dictionary<string, string?> BuildTokens(AssetAssignment a, Entities.HR.CompanyProfile company)
+    private static Dictionary<string, string?> BuildTokens(AssetAssignment a, Entities.HR.CompanyProfile company, string? logo)
     {
         var due = a.ExpectedReturnDate;
 
@@ -212,7 +214,7 @@ public sealed class AssetTermsLetterService : IAssetTermsLetterService
             // provider already falls back to the Tenant record when no profile row exists yet.
             ["CompanyName"] = string.IsNullOrWhiteSpace(company.LegalName) ? null : company.LegalName,
             ["CompanyAddress"] = ComposeAddress(company),
-            ["CompanyLogoUrl"] = company.LogoUrl,
+            ["CompanyLogoUrl"] = logo,
             ["CompanyFooter"] = company.DocumentFooterText,
             ["SignatoryName"] = company.DefaultSignatoryName,
             ["SignatoryTitle"] = company.DefaultSignatoryTitle,

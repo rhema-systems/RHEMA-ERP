@@ -193,6 +193,7 @@ public partial class ApplicationDbContext
     public DbSet<MeetingRoom> MeetingRooms { get; set; } = null!;
     public DbSet<RoomBooking> RoomBookings { get; set; } = null!;
     public DbSet<CompanyMilestone> CompanyMilestones { get; set; } = null!;
+    public DbSet<CompanyMilestoneDocument> CompanyMilestoneDocuments { get; set; } = null!;
     public DbSet<BusinessClosure> BusinessClosures { get; set; } = null!;
     public DbSet<JobDescription> JobDescriptions { get; set; } = null!;
     public DbSet<JobDutyItem> JobDutyItems { get; set; } = null!;
@@ -5998,6 +5999,12 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.EndDate);
             entity.HasIndex(x => x.OrganizerId);
             entity.HasIndex(x => x.DepartmentId);
+            entity.HasIndex(x => x.OrganizationUnitId);
+            // Final closure D-12: a series action ("this and following", "the whole series") is a
+            // query on the series id — there is no series table.
+            entity.HasIndex(x => x.RecurrenceSeriesId);
+            // Final closure C-51: the drill finds the event it scheduled, to move or cancel it.
+            entity.HasIndex(x => new { x.SourceEntityType, x.SourceEntityId });
 
             entity.Property(x => x.Category).HasConversion<int>();
             entity.Property(x => x.Type).HasConversion<int>();
@@ -6023,6 +6030,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Department)
                 .WithMany()
                 .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.ApprovedBy)
@@ -6056,6 +6068,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.EventId);
             entity.HasIndex(x => x.EmployeeId);
             entity.HasIndex(x => x.InvitationStatus);
+            // ⚠ Final closure F-45. One live invitation per employee per event: the add is a
+            // check-then-insert, so two requests at once could both pass the check. Filtered on
+            // IsDeleted because a removal is soft and must free the slot for a re-invite; external
+            // guests (no EmployeeId) are outside it.
+            entity.HasIndex(x => new { x.TenantId, x.EventId, x.EmployeeId })
+                .IsUnique()
+                .HasFilter("[EmployeeId] IS NOT NULL AND [IsDeleted] = 0")
+                .HasDatabaseName("UX_EventParticipant_Tenant_Event_Employee");
 
             entity.Property(x => x.Role).HasConversion<int>();
             entity.Property(x => x.InvitationStatus).HasConversion<int>();
@@ -6075,6 +6095,11 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => x.EventId);
             entity.HasIndex(x => x.EmployeeId);
+            // ⚠ Final closure F-45, as on participants: one live attendance row per employee per event.
+            entity.HasIndex(x => new { x.TenantId, x.EventId, x.EmployeeId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("UX_EventAttendance_Tenant_Event_Employee");
 
             entity.HasOne(x => x.Event)
                 .WithMany(x => x.AttendanceRecords)
@@ -6236,12 +6261,18 @@ private void ConfigureHREntities(ModelBuilder builder)
         builder.Entity<EventAttachment>(entity =>
         {
             entity.HasIndex(x => x.EventId);
+            entity.HasIndex(x => x.UploadedById);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
             entity.HasOne(x => x.Event)
                 .WithMany(x => x.Attachments)
                 .HasForeignKey(x => x.EventId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -6330,6 +6361,23 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.Property(x => x.Category).HasConversion<int>();
         });
 
+        // Final closure D-3: a milestone's documents are real files on the upload gate.
+        builder.Entity<CompanyMilestoneDocument>(entity =>
+        {
+            entity.HasIndex(x => x.MilestoneId);
+            entity.HasIndex(x => x.UploadedById);
+
+            entity.HasOne(x => x.Milestone)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.MilestoneId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<BusinessClosure>(entity =>
         {
             entity.HasIndex(x => x.StartDate);
@@ -6337,6 +6385,7 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(x => x.Type);
             entity.HasIndex(x => x.LocationId);
             entity.HasIndex(x => x.DepartmentId);
+            entity.HasIndex(x => x.OrganizationUnitId);
 
             entity.Property(x => x.Type).HasConversion<int>();
 
@@ -6348,6 +6397,11 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.Department)
                 .WithMany()
                 .HasForeignKey(x => x.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.AnnouncedBy)

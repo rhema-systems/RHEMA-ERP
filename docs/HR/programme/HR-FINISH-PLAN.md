@@ -877,6 +877,24 @@ pair (`HrIdentificationExpirySweep`). Both are applied.
       only what it exercises.
 - [ ] Exit interview questions are fixed fields, not a configurable question set, and carry no
       attachments.
+- [x] **Every HR picker could save a blank — HR-wide (company-schedule final closure F-27, recorded
+      2026-10-06)** — ✅ **fixed in HEAD since 2026-10-02** (`19f20f2f2`, the travel final closure's
+      C6). The shared `SelectField` (`frontend/src/components/hr/employee/tabs/fields.tsx`) wrote a
+      blank into the form when its value arrived before its async options: Radix Select 2.2.6 keeps a
+      hidden native `<select>` inside a form, and with no matching option yet it reads back `''`. A
+      required picker then showed its placeholder (a room's site on edit, F-19); **an optional one
+      cleared, and Save wrote the blank to the database**. Intermittent — with the options cached
+      they arrive first. The guard, `if (next === '') return;`, is in the one shared component, so it
+      covers every HR form that uses it. **Owed:** a browser re-test, not a build — a cold load of an
+      edit page whose picker loads its options (the company-schedule plan's lane 5 walk, item 1).
+- [x] **Every HR collection tab could open an empty ⋯ menu — HR-wide (company-schedule F-67, 2026-10-06)** —
+      ✅ **fixed 2026-10-06**, found by the user's browser walk. `ResourceCollectionTab`
+      (`frontend/src/components/hr/common/ResourceCollectionTab.tsx`, 86 files use it) decided whether rows get a ⋯
+      for the whole table, then filtered each row's items (`canEditItem`, `canRemoveItem`, an action's `visible`).
+      A row whose items were all hidden opened an empty menu — every guest row of a closed company event, for one.
+      Each row now works out its own items, and a row with none has no ⋯. Proved by
+      `ResourceCollectionTab.test.tsx` (4 tests; 3 fail against the old file). **Owed:** nothing but the
+      company-schedule browser re-check; any other HR tab that showed an empty menu is fixed by the same change.
 - [ ] No labour-law checklist.
 - [ ] No mass application of benefits to dependents. ⚠ This is a **bulk operation**, which is the
       excluded `docs/HR/` programme — build the single-record path here and record the bulk need
@@ -1139,10 +1157,18 @@ Each was a deliberate deferral with a trigger, not an oversight.
       and any base amount, and the claim total followed. The same half-fix shape as
       `EmployeeNumberExistsAsync`: fixed where it was noticed, not on every path that writes the
       field. Both derived fields are now gone from the write DTOs and derived on both paths.
-- [ ] **D-02 — self-service invitation response is act-as-anyone** — **the trigger has fired
-      (2026-10-01): the company-schedule final closure plan's lane 7 ships a `/me/calendar`, and its
-      D-8 builds the invitee's own reply door with the self check** — see
-      `docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md`. Closed there.
+- [x] **D-02 — self-service invitation response is act-as-anyone** — ✅ **CLOSED 2026-10-06 by the
+      company-schedule final closure's D-8 (lane 7a).** The invitee answers on their own door,
+      `POST api/CompanySchedule/events/{eventId}/participants/{participantId}/reply` (any internal
+      login): the participant must be the caller's own employee — anybody else's is a 404 — and the
+      invitation must have gone, the RSVP deadline not passed and the event not begun (each a 422 with
+      the reason). The desk's
+      `participants/respond` stays on `HR.Company.Write`, as *"HR records the answer"*. Proved by
+      `run-final-review.mjs` block 7a in both positions; the `/me/calendar` page and the staff event
+      page are lane 7b's, awaiting the user's browser walk (items 9–10). The history below is kept.
+      **The trigger had fired (2026-10-01): the company-schedule final closure plan's lane 7 ships a
+      `/me/calendar`, and its D-8 builds the invitee's own reply door with the self check** — see
+      `docs/HR/areas/company-schedule/HR-COMPANY-SCHEDULE-FINAL-CLOSURE-PLAN.md`.
       **VERIFIED NOT LIVE 2026-09-01, trigger kept.** The only caller of `participants/respond` is the HR-desk screen
       (`/hr/company-schedule/events/[id]`), and no `/me` events or invitations surface exists
       (`me-portal.service` has none). Correct for its one consumer; the self-or-permission check is

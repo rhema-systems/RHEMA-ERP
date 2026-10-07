@@ -184,6 +184,37 @@ public interface ILeaveService
     Task<int> AdvanceLeaveInProgressAsync(Guid tenantId, CancellationToken ct = default);
 
     /// <summary>
+    /// Recounts granted leave over days whose days-off status changed — a business closure or a
+    /// public holiday added, moved or removed (company-schedule final closure, lane 1c: D-15a, D-15b).
+    /// </summary>
+    /// <param name="spans">The days that may have changed: the closure's or holiday's days, before and after.</param>
+    /// <param name="because">How the notice ends "…because {because}", e.g. "a business closure, Year-end stocktake, was added".</param>
+    /// <remarks>
+    /// <para>Approved, in-progress and completed requests that touch a span are recounted with the
+    /// one definition of chargeable days; those whose count changes get their day count, their balance
+    /// and their attendance days put right, and the employee is told. Taken leave is included — an
+    /// emergency closure is often recorded after the day.</para>
+    ///
+    /// <para>⚠ A request in a FINISHED leave year (before the current one) is listed, not recounted:
+    /// that year's unused days may already have been carried over, and a recount would strand the
+    /// day returned in a year nobody draws on. HR adjusts those by hand.</para>
+    /// </remarks>
+    Task<LeaveRechargeResultDto> RechargeForDaysOffChangeAsync(
+        Guid tenantId, IReadOnlyCollection<(DateOnly From, DateOnly To)> spans, string because,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The one-time pass: recounts all granted leave in the current and later leave years against
+    /// the closures and holidays as they stand (lane 1c). For closures recorded before the recount
+    /// existed, which never changed afterwards and so never triggered it.
+    /// </summary>
+    /// <param name="dryRun">
+    /// Answer what it WOULD change — saving nothing and telling nobody. It touches every granted
+    /// request in the open years, so HR sees the list before anybody's balance moves.
+    /// </param>
+    Task<LeaveRechargeResultDto> RechargeAllOpenLeaveAsync(Guid tenantId, bool dryRun = false, CancellationToken ct = default);
+
+    /// <summary>
     /// Approve or reject several requests, one real service call each.
     /// </summary>
     /// <remarks>

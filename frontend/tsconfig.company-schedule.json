@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/company-schedule.ts",
+    "src/services/hr/company-schedule.service.ts",
+    "src/services/hr/announcements.service.ts",
+    "src/app/hr/company-schedule/**/*.tsx",
+    "src/app/administration/hr/company-schedule/**/*.tsx",
+    "src/app/me/room-bookings/**/*.tsx",
+    "src/app/me/calendar/**/*.tsx",
+    "src/components/me/portal-top-nav.tsx",
+    "src/app/me/page.tsx",
+    "src/components/me/portal-top-nav.tsx",
+    "src/components/hr/manpower/ManpowerBudgetFormFields.tsx",
+    "src/components/hr/manpower/PlanBudgetFromEstablishmentDialog.tsx",
+    "src/app/hr/manpower-budgets/new/page.tsx",
+    "src/app/administration/hr/settings/policy/page.tsx",
+    "src/config/hr-setup-nav.ts",
+    "src/app/administration/hr/settings/company-profile/page.tsx",
+    "src/services/hr/company-profile.service.ts",
+    "src/types/hr/company-profile.ts",
+    "src/components/hr/company-schedule/**/*.ts",
+    "src/components/hr/company-schedule/**/*.tsx"
+  ]
+}

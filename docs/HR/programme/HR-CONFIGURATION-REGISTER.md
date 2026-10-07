@@ -2,15 +2,15 @@
 
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c), and 2026-09-23 (round 4 lane K-a — § 2.5; lane K-b1 — § 2.6;
-lane N — § 2.7, the 44 letter and email templates; lane N-b2 — § 2.8, company-schedule reminders;
+lane N — § 2.7, the letter and email templates (44 then, 49 since company-schedule lane 2e-1); lane N-b2 — § 2.8, company-schedule reminders;
 lane O — § 2.9, the technician-role flag and the person's exception).
 
 **Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18 + 4 added 2026-09-23, all four enforced — § 2.5), all of `LeaveType` (26 + 2, and `AllowOffsetAgainstAnnual` added 2026-09-26), and
 all four of leave's CHILD tables (38)** — plus, not as a full survey, the three `OrientationProgram` notice and
 certificate switches lane K-b1 made real (§ 2.6: two were ghosts). Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
-appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
-expected to cost.
+appraisal and the rest are still to do — see § 4, which now says what each one is expected to cost. The
+company schedule's were surveyed by its final closure (2026-10-06, § 4's row; § 2.8).
 
 ### ⚠ Corrected 2026-09-25 — every leave-type setting audited (round 5)
 
@@ -74,7 +74,7 @@ believe it binds, and discover months later that it never did. This is not hypot
 | **14 of 50 appraisal settings do not enforce what they claim** — 9 advisory, 2 client-side only, 3 read by nothing at all | `HR-APPRAISAL-SETTINGS-AUDIT.md` |
 | **11 ghost leave settings** — configurable, saved, read by nothing | leave guide § 4.4 |
 | Travel's policy rule register **ships deliberately read-only**, with the argument recorded on the component: an editable control that does nothing creates false assurance | `PolicyRulesPanel` |
-| A room's `MaxBookingDurationHours` and `AdvanceBookingDays` are stored and read by nothing | company schedule C-4 |
+| A room's `MaxBookingDurationHours` and `AdvanceBookingDays` were stored and read by nothing — ✅ enforced on save since round 4 (C-4), and by the availability search since company-schedule final closure lane 3a (R4-9.1) | company schedule C-4 |
 
 **So the Status column is the point of the table, not decoration.**
 
@@ -301,7 +301,7 @@ was off.
 
 Round 4, lane N. Every email and printed document the HR modules produce is rendered from a
 template whose shipped wording is declared in one of **eight catalogues** (`IEmailEventCatalog`) —
-**44 templates**. Since this lane a tenant can reword any of them at **Administration → HR Settings →
+**56 templates** (44 at lane N; company-schedule final closure lane 2e-1 added five, lane 2e-3 one, lane 2f-2a two, lane 3b-1 two, lane 3b-2 one, lane 3d-1 one). Since this lane a tenant can reword any of them at **Administration → HR Settings →
 Letter & Email Templates** (`api/hr/letter-templates`: reading on HR Company Read, saving, resetting
 and a test send on Write, which the HR role holds). The shipped wording stays in code; a tenant's own
 is a row in `EmailTemplates`, written only when HR saves one and set aside by **Reset**.
@@ -374,7 +374,19 @@ every render, and the escaped form would have printed their markup as text.
 | `CompanySchedule/EventRsvpReminder` | RSVP Reminder | email | the hourly sweep chases unanswered invitations `CompanyEventRsvpChaseLeadDays` before the RSVP deadline, **once**; or HR presses **Chase unanswered now**, which counts as the chase. Until lane N-b2 the chase was an API endpoint that no screen called | signed in, or background (sweep) | **Enforced** (§ 2.8) |
 | `CompanySchedule/EventReminder` | Event Reminder | email | the hourly sweep sends it `ReminderDaysBefore` before a live event whose **Send reminders** is on, **once**, and again if the date moves; or HR presses **Send reminder now**, which counts as the send. Until lane N-b2 the form's switch and its days were read by nothing | signed in, or background (sweep) | **Enforced** (§ 2.8) |
 | `CompanySchedule/EventRescheduled` | Event Rescheduled | email | an event is moved | signed in | **Enforced** |
-| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled | signed in | **Enforced** |
+| `CompanySchedule/EventCancelled` | Event Cancelled | email | an event is cancelled — or not approved, when it also goes to the organiser (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventApproved` | Event Approved | email | an event that needs approval is approved at its last stage; to the organiser, as its waiting invitations go out (company-schedule lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventPostponed` | Event Postponed | email | an event's edit sets it Postponed; to the guests who were invited (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventChanged` | Event Details Changed | email | an edit changes the venue, site or joining link but not the time; to the guests who were invited (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventGuestRemoved` | Event Guest Removed | email | a guest who was invited is taken off the guest list (lane 2e-1) | signed in | **Enforced** |
+| `CompanySchedule/EventTaskAssigned` | Event Task Assigned | email | a task on an event is added for somebody, or passed to somebody new (lane 2e-1, F-34) | signed in | **Enforced** |
+| `CompanySchedule/EventTaskOverdue` | Event Task Overdue | email | the hourly sweep finds an open task past its due date, **once** — again only if the due date moves or the task passes to someone new; to the assignee (lane 2e-3, F-34) | background (sweep), or signed in (HR's run-now) | **Enforced** |
+| `CompanySchedule/EventSeriesInvitation` | Event Series Invitation | email | a guest is invited to several dates of a recurring event at once — added with a series scope, invited by the series' approval, or carried onto the dates an extension adds; **one** per guest, listing the dates, a calendar file per date (lane 2f-2a, D-12) | signed in | **Enforced** |
+| `CompanySchedule/EventSeriesChanged` | Event Series Changed | email | several dates of a recurring event change for a guest together — taken off the guest list with a series scope (lane 2f-2a); moved, changed or cancelled from lane 2f-2b; **one** per guest, listing the dates, each date's calendar update or cancellation | signed in | **Enforced** |
+| `CompanySchedule/BookingApproved` | Room Booking Approved | email | a booking of a room that needs approval is approved at its last stage; to its booker, with the in-app notice (lane 3b-1) | signed in | **Enforced** |
+| `CompanySchedule/BookingCancelled` | Room Booking Cancelled | email | a booking is cancelled by somebody other than its booker — by the desk, with its event, by retiring its room — or not approved; to its booker, with the reason (lane 3b-1). From lane 3b-2 also when the hourly sweep lapses one still Tentative at its start ("Not approved before it started.") — that send has nobody signed in, so under #40 it finds no mail server and only the in-app notice reaches the booker | signed in; the sweep's has nobody | **Enforced** |
+| `CompanySchedule/BookingNoShow` | Room Booking No-Show | email | the desk marks a confirmed booking whose start has passed a no-show — for good; to its booker, with the in-app notice (lane 3b-2) | signed in | **Enforced** |
+| `CompanySchedule/BookingsChanged` | Room Bookings Changed | email | one act approves, does not approve or cancels several of a booker's bookings together — a series' dates approved or not approved at once, a series cancelled, a room taken out of use; once to that booker, listing them with each reason, with one in-app notice (lane 3d-1, the user's ruling). One booking uses the single-booking email | signed in | **Enforced** |
 | `HrLetters/HrLetterEmploymentConfirmation` | Letter — employment confirmation | document | HR previews or issues an employee's letter request | signed in | **Enforced**: [E1–E4] |
 | `HrLetters/HrLetterIntroduction` | Letter — introduction | document | as above | signed in | **Enforced** |
 | `HrLetters/HrLetterServiceCertificate` | Letter — certificate of service | document | as above | signed in | **Enforced** |
@@ -407,6 +419,68 @@ so it goes **once**. A reschedule or an edit that moves a date clears the matchi
 **Send reminder now** and **Chase unanswered now**, on the event page's Reminders card, stamp the same
 dates. **Two of the three settings were ghosts**: the event form offered them, the database saved them,
 and nothing read them.
+
+**The booking half (company-schedule final closure lane 3b-2, F-48).** The same hourly pass, and HR's run-now, also
+sweep room bookings (`IRoomBookingService.SweepAsync`, tenant-explicit): a booking still **Tentative** when its start
+comes is cancelled, "Not approved before it started.", its approval withdrawn and its booker told; a **confirmed**
+booking whose end has passed is **Completed**, silently. No setting governs either — they follow the booking's own
+times. The run-now answer lists them (`bookingsLapsed`, `bookingsCompleted`).
+
+**Staff booking from the portal (company-schedule final closure lane 3c, D-13) — no setting.** `api/CompanySchedule/me`
+(any linked internal login; no `HR.Company.*` needed): the rooms in use and open for booking, what is free, busy times
+(others' bookings as room and time only, at most 31 days a read), and the caller's own bookings — book, change, cancel
+with a reason. The room's own rules apply as at the desk. Two rules are the portal's alone, **fixed in code, not
+configurable**: a booking from the portal is never linked to an event, and its start may not be more than **15 minutes**
+past (`RoomBookingRules.SelfServiceStartGrace`; an unchanged start on a booking under way is allowed, so it can be
+extended). Every booker's in-app notice (approved, not approved, cancelled, no-show) now opens `/me/room-bookings/{id}`.
+Proof: `hr-company-schedule/run-final-review.mjs` block 3c, both positions.
+
+**A room for every date of a series (company-schedule final closure lane 3d-1, D-12) — no setting.** `POST
+api/CompanySchedule/bookings/series` (Write) books each date in the scope still to come at the same distance from its own
+start, under the room's own rules; the dates it cannot take are listed. Fixed in code, by the user's rulings: on a room
+needing approval the dates are **approved once** (the first asks; its decision covers the rest; it passes on when that
+date is cancelled, deleted or lapses), and a booker is **told once per act** about several bookings — the
+`BookingsChanged` email above and one in-app notice (topic `CompanySchedule.BookingsChanged.Booker`). Proof: block 3d-1.
+Lane 3d-2, also fixed in code: **extending a series books the rooms its latest date still holds** for the new dates, by
+whoever extends (a login with no employee link carries none and is told); the dates a room cannot take are warnings. `GET
+api/CompanySchedule/events/{id}/bookings` (Read) feeds the event page's Rooms card. Proof: block 3d-2.
+
+**A milestone's "Repeats every year" (`CompanyMilestone.IsRecurringAnnually`, per milestone) — Enforced since lane 4a; it was
+a ghost** (stored, read by nothing: an anniversary was "upcoming" in its first year only). It now puts the milestone on the
+same month and day every year from its own (29 February on the 28th in common years): the upcoming read answers its next
+occurrence, a range read one row per occurrence (at most five years), and each row counts its years. Its files go
+through the upload gate (`milestones/{id}/documents`), removed on `HR.Company.Write`. Proof: block 4a, both positions
+(yearly and one-off).
+
+**The fiscal year (`CompanyHrPolicySettings.FiscalYearStartMonth`, "Fiscal year starts (when Finance has no calendar)") —
+a fallback only, since lane 4b (D-6).** Requisitions' budget checks and links and the manpower budget forms take a year
+from **Finance's** fiscal calendar, read in-process on `HR.Company.Read` (`api/CompanySchedule/fiscal-calendar`, `…/year?date=`,
+`…/period?year=`): Finance's year covering the date, or numbered so; else **Finance's sequence continued** (the next year
+one higher, from the day after the last ends — Finance's own rule for opening it; backwards before the first); the month
+answers only while Finance has **no** fiscal year at all, and the policy screen shows it read-only meanwhile, with
+Finance's start. HR's own fiscal years and periods, and their 16 routes and two screens, are retired (the tables stay
+until a later migration). Proof: block 4b — the month moved to July and back changes none of the answers on a tenant with
+Finance years (UAT); the "no Finance year" position cannot be reached on UAT.
+
+**A milestone's "Show on calendar" (`CompanyMilestone.ShowOnCalendar`, per milestone) — Enforced since lane 7a; it was a
+ghost** (stored, read by nothing). The company calendar (`GET api/CompanySchedule/calendar`) shows a milestone only when it
+is set — on every anniversary in range for a yearly one. An event's "Show on company calendar" already decided its diary
+audience (lane 2c); since 7a it also decides who sees it on the calendar (never a Private or Confidential event, never one
+awaiting approval, beyond its organiser and guests). Proof: block 7a, both positions (on vs off).
+
+**Who reads a team schedule — data, not a setting (lane 5b, R4-10B.3, the user's ruling).** `OrganizationUnit.HeadEmployeeId`
+decides it beside the HR desk's `HR.Company.Write`: a unit's head reads that unit and every unit beneath it
+(`team-schedule/{unitId}`, `team-schedule/units`). A unit with no head recorded is readable by the desk only — on UAT, 39 of
+451 active units carry a head. Proof: block 5b, both positions (head vs not; the unit beneath vs the one above).
+
+**The letterhead logo (`CompanyProfile.LogoUrl`, "Logo URL") — retired since lane 4c (F-55); it was a free-text URL
+substituted into six letter types.** The logo is now an uploaded, versioned image (`CompanySealAssetKind.Logo`,
+`POST api/hr/company-profile/seal-assets/Logo`, `HR.Company.Admin`), embedded in letters like the seal and the
+signature; with none uploaded a letter carries `Tenant.LogoUrl` (now even when a profile row exists), else no logo. A
+`logoUrl` sent with a profile save is ignored and none is answered. **All three images — logo, seal, signature — must
+be a PNG or JPEG of at most 2 MB** (the user's ruling), checked before the upload gate stores a byte; the gate's own
+per-tenant type list does not loosen it. Proof: block 4c, both positions (uploaded vs tenant logo; images refused vs
+accepted).
 
 | Setting (the form's label) | Where | Default | Status | Proof — `hr-templates/run-lane-nb2.mjs`, both positions |
 |---|---|---|---|---|
@@ -728,7 +802,7 @@ owed a pass, most cheaply as part of that module's own closure plan.
 | **Appraisal settings** | `HR-APPRAISAL-SETTINGS-AUDIT.md` — 50 fields already classified **by hand**, which is the harder half the tool cannot do. ⚠ **14 do not enforce what they say.** Fold that audit in wholesale rather than re-deriving it |
 | Attendance & time | 35 settings noted in the attendance guide; `LateGracePeriodMinutes` is read by **nothing in the solution** (A-1) |
 | Travel | the policy rule register is read-only by decision (T-4); caps bind only when a policy is approved (T-1) |
-| Company schedule | `MaxBookingDurationHours`, `AdvanceBookingDays` — both ghosts (C-4) |
+| Company schedule | ✅ **Surveyed by the final closure (2026-10-06).** No ghost left: every setting on the room and event forms decides something, listed in the guide's § 1.4 — the room's two limits enforced since round 4 (C-4), the reminders since N-b2. The ones with a tenant-wide or schedule-wide effect are in § 2.8 above (the reminders and the RSVP chase lead, the booking sweep, staff booking, a series' rooms, a milestone's *Repeats every year* and *Show on calendar*, the fiscal start, who reads a team schedule, the retired logo URL). An event's budget, resources and catering are recorded data, not settings |
 | Recruitment, performance, medical, separation, discipline | not looked at |
 | The rest of `CompanyHrPolicySettings` | 35 fields predating this register — retirement ages, notice periods, the FR-HR-092 threshold, the alert lead times, the grievance clocks |
 

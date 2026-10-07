@@ -94,6 +94,16 @@ public sealed class TemplatedEmailService : ITemplatedEmailService
         CancellationToken cancellationToken = default)
         => SendCoreAsync(tenantId == Guid.Empty ? null : tenantId, module, eventKey, to, tokens, null, null, cancellationToken);
 
+    public Task<bool> SendForTenantAsync(
+        Guid tenantId,
+        string module,
+        string eventKey,
+        string to,
+        IReadOnlyDictionary<string, string?> tokens,
+        IReadOnlyList<EmailAttachmentDto>? attachments,
+        CancellationToken cancellationToken = default)
+        => SendCoreAsync(tenantId == Guid.Empty ? null : tenantId, module, eventKey, to, tokens, attachments, null, cancellationToken);
+
     private async Task<bool> SendCoreAsync(
         Guid? tenantId,
         string module,

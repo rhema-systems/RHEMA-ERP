@@ -46,7 +46,6 @@ public static class CompanyProfileMappingExtensions
             DefaultSignatoryTitle       = entity.DefaultSignatoryTitle,
             SignatureImageUrl           = entity.SignatureImageUrl,
             CompanySealImageUrl         = entity.CompanySealImageUrl,
-            LogoUrl                     = entity.LogoUrl,
             OfferAcceptanceInstructions = entity.OfferAcceptanceInstructions,
             DocumentFooterText          = entity.DocumentFooterText,
         };
@@ -83,8 +82,7 @@ public static class CompanyProfileMappingExtensions
         entity.DefaultSignatoryTitle       = dto.DefaultSignatoryTitle?.Trim();
         // ⚠ SignatureImageUrl and CompanySealImageUrl are legacy read-only — see the update DTO.
         // A seal is an instrument of authority; it is uploaded through the gate and versioned, not
-        // typed as a path on a profile edit.
-        entity.LogoUrl                     = dto.LogoUrl?.Trim();
+        // typed as a path on a profile edit. So is the logo since lane 4c (F-55): LogoUrl is no longer written.
         entity.OfferAcceptanceInstructions = dto.OfferAcceptanceInstructions?.Trim();
         entity.DocumentFooterText          = dto.DocumentFooterText?.Trim();
     }

@@ -29,7 +29,32 @@ export type EventType = 'Internal' | 'External' | 'ClientMeeting' | 'Statutory' 
 
 export type EventPriority = 'Critical' | 'High' | 'Medium' | 'Low';
 
-export type RecurrencePattern = 'Daily' | 'Weekly' | 'BiWeekly' | 'Monthly' | 'Quarterly' | 'Annually';
+export type RecurrencePattern = 'Daily' | 'Weekdays' | 'Weekly' | 'BiWeekly' | 'Monthly' | 'Quarterly' | 'Annually';
+
+/** How each pattern reads on a form (lane 2f-1). Weekdays is Monday to Friday; Daily every calendar day. */
+export const RECURRENCE_PATTERN_LABELS: Record<RecurrencePattern, string> = {
+  Daily: 'Every day',
+  Weekdays: 'Every weekday (Mon–Fri)',
+  Weekly: 'Every week',
+  BiWeekly: 'Every two weeks',
+  Monthly: 'Every month',
+  Quarterly: 'Every quarter',
+  Annually: 'Every year',
+};
+
+/**
+ * Which dates of a series a guest action reaches (lane 2f-2a, D-12). Never a date that has started, been completed or
+ * been cancelled — the server passes those over.
+ */
+export type SeriesScope = 'ThisOccurrence' | 'ThisAndFollowing' | 'WholeSeries';
+
+export const SERIES_SCOPE_LABELS: Record<SeriesScope, string> = {
+  ThisOccurrence: 'This date only',
+  ThisAndFollowing: 'This and following dates',
+  WholeSeries: 'Every date in the series',
+};
+
+export const SERIES_SCOPES: SeriesScope[] = ['ThisOccurrence', 'ThisAndFollowing', 'WholeSeries'];
 
 export type EventLocationType = 'OnSite' | 'OffSite' | 'Virtual' | 'Hybrid';
 
@@ -69,10 +94,19 @@ export type FiscalPeriodType = 'Quarter' | 'Month' | 'SemiAnnual';
 export const EVENT_CATEGORIES: EventCategory[] = [
   'Meeting', 'Training', 'CompanyEvent', 'Deadline', 'Holiday', 'Conference', 'SocialEvent', 'Milestone',
 ];
+/**
+ * The categories a NEW event may take (F-44): public holidays and company milestones have their own
+ * registers, and the server refuses them. The two values stay in `EVENT_CATEGORIES` for older rows.
+ */
+export const EVENT_CATEGORIES_FOR_NEW: EventCategory[] = EVENT_CATEGORIES.filter(
+  (c) => c !== 'Holiday' && c !== 'Milestone',
+);
+/** The statuses an edit may set (lane 2a); Confirmed only where no approval is needed. */
+export const EVENT_EDITABLE_STATUSES: EventStatus[] = ['Scheduled', 'InProgress', 'Postponed'];
 export const EVENT_TYPES: EventType[] = ['Internal', 'External', 'ClientMeeting', 'Statutory', 'BoardMeeting'];
 export const EVENT_PRIORITIES: EventPriority[] = ['Critical', 'High', 'Medium', 'Low'];
 export const RECURRENCE_PATTERNS: RecurrencePattern[] = [
-  'Daily', 'Weekly', 'BiWeekly', 'Monthly', 'Quarterly', 'Annually',
+  'Daily', 'Weekdays', 'Weekly', 'BiWeekly', 'Monthly', 'Quarterly', 'Annually',
 ];
 export const EVENT_LOCATION_TYPES: EventLocationType[] = ['OnSite', 'OffSite', 'Virtual', 'Hybrid'];
 export const PARTICIPANT_SCOPES: ParticipantScope[] = [
@@ -98,6 +132,10 @@ export const TASK_PRIORITIES: TaskPriority[] = ['Critical', 'High', 'Medium', 'L
 export const EVENT_TASK_STATUSES: EventTaskStatus[] = [
   'NotStarted', 'InProgress', 'Completed', 'Overdue', 'Cancelled',
 ];
+/** The statuses an edit may set (lane 2d). Overdue is worked out from the due date — see `EventTask.isOverdue`. */
+export const EVENT_TASK_SETTABLE_STATUSES: EventTaskStatus[] = ['NotStarted', 'InProgress', 'Completed', 'Cancelled'];
+/** The answers an invitation can be given (F-11). */
+export const INVITATION_ANSWERS: InvitationStatus[] = ['Accepted', 'Declined', 'Tentative'];
 export const ROOM_TYPES: RoomType[] = ['Conference', 'Boardroom', 'Training', 'Huddle', 'Auditorium'];
 export const BOOKING_STATUSES: BookingStatus[] = ['Tentative', 'Confirmed', 'Completed', 'Cancelled', 'NoShow'];
 export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
@@ -105,6 +143,35 @@ export const MILESTONE_CATEGORIES: MilestoneCategory[] = [
 ];
 export const CLOSURE_TYPES: ClosureType[] = [
   'FullClosure', 'PartialClosure', 'DepartmentClosure', 'StationClosure',
+];
+
+/**
+ * What each closure type covers (company-schedule final closure, D-1). The type decides the scope:
+ * the server refuses a site on a full closure, a site closure without a site, and so on.
+ * `DepartmentClosure` is the wire name of an organisation-unit closure — the unit replaced the
+ * department (D-5), the enum value stayed.
+ */
+export const CLOSURE_TYPE_OPTIONS: { value: ClosureType; label: string; hint: string }[] = [
+  {
+    value: 'FullClosure',
+    label: 'Whole company',
+    hint: 'Everybody is off. Not a working day, so leave over it is not charged.',
+  },
+  {
+    value: 'StationClosure',
+    label: 'One site',
+    hint: 'The staff based at the site are off. Not a working day for them.',
+  },
+  {
+    value: 'DepartmentClosure',
+    label: 'One organisation unit',
+    hint: 'The unit and every unit beneath it are off, wherever their staff sit. Not a working day for them.',
+  },
+  {
+    value: 'PartialClosure',
+    label: 'Reduced operations',
+    hint: 'Open with reduced service, for the whole company, one site or one unit. Still a working day.',
+  },
 ];
 export const FISCAL_YEAR_STATUSES: FiscalYearStatus[] = ['Active', 'Closed', 'Archived'];
 export const FISCAL_PERIOD_TYPES: FiscalPeriodType[] = ['Quarter', 'Month', 'SemiAnnual'];
@@ -137,6 +204,13 @@ export interface CompanyEvent extends AuditFields {
   recurrenceDetails?: string | null;
   recurrenceEndDate?: string | null;
   recurrenceCount?: number | null;
+  /** The series it is an occurrence of, its place in it, and how many the series has (lane 2f-1). */
+  recurrenceSeriesId?: string | null;
+  occurrenceNumber?: number | null;
+  occurrenceCount?: number | null;
+  /** The record that made it (lane 2h) — "EmergencyDrill" — or null for an event HR made. */
+  sourceEntityType?: string | null;
+  sourceEntityId?: string | null;
 
   locationType: EventLocationType;
   locationTypeName: string;
@@ -150,14 +224,26 @@ export interface CompanyEvent extends AuditFields {
 
   organizerId: string;
   organizerName: string;
+  /** ⚠ Retired (D-5): no event carries one. Read only, for any older row. */
   departmentId?: string | null;
   departmentName?: string | null;
+  /** The organisation unit the event is for — required when `scope` is Department. */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
 
   scope: ParticipantScope;
   scopeName: string;
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
   rsvpDeadline?: string | null;
+  /** Who the event is for, from its scope and visibility (lane 2c, D-16). */
+  audienceDescription: string;
+  /** An audience that reaches nobody, said on save (create and update answers only). */
+  warnings?: string[];
+  /** Who an edit's notice reached — a move, a postponement, a new venue or link (update only, lane 2e-2). */
+  told?: CompanyEventNoticeResult | null;
+  /** Lane 2f-2b: an edit with a series scope — the dates it changed (update only). */
+  series?: EventSeriesChangeResult | null;
 
   visibility: EventVisibility;
   visibilityName: string;
@@ -233,6 +319,9 @@ export interface CompanyEventSummary {
   statusName: string;
   organizerName: string;
   estimatedAttendees?: number | null;
+  /** The series it belongs to, if any (lane 3d-1: the booking form offers to book every date). */
+  recurrenceSeriesId?: string | null;
+  occurrenceNumber?: number | null;
 }
 
 export interface CompanyEventDetail extends CompanyEvent {
@@ -240,11 +329,85 @@ export interface CompanyEventDetail extends CompanyEvent {
   attendanceRecords: EventAttendance[];
   attachments: EventAttachment[];
   tasks: EventTask[];
+  /** The day the hourly sweep sends the reminder; null when reminders are off (lane 2e-2). */
+  reminderDueOn?: string | null;
+  /** The day the hourly sweep chases unanswered invitations; null without a reply-by date. */
+  rsvpChaseDueOn?: string | null;
+  /** Whether the tenant has a mail server set up — without one, only people with a login are told, in the app. */
+  mailServerSetUp: boolean;
+  /** Every occurrence of its series, in order (lane 2f-1); empty for a one-off event. */
+  seriesOccurrences: EventSeriesOccurrence[];
+  /** "Falls on a public holiday: …" — flagged, not skipped (D-12). */
+  dayOffNote?: string | null;
+  /** Lane 2h (C-51): the Safety drill that made it, worded and linked; null for an event HR made. */
+  source?: EventSource | null;
+}
+
+/** One occurrence of a series, as its list shows it (lane 2f-1). */
+export interface EventSeriesOccurrence {
+  id: string;
+  eventNumber: string;
+  occurrenceNumber: number;
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  status: EventStatus;
+  statusName: string;
+  isCancelled: boolean;
+  dayOffNote?: string | null;
+}
+
+/** More occurrences after a series' last: how many, or until when — not both (lane 2f-1). */
+export interface ExtendEventSeries {
+  count?: number | null;
+  until?: string | null;
+}
+
+export interface EventSeriesResult {
+  occurrences: EventSeriesOccurrence[];
+  warnings: string[];
+  /** Lane 2f-2a: the latest date's guests put on the new dates. */
+  guests: number;
+  /** Who their invitations reached; null when they wait for approval or there were none. */
+  told?: CompanyEventNoticeResult | null;
+  /** Lane 3d-2: the latest date's rooms, booked for the new dates by whoever extended — one per room. */
+  rooms: RoomBookingSeriesResult[];
+}
+
+/** What a guest action with a series scope did (lane 2f-2a): add, remove, or an answer. */
+export interface EventSeriesGuestResult {
+  /** The dates acted on, in date order. */
+  eventNumbers: string[];
+  /** Dates passed over: already invited (adding), or not invited (removing, answering). */
+  skipped: number;
+  /** Dates left alone: started, completed or cancelled. */
+  closed: number;
+  /** Dates added whose invitation waits for the approval. */
+  waiting: number;
+  told?: CompanyEventNoticeResult | null;
 }
 
 /**
- * ⚠ **No `organizerId`.** The API takes the organiser from the caller's token — a value the client
- * cannot know is a value the client must not send. Same rule as the manpower budget's approver.
+ * What one notice did (lane 2e-2, R4-6.3): how many people it was for and how many it reached — by an email
+ * the mail server took, or in the app. Counts are of people.
+ */
+export interface CompanyEventNoticeResult {
+  issued: number;
+  reached: number;
+  notReached: number;
+  /** Emails the mail server took. */
+  emailed: number;
+  /** Emails tried that no mail server took. */
+  emailsNotTaken: number;
+  toldInApp: number;
+  mailServerSetUp: boolean;
+  /** A reminder or a chase: it reached somebody, so it counts as sent. */
+  stamped: boolean;
+}
+
+/**
+ * `organizerId` is optional (D-11, lane 2a): empty means the person creating it, who is recorded as the
+ * creator either way. `departmentId` is gone — the server refuses one (D-5); choose `organizationUnitId`.
  */
 export interface CreateCompanyEvent {
   eventName: string;
@@ -268,7 +431,8 @@ export interface CreateCompanyEvent {
   onlineMeetingLink?: string | null;
   meetingPassword?: string | null;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  organizerId?: string | null;
   scope: ParticipantScope;
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
@@ -310,7 +474,9 @@ export interface UpdateCompanyEvent {
   onlineMeetingLink?: string | null;
   meetingPassword?: string | null;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  /** Empty leaves the organiser as it is. */
+  organizerId?: string | null;
   scope: ParticipantScope;
   estimatedAttendees?: number | null;
   requiresRsvp: boolean;
@@ -318,7 +484,10 @@ export interface UpdateCompanyEvent {
   visibility: EventVisibility;
   showOnCompanyCalendar: boolean;
   showOnIntranet: boolean;
-  status: EventStatus;
+  /** Scheduled, InProgress or Postponed — or Confirmed where no approval is needed. Empty leaves it as it is. */
+  status?: EventStatus | null;
+  /** Required when the dates, times or all-day switch change: an edit that moves the event is a reschedule. */
+  rescheduleReason?: string | null;
   hasBudget: boolean;
   budgetAmount?: number | null;
   actualCost?: number | null;
@@ -329,11 +498,18 @@ export interface UpdateCompanyEvent {
   sendReminders: boolean;
   reminderDaysBefore?: number | null;
   additionalNotes?: string | null;
+  /**
+   * Lane 2f-2b: on a recurring event, which dates the edit reaches — each takes only what this edit changed. Not
+   * `scope`, which is who the event is for.
+   */
+  seriesScope?: SeriesScope;
 }
 
 export interface CancelEvent {
   eventId: string;
   cancellationReason: string;
+  /** Lane 2f-2b: on a recurring event, which dates are cancelled ("this and following" ends the series). */
+  seriesScope?: SeriesScope;
 }
 
 export interface RescheduleEvent {
@@ -343,6 +519,128 @@ export interface RescheduleEvent {
   newEndDate: string;
   newEndTime?: string | null;
   rescheduleReason: string;
+  /** A new reply-by date, when the current one would fall after the new start. */
+  newRsvpDeadline?: string | null;
+  /** Lane 2f-2b: on a recurring event, which dates move — each by the same number of days. */
+  seriesScope?: SeriesScope;
+}
+
+/**
+ * The events register's search (lane 2g-1): filtered, sorted and paged on the server. Dates by overlap. The export
+ * takes the same filters.
+ */
+export interface CompanyEventSearch {
+  text?: string;
+  status?: EventStatus;
+  category?: EventCategory;
+  locationId?: string;
+  organizationUnitId?: string;
+  organizerId?: string;
+  /** One series' dates, in their order (lane 2f-1's register filter). */
+  seriesId?: string;
+  from?: string;
+  to?: string;
+  /** `-start` (newest first, the default), `start`, `name`, `number` or `-number`. */
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** What the event form asks before saving (lane 2g-2, C-15). The event being edited and its series are left out. */
+export interface EventClashQuery {
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  endTime?: string | null;
+  isAllDayEvent: boolean;
+  scope: ParticipantScope;
+  visibility: EventVisibility;
+  organizationUnitId?: string | null;
+  /** None: online, or the whole company — every site. */
+  locationId?: string | null;
+  excludeId?: string | null;
+  seriesId?: string | null;
+}
+
+/** An event the one being saved would clash with (lane 2g-2, C-15). */
+export interface EventClash {
+  eventId: string;
+  eventNumber: string;
+  eventName: string;
+  when: string;
+  audience: string;
+  siteName?: string | null;
+  /** The save would be refused: both for the whole company, or both for the same unit. Otherwise a warning. */
+  refused: boolean;
+  message: string;
+}
+
+/** The bookings register's search (lane 2g-1). */
+export interface RoomBookingSearch {
+  text?: string;
+  status?: BookingStatus;
+  roomId?: string;
+  from?: string;
+  to?: string;
+  /** `-start` (newest first, the default), `start`, `number` or `-number`. */
+  sort?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+/** The landing page in one read (lane 2g-1). */
+export interface CompanyScheduleDashboard {
+  upcomingEvents: CompanyEventSummary[];
+  pendingBookings: RoomBookingSummary[];
+  upcomingClosures: BusinessClosure[];
+  upcomingMilestones: CompanyMilestone[];
+}
+
+/** What an edit, move or cancellation with a series scope did (lane 2f-2b): the dates, and who was told. */
+export interface EventSeriesChangeResult {
+  eventNumbers: string[];
+  /** Dates left alone: started, completed or cancelled. */
+  closed: number;
+  told?: CompanyEventNoticeResult | null;
+}
+
+/** Who an event with this scope and visibility would be for, and how many (lane 2c, D-16). */
+export interface EventAudiencePreview {
+  audience: string;
+  reach: number;
+  /** For its guests and organiser only — nothing to count. */
+  guestListOnly: boolean;
+  warning?: string | null;
+}
+
+/** What announcing an event on the intranet would say, and to how many (lane 2c). */
+export interface EventAnnouncementPreview {
+  eventId: string;
+  staffReached: number;
+  canAnnounce: boolean;
+  /** Why it cannot be announced, when it cannot. */
+  reason?: string | null;
+  title: string;
+  summary: string;
+  body: string;
+}
+
+/** What cancelling, rescheduling or deleting an event did beyond the event (lane 2a). */
+export interface CompanyEventChange {
+  /** The event as it now stands; null after a delete. */
+  event?: CompanyEvent | null;
+  bookingsMoved: string[];
+  bookingsCancelled: string[];
+  /** Accepted or tentative answers set back to awaiting a reply. */
+  answersReset: number;
+  /** It had been approved, moved, and now waits for approval again. */
+  approvalCleared: boolean;
+  /** Who was told of it (lane 2e-2); null after a delete. */
+  told?: CompanyEventNoticeResult | null;
+  /** Lane 2f-2b: a move or cancellation with a series scope. */
+  series?: EventSeriesChangeResult | null;
+  /** Lane 2g-2: another event at the same time and place that did not stop the move. */
+  warnings?: string[];
 }
 
 export interface CompleteEvent {
@@ -374,6 +672,8 @@ export interface EventParticipant extends AuditFields {
   responseDate?: string | null;
   responseComments?: string | null;
   specialRequirements?: string | null;
+  /** Lane 2f-2a: on an add with a series scope, what it did across the dates. */
+  series?: EventSeriesGuestResult | null;
 }
 
 /** Either `employeeId` (internal) or the three external fields — never both. */
@@ -386,12 +686,30 @@ export interface CreateEventParticipant {
   role: ParticipantRole;
   isRequired: boolean;
   specialRequirements?: string | null;
+  /** Lane 2f-2a: on a recurring event, which dates (this one only when absent). */
+  scope?: SeriesScope;
+}
+
+/**
+ * A guest as HR corrects them (lane 2d, C-22). An employee guest's employee cannot change — uninvite and
+ * invite the other person; the external fields are an outside guest's only, and need a name and an email.
+ */
+export interface UpdateEventParticipant {
+  id: string;
+  externalParticipantName?: string | null;
+  externalParticipantEmail?: string | null;
+  externalParticipantOrganization?: string | null;
+  role: ParticipantRole;
+  isRequired: boolean;
+  specialRequirements?: string | null;
 }
 
 export interface RespondToEventInvitation {
   participantId: string;
   response: InvitationStatus;
   responseComments?: string | null;
+  /** Lane 2f-2a: on a recurring event, the answer for which dates (this one only when absent). */
+  scope?: SeriesScope;
 }
 
 // ── Attendance ────────────────────────────────────────────────────────────────
@@ -436,14 +754,21 @@ export interface EventAttachment extends AuditFields {
   typeName: string;
   description?: string | null;
   uploadDate: string;
+  /**
+   * Lane 2h (C-18): a file uploaded through the gate, which downloads. False for a row from before it — a name and a
+   * path typed in, no file stored (F-54): "reference only — no file stored".
+   */
+  hasFile: boolean;
+  fileSizeBytes?: number | null;
+  uploadedById?: string | null;
 }
 
-export interface CreateEventAttachment {
-  eventId: string;
-  fileName: string;
-  filePath: string;
-  type: EventAttachmentType;
-  description?: string | null;
+/** Where an event came from (lane 2h, C-51) — the Safety drill that made it, worded and linked. */
+export interface EventSource {
+  kind: string;
+  label: string;
+  /** Null when the source has since been deleted. */
+  link?: string | null;
 }
 
 export interface EventTask extends AuditFields {
@@ -459,6 +784,10 @@ export interface EventTask extends AuditFields {
   priorityName: string;
   status: EventTaskStatus;
   statusName: string;
+  /** Due before today and still open — worked out by the server on every read (lane 2d, F-12). */
+  isOverdue: boolean;
+  /** When the hourly sweep chased the assignee about it — once (lane 2e-3, F-34). */
+  overdueChasedAt?: string | null;
   completionDate?: string | null;
   completionNotes?: string | null;
 }
@@ -529,6 +858,8 @@ export interface MeetingRoomSummary {
   typeName: string;
   isActive: boolean;
   isBookable: boolean;
+  /** A booking of it waits for approval (lane 3c). */
+  requiresApproval: boolean;
 }
 
 export interface CreateMeetingRoom {
@@ -556,6 +887,21 @@ export interface CreateMeetingRoom {
 
 export interface UpdateMeetingRoom extends CreateMeetingRoom {
   id: string;
+  /**
+   * D-18 (lane 3a): deactivating a room with bookings still to come is refused unless this says to cancel them. Ask
+   * `GET rooms/{id}/retirement` first and list them.
+   */
+  cancelFutureBookings?: boolean;
+}
+
+/** What retiring a room would touch (D-18, lane 3a). A room with any booking on record cannot be deleted. */
+export interface RoomRetirement {
+  roomId: string;
+  roomName: string;
+  isActive: boolean;
+  futureBookings: RoomBookingSummary[];
+  bookingsOnRecord: number;
+  canDelete: boolean;
 }
 
 // ── Room bookings ─────────────────────────────────────────────────────────────
@@ -590,7 +936,9 @@ export interface RoomBooking extends AuditFields {
 export interface RoomBookingSummary {
   id: string;
   bookingNumber: string;
+  roomId: string;
   roomName: string;
+  bookedById: string;
   bookedByName: string;
   startDateTime: string;
   endDateTime: string;
@@ -629,6 +977,48 @@ export interface CancelRoomBooking {
   cancellationReason: string;
 }
 
+/**
+ * Booking a room for several dates of a series (lane 3d-1, D-12): the window is the linked occurrence's; each other date
+ * is booked at the same distance from its own start.
+ */
+export interface CreateRoomBookingSeries extends CreateRoomBooking {
+  eventId: string;
+  seriesScope: Exclude<SeriesScope, 'ThisOccurrence'>;
+}
+
+/** A date of a series the room was not booked for, and why. */
+export interface RoomBookingSeriesSkip {
+  eventId: string;
+  eventNumber: string;
+  occurrenceNumber: number;
+  startDateTime: string;
+  endDateTime: string;
+  reason: string;
+}
+
+export interface RoomBookingSeriesResult {
+  roomId: string;
+  roomName: string;
+  booked: RoomBookingSummary[];
+  notBooked: RoomBookingSeriesSkip[];
+  /** Dates the scope covered and left alone: started, completed or cancelled. */
+  closed: number;
+  /** On a room needing approval, the booking whose approval covers the rest. */
+  approvalCarriedBy?: string | null;
+}
+
+/**
+ * When a room is held (lane 3c, D-13): all staff see of a booking that is not theirs — the room and the time. Their own
+ * carry `bookingId`.
+ */
+export interface RoomBusyTime {
+  roomId: string;
+  startDateTime: string;
+  endDateTime: string;
+  isMine: boolean;
+  bookingId?: string | null;
+}
+
 // ── Milestones ────────────────────────────────────────────────────────────────
 
 export interface CompanyMilestone extends AuditFields {
@@ -641,7 +1031,27 @@ export interface CompanyMilestone extends AuditFields {
   isRecurringAnnually: boolean;
   showOnCalendar: boolean;
   significance?: string | null;
+  /** Free-text references ("certificate no. …") — the files are `documentCount`. */
   relatedDocuments?: string | null;
+  /** Lane 4a: the date this row stands for — the occurrence a dated read found, else the next one, else its own date. */
+  occurrenceDate: string;
+  /** The next time it falls, today or later; null for a one-off already past. */
+  nextOccurrence?: string | null;
+  /** Whole years from its own date to `occurrenceDate` — "the 10th anniversary"; 0 on the first. */
+  yearsSince: number;
+  /** How many files evidence it (lane 4a, D-3). */
+  documentCount: number;
+}
+
+/** A file evidencing a milestone, through the upload gate (lane 4a, D-3). */
+export interface CompanyMilestoneDocument {
+  id: string;
+  milestoneId: string;
+  fileName: string;
+  description?: string | null;
+  fileSizeBytes?: number | null;
+  uploadDate: string;
+  uploadedByName?: string | null;
 }
 
 export interface CreateCompanyMilestone {
@@ -669,39 +1079,136 @@ export interface BusinessClosure extends AuditFields {
   endDate: string;
   type: ClosureType;
   typeName: string;
+  /** Derived by the server from the type: true for every type but a partial closure with a site or unit. */
   affectsAllStations: boolean;
   locationId?: string | null;
   locationName?: string | null;
+  /** ⚠ Retired (D-5). Still on the read; no row on any database carries one (L0-1). */
   departmentId?: string | null;
   departmentName?: string | null;
+  /** The unit an organisation-unit closure covers, with everything beneath it. */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
+  /** Who it covers, as a sentence for the register: "Whole company", "Site: Tema", "Unit: Finance and everything beneath it". */
+  scopeDescription: string;
+  /** Falls on the same month and day every later year. */
+  recursAnnually: boolean;
   isPaidClosure: boolean;
+  /** Derived by the server from the type: only a partial closure is a working day. */
   countsAsWorkingDay: boolean;
   announcementDate: string;
   announcedById?: string | null;
   announcedByName?: string | null;
   communicationNotes?: string | null;
+  /** What the person saving should know that did not stop the save. Create and update only. */
+  warnings?: string[];
+  /** The granted leave this save recounted. Create and update only; null on a read. */
+  leaveRecharge?: LeaveRechargeResult | null;
 }
 
-/** ⚠ No `announcedById` — the API takes the announcer from the token. */
+/**
+ * ⚠ No `announcedById` — the API takes the announcer from the token. No `departmentId` either: the
+ * server refuses one (D-5), so the form cannot send it.
+ */
 export interface CreateBusinessClosure {
   title: string;
   reason?: string | null;
   startDate: string;
   endDate: string;
   type: ClosureType;
+  /** Read only for a partial closure; every other type sets it from the type. */
   affectsAllStations: boolean;
   locationId?: string | null;
-  departmentId?: string | null;
+  organizationUnitId?: string | null;
+  recursAnnually: boolean;
   isPaidClosure: boolean;
+  /** Ignored: the server sets it from the type. Sent so the shape matches the DTO. */
   countsAsWorkingDay: boolean;
   communicationNotes?: string | null;
+}
+
+/**
+ * What recounting granted leave did after the days off under it changed — a closure or a public
+ * holiday added, moved or removed (lane 1c). Mirrors `LeaveRechargeResultDto`. Only requests whose
+ * count changed are listed.
+ */
+export interface LeaveRechargeResult {
+  dryRun: boolean;
+  /** Recounted: the days, the balance and the attendance changed, and the employee was told. */
+  recharged: LeaveRechargeLine[];
+  /** In a finished leave year, so left as charged for HR to adjust by hand. */
+  notRecharged: LeaveRechargeLine[];
+  /** Requests the recount could not save, each with why. */
+  failures: string[];
+}
+
+export interface LeaveRechargeLine {
+  requestId: string;
+  requestNumber: string;
+  employeeId: string;
+  employeeName: string;
+  leaveTypeName: string;
+  startDate: string;
+  endDate: string;
+  oldDays: number;
+  newDays: number;
+}
+
+/** What announcing a closure would say, and to how many — mirrors `ClosureAnnouncementPreviewDto`. */
+export interface ClosureAnnouncementPreview {
+  closureId: string;
+  /** Active staff the closure covers: the announcement's reach. */
+  staffCovered: number;
+  /** False when nobody is covered — show "no staff to tell", not the button. */
+  canAnnounce: boolean;
+  title: string;
+  summary: string;
+  body: string;
 }
 
 export interface UpdateBusinessClosure extends CreateBusinessClosure {
   id: string;
 }
 
-// ── Fiscal years and periods ──────────────────────────────────────────────────
+// ── The fiscal calendar, Finance's (lane 4b, D-6) ─────────────────────────────
+
+/** A Finance fiscal year as HR reads it: its own status, and each accounting book's year-end close. */
+export interface HrFiscalCalendarYear {
+  id: string;
+  name: string;
+  code: string;
+  year: number;
+  startDate: string;
+  endDate: string;
+  /** Finance's year status: Future, Open, Closed, Locked or Archived. */
+  status: string;
+  isLocked: boolean;
+  /** Each book with a year-end close done ("Closed") or under way ("Closing"); a reopened close is not listed. */
+  books: { bookCode: string; bookName?: string | null; status: string; closedAtUtc: string }[];
+  periods: { number: number; name: string; startDate: string; endDate: string; status: string }[];
+}
+
+export interface HrFiscalCalendar {
+  years: HrFiscalCalendarYear[];
+  /** The year after Finance's last, as Finance must open it (numbered one higher, from the day after); null with no year. */
+  nextYear?: HrFiscalYearAnswer | null;
+  /** The policy's "Fiscal year starts" month — used only while Finance has no fiscal year at all. */
+  fallbackStartMonth: number;
+}
+
+/**
+ * The fiscal year a date falls in, or a fiscal year's dates — and what answered: a year Finance has, a year Finance has not
+ * opened continued from its sequence ("Projected"), or — with no Finance year at all — the policy's start month.
+ */
+export interface HrFiscalYearAnswer {
+  fiscalYear: number;
+  startDate: string;
+  endDate: string;
+  source: 'Finance' | 'Projected' | 'Fallback';
+  name?: string | null;
+}
+
+// ── Fiscal years and periods (HR's own — retired at lane 4b; the types stay with the tables) ──────────────────
 
 export interface FiscalYear extends AuditFields {
   tenantId: string;
@@ -819,25 +1326,156 @@ export interface PersonalScheduleEntry {
 export interface PersonalSchedule {
   employeeId: string;
   employeeName: string;
+  /** The person's own unit — on a team schedule, which sub-unit they sit in (lane 5b). */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   from: string;
   to: string;
   entries: PersonalScheduleEntry[];
+  /** Sources that could not be read ("leave", "training"…) — the diary is incomplete when any are named (lane 5b). */
+  incompleteSources: string[];
 }
 
 /** A unit and everything beneath it — what a head needs before scheduling for their team. */
 export interface TeamSchedule {
   organizationUnitId: string;
+  organizationUnitName?: string | null;
   from: string;
   to: string;
   members: PersonalSchedule[];
+  incompleteSources: string[];
+}
+
+/**
+ * The units whose team schedule the caller may read (lane 5b, the user's ruling): every active unit for the HR desk; the
+ * units a head heads and everything beneath them; none for anyone else.
+ */
+export interface TeamScheduleUnits {
+  canReadEveryUnit: boolean;
+  units: { id: string; name: string; parentUnitId?: string | null; path: string; headedByCaller: boolean }[];
 }
 
 /** One pass of the reminder sweep (round 4, lane N-b2) — the scheduled run and run-now return the same. */
 export interface CompanyScheduleReminderRun {
+  /** Bookings still Tentative when their start came: cancelled, their bookers told (lane 3b-2). */
+  bookingsLapsed?: string[];
+  /** Confirmed bookings whose end had passed: completed (lane 3b-2). */
+  bookingsCompleted?: string[];
   /** Event numbers whose reminder went this pass. */
   reminded: string[];
   /** Event numbers whose unanswered invitations were chased this pass. */
   rsvpChased: string[];
+  /** Event numbers whose reminder, or chase, was due and reached nobody — tried again next pass (lane 2e-2). */
+  remindersLeftDue: string[];
+  chasesLeftDue: string[];
+  /** Overdue tasks whose assignee was chased this pass, and those whose chase reached nobody (lane 2e-3). */
+  tasksChased: string[];
+  tasksLeftDue: string[];
+  peopleIssued: number;
+  peopleReached: number;
+  /** Emails the mail server took (it counted every address tried until lane 2e-2). */
   emailsSent: number;
+  emailsNotTaken: number;
+  toldInApp: number;
   rsvpChaseLeadDays: number;
+}
+
+// ── The company calendar (lane 7, D-7, D-8) ───────────────────────────────────
+
+export type CalendarEntryKind = 'Event' | 'Closure' | 'Milestone' | 'Holiday' | 'RoomBooking' | 'Mine';
+
+/** One thing on the calendar: a band from `start` to `end` — what the server decided this caller may see. */
+export interface CalendarEntry {
+  kind: CalendarEntryKind;
+  /** An event's category; Full / Partial for a closure; Holiday / InLieu; for Mine, Leave / Travel / Interview / Training. */
+  subKind?: string | null;
+  label: string;
+  start: string;
+  end: string;
+  isAllDay: boolean;
+  colourKey: string;
+  reference?: string | null;
+  /** Where a click goes — the HR page for the desk, the portal page otherwise — or nowhere. */
+  link?: string | null;
+  eventId?: string | null;
+  seriesId?: string | null;
+  status?: string | null;
+  awaitingApproval: boolean;
+  isOrganiser: boolean;
+  /** The caller's own invitation to the event, their answer so far, and whether they may answer now (and why not). */
+  myParticipantId?: string | null;
+  myAnswer?: InvitationStatus | null;
+  canAnswer: boolean;
+  whyNotAnswer?: string | null;
+  roomId?: string | null;
+  roomName?: string | null;
+  /** The caller booked it. Somebody else's booking, to staff, is only "booked". */
+  isMine: boolean;
+  bookingId?: string | null;
+}
+
+export interface CompanyCalendar {
+  from: string;
+  to: string;
+  /** The caller holds HR.Company.Read: the whole company's calendar. */
+  hrDesk: boolean;
+  roomId?: string | null;
+  roomName?: string | null;
+  entries: CalendarEntry[];
+  /** Parts of the caller's own diary that could not be read. */
+  incompleteSources: string[];
+}
+
+/** The caller's own invitation to an event (lane 7). */
+export interface MyInvitation {
+  participantId: string;
+  status: InvitationStatus;
+  responseDate?: string | null;
+  responseComments?: string | null;
+  canAnswer: boolean;
+  whyNot?: string | null;
+}
+
+/** An event as staff see it (lane 7): no budget, no other guest's answer; the password only to a guest or the organiser. */
+export interface CalendarEventView {
+  id: string;
+  eventNumber: string;
+  eventName: string;
+  description?: string | null;
+  category: string;
+  type: string;
+  status: string;
+  isCancelled: boolean;
+  cancellationReason?: string | null;
+  awaitingApproval: boolean;
+  startDate: string;
+  startTime?: string | null;
+  endDate: string;
+  endTime?: string | null;
+  isAllDay: boolean;
+  when: string;
+  locationType: string;
+  siteName?: string | null;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  onlineMeetingLink?: string | null;
+  meetingPassword?: string | null;
+  rooms: string[];
+  organizerName?: string | null;
+  isOrganiser: boolean;
+  audienceDescription: string;
+  requiresRsvp: boolean;
+  rsvpDeadline?: string | null;
+  seriesId?: string | null;
+  occurrenceNumber?: number | null;
+  occurrenceCount?: number | null;
+  myInvitation?: MyInvitation | null;
+  canOpenHrPage: boolean;
+}
+
+/** The invitee's own answer (lane 7, D-8). */
+export interface ReplyToEventInvitation {
+  response: InvitationStatus;
+  comment?: string | null;
+  scope?: SeriesScope;
 }

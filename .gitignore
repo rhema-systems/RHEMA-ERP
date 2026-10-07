@@ -215,6 +215,9 @@ secrets-template.json
 
 # Logs
 logs/
+# ...but not a Next.js route that is named logs: under the rule above, /hr/attendance/logs went
+# uncommitted from Aug to Oct 2026, built locally and 404'd on every deployed server.
+!frontend/src/app/**/logs/
 *.log
 
 # Backup files

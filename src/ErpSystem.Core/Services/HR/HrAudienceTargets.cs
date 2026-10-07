@@ -22,11 +22,14 @@ namespace ErpSystem.Core.Services.HR;
 /// </remarks>
 public static class HrAudienceTargets
 {
-    public static bool NeedsTarget(HrAudienceTargetType type) => type != HrAudienceTargetType.AllEmployees;
+    /// <summary>Whether a rule of this type names a record. Everyone and Management (D-16) do not.</summary>
+    public static bool NeedsTarget(HrAudienceTargetType type) =>
+        type is not (HrAudienceTargetType.AllEmployees or HrAudienceTargetType.Management);
 
     public static string TypeLabel(HrAudienceTargetType type) => type switch
     {
         HrAudienceTargetType.AllEmployees => "Everyone",
+        HrAudienceTargetType.Management => "Management (unit heads and line managers)",
         HrAudienceTargetType.OrganizationUnit => "Organisation unit",
         HrAudienceTargetType.OrganizationLevel => "Organisation level",
         HrAudienceTargetType.Position => "Position",
@@ -50,7 +53,8 @@ public static class HrAudienceTargets
         if (!NeedsTarget(type))
         {
             if (targetId is { } stray && stray != Guid.Empty)
-                throw new InvalidOperationException("'Everyone' takes no target — clear the target, or choose what it narrows to.");
+                throw new InvalidOperationException(
+                    $"'{TypeLabel(type)}' takes no target — clear the target, or choose what it narrows to.");
             return;
         }
 

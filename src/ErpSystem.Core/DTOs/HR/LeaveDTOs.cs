@@ -839,6 +839,48 @@ public class CreateLeaveRequestDto
 }
 
 /// <summary>
+/// What recounting granted leave did, after the days off under it changed — a business closure or a
+/// public holiday added, moved or removed (company-schedule final closure, lane 1c: D-15a, D-15b).
+/// </summary>
+/// <remarks>
+/// Only requests whose count CHANGED appear; leave whose days were untouched is not listed.
+/// </remarks>
+public class LeaveRechargeResultDto
+{
+    /// <summary>
+    /// True when nothing was saved and nobody told: <see cref="Recharged"/> then lists what WOULD be
+    /// recounted (the one-time pass's preview).
+    /// </summary>
+    public bool DryRun { get; set; }
+
+    /// <summary>Recounted: the day count, the balance and the attendance days changed, and the employee was told.</summary>
+    public List<LeaveRechargeLineDto> Recharged { get; set; } = new();
+
+    /// <summary>
+    /// Would change, but left as charged because their leave year is finished — its unused days may
+    /// already have been carried over. For HR to adjust by hand.
+    /// </summary>
+    public List<LeaveRechargeLineDto> NotRecharged { get; set; } = new();
+
+    /// <summary>Requests the recount could not save, each with why. Running the recount again retries them.</summary>
+    public List<string> Failures { get; set; } = new();
+}
+
+/// <summary>One request's recount.</summary>
+public class LeaveRechargeLineDto
+{
+    public Guid RequestId { get; set; }
+    public string RequestNumber { get; set; } = string.Empty;
+    public Guid EmployeeId { get; set; }
+    public string EmployeeName { get; set; } = string.Empty;
+    public string LeaveTypeName { get; set; } = string.Empty;
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+    public decimal OldDays { get; set; }
+    public decimal NewDays { get; set; }
+}
+
+/// <summary>
 /// What a request for these dates would ask of its leave type, and of annual leave beyond the type's
 /// limit (round 5, lane H). Read by the request forms before anything is saved.
 /// </summary>

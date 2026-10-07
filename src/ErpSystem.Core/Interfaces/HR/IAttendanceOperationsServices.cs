@@ -67,14 +67,16 @@ public interface IHolidayCalendarService
 
     Task<HolidayCalendarDto> CreateAsync(CreateHolidayCalendarDto dto, Guid tenantId, Guid userId, CancellationToken ct = default);
     Task<HolidayCalendarDto> UpdateAsync(UpdateHolidayCalendarDto dto, Guid userId, CancellationToken ct = default);
-    Task<bool> DeleteAsync(Guid id, CancellationToken ct = default);
+    /// <summary>Deletes a calendar; when it was active, all granted leave is recounted (company-schedule lane 1c).</summary>
+    Task<LeaveRechargeResultDto> DeleteAsync(Guid id, CancellationToken ct = default);
 
     // Public holiday sub-operations
     Task<PublicHolidayDto> AddHolidayAsync(CreatePublicHolidayDto dto, Guid tenantId, Guid userId, CancellationToken ct = default);
     Task<IEnumerable<PublicHolidaySummaryDto>> GetHolidaysAsync(Guid calendarId, int? year = null, CancellationToken ct = default);
     Task<PublicHolidayDto> GetHolidayByIdAsync(Guid holidayId, CancellationToken ct = default);
     Task<PublicHolidayDto> UpdateHolidayAsync(UpdatePublicHolidayDto dto, Guid userId, CancellationToken ct = default);
-    Task<bool> DeleteHolidayAsync(Guid holidayId, CancellationToken ct = default);
+    /// <summary>Deletes a holiday, and answers the recount of the leave it covered (company-schedule lane 1c, D-15b).</summary>
+    Task<LeaveRechargeResultDto> DeleteHolidayAsync(Guid holidayId, CancellationToken ct = default);
 }
 
 #endregion

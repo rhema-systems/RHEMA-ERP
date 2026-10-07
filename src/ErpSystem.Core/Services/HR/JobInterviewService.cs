@@ -3079,52 +3079,36 @@ public class JobInterviewService : IJobInterviewService
         interview.ScheduledDate.AddDays(1).ToDateTime(TimeOnly.MinValue);
 
     /// <summary>
-    /// Hand-builds a minimal RFC 5545 VEVENT for the interview so mail clients render an "Add to calendar"
-    /// invite. Times are emitted as floating local time (no library dependency, no timezone assumptions).
+    /// The interview's calendar file, through the builder company events share (company-schedule final closure,
+    /// lane 2e-3, D-14).
     /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>One UID per interview, for ever.</b> It was random on every email, so a rescheduled interview
+    /// arrived as a second calendar entry beside the first. Now a move replaces the entry. The interview stores no
+    /// change counter, so SEQUENCE stays 0 and the newer DTSTAMP wins, as RFC 5546 allows (the user's ruling: no schema
+    /// change for recruitment).</para>
+    ///
+    /// <para>Times are UTC: TDC works on GMT, and the interview's day-clock is that. They were floating, which a client
+    /// in another zone read as its own local time. No ORGANIZER, as before: an interview names no organiser to answer.</para>
+    /// </remarks>
     private static EmailAttachmentDto BuildInterviewIcs(
         JobInterview interview, string summary, string? attendeeEmail, TimeSpan? slotStart, TimeSpan? slotEnd)
     {
         var startTod = slotStart ?? interview.StartTime;
         var endTod   = slotEnd   ?? interview.EndTime;
-        var startDt  = interview.ScheduledDate.ToDateTime(TimeOnly.FromTimeSpan(startTod));
-        var endDt    = interview.ScheduledDate.ToDateTime(TimeOnly.FromTimeSpan(endTod));
-        if (endDt <= startDt) endDt = startDt.AddHours(1);
-
-        static string Esc(string? s) => (s ?? string.Empty)
-            .Replace("\\", "\\\\").Replace(";", "\\;").Replace(",", "\\,")
-            .Replace("\r\n", "\\n").Replace("\n", "\\n");
-        static string Fmt(DateTime dt) => dt.ToString("yyyyMMddTHHmmss");
-
         var location = string.IsNullOrWhiteSpace(interview.LocationOrLink) ? "To be advised" : interview.LocationOrLink;
 
-        var sb = new StringBuilder();
-        sb.Append("BEGIN:VCALENDAR\r\n");
-        sb.Append("VERSION:2.0\r\n");
-        sb.Append("PRODID:-//ErpSystem//Recruitment//EN\r\n");
-        sb.Append("CALSCALE:GREGORIAN\r\n");
-        sb.Append("METHOD:REQUEST\r\n");
-        sb.Append("BEGIN:VEVENT\r\n");
-        sb.Append($"UID:{interview.Id:N}-{Guid.NewGuid():N}@erpsystem\r\n");
-        sb.Append($"DTSTAMP:{Fmt(DateTime.UtcNow)}Z\r\n");
-        sb.Append($"DTSTART:{Fmt(startDt)}\r\n");
-        sb.Append($"DTEND:{Fmt(endDt)}\r\n");
-        sb.Append($"SUMMARY:{Esc(summary)}\r\n");
-        sb.Append($"LOCATION:{Esc(location)}\r\n");
-        sb.Append($"DESCRIPTION:{Esc($"Interview reference {interview.InterviewNumber}")}\r\n");
-        if (!string.IsNullOrWhiteSpace(attendeeEmail))
-            sb.Append($"ATTENDEE;RSVP=TRUE:mailto:{attendeeEmail}\r\n");
-        sb.Append("STATUS:CONFIRMED\r\n");
-        sb.Append("SEQUENCE:0\r\n");
-        sb.Append("END:VEVENT\r\n");
-        sb.Append("END:VCALENDAR\r\n");
-
-        return new EmailAttachmentDto
+        return HrCalendarFile.Build(new HrCalendarEntry
         {
-            FileName    = $"interview-{interview.InterviewNumber}.ics",
-            Content     = Encoding.UTF8.GetBytes(sb.ToString()),
-            ContentType = "text/calendar",
-        };
+            Uid = $"interview-{interview.Id:N}@rhema-erp",
+            Summary = summary,
+            Description = $"Interview reference {interview.InterviewNumber}",
+            Location = location,
+            StartUtc = interview.ScheduledDate.ToDateTime(TimeOnly.FromTimeSpan(startTod)),
+            EndUtc = interview.ScheduledDate.ToDateTime(TimeOnly.FromTimeSpan(endTod)),
+            Attendee = string.IsNullOrWhiteSpace(attendeeEmail) ? null : new HrCalendarPerson(attendeeEmail),
+            RsvpRequested = true,
+        }, $"interview-{interview.InterviewNumber}.ics");
     }
 
     private async Task SendInterviewEmailAsync(

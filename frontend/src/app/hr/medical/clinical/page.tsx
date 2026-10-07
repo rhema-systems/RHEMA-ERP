@@ -60,12 +60,17 @@ const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '
 const fmtDateTime = (v?: string | null) => (v ? new Date(v).toLocaleString() : '—');
 const label = (opts: { value: string; label: string }[], v: string) =>
   opts.find((o) => o.value === v)?.label ?? v;
+/** The serialised enum name as words: "PendingApproval" → "Pending approval", "CheckedIn" → "Checked in". */
+const humanise = (v: string) => {
+  const words = v.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
 
 function PreAuthBadge({ status }: { status: string }) {
   if (status === 'Approved') return <Badge variant="secondary">Approved</Badge>;
   if (status === 'Rejected' || status === 'Expired' || status === 'Cancelled')
     return <Badge variant="destructive">{status}</Badge>;
-  return <Badge variant="outline">{status}</Badge>;
+  return <Badge variant="outline">{humanise(status)}</Badge>;
 }
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -235,7 +240,7 @@ export default function MedicalClinicalPage() {
                       <TableHead>Planned</TableHead>
                       <TableHead className="text-right">Estimated</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead />
+                      <TableHead className="w-[60px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -251,28 +256,24 @@ export default function MedicalClinicalPage() {
                         <TableCell>
                           <PreAuthBadge status={p.status} />
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
                           {/* Only an undecided request can be decided; edit and delete are not
                               state-gated, because correcting a record is not a transition. */}
-                          <div className="flex justify-end gap-1">
-                            {(p.status === 'Requested' || p.status === 'PendingApproval') && (
-                              <>
-                                <Button variant="ghost" size="sm" onClick={() => setApproving(p)}>
-                                  Approve
-                                </Button>
-                                <Button variant="ghost" size="sm" onClick={() => setRejecting(p)}>
-                                  Reject
-                                </Button>
-                              </>
-                            )}
-                            <ClinicalRecordActions
-                              kind="pre-authorization"
-                              id={p.id}
-                              recordLabel={p.authorizationNumber}
-                              canWrite={canWrite}
-                              canDelete={canDelete}
-                            />
-                          </div>
+                          <ClinicalRecordActions
+                            kind="pre-authorization"
+                            id={p.id}
+                            recordLabel={p.authorizationNumber}
+                            canWrite={canWrite}
+                            canDelete={canDelete}
+                            steps={
+                              canWrite && (p.status === 'Requested' || p.status === 'PendingApproval')
+                                ? [
+                                    { label: 'Approve', onSelect: () => setApproving(p) },
+                                    { label: 'Reject', onSelect: () => setRejecting(p) },
+                                  ]
+                                : []
+                            }
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -301,7 +302,7 @@ export default function MedicalClinicalPage() {
                       <TableHead>Priority</TableHead>
                       <TableHead>Referred</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead />
+                      <TableHead className="w-[60px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -314,23 +315,21 @@ export default function MedicalClinicalPage() {
                         </TableCell>
                         <TableCell>{fmtDate(r.referralDate)}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{r.status}</Badge>
+                          <Badge variant="outline">{humanise(r.status)}</Badge>
                         </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-1">
-                            {['Pending', 'Issued', 'Accepted'].includes(r.status) && (
-                              <Button variant="ghost" size="sm" onClick={() => setCompleting(r)}>
-                                Complete
-                              </Button>
-                            )}
-                            <ClinicalRecordActions
-                              kind="referral"
-                              id={r.id}
-                              recordLabel={r.referralNumber}
-                              canWrite={canWrite}
-                              canDelete={canDelete}
-                            />
-                          </div>
+                        <TableCell>
+                          <ClinicalRecordActions
+                            kind="referral"
+                            id={r.id}
+                            recordLabel={r.referralNumber}
+                            canWrite={canWrite}
+                            canDelete={canDelete}
+                            steps={
+                              canWrite && ['Pending', 'Issued', 'Accepted'].includes(r.status)
+                                ? [{ label: 'Complete', onSelect: () => setCompleting(r) }]
+                                : []
+                            }
+                          />
                         </TableCell>
                       </TableRow>
                     ))}
@@ -359,7 +358,7 @@ export default function MedicalClinicalPage() {
                       <TableHead>Facility</TableHead>
                       <TableHead>When</TableHead>
                       <TableHead>Status</TableHead>
-                      <TableHead />
+                      <TableHead className="w-[60px]" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -370,46 +369,29 @@ export default function MedicalClinicalPage() {
                         <TableCell>{a.facilityName}</TableCell>
                         <TableCell>{fmtDateTime(a.appointmentDateTime)}</TableCell>
                         <TableCell>
-                          <Badge variant="outline">{a.status}</Badge>
+                          <Badge variant="outline">{humanise(a.status)}</Badge>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell>
                           {/* The visit runs check-in → check-out; each shows only at its point. */}
-                          <div className="flex justify-end gap-1">
-                            {['Scheduled', 'Confirmed'].includes(a.status) && (
-                              <>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => checkIn.mutate(a.id)}
-                                >
-                                  Check in
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => setCancelling(a)}
-                                >
-                                  Cancel
-                                </Button>
-                              </>
-                            )}
-                            {['CheckedIn', 'InProgress'].includes(a.status) && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => checkOut.mutate(a.id)}
-                              >
-                                Check out
-                              </Button>
-                            )}
-                            <ClinicalRecordActions
-                              kind="appointment"
-                              id={a.id}
-                              recordLabel={a.appointmentNumber}
-                              canWrite={canWrite}
-                              canDelete={canDelete}
-                            />
-                          </div>
+                          <ClinicalRecordActions
+                            kind="appointment"
+                            id={a.id}
+                            recordLabel={a.appointmentNumber}
+                            canWrite={canWrite}
+                            canDelete={canDelete}
+                            steps={
+                              !canWrite
+                                ? []
+                                : ['Scheduled', 'Confirmed'].includes(a.status)
+                                  ? [
+                                      { label: 'Check in', onSelect: () => checkIn.mutate(a.id) },
+                                      { label: 'Cancel appointment', onSelect: () => setCancelling(a) },
+                                    ]
+                                  : ['CheckedIn', 'InProgress'].includes(a.status)
+                                    ? [{ label: 'Check out', onSelect: () => checkOut.mutate(a.id) }]
+                                    : []
+                            }
+                          />
                         </TableCell>
                       </TableRow>
                     ))}

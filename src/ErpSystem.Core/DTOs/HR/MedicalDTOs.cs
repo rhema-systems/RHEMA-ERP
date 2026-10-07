@@ -321,7 +321,7 @@ public class UpdatePhysicianDto : UpdateDtoBase
     [MaxLength(255)][EmailAddress]
     public string? Email { get; set; }
     public Guid? FacilityId { get; set; }
-    public bool IsVerified { get; set; }
+    // No IsVerified (2026-10-07): an edit does not verify or un-verify — POST {id}/verify does.
     public bool IsActive { get; set; }
     [MaxLength(1000)]
     public string? Notes { get; set; }

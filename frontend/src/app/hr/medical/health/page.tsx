@@ -150,10 +150,8 @@ export default function EmployeeHealthPage() {
     queryFn: () => medicalFacilityService.getFacilities(),
   });
 
-  const facilityOptions = [
-    { value: '', label: 'No preferred facility' },
-    ...facilities.map((f) => ({ value: f.id, label: f.facilityName })),
-  ];
+  // The "no facility" choice is SelectField's allowEmpty item: Radix throws on an item whose value is ''.
+  const facilityOptions = facilities.map((f) => ({ value: f.id, label: f.facilityName }));
 
   return (
     <div className="space-y-6 p-6">
@@ -322,6 +320,8 @@ export default function EmployeeHealthPage() {
                   name="preferredFacilityId"
                   label="Preferred facility"
                   options={facilityOptions}
+                  allowEmpty
+                  emptyLabel="No preferred facility"
                 />
                 <TextareaField form={form} name="notes" label="Notes" rows={2} />
               </>

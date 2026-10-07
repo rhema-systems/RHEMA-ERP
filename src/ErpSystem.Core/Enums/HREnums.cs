@@ -5141,7 +5141,15 @@ public enum ClaimStatus
     AdditionalInfoRequired = 10,
 
     [Description("Cancelled")]
-    Cancelled = 11
+    Cancelled = 11,
+
+    /// <summary>
+    /// Filed by the employee on self-service and not yet submitted (2026-10-07): their own working
+    /// copy, which the HR desk does not see. Submitting moves it to <see cref="Pending"/>. Appended
+    /// rather than numbered first — the column stores the number, and every existing row keeps its own.
+    /// </summary>
+    [Description("Draft")]
+    Draft = 12
 }
 
 public enum ClaimPreAuthorizationStatus
@@ -7991,7 +7999,31 @@ public enum RecurrencePattern
     Quarterly = 5,
 
     [Description("Annually")]
-    Annually = 6
+    Annually = 6,
+
+    /// <summary>
+    /// Monday to Friday (company-schedule final closure, lane 2f-1: the user's ruling) — a daily stand-up. Daily stays
+    /// every calendar day. Stored as an int, so no schema change.
+    /// </summary>
+    [Description("Weekdays")]
+    Weekdays = 7
+}
+
+/// <summary>
+/// Which dates of a recurring event's series an action reaches (company-schedule final closure, lane 2f-2, D-12) —
+/// adding or removing a guest, recording an answer. Asked for, never stored. A series action never reaches a date that
+/// has started, been completed or been cancelled.
+/// </summary>
+public enum SeriesScope
+{
+    [Description("This date only")]
+    ThisOccurrence = 0,
+
+    [Description("This and following dates")]
+    ThisAndFollowing = 1,
+
+    [Description("Every date in the series")]
+    WholeSeries = 2
 }
 
 public enum RegularizationType
@@ -10761,7 +10793,18 @@ public enum HrAudienceTargetType
     Location = 5,
 
     /// <summary>One named person — mostly useful as an exclusion.</summary>
-    Employee = 6
+    Employee = 6,
+
+    /// <summary>
+    /// Management: everyone active who heads an organisation unit or is named as somebody's line
+    /// manager. Needs no target id. One definition across HR (company-schedule final closure D-16) —
+    /// orientation's Management population reads this rule too.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Only as full as the data: on TDC's own records (2026-08) few units had a head and few staff a
+    /// line manager, so a screen that targets it should say how many it reaches before it is used.
+    /// </remarks>
+    Management = 7
 }
 
 #endregion
@@ -10840,9 +10883,9 @@ public enum HrPolicyAcknowledgementOutcome
 /// Which instrument of authority a stored company image is.
 /// </summary>
 /// <remarks>
-/// ⚠ One table, two kinds, because they are governed identically: both are what makes a generated
-/// document look authentic, both must be versioned rather than overwritten, and both are replaced
-/// by the same restricted act. Two tables would duplicate that governance and let it drift.
+/// ⚠ One table, three kinds, because they are governed identically: each is what makes a generated
+/// document look authentic, each must be versioned rather than overwritten, and each is replaced
+/// by the same restricted act. Separate tables would duplicate that governance and let it drift.
 /// </remarks>
 public enum CompanySealAssetKind
 {
@@ -10850,7 +10893,13 @@ public enum CompanySealAssetKind
     Seal = 1,
 
     /// <summary>The authorised signatory's signature image.</summary>
-    Signature = 2
+    Signature = 2,
+
+    /// <summary>
+    /// The company logo (company-schedule final closure D-9, C-50) — versioned like the other two,
+    /// because letters and emails embed it; it replaces the free-text <c>CompanyProfile.LogoUrl</c> (F-55).
+    /// </summary>
+    Logo = 3
 }
 
 #endregion

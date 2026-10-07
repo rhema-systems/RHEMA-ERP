@@ -12,15 +12,18 @@ public sealed class LeaveUsageReader : ILeaveUsageReader
     private readonly IGenericRepository<LeaveRequest> _requests;
     private readonly IGenericRepository<LeaveType> _leaveTypes;
     private readonly IHrWorkingDayCalculator _workingDays;
+    private readonly IHrClosureCalendar _closures;
 
     public LeaveUsageReader(
         IGenericRepository<LeaveRequest> requests,
         IGenericRepository<LeaveType> leaveTypes,
-        IHrWorkingDayCalculator workingDays)
+        IHrWorkingDayCalculator workingDays,
+        IHrClosureCalendar closures)
     {
         _requests = requests;
         _leaveTypes = leaveTypes;
         _workingDays = workingDays;
+        _closures = closures;
     }
 
     /// <inheritdoc />
@@ -58,6 +61,16 @@ public sealed class LeaveUsageReader : ILeaveUsageReader
         // first time one is met. A wider set gives the same walk (see LeaveChargeableDays).
         IReadOnlySet<DateOnly>? holidays = null;
 
+        // …and so do the straddling employees' own closures (company-schedule final closure, lane 1b):
+        // a closure of someone's site or unit was a day off when their leave was charged, so it is
+        // one here. Loaded once, for all of them, with nobody signed in (the nightly sweeps read this).
+        var straddlers = requests
+            .Where(r => r.Status != LeaveStatus.Pending && r.EndDate > through && r.StartDate <= through)
+            .Select(r => r.EmployeeId)
+            .Distinct()
+            .ToList();
+        IReadOnlyDictionary<Guid, IReadOnlySet<DateOnly>>? ownClosures = null;
+
         var usage = new Dictionary<Guid, LeaveUsage>();
         foreach (var employee in requests.GroupBy(r => r.EmployeeId))
         {
@@ -80,8 +93,12 @@ public sealed class LeaveUsageReader : ILeaveUsageReader
                 {
                     // Straddling it: its chargeable days up to the date, never more than it was charged.
                     holidays ??= await _workingDays.GetHolidayDatesAsync(tenantId, yearStart, through, ct);
+                    ownClosures ??= await _closures.GetClosureDatesAsync(tenantId, straddlers, yearStart, through, ct);
+                    var daysOff = ownClosures.TryGetValue(r.EmployeeId, out var own) && own.Count > 0
+                        ? new HashSet<DateOnly>(holidays.Concat(own))
+                        : holidays;
                     takenThrough += Math.Min(
-                        LeaveChargeableDays.Between(r.StartDate, through, leaveType, holidays).Count,
+                        LeaveChargeableDays.Between(r.StartDate, through, leaveType, daysOff).Count,
                         r.TotalDays);
                 }
             }

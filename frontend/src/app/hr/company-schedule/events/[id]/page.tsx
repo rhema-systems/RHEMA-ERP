@@ -2,6 +2,7 @@
 
 import { use, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   BellRing,
@@ -9,7 +10,9 @@ import {
   CheckCircle2,
   Loader2,
   MailQuestion,
+  Megaphone,
   Pencil,
+  Send,
   Trash2,
   XCircle,
 } from 'lucide-react';
@@ -39,9 +42,59 @@ import {
   TasksPanel,
 } from '@/components/hr/company-schedule/EventPanels';
 import { companyEventService } from '@/services/hr/company-schedule.service';
+import { toIsoInstant } from '@/components/hr/employee/tabs/fields';
+import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
+import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
+import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
+import { EventAnnounceDialog } from '@/components/hr/company-schedule/EventAnnounceDialog';
+import { EventSeriesCard } from '@/components/hr/company-schedule/EventSeriesCard';
+import { EventRoomsCard } from '@/components/hr/company-schedule/EventRoomsCard';
+import { RECURRENCE_PATTERN_LABELS } from '@/types/hr/company-schedule';
+import { describeReach, describeSeriesChange } from '@/components/hr/company-schedule/noticeReach';
+import { SeriesScopeField } from '@/components/hr/company-schedule/SeriesScopeField';
+import type { CompanyEvent, CompanyEventChange, CompanyEventNoticeResult, SeriesScope } from '@/types/hr/company-schedule';
+
+/**
+ * What a cancel, move or delete did beyond the event, as one sentence for the toast (lane 2a) — and who was
+ * told, counted from the email result and the in-app notice (lane 2e-2).
+ */
+function describeChange(change?: CompanyEventChange | null): string | undefined {
+  if (!change) return undefined;
+  const parts: string[] = [];
+  const list = (n: string[]) => `${n.length} room booking${n.length === 1 ? '' : 's'} (${n.join(', ')})`;
+  if (change.bookingsMoved?.length) parts.push(`${list(change.bookingsMoved)} moved with it`);
+  if (change.bookingsCancelled?.length) parts.push(`${list(change.bookingsCancelled)} cancelled with it`);
+  if (change.answersReset) parts.push(`${change.answersReset} accepted or tentative repl${change.answersReset === 1 ? 'y' : 'ies'} asked again`);
+  if (change.approvalCleared) parts.push('it waits for approval again');
+  const told = change.told?.issued ? describeReach(change.told, 'Guests told') : undefined;
+  return [parts.length ? `${parts.join('; ')}.` : undefined, told].filter(Boolean).join(' ') || undefined;
+}
+
+/** Lane 2f-2b: the dates a series move or cancellation reached — who was told is in describeChange. */
+function seriesLine(change?: CompanyEventChange | null): string | undefined {
+  return change?.series ? describeSeriesChange({ ...change.series, told: null }) : undefined;
+}
+
+/** A day as the card reads it: "Tue 14 Oct 2026". */
+const day = (s?: string | null) =>
+  s ? new Date(`${s.slice(0, 10)}T00:00:00Z`).toLocaleDateString(undefined, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
 const spaced = (s?: string | null) => (s ? s.replace(/([a-z])([A-Z])/g, '$1 $2') : '—');
 const hhmm = (t?: string | null) => (t ? t.slice(0, 5) : null);
+
+/**
+ * The window an event had before its first move (lane 5a, R4-6.1) — the server keeps it from the first move on
+ * (`MoveAsync`); null when it was moved before that was recorded.
+ */
+function originalWindow(e: CompanyEvent): string | null {
+  if (!e.originalStartDate) return null;
+  const from = e.originalStartDate.slice(0, 10);
+  const to = (e.originalEndDate ?? e.originalStartDate).slice(0, 10);
+  const start = e.isAllDayEvent ? null : hhmm(e.originalStartTime);
+  const end = e.isAllDayEvent ? null : hhmm(e.originalEndTime);
+  if (from === to) return `${from}${start ? ` · ${start}${end ? `–${end}` : ''}` : e.isAllDayEvent ? ' · all day' : ''}`;
+  return `${from}${start ? ` · ${start}` : ''} to ${to}${end ? ` · ${end}` : ''}`;
+}
 
 function Detail({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -80,6 +133,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
 
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  // Lane 2f-2b: on a recurring event, which dates a cancellation or a move reaches.
+  const [cancelScope, setCancelScope] = useState<SeriesScope>('ThisOccurrence');
+  const [moveScope, setMoveScope] = useState<SeriesScope>('ThisOccurrence');
   const [rescheduleOpen, setRescheduleOpen] = useState(false);
   const [reschedule, setReschedule] = useState({
     newStartDate: '',
@@ -87,10 +143,12 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     newEndDate: '',
     newEndTime: '',
     rescheduleReason: '',
+    newRsvpDeadline: '',
   });
   const [completeOpen, setCompleteOpen] = useState(false);
   const [complete, setComplete] = useState({ actualAttendance: '', outcomeSummary: '' });
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [announceOpen, setAnnounceOpen] = useState(false);
 
   const detailKey = ['hr', 'company-schedule', 'events', id, 'detail'];
   const { data: event, isLoading } = useQuery({
@@ -112,40 +170,89 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
     });
 
   // Round 4, lane N-b2: the reminder and the RSVP chase, sent now. The hourly sweep sends each once
-  // when it falls due; sending it here counts as that send, so nobody is told twice.
+  // when it falls due; sending it here counts as that send, so nobody is told twice. Lane 2e-2 (R4-6.3):
+  // only once it reached somebody — by an email the mail server took, or in the app. One that reached
+  // nobody stays due, and says so rather than "sent".
+  const sentOrDue = (what: string, sent: string) => async (r: CompanyEventNoticeResult) => {
+    await refresh();
+    toast(
+      r.stamped
+        ? { title: sent, description: describeReach(r) }
+        : {
+            title: `${what} not delivered`,
+            description: `${describeReach(r) ?? ''} It stays due: the hourly sweep tries again, or send it here once that is fixed.`,
+            variant: 'destructive',
+          },
+    );
+  };
   const remindNow = useMutation({
     mutationFn: () => companyEventService.sendEventReminders(id),
-    onSuccess: async ({ sent }) => {
-      await refresh();
-      toast({ title: 'Reminder sent', description: `${sent} participant${sent === 1 ? '' : 's'} reminded.` });
-    },
+    onSuccess: sentOrDue('Reminder', 'Reminder sent'),
     onError: fail('Could not send the reminder'),
   });
   const chaseNow = useMutation({
     mutationFn: () => companyEventService.sendRsvpReminders(id),
-    onSuccess: async ({ sent }) => {
-      await refresh();
-      toast({ title: 'Invitations chased', description: `${sent} unanswered invitation${sent === 1 ? '' : 's'} chased.` });
-    },
+    onSuccess: sentOrDue('Chase', 'Invitations chased'),
     onError: fail('Could not chase the invitations'),
   });
-
-  const approve = useMutation({
-    mutationFn: () => companyEventService.approve(id),
-    onSuccess: async () => {
-      await refresh();
-      toast({ title: 'Event approved' });
+  // Lane 2e-2: an invitation that reached nobody is left "Not delivered"; this sends those again.
+  const resendInvitations = useMutation({
+    mutationFn: () => companyEventService.sendUndeliveredInvitations(id),
+    onSuccess: async (r) => {
+      await Promise.all([
+        refresh(),
+        queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events', id, 'participants'] }),
+      ]);
+      toast({
+        title: r.reached ? 'Invitations sent' : 'Invitations still not delivered',
+        description: describeReach(r),
+        variant: r.reached ? undefined : 'destructive',
+      });
     },
-    onError: fail('Could not approve the event'),
+    onError: fail('Could not send the invitations'),
+  });
+
+  // Lane 2b (D-10): approval runs on the workflow engine. The shared actions show who it waits for and
+  // offer Approve and Reject to whoever the engine names; the decision goes through this module's own
+  // endpoints, which apply it to the event (the generic inbox path does not — cross-module #15).
+  const awaitingApproval =
+    !!event &&
+    event.requiresApproval &&
+    !event.approvalDate &&
+    !event.isCancelled &&
+    ['Scheduled', 'Rescheduled', 'Postponed'].includes(event.status);
+  const workflow = useWorkflowRecord({
+    entityType: 'CompanyEvent',
+    entityId: id,
+    entityLabel: 'Company event',
+    entityNumber: event?.eventNumber,
+    status: awaitingApproval ? 'PendingApproval' : (event?.status ?? 'Scheduled'),
+    // Events have no draft: the approval starts when the event is created.
+    canSubmit: false,
+    canApproveReject: awaitingApproval,
+    // No recall: the generic button would call the engine directly and leave the event waiting with
+    // nothing under way.
+    canRecall: false,
+    enabled: !!event?.requiresApproval,
+    commands: {
+      approve: (ctx) => companyEventService.approve(id, ctx.comments || null),
+      reject: (ctx) => companyEventService.reject(id, ctx.comments || ''),
+      afterAction: refresh,
+    },
+    onOpenWorkflows: () => router.push('/administration/workflow'),
   });
 
   const cancel = useMutation({
-    mutationFn: () => companyEventService.cancel(id, cancelReason.trim()),
-    onSuccess: async () => {
+    mutationFn: () =>
+      companyEventService.cancel(id, cancelReason.trim(), event?.recurrenceSeriesId ? cancelScope : undefined),
+    onSuccess: async (change) => {
       await refresh();
       setCancelOpen(false);
       setCancelReason('');
-      toast({ title: 'Event cancelled' });
+      toast({
+        title: change.series ? 'Dates cancelled' : 'Event cancelled',
+        description: [seriesLine(change), describeChange(change)].filter(Boolean).join(' ') || undefined,
+      });
     },
     onError: fail('Could not cancel the event'),
   });
@@ -158,11 +265,18 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         newEndDate: reschedule.newEndDate,
         newEndTime: reschedule.newEndTime ? `${reschedule.newEndTime}:00` : null,
         rescheduleReason: reschedule.rescheduleReason.trim(),
+        newRsvpDeadline: toIsoInstant(reschedule.newRsvpDeadline),
+        ...(event?.recurrenceSeriesId ? { seriesScope: moveScope } : {}),
       }),
-    onSuccess: async () => {
+    onSuccess: async (change) => {
       await refresh();
       setRescheduleOpen(false);
-      toast({ title: 'Event rescheduled' });
+      toast({
+        title: change.series ? 'Dates moved' : 'Event rescheduled',
+        description:
+          [seriesLine(change), describeChange(change), ...(change.warnings ?? []).map((w) => `⚠ ${w}`)]
+            .filter(Boolean).join(' ') || undefined,
+      });
     },
     onError: fail('Could not reschedule the event'),
   });
@@ -185,9 +299,9 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
 
   const remove = useMutation({
     mutationFn: () => companyEventService.remove(id),
-    onSuccess: async () => {
+    onSuccess: async (change) => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'company-schedule', 'events'] });
-      toast({ title: 'Event deleted' });
+      toast({ title: 'Event deleted', description: describeChange(change) });
       router.push('/hr/company-schedule/events');
     },
     onError: fail('Could not delete the event'),
@@ -206,36 +320,94 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
   }
 
   const open = !event.isCancelled && event.status !== 'Completed';
+  // Complete only once it has started (F-40); event times are GMT, as the server compares them.
+  const startsAt = new Date(
+    `${event.startDate.slice(0, 10)}T${event.isAllDayEvent || !event.startTime ? '00:00:00' : event.startTime}Z`,
+  );
+  const started = startsAt.getTime() <= Date.now();
+  // Lane 2e-1 (F-33): the buttons follow the sweep's rule, which the server applies to them too — live,
+  // approved where approval is needed, not postponed, and not yet begun; a chase also needs a reply-by
+  // date still ahead.
+  const today = new Date().toISOString().slice(0, 10);
+  const canRemind =
+    open && !awaitingApproval && event.status !== 'Postponed' && event.status !== 'InProgress'
+    && event.startDate.slice(0, 10) >= today;
+  const canChase =
+    canRemind && event.requiresRsvp && !!event.rsvpDeadline && new Date(event.rsvpDeadline).getTime() > Date.now();
+
+  // Lane 2e-2 (R4-6.3): issued vs delivered. A reminder or chase is stamped only once it reached somebody, so one
+  // past its day with no stamp reached nobody; an invitation is Sent only once it reached its guest.
+  const reminderDue = canRemind && !event.reminderSentDate && !!event.reminderDueOn && event.reminderDueOn.slice(0, 10) <= today;
+  const chaseDue = canChase && !event.rsvpReminderSentDate && !!event.rsvpChaseDueOn && event.rsvpChaseDueOn.slice(0, 10) <= today;
+  const guests = event.participants ?? [];
+  const notDelivered = guests.filter((p) => p.invitationStatus === 'NotSent').length;
+  // The server's rule (RefuseInviting): open, not awaiting approval, not yet begun.
+  const canResend =
+    open && !awaitingApproval && event.status !== 'InProgress' && event.startDate.slice(0, 10) >= today && notDelivered > 0;
+  const stillDue = 'it has reached nobody yet. The hourly sweep tries again.';
+
+  const reminderText = !event.sendReminders
+    ? 'Off — turn on Send reminders in Edit'
+    : event.reminderSentDate
+      ? `Sent ${new Date(event.reminderSentDate).toLocaleString()}`
+      : reminderDue
+        ? `Due since ${day(event.reminderDueOn)} — ${stillDue}`
+        : canRemind
+          ? `Goes on ${day(event.reminderDueOn)}, ${event.reminderDaysBefore ?? 0} day${event.reminderDaysBefore === 1 ? '' : 's'} before the event, automatically`
+          : 'Not sent';
+  const chaseText = !event.requiresRsvp || !event.rsvpDeadline
+    ? 'No RSVP deadline'
+    : event.rsvpReminderSentDate
+      ? `Chased ${new Date(event.rsvpReminderSentDate).toLocaleString()}`
+      : chaseDue
+        ? `Due since ${day(event.rsvpChaseDueOn)} — ${stillDue}`
+        : canChase
+          ? `Goes on ${day(event.rsvpChaseDueOn)}, automatically, to everybody who has not answered`
+          : 'Not sent';
+  const invitationsText = !guests.length
+    ? 'Nobody invited yet'
+    : awaitingApproval && notDelivered
+      ? `${notDelivered} wait${notDelivered === 1 ? 's' : ''} for the approval`
+      : `${guests.length - notDelivered} of ${guests.length} delivered${notDelivered ? ` — ${notDelivered} not delivered` : ''}`;
 
   return (
     <div className="space-y-6 p-6">
       <PageHeader
         title={event.eventName}
-        description={`${event.eventNumber} · organised by ${event.organizerName}`}
+        description={`${event.eventNumber}${
+          event.occurrenceNumber && event.occurrenceCount ? ` · occurrence ${event.occurrenceNumber} of ${event.occurrenceCount}` : ''
+        } · organised by ${event.organizerName}`}
         backHref="/hr/company-schedule/events"
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            {event.requiresApproval && !event.approvedById && open && (
-              <Button variant="outline" onClick={() => approve.mutate()} disabled={approve.isPending}>
-                <CheckCircle2 className="mr-2 h-4 w-4" /> Approve
-              </Button>
-            )}
+            {event.requiresApproval && <WorkflowApprovalActions {...workflow.actionProps} />}
             {open && (
               <>
                 <Button variant="outline" onClick={() => setRescheduleOpen(true)}>
                   <CalendarClock className="mr-2 h-4 w-4" /> Reschedule
                 </Button>
-                <Button variant="outline" onClick={() => setCompleteOpen(true)}>
-                  <CheckCircle2 className="mr-2 h-4 w-4" /> Complete
-                </Button>
+                {started && (
+                  <Button variant="outline" onClick={() => setCompleteOpen(true)}>
+                    <CheckCircle2 className="mr-2 h-4 w-4" /> Complete
+                  </Button>
+                )}
                 <Button variant="outline" onClick={() => setCancelOpen(true)}>
                   <XCircle className="mr-2 h-4 w-4" /> Cancel
                 </Button>
               </>
             )}
-            <Button variant="outline" onClick={() => router.push(`/hr/company-schedule/events/${id}/edit`)}>
-              <Pencil className="mr-2 h-4 w-4" /> Edit
-            </Button>
+            {/* Lane 2c: "Show on intranet" marks it to announce; HR sends it here, once it is approved. */}
+            {open && event.showOnIntranet && (
+              <Button variant="outline" onClick={() => setAnnounceOpen(true)}>
+                <Megaphone className="mr-2 h-4 w-4" /> Announce on the intranet
+              </Button>
+            )}
+            {/* A cancelled or completed event can no longer be edited (lane 2a). */}
+            {open && (
+              <Button variant="outline" onClick={() => router.push(`/hr/company-schedule/events/${id}/edit`)}>
+                <Pencil className="mr-2 h-4 w-4" /> Edit
+              </Button>
+            )}
             {canDelete && (
               <Button variant="destructive" onClick={() => setDeleteOpen(true)}>
                 <Trash2 className="mr-2 h-4 w-4" /> Delete
@@ -244,6 +416,28 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           </div>
         }
       />
+
+      {/* Lane 2f-1 (D-12): made and flagged, not skipped — moving it is HR's call. */}
+      {event.dayOffNote && open && (
+        <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+          {event.dayOffNote} It is kept as scheduled; reschedule it if it should not go ahead that day.
+        </p>
+      )}
+
+      {/* Lane 2h (C-51): made by Safety from a drill's next date — and kept in step with it. */}
+      {event.source && (
+        <p className="rounded-md border bg-muted/40 p-3 text-sm">
+          From{' '}
+          {event.source.link ? (
+            <Link className="font-medium text-primary underline underline-offset-2" href={event.source.link}>
+              {event.source.label}
+            </Link>
+          ) : (
+            <span className="font-medium">{event.source.label}</span>
+          )}
+          . Its date follows the drill&apos;s next date in Safety: a change there moves or cancels it here.
+        </p>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Overview</CardTitle></CardHeader>
@@ -262,14 +456,20 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
             {!event.isAllDayEvent && hhmm(event.endTime) ? ` · ${hhmm(event.endTime)}` : ''}
           </Detail>
           <Detail label="Repeats">
-            {event.isRecurring ? spaced(event.recurrencePattern) : 'One-off'}
+            {/* Lane 2f-1: a series' occurrence says which; a row saved as repeating before series existed says so. */}
+            {event.recurrenceSeriesId && event.recurrencePattern
+              ? `${RECURRENCE_PATTERN_LABELS[event.recurrencePattern]} — ${event.occurrenceNumber} of ${event.occurrenceCount ?? '?'}`
+              : event.isRecurring
+                ? `${spaced(event.recurrencePattern)} (no occurrences made)`
+                : 'One-off'}
           </Detail>
           <Detail label="Audience">{spaced(event.scope)}</Detail>
 
           <Detail label="Location type">{spaced(event.locationType)}</Detail>
           <Detail label="Site">{event.locationName || '—'}</Detail>
           <Detail label="Venue">{event.venueName || '—'}</Detail>
-          <Detail label="Department">{event.departmentName || 'Company-wide'}</Detail>
+          <Detail label="Organisation unit">{event.organizationUnitName || event.departmentName || '—'}</Detail>
+          <Detail label="For">{event.audienceDescription || '—'}</Detail>
 
           {event.locationType !== 'OnSite' && (
             <Detail label="Meeting link">
@@ -309,39 +509,58 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               {event.cancellationDate?.slice(0, 10)} — {event.cancellationReason}
             </Detail>
           )}
+          {/* Lane 5a (R4-6.1, F-21): the window it had before its first move, and when it was moved — the press, not a
+              date it was moved to (the dates above are where it is now). */}
           {event.isRescheduled && (
-            <Detail label="Rescheduled">
-              {event.rescheduledDate?.slice(0, 10)} — {event.rescheduleReason}
-            </Detail>
+            <>
+              <Detail label="Originally">{originalWindow(event) ?? 'Not recorded'}</Detail>
+              <Detail label="Moved on">
+                {event.rescheduledDate?.slice(0, 10) ?? '—'}
+                {event.rescheduleReason ? ` — ${event.rescheduleReason}` : ''}
+              </Detail>
+            </>
           )}
         </CardContent>
       </Card>
 
+      <EventSeriesCard event={event} open={open} />
+
+      {/* Lane 3d-2 (the user's ruling): the rooms booked for it, and booking one from here. */}
+      <EventRoomsCard event={event} open={open} />
+
       <Card>
-        <CardHeader><CardTitle>Reminders</CardTitle></CardHeader>
+        <CardHeader><CardTitle>Invitations and reminders</CardTitle></CardHeader>
         <CardContent className="space-y-4 text-sm">
-          <div className="grid gap-6 sm:grid-cols-2">
-            <Detail label="Event reminder">
-              {!event.sendReminders
-                ? 'Off — turn on Send reminders in Edit'
-                : event.reminderSentDate
-                  ? `Sent ${new Date(event.reminderSentDate).toLocaleString()}`
-                  : `Goes ${event.reminderDaysBefore ?? 0} day${event.reminderDaysBefore === 1 ? '' : 's'} before the event, automatically`}
-            </Detail>
-            <Detail label="RSVP chase">
-              {!event.requiresRsvp || !event.rsvpDeadline
-                ? 'No RSVP deadline'
-                : event.rsvpReminderSentDate
-                  ? `Chased ${new Date(event.rsvpReminderSentDate).toLocaleString()}`
-                  : 'Goes automatically ahead of the RSVP deadline, to everybody who has not answered'}
-            </Detail>
+          <div className="grid gap-6 sm:grid-cols-3">
+            <Detail label="Invitations">{invitationsText}</Detail>
+            <Detail label="Event reminder">{reminderText}</Detail>
+            <Detail label="RSVP chase">{chaseText}</Detail>
           </div>
-          {open && (
+          {/* Lane 2e-2: why nothing reaches the outside guests on a database with no mail server (Rule 7). */}
+          {open && !event.mailServerSetUp && (
+            <p className="rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100">
+              No mail server is set up, so no email goes. Employees with a login are told in the app; guests from
+              outside, and staff without a login, are not reached.
+            </p>
+          )}
+          {awaitingApproval && open && (
+            <p className="text-muted-foreground">
+              Nobody is invited while the event awaits approval: its invitations go out when it is approved.
+            </p>
+          )}
+          {(canRemind || canResend) && (
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
-                <BellRing className="mr-2 h-4 w-4" /> Send reminder now
-              </Button>
-              {event.requiresRsvp && (
+              {canResend && (
+                <Button variant="outline" onClick={() => resendInvitations.mutate()} disabled={resendInvitations.isPending}>
+                  <Send className="mr-2 h-4 w-4" /> Send the undelivered invitation{notDelivered === 1 ? '' : 's'} ({notDelivered})
+                </Button>
+              )}
+              {canRemind && (
+                <Button variant="outline" onClick={() => remindNow.mutate()} disabled={remindNow.isPending}>
+                  <BellRing className="mr-2 h-4 w-4" /> Send reminder now
+                </Button>
+              )}
+              {canChase && (
                 <Button variant="outline" onClick={() => chaseNow.mutate()} disabled={chaseNow.isPending}>
                   <MailQuestion className="mr-2 h-4 w-4" /> Chase unanswered now
                 </Button>
@@ -349,8 +568,11 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
             </div>
           )}
           <p className="text-muted-foreground">
-            Each is sent once. Sending it here counts as that send. Moving the event&apos;s date, or its
-            RSVP deadline, lets it go again for the new date.
+            An invitation, a reminder or a chase counts as sent once it reaches somebody — by an email the mail
+            server took, or in the app. The reminder and the chase are sent once; sending one here counts as that
+            send, and one that reaches nobody stays due. Moving the event&apos;s date, or its RSVP deadline, lets them
+            go again for the new date. Each invitation email carries a calendar entry; a move, a new venue or link,
+            a postponement, a cancellation or being taken off the list sends guests the update.
           </p>
         </CardContent>
       </Card>
@@ -377,11 +599,48 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
           <TabsTrigger value="attendance">Attendance ({event.attendanceRecords?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="tasks">Tasks ({event.tasks?.length ?? 0})</TabsTrigger>
           <TabsTrigger value="attachments">Attachments ({event.attachments?.length ?? 0})</TabsTrigger>
+          {event.requiresApproval && <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />}
         </TabsList>
-        <TabsContent value="participants" className="pt-4"><ParticipantsPanel eventId={id} /></TabsContent>
-        <TabsContent value="attendance" className="pt-4"><AttendancePanel eventId={id} /></TabsContent>
+        <TabsContent value="participants" className="pt-4">
+          <ParticipantsPanel
+            eventId={id}
+            open={open}
+            awaitingApproval={awaitingApproval}
+            mailServerSetUp={event.mailServerSetUp}
+            inSeries={!!event.recurrenceSeriesId}
+          />
+        </TabsContent>
+        <TabsContent value="attendance" className="pt-4">
+          {/* Lane 2d: a register once the event has started, never for a cancelled one — as the server rules. */}
+          <AttendancePanel
+            eventId={id}
+            markable={started && !event.isCancelled}
+            notMarkable={
+              event.isCancelled
+                ? 'This event was cancelled, so there is no attendance to mark.'
+                : 'Attendance is marked once the event has started.'
+            }
+          />
+        </TabsContent>
         <TabsContent value="tasks" className="pt-4"><TasksPanel eventId={id} /></TabsContent>
-        <TabsContent value="attachments" className="pt-4"><AttachmentsPanel eventId={id} /></TabsContent>
+        <TabsContent value="attachments" className="pt-4">
+          <AttachmentsPanel eventId={id} cancelled={event.isCancelled || event.status === 'Cancelled'} />
+        </TabsContent>
+        {event.requiresApproval && (
+          <WorkflowTabContent
+            {...workflow.tabProps}
+            value="workflow"
+            entityType="CompanyEvent"
+            entityId={id}
+            entityLabel="Company event"
+            entityNumber={event.eventNumber}
+            status={awaitingApproval ? 'PendingApproval' : event.status}
+            onAfterAction={async () => {
+              await refresh();
+              await workflow.refresh();
+            }}
+          />
+        )}
       </Tabs>
 
       {/* Cancel */}
@@ -401,6 +660,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               placeholder="Why is it being cancelled?"
             />
           </div>
+          {event.recurrenceSeriesId && (
+            <SeriesScopeField
+              value={cancelScope}
+              onChange={setCancelScope}
+              hint="This and following ends the series at this date; their rooms are cancelled with them."
+            />
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setCancelOpen(false)}>Keep it</Button>
             <Button
@@ -415,12 +681,17 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
         </DialogContent>
       </Dialog>
 
+      <EventAnnounceDialog eventId={id} eventName={event.eventName} open={announceOpen} onOpenChange={setAnnounceOpen} />
+
       {/* Reschedule */}
       <Dialog open={rescheduleOpen} onOpenChange={setRescheduleOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Reschedule</DialogTitle>
-            <DialogDescription>The original dates are kept on the record as history.</DialogDescription>
+            <DialogDescription>
+              The original dates are kept. Everybody invited is told why; accepted and tentative replies are
+              asked again; room bookings for the event move with it. Leave the times empty to keep its hours.
+            </DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -460,6 +731,20 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               />
             </div>
           </div>
+          {event.requiresRsvp && (
+            <div className="space-y-2">
+              <Label htmlFor="newRsvpDeadline">New RSVP deadline</Label>
+              <Input
+                id="newRsvpDeadline"
+                type="datetime-local"
+                value={reschedule.newRsvpDeadline}
+                onChange={(e) => setReschedule({ ...reschedule, newRsvpDeadline: e.target.value })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Needed only if the current one would fall after the new start. Empty keeps it.
+              </p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="rescheduleReason">Reason</Label>
             <Textarea
@@ -469,6 +754,13 @@ export default function CompanyEventDetailPage({ params }: { params: Promise<{ i
               onChange={(e) => setReschedule({ ...reschedule, rescheduleReason: e.target.value })}
             />
           </div>
+          {event.recurrenceSeriesId && (
+            <SeriesScopeField
+              value={moveScope}
+              onChange={setMoveScope}
+              hint="The other dates move by the same number of days, to the new times when you give them; a new reply-by date keeps its distance from each date."
+            />
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setRescheduleOpen(false)}>Cancel</Button>
             <Button

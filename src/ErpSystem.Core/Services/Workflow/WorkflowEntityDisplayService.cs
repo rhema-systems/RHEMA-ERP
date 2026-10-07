@@ -199,6 +199,37 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            // Company-schedule final closure, lane 2b (D-10): the inbox row names the event and its day,
+            // and links to the event page — where Approve reaches the record (the generic inbox path does
+            // not, cross-module #15).
+            if (key == Normalize("CompanyEvent") || key == Normalize("COMPANY_EVENT") || key == Normalize("Company Event"))
+            {
+                var companyEvent = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.CompanySchedule.CompanyEvent>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId);
+                info.EntityType = "CompanyEvent";
+                info.EntityNumber = companyEvent?.EventNumber;
+                info.EntityName = companyEvent == null
+                    ? null
+                    : $"{companyEvent.EventName} on {companyEvent.StartDate:dd MMM yyyy}";
+                info.ActionUrl = $"/hr/company-schedule/events/{entityId}";
+                return info;
+            }
+
+            // Company-schedule final closure, lane 3b-1 (D-10): the inbox row names the room, its day and its booking,
+            // and links to the booking page — where Approve reaches the record (the generic inbox path does not, #15).
+            if (key == Normalize("RoomBooking") || key == Normalize("ROOM_BOOKING") || key == Normalize("Room Booking"))
+            {
+                var booking = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.CompanySchedule.RoomBooking>()
+                    .FirstOrDefaultAsync(x => x.Id == entityId, x => x.Room);
+                info.EntityType = "RoomBooking";
+                info.EntityNumber = booking?.BookingNumber;
+                info.EntityName = booking == null
+                    ? null
+                    : $"{booking.Room?.RoomName ?? "A room"} on {booking.StartDateTime:dd MMM yyyy, HH:mm}";
+                info.ActionUrl = $"/hr/company-schedule/bookings/{entityId}";
+                return info;
+            }
+
             if (key == Normalize("StaffOvertimeRequest") || key == Normalize("STAFF_OVERTIME_REQUEST") || key == Normalize("Overtime Request"))
             {
                 var overtime = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffAttendance.StaffOvertimeRequest>()

@@ -7,12 +7,14 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.HR;
 
 /// <summary>
 /// The company schedule — events with participants, attendance, attachments and tasks; meeting
-/// rooms and their bookings; company milestones; business closures; fiscal years and periods.
+/// rooms and their bookings; company milestones; business closures; and Finance's fiscal calendar, read-only (lane 4b:
+/// HR's own fiscal years and periods are retired, D-6).
 /// </summary>
 /// <remarks>
 /// <para><b>W3 slice 14.</b> All 90 actions carried a bare <c>[Authorize]</c> and no screen has
@@ -45,7 +47,12 @@ public class CompanyScheduleController : HrControllerBase
     private readonly IRoomBookingService _bookingService;
     private readonly ICompanyMilestoneService _milestoneService;
     private readonly IBusinessClosureService _closureService;
-    private readonly IFiscalYearService _fiscalYearService;
+    // Lane 2h (C-18): event attachments through the upload gate, and their download.
+    private readonly ErpSystem.Api.Services.HR.IHrControlledDocumentService _hrDocuments;
+    private readonly ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService _centralDocuments;
+    private readonly IFileStorageService _fileStorage;
+    private readonly ErpSystem.Data.ApplicationDbContext _db;
+    private readonly ILogger<CompanyScheduleController> _logger;
 
     public CompanyScheduleController(
         ICompanyEventService eventService,
@@ -53,9 +60,13 @@ public class CompanyScheduleController : HrControllerBase
         IRoomBookingService bookingService,
         ICompanyMilestoneService milestoneService,
         IBusinessClosureService closureService,
-        IFiscalYearService fiscalYearService,
         ErpSystem.Core.Services.HR.CompanySchedule.IPersonalScheduleService personalSchedule,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ErpSystem.Api.Services.HR.IHrControlledDocumentService hrDocuments,
+        ErpSystem.Core.Interfaces.DocumentManagement.ICentralDocumentRepositoryFileService centralDocuments,
+        IFileStorageService fileStorage,
+        ErpSystem.Data.ApplicationDbContext db,
+        ILogger<CompanyScheduleController> logger)
         : base(currentUser)
     {
         _eventService = eventService;
@@ -63,8 +74,12 @@ public class CompanyScheduleController : HrControllerBase
         _bookingService = bookingService;
         _milestoneService = milestoneService;
         _closureService = closureService;
-        _fiscalYearService = fiscalYearService;
         _personalSchedule = personalSchedule;
+        _hrDocuments = hrDocuments;
+        _centralDocuments = centralDocuments;
+        _fileStorage = fileStorage;
+        _db = db;
+        _logger = logger;
     }
 
     #region Company Events
@@ -80,6 +95,43 @@ public class CompanyScheduleController : HrControllerBase
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _eventService.GetPagedAsync(pageNumber, pageSize));
+
+    /// <summary>
+    /// The events register (lane 2g-1, C-10…C-13): text, status, category, site, unit, organiser, series and a date range
+    /// (by overlap), sorted and paged on the server.
+    /// </summary>
+    [HttpGet("events/search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<PagedResult<CompanyEventDto>>> SearchEvents([FromQuery] CompanyEventSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.SearchAsync(search, ct));
+    }
+
+    /// <summary>
+    /// Every event the same search finds, as a CSV (lane 2g-1, C-12) — on the register's own read permission (the user's
+    /// ruling), as the leave register's export is.
+    /// </summary>
+    [HttpGet("events/export")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> ExportEvents([FromQuery] CompanyEventSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return File(await _eventService.ExportCsvAsync(search, ct), "text/csv", $"company-events-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
+
+    /// <summary>The landing page in one read (lane 2g-1, D-9): the next 30 days' events, the bookings awaiting approval,
+    /// the next 60 days' closures and the next 90 days' milestones.</summary>
+    [HttpGet("dashboard")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<CompanyScheduleDashboardDto>> GetDashboard(CancellationToken ct)
+        => Ok(new CompanyScheduleDashboardDto
+        {
+            UpcomingEvents = (await _eventService.GetUpcomingEventsAsync(30, ct)).ToList(),
+            PendingBookings = (await _bookingService.GetPendingApprovalsAsync(ct)).ToList(),
+            UpcomingClosures = (await _closureService.GetUpcomingClosuresAsync(60, ct)).ToList(),
+            UpcomingMilestones = (await _milestoneService.GetUpcomingMilestonesAsync(90, ct)).ToList(),
+        });
 
     [HttpGet("events/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -103,10 +155,54 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByOrganizer(Guid organizerId)
         => Ok(await _eventService.GetByOrganizerAsync(organizerId));
 
-    [HttpGet("events/department/{departmentId:guid}")]
+    /// <summary>
+    /// Who an event with this scope and visibility would be for, and how many people that is (lane 2c,
+    /// D-16) — the line the event form shows before saving, with a warning when it reaches nobody.
+    /// </summary>
+    [HttpGet("events/audience-preview")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByDepartment(Guid departmentId)
-        => Ok(await _eventService.GetByDepartmentAsync(departmentId));
+    public async Task<ActionResult<EventAudiencePreviewDto>> PreviewEventAudience(
+        [FromQuery] ParticipantScope scope,
+        [FromQuery] EventVisibility visibility,
+        [FromQuery] Guid? organizationUnitId)
+        => Ok(await _eventService.PreviewAudienceAsync(scope, visibility, organizationUnitId));
+
+    /// <summary>
+    /// The live events these dates, this audience and this site would clash with (lane 2g-2, C-15), each refused or
+    /// warned of — what the form shows before saving. Saves nothing.
+    /// </summary>
+    [HttpGet("events/clashes")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IReadOnlyList<EventClashDto>>> FindEventClashes([FromQuery] EventClashQueryDto query, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.FindClashesAsync(query, ct));
+    }
+
+    /// <summary>What announcing the event on the intranet would say, and to how many; saves nothing (lane 2c).</summary>
+    [HttpGet("events/{id:guid}/announcement")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventAnnouncementPreviewDto>> PreviewEventAnnouncement(Guid id)
+        => Ok(await _eventService.PreviewAnnouncementAsync(id));
+
+    /// <summary>
+    /// Announces the event on the intranet to its audience — HR's click, never a save's side effect
+    /// (lane 2c; the closures' rule, L1-1). 422 with the reason when it cannot be announced.
+    /// </summary>
+    [HttpPost("events/{id:guid}/announce")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<HrAnnouncementDto>> AnnounceEvent(Guid id)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var publisherId, "Announcing an event");
+        if (ctx != null) return ctx;
+        return Ok(await _eventService.AnnounceAsync(id, publisherId));
+    }
+
+    /// <summary>Events for one organisation unit (lane 2a; replaces the retired department read, D-5).</summary>
+    [HttpGet("events/unit/{organizationUnitId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetEventsByOrganizationUnit(Guid organizationUnitId)
+        => Ok(await _eventService.GetByOrganizationUnitAsync(organizationUnitId));
 
     [HttpGet("events/status/{status}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -123,15 +219,19 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<CompanyEventSummaryDto>>> GetUpcomingEvents([FromQuery] int daysAhead = 30)
         => Ok(await _eventService.GetUpcomingEventsAsync(daysAhead));
 
+    /// <summary>
+    /// Creates an event. The organiser is the one chosen on the form, or the caller (D-11); the caller is
+    /// recorded as the creator either way, so an account with no employee record still cannot create one.
+    /// </summary>
     [HttpPost("events")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<CompanyEventDto>> CreateEvent([FromBody] CreateCompanyEventDto dto)
     {
         if (!ModelState.IsValid) return BadRequest(ModelState);
-        var ctx = TryGetEmployeeWriteContext(out _, out _, out var organizerId, "Organising an event");
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var callerEmployeeId, "Organising an event");
         if (ctx != null) return ctx;
 
-        var created = await _eventService.CreateAsync(dto, organizerId);
+        var created = await _eventService.CreateAsync(dto, callerEmployeeId);
         return CreatedAtAction(nameof(GetEvent), new { id = created.Id }, created);
     }
 
@@ -145,33 +245,57 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Approves an event awaiting approval (lane 2b, D-10): the engine decides whether the caller may — the
+    /// approver its definition names — and with no approval under way, <c>HR.Company.Approve</c>. The
+    /// organiser may not approve their own. The body is optional: <c>{ comments }</c>.
+    /// </summary>
     [HttpPost("events/{id:guid}/approve")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> ApproveEvent(Guid id)
+    public async Task<IActionResult> ApproveEvent(
+        Guid id,
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)] EventDecisionDto? dto)
     {
         var ctx = TryGetEmployeeWriteContext(out _, out _, out var approvedById, "Approving an event");
         if (ctx != null) return ctx;
 
-        await _eventService.ApproveEventAsync(id, approvedById);
+        await _eventService.ApproveEventAsync(id, approvedById, dto?.Comments);
         return Ok(new { message = "Event approved" });
     }
 
-    [HttpPost("events/{id:guid}/cancel")]
+    /// <summary>
+    /// Rejects an event awaiting approval (lane 2b): it is cancelled with the reason, which everybody
+    /// invited is told, and its room bookings are cancelled with it. Body: <c>{ comments }</c>, required.
+    /// </summary>
+    [HttpPost("events/{id:guid}/reject")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> CancelEvent(Guid id, [FromBody] CancelEventDto dto)
+    public async Task<ActionResult<CompanyEventChangeDto>> RejectEvent(Guid id, [FromBody] EventDecisionDto dto)
     {
-        dto.EventId = id;
-        await _eventService.CancelEventAsync(dto);
-        return Ok(new { message = "Event cancelled" });
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var rejectedById, "Rejecting an event");
+        if (ctx != null) return ctx;
+
+        return Ok(await _eventService.RejectEventAsync(id, rejectedById, dto.Comments ?? string.Empty));
     }
 
-    [HttpPost("events/{id:guid}/reschedule")]
+    /// <summary>Cancels the event and its live room bookings, and answers what was cancelled (F-39).</summary>
+    [HttpPost("events/{id:guid}/cancel")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> RescheduleEvent(Guid id, [FromBody] RescheduleEventDto dto)
+    public async Task<ActionResult<CompanyEventChangeDto>> CancelEvent(Guid id, [FromBody] CancelEventDto dto)
     {
         dto.EventId = id;
-        await _eventService.RescheduleEventAsync(dto);
-        return Ok(new { message = "Event rescheduled" });
+        return Ok(await _eventService.CancelEventAsync(dto));
+    }
+
+    /// <summary>
+    /// Moves the event — its room bookings with it, answers back to awaiting a reply, an approval cleared —
+    /// and answers what changed (F-38, C-7).
+    /// </summary>
+    [HttpPost("events/{id:guid}/reschedule")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<CompanyEventChangeDto>> RescheduleEvent(Guid id, [FromBody] RescheduleEventDto dto)
+    {
+        dto.EventId = id;
+        return Ok(await _eventService.RescheduleEventAsync(dto));
     }
 
     [HttpPost("events/{id:guid}/complete")]
@@ -183,13 +307,11 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(new { message = "Event completed" });
     }
 
+    /// <summary>Deletes the event after cancelling its live room bookings; answers 200 with the bookings cancelled (F-39).</summary>
     [HttpDelete("events/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteEvent(Guid id)
-    {
-        await _eventService.DeleteAsync(id);
-        return NoContent();
-    }
+    public async Task<ActionResult<CompanyEventChangeDto>> DeleteEvent(Guid id)
+        => Ok(await _eventService.DeleteAsync(id));
 
     #region Participants
 
@@ -208,12 +330,26 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<EventParticipantDto>>> GetParticipants(Guid eventId)
         => Ok(await _eventService.GetParticipantsAsync(eventId));
 
+    /// <summary>
+    /// Records a guest's answer. Only accepted, declined or tentative, from a guest of this event (F-11). On a series,
+    /// <c>scope</c> records it for this and following dates, or every date (lane 2f-2a); the answer lists them.
+    /// </summary>
     [HttpPost("events/{eventId:guid}/participants/respond")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> RespondToInvitation(Guid eventId, [FromBody] RespondToEventInvitationDto dto)
+    public async Task<ActionResult<EventSeriesGuestResultDto>> RespondToInvitation(Guid eventId, [FromBody] RespondToEventInvitationDto dto)
+        => Ok(await _eventService.RespondToInvitationAsync(eventId, dto));
+
+    /// <summary>
+    /// Corrects a guest: their role, whether they are required, their needs, and an outside guest's name,
+    /// address and organisation (lane 2d, C-22).
+    /// </summary>
+    [HttpPut("participants/{participantId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventParticipantDto>> UpdateParticipant(Guid participantId, [FromBody] UpdateEventParticipantDto dto)
     {
-        await _eventService.RespondToInvitationAsync(dto);
-        return Ok(new { message = "Invitation response recorded" });
+        if (participantId != dto.Id) return BadRequest("ID mismatch");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _eventService.UpdateParticipantAsync(dto));
     }
 
     // =========================================================================
@@ -248,26 +384,121 @@ public class CompanyScheduleController : HrControllerBase
     /// scheduling something for their team.
     /// </summary>
     /// <remarks>
-    /// ⚠ Gated on the company-schedule WRITE policy rather than Read: this exposes other people's
-    /// leave and travel, which is desk information, not general reading.
+    /// ⚠ This exposes other people's leave and travel, which is desk information, not general reading: the HR desk
+    /// (the company-schedule WRITE policy) reads any unit; since lane 5b (R4-10B.3, the user's ruling) a unit's head —
+    /// or the head of a unit above it — reads theirs without that permission. Nobody else: not a line manager, not a
+    /// member of the unit.
     /// </remarks>
     [HttpGet("team-schedule/{organizationUnitId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<TeamScheduleDto>> GetTeamSchedule(
         Guid organizationUnitId, [FromQuery] DateOnly from, [FromQuery] DateOnly to, CancellationToken ct)
-        => Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
+    {
+        if (!await IsHrDeskAsync()
+            && !await _personalSchedule.HeadsUnitOrAncestorAsync(CurrentUser.EmployeeId, organizationUnitId, ct))
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                message = "A team schedule is for the HR desk and the unit's head (or the head of a unit above it).",
+            });
+        return Ok(await _personalSchedule.GetForUnitAsync(organizationUnitId, from, to, ct));
+    }
 
-    /// <summary>Chases everybody who has not answered their invitation (round 4, D6).</summary>
+    /// <summary>
+    /// The units whose team schedule the caller may read (lane 5b): every active unit for the HR desk; the units a head
+    /// heads and every unit beneath them; none for anyone else — the page says so rather than offering units it would
+    /// refuse.
+    /// </summary>
+    [HttpGet("team-schedule/units")]
+    public async Task<ActionResult<TeamScheduleUnitsDto>> GetTeamScheduleUnits(CancellationToken ct)
+        => Ok(await _personalSchedule.GetReadableUnitsAsync(CurrentUser.EmployeeId, await IsHrDeskAsync(), ct));
+
+    /// <summary>The HR desk for the team schedule: the company-schedule WRITE policy, checked per request.</summary>
+    private async Task<bool> IsHrDeskAsync()
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, HrPermissions.CompanyWritePolicy)).Succeeded;
+    }
+
+    // ── The company calendar (lane 7, D-7, D-8) ─────────────────────────────────────────────────
+
+    /// <summary>The company-schedule READ policy, checked per request: the desk's whole-company calendar.</summary>
+    private async Task<bool> CanReadCompanyAsync()
+    {
+        var authorization = HttpContext.RequestServices.GetRequiredService<IAuthorizationService>();
+        return (await authorization.AuthorizeAsync(User, HrPermissions.CompanyReadPolicy)).Succeeded;
+    }
+
+    /// <summary>
+    /// The company calendar between two dates (at most sixty days apart) for any signed-in internal user — the server
+    /// decides what each may see (<c>ICompanyCalendarService</c>). <paramref name="roomId"/> narrows it to one room: the
+    /// room view (C-26, C-35).
+    /// </summary>
+    [HttpGet("calendar")]
+    public async Task<ActionResult<CompanyCalendarDto>> GetCompanyCalendar(
+        [FromQuery] DateOnly from, [FromQuery] DateOnly to, [FromQuery] Guid? roomId,
+        [FromServices] ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService calendar, CancellationToken ct)
+    {
+        if (from == default || to == default) return BadRequest(new { message = "Say which dates (from and to)." });
+        return Ok(await calendar.GetCalendarAsync(CurrentUser.EmployeeId, await CanReadCompanyAsync(), from, to, roomId, ct));
+    }
+
+    /// <summary>
+    /// An event as staff see it (lane 7) — for its organiser, its guests, its audience and the HR desk; anyone else gets 404.
+    /// </summary>
+    [HttpGet("calendar/events/{eventId:guid}")]
+    public async Task<ActionResult<CalendarEventViewDto>> GetCalendarEvent(
+        Guid eventId, [FromServices] ErpSystem.Core.Services.HR.CompanySchedule.ICompanyCalendarService calendar, CancellationToken ct)
+        => Ok(await calendar.GetEventAsync(eventId, CurrentUser.EmployeeId, await CanReadCompanyAsync(), ct));
+
+    /// <summary>
+    /// The invitee's own answer (lane 7, D-8): any signed-in internal user, for their OWN invitation only — anybody else's
+    /// is 404 — and only while it may be answered (sent, not awaiting approval, before the reply-by date or the start, not
+    /// closed: 422 with the reason). The organiser is told in the app. The HR desk's <c>participants/respond</c> is
+    /// unchanged.
+    /// </summary>
+    [HttpPost("events/{eventId:guid}/participants/{participantId:guid}/reply")]
+    public async Task<ActionResult<EventSeriesGuestResultDto>> ReplyToOwnInvitation(
+        Guid eventId, Guid participantId, [FromBody] ReplyToEventInvitationDto reply, CancellationToken ct)
+    {
+        if (CurrentUser.EmployeeId is not { } me || me == Guid.Empty)
+            return BadRequest(new { message = "Your user account is not linked to an employee record." });
+        return Ok(await _eventService.ReplyToOwnInvitationAsync(eventId, participantId, me, reply, ct));
+    }
+
+    /// <summary>
+    /// Chases everybody who has not answered their invitation (round 4, D6) — answering who it was for and who it
+    /// reached (lane 2e-2). It counted attempts as <c>sent</c>.
+    /// </summary>
     [HttpPost("events/{eventId:guid}/rsvp-reminders")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SendRsvpReminders(Guid eventId, CancellationToken ct)
-        => Ok(new { sent = await _eventService.SendRsvpRemindersAsync(eventId, ct) });
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendRsvpReminders(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendRsvpRemindersAsync(eventId, ct));
 
-    /// <summary>Reminds every participant who has not declined that the event is coming (D6).</summary>
+    /// <summary>Reminds every participant who has not declined that the event is coming (D6), with who it reached (lane 2e-2).</summary>
     [HttpPost("events/{eventId:guid}/reminders")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SendEventReminders(Guid eventId, CancellationToken ct)
-        => Ok(new { sent = await _eventService.SendEventRemindersAsync(eventId, ct) });
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendEventReminders(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendEventRemindersAsync(eventId, ct));
+
+    /// <summary>The room bookings made for the event, any status, in time order (lane 3d-2: the event page's Rooms card).</summary>
+    [HttpGet("events/{eventId:guid}/bookings")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IEnumerable<RoomBookingSummaryDto>>> GetEventBookings(Guid eventId, CancellationToken ct)
+        => Ok(await _bookingService.GetByEventAsync(eventId, ct));
+
+    /// <summary>
+    /// Extends the event's series on its rule (lane 2f-1): either how many more occurrences, or until a date. Its guests come
+    /// (2f-2a), and so do the latest date's rooms, booked by whoever extends (lane 3d-2).
+    /// </summary>
+    [HttpPost("events/{eventId:guid}/series/extend")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventSeriesResultDto>> ExtendSeries(Guid eventId, [FromBody] ExtendEventSeriesDto dto, CancellationToken ct)
+        => Ok(await _eventService.ExtendSeriesAsync(eventId, dto, ct));
+
+    /// <summary>Sends again the invitations that reached nobody (lane 2e-2), with who they reached this time.</summary>
+    [HttpPost("events/{eventId:guid}/invitations/send")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<CompanyEventNoticeResultDto>> SendUndeliveredInvitations(Guid eventId, CancellationToken ct)
+        => Ok(await _eventService.SendUndeliveredInvitationsAsync(eventId, ct));
 
     /// <summary>
     /// Runs the reminder sweep now for the caller's tenant (round 4, lane N-b2) — exactly the code the
@@ -276,15 +507,24 @@ public class CompanyScheduleController : HrControllerBase
     [HttpPost("reminders/run")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<CompanyScheduleReminderRunDto>> RunDueReminders(CancellationToken ct)
-        => Ok(await _eventService.RunDueRemindersNowAsync(ct));
-
-    [HttpDelete("participants/{participantId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> RemoveParticipant(Guid participantId)
     {
-        await _eventService.RemoveParticipantAsync(participantId);
-        return NoContent();
+        var run = await _eventService.RunDueRemindersNowAsync(ct);
+        // Lane 3b-2: the sweep's booking half — lapses and completions — as the hourly run does it.
+        var swept = await _bookingService.SweepNowAsync(ct);
+        run.BookingsLapsed = swept.Lapsed;
+        run.BookingsCompleted = swept.Completed;
+        return Ok(run);
     }
+
+    /// <summary>
+    /// Uninvites a guest — organiser work, on Write (lane 2d); it needed Admin. On a series, <c>?scope=</c>
+    /// ThisAndFollowing or WholeSeries takes them off those dates still to come (lane 2f-2a); the answer lists them.
+    /// </summary>
+    [HttpDelete("participants/{participantId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<EventSeriesGuestResultDto>> RemoveParticipant(
+        Guid participantId, [FromQuery] SeriesScope scope = SeriesScope.ThisOccurrence)
+        => Ok(await _eventService.RemoveParticipantAsync(participantId, scope));
 
     #endregion
 
@@ -316,17 +556,54 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(new { message = "Checked out" });
     }
 
+    /// <summary>Removes a row from the event's register — a correction, on Write, not an Admin destruction (C-21, D-9).</summary>
+    [HttpDelete("events/{eventId:guid}/attendance/{attendanceId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> RemoveAttendance(Guid eventId, Guid attendanceId)
+    {
+        await _eventService.RemoveAttendanceAsync(eventId, attendanceId);
+        return NoContent();
+    }
+
     #endregion
 
     #region Event Attachments
 
+    /// <summary>
+    /// Attaches a file to an event — its agenda, minutes, slides or a resource — through the upload gate: scanned, stored
+    /// and registered (lane 2h, C-18). It took a file name and a path in JSON, and stored no file (F-54).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The event is resolved — and a cancelled one refused — BEFORE a byte is stored: the gate cannot roll a stored
+    /// file back once its registration has run (the asset photographs' lesson).
+    /// </remarks>
     [HttpPost("events/{eventId:guid}/attachments")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<EventAttachmentDto>> AddEventAttachment(Guid eventId, [FromBody] CreateEventAttachmentDto dto)
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddEventAttachment(
+        Guid eventId,
+        IFormFile file,
+        [FromForm] EventAttachmentType type,
+        [FromForm] string? description,
+        CancellationToken ct)
     {
-        dto.EventId = eventId;
-        var created = await _eventService.AddAttachmentAsync(dto);
-        return CreatedAtAction(nameof(GetEventAttachments), new { eventId }, created);
+        var ev = await _eventService.GetByIdAsync(eventId, ct);
+        if (ErpSystem.Core.Services.HR.CompanyEventRules.RefuseAttaching(ev.EventName, ev.IsCancelled, ev.Status, type) is { } refusal)
+            throw new InvalidOperationException(refusal);
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "CompanyEvent",
+            sourceRecordId: eventId,
+            sourceLabel: $"Company event {ev.EventNumber}",
+            documentType: "CompanyEventAttachment",
+            description: description,
+            persist: (uploadedById, document) => _eventService.AddUploadedAttachmentAsync(
+                eventId, type, description, uploadedById,
+                document.OriginalFileName, document.FilePath, document.FileSize, document.FileUploadRecordId,
+                document.DocumentRecordId, document.DocumentVersionId, ct),
+            ct,
+            category: ControlledFileUploadCategories.HrCompanyScheduleAttachments);
     }
 
     [HttpGet("events/{eventId:guid}/attachments")]
@@ -334,8 +611,37 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<EventAttachmentDto>>> GetEventAttachments(Guid eventId)
         => Ok(await _eventService.GetAttachmentsAsync(eventId));
 
+    /// <summary>
+    /// Downloads an event's file (lane 2h, C-18), on the register's read permission. A row from before the gate is a
+    /// reference with no file stored (F-54): it answers 404, saying so.
+    /// </summary>
+    [HttpGet("attachments/{attachmentId:guid}/download")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> DownloadEventAttachment(Guid attachmentId, CancellationToken ct)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is this endpoint's: the download helper performs none. The service applies the tenant.
+        var attachment = await _eventService.GetAttachmentAsync(attachmentId, ct);
+        if (!attachment.HasFile)
+            return NotFound(new { message = "Reference only — no file stored. It was recorded before files were uploaded here." });
+
+        // ⚠ No legacy path: a path a caller once typed is not a file this server stored (F-54).
+        var stored = await _db.EventAttachments.AsNoTracking()
+            .Where(a => a.Id == attachmentId && a.TenantId == tenantId)
+            .Select(a => new { a.DocumentRecordId, a.DocumentVersionId, a.FileUploadRecordId })
+            .FirstAsync(ct);
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            stored.DocumentRecordId, stored.DocumentVersionId, stored.FileUploadRecordId,
+            legacyPath: null, attachment.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Removes an event's file — organiser work, on Write (lane 2h, the user's ruling); it was Admin.</summary>
     [HttpDelete("attachments/{attachmentId:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<IActionResult> DeleteEventAttachment(Guid attachmentId)
     {
         await _eventService.DeleteAttachmentAsync(attachmentId);
@@ -446,6 +752,10 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Refused while the room has any booking on record — deactivate it instead (D-18, F-49: deleting one hid its
+    /// history from the register).
+    /// </summary>
     [HttpDelete("rooms/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     public async Task<IActionResult> DeleteMeetingRoom(Guid id)
@@ -453,6 +763,15 @@ public class CompanyScheduleController : HrControllerBase
         await _roomService.DeleteAsync(id);
         return NoContent();
     }
+
+    /// <summary>
+    /// What retiring the room would touch (D-18, lane 3a): its bookings still to come, which deactivating it offers to
+    /// cancel, and whether it can be deleted at all. The Rooms screens ask it before deactivating or deleting.
+    /// </summary>
+    [HttpGet("rooms/{id:guid}/retirement")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<RoomRetirementDto>> GetRoomRetirement(Guid id, CancellationToken ct)
+        => Ok(await _roomService.GetRetirementAsync(id, ct));
 
     #endregion
 
@@ -469,6 +788,24 @@ public class CompanyScheduleController : HrControllerBase
         [FromQuery] int pageNumber = 1,
         [FromQuery] int pageSize = 20)
         => Ok(await _bookingService.GetPagedAsync(pageNumber, pageSize));
+
+    /// <summary>The bookings register (lane 2g-1, C-25): text, status, room and a date range, sorted and paged on the server.</summary>
+    [HttpGet("bookings/search")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<PagedResult<RoomBookingDto>>> SearchBookings([FromQuery] RoomBookingSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _bookingService.SearchAsync(search, ct));
+    }
+
+    /// <summary>Every booking the same search finds, as a CSV (lane 2g-1, C-25), on the register's read permission.</summary>
+    [HttpGet("bookings/export")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> ExportBookings([FromQuery] RoomBookingSearchDto search, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return File(await _bookingService.ExportCsvAsync(search, ct), "text/csv", $"room-bookings-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
 
     [HttpGet("bookings/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
@@ -514,6 +851,22 @@ public class CompanyScheduleController : HrControllerBase
         return CreatedAtAction(nameof(GetBooking), new { id = created.Id }, created);
     }
 
+    /// <summary>
+    /// Books the room for every date of the linked event's series in the scope still to come (lane 3d-1, D-12): one booking
+    /// per date, each at the same distance from its date's start; the dates the room cannot take listed, saying why. On a
+    /// room needing approval the first date's approval covers the rest (the user's ruling).
+    /// </summary>
+    [HttpPost("bookings/series")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingSeriesResultDto>> CreateSeriesBookings([FromBody] CreateRoomBookingSeriesDto dto, CancellationToken ct)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var bookedById, "Booking a room");
+        if (ctx != null) return ctx;
+
+        return Ok(await _bookingService.CreateForSeriesAsync(dto, bookedById, ct));
+    }
+
     [HttpPut("bookings/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
     public async Task<ActionResult<RoomBookingDto>> UpdateBooking(Guid id, [FromBody] UpdateRoomBookingDto dto)
@@ -533,6 +886,29 @@ public class CompanyScheduleController : HrControllerBase
 
         await _bookingService.ApproveBookingAsync(id, approvedById);
         return Ok(new { message = "Booking approved" });
+    }
+
+    /// <summary>
+    /// Marks a confirmed booking whose start has passed a no-show — held and not used — for good; its booker told (lane
+    /// 3b-2, the user's ruling).
+    /// </summary>
+    [HttpPost("bookings/{id:guid}/no-show")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingDto>> MarkBookingNoShow(Guid id, CancellationToken ct)
+        => Ok(await _bookingService.MarkNoShowAsync(id, ct));
+
+    /// <summary>
+    /// Not approved (lane 3b-1, D-10): the booking is cancelled, "Not approved: …", and its booker told why. Decided through
+    /// the engine when an approval is under way, the approve tier otherwise; never by the booker.
+    /// </summary>
+    [HttpPost("bookings/{id:guid}/reject")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<RoomBookingDto>> RejectBooking(Guid id, [FromBody] EventDecisionDto dto)
+    {
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var rejectedById, "Rejecting a room booking");
+        if (ctx != null) return ctx;
+
+        return Ok(await _bookingService.RejectBookingAsync(id, rejectedById, dto.Comments ?? string.Empty));
     }
 
     [HttpPost("bookings/{id:guid}/cancel")]
@@ -617,6 +993,63 @@ public class CompanyScheduleController : HrControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Adds a file evidencing the milestone — the certificate, the licence, the photograph — through the upload gate:
+    /// scanned, stored and registered (lane 4a, D-3). It had a text box only.
+    /// </summary>
+    /// <remarks>⚠ The milestone is resolved BEFORE a byte is stored: the gate cannot roll a stored file back.</remarks>
+    [HttpPost("milestones/{id:guid}/documents")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    [RequestSizeLimit(25 * 1024 * 1024)]
+    public async Task<IActionResult> AddMilestoneDocument(Guid id, IFormFile file, [FromForm] string? description, CancellationToken ct)
+    {
+        var milestone = await _milestoneService.RequireAsync(id, ct);
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, CurrentUser, _logger, file,
+            sourceEntityType: "CompanyMilestone",
+            sourceRecordId: id,
+            sourceLabel: $"Company milestone {milestone.Title}",
+            documentType: "CompanyMilestoneDocument",
+            description: description,
+            persist: (uploadedById, document) => _milestoneService.AddDocumentAsync(
+                id, description, uploadedById, document.OriginalFileName, document.FilePath, document.FileSize,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId, ct),
+            ct,
+            category: ControlledFileUploadCategories.HrCompanyScheduleAttachments);
+    }
+
+    /// <summary>The milestone's files (lane 4a).</summary>
+    [HttpGet("milestones/{id:guid}/documents")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<IEnumerable<CompanyMilestoneDocumentDto>>> GetMilestoneDocuments(Guid id, CancellationToken ct)
+        => Ok(await _milestoneService.GetDocumentsAsync(id, ct));
+
+    /// <summary>Downloads a milestone's file (lane 4a), on the read permission. The service applies the tenant.</summary>
+    [HttpGet("milestones/documents/{documentId:guid}/download")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<IActionResult> DownloadMilestoneDocument(Guid documentId, CancellationToken ct)
+    {
+        if (CurrentUser.TenantId is not Guid tenantId)
+            return Unauthorized("Tenant context could not be resolved");
+
+        // ⚠ The entitlement check is this endpoint's: the download helper performs none.
+        var file = await _milestoneService.GetDocumentFileAsync(documentId, ct);
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            file.DocumentRecordId, file.DocumentVersionId, file.FileUploadRecordId,
+            legacyPath: null, file.FileName, fallbackContentType: null,
+            inline: false, ct);
+    }
+
+    /// <summary>Removes a file from its milestone — on Write (the user's ruling, as event files); deleting the milestone stays Admin.</summary>
+    [HttpDelete("milestones/documents/{documentId:guid}")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<IActionResult> DeleteMilestoneDocument(Guid documentId, CancellationToken ct)
+    {
+        await _milestoneService.DeleteDocumentAsync(documentId, ct);
+        return NoContent();
+    }
+
     #endregion
 
     #region Business Closures
@@ -660,13 +1093,18 @@ public class CompanyScheduleController : HrControllerBase
     public async Task<ActionResult<IEnumerable<BusinessClosureDto>>> GetUpcomingClosures([FromQuery] int daysAhead = 30)
         => Ok(await _closureService.GetUpcomingClosuresAsync(daysAhead));
 
+    /// <summary>
+    /// Whether a closure that is a day off covers the date for someone at this site and in this
+    /// organisation unit (company-schedule final closure, lane 1). With neither, only a company-wide
+    /// closure answers true; a partial closure never does — its day is still worked.
+    /// </summary>
     [HttpGet("closures/is-closure-date")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
     public async Task<ActionResult<bool>> IsClosureDate(
         [FromQuery] DateTime date,
         [FromQuery] Guid? locationId = null,
-        [FromQuery] Guid? departmentId = null)
-        => Ok(await _closureService.IsClosureDateAsync(date, locationId, departmentId));
+        [FromQuery] Guid? organizationUnitId = null)
+        => Ok(await _closureService.IsClosureDateAsync(date, locationId, organizationUnitId));
 
     [HttpPost("closures")]
     [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
@@ -690,133 +1128,108 @@ public class CompanyScheduleController : HrControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Deletes a closure, and answers what recounting the leave it covered did (lane 1c, D-15a) —
+    /// 200 with the recount rather than 204, because the person deleting should see whose leave changed.
+    /// </summary>
     [HttpDelete("closures/{id:guid}")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteClosure(Guid id)
+    public async Task<ActionResult<LeaveRechargeResultDto>> DeleteClosure(Guid id)
+        => Ok(await _closureService.DeleteAsync(id));
+
+    /// <summary>
+    /// The one-time recount (lane 1c): all granted leave in the current and later leave years, against
+    /// the closures and holidays as they stand. For closures recorded before the recount existed. Safe
+    /// to run again — leave whose count is right is left alone, and nobody is told anything about it.
+    /// </summary>
+    /// <remarks>
+    /// Company ADMIN: it can change many people's balances at once. <c>?dryRun=true</c> answers the
+    /// same list without saving anything or telling anyone — run it first.
+    /// </remarks>
+    [HttpPost("closures/recharge-leave")]
+    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
+    public async Task<ActionResult<LeaveRechargeResultDto>> RechargeLeave([FromQuery] bool dryRun = false)
+        => Ok(await _closureService.RechargeAllOpenLeaveAsync(dryRun));
+
+    /// <summary>
+    /// What announcing the closure would say and how many active staff it would reach — the line behind
+    /// "Announce to the N staff it covers" (lane 1d, L1-1).
+    /// </summary>
+    [HttpGet("closures/{id:guid}/announcement")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<ClosureAnnouncementPreviewDto>> PreviewClosureAnnouncement(Guid id)
+        => Ok(await _closureService.PreviewAnnouncementAsync(id));
+
+    /// <summary>
+    /// Announces the closure to the staff it covers, on HR's click (lane 1d, L1-1): an HR announcement
+    /// addressed by the closure's scope, published as the caller. 422 when it covers nobody or is over.
+    /// </summary>
+    [HttpPost("closures/{id:guid}/announce")]
+    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
+    public async Task<ActionResult<HrAnnouncementDto>> AnnounceClosure(Guid id)
     {
-        await _closureService.DeleteAsync(id);
-        return NoContent();
+        var ctx = TryGetEmployeeWriteContext(out _, out _, out var publisherId, "Announcing a business closure");
+        if (ctx != null) return ctx;
+        return Ok(await _closureService.AnnounceAsync(id, publisherId));
     }
+
+    /// <summary>
+    /// Each employee's closure days, each with its closure and whether staff are paid — the read payroll
+    /// is pointed at (lane 1d, D-15c). HR records the pay flag; what an unpaid day is worth is payroll's.
+    /// Up to 500 employees and a year at a time; a partial closure only with <c>includePartial</c>.
+    /// </summary>
+    [HttpGet("closures/employee-days")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<List<EmployeeClosureDaysDto>>> GetEmployeeClosureDays(
+        [FromQuery] List<Guid> employeeIds,
+        [FromQuery] DateOnly from,
+        [FromQuery] DateOnly to,
+        [FromQuery] bool includePartial = false)
+        => Ok(await _closureService.GetEmployeeClosureDaysAsync(employeeIds ?? [], from, to, includePartial));
 
     #endregion
 
-    #region Fiscal Years
+    #region Fiscal Calendar (lane 4b, D-6)
 
-    [HttpGet("fiscal-years")]
+    // ⚠ Company-schedule final closure lane 4b (D-6): sixteen routes over HR's own fiscal years and periods stood here
+    // (fiscal-years, periods) — a calendar read by nothing but its own two screens. HR reads Finance's, in-process: Finance's
+    // routes need Finance.Read, which HR's people do not hold.
+
+    /// <summary>
+    /// Finance's fiscal calendar, read-only: its years with their periods, each year's own status and each accounting book's
+    /// year-end close (the user's ruling), and the policy's fallback month.
+    /// </summary>
+    [HttpGet("fiscal-calendar")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalYearDto>>> GetFiscalYears()
-        => Ok(await _fiscalYearService.GetAllAsync());
+    public async Task<ActionResult<HrFiscalCalendarDto>> GetFiscalCalendar(
+        [FromServices] IHrFiscalCalendar calendar, CancellationToken ct)
+        => Ok(await calendar.GetCalendarAsync(ct));
 
-    [HttpGet("fiscal-years/paged")]
+    /// <summary>
+    /// The fiscal year a date falls in — Finance's year covering it, else Finance's sequence continued, else (no Finance year
+    /// at all) the policy's start month.
+    /// </summary>
+    [HttpGet("fiscal-calendar/year")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<PagedResult<FiscalYearDto>>> GetFiscalYearsPaged(
-        [FromQuery] int pageNumber = 1,
-        [FromQuery] int pageSize = 20)
-        => Ok(await _fiscalYearService.GetPagedAsync(pageNumber, pageSize));
-
-    [HttpGet("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetFiscalYear(Guid id)
-        => Ok(await _fiscalYearService.GetByIdAsync(id));
-
-    [HttpGet("fiscal-years/{id:guid}/details")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDetailDto>> GetFiscalYearDetail(Guid id)
-        => Ok(await _fiscalYearService.GetDetailByIdAsync(id));
-
-    [HttpGet("fiscal-years/by-year/{year:int}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetFiscalYearByYear(int year)
-        => Ok(await _fiscalYearService.GetByYearAsync(year));
-
-    [HttpGet("fiscal-years/current")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<FiscalYearDto>> GetCurrentFiscalYear()
-        => Ok(await _fiscalYearService.GetCurrentFiscalYearAsync());
-
-    [HttpGet("fiscal-years/status/{status}")]
-    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalYearDto>>> GetFiscalYearsByStatus(FiscalYearStatus status)
-        => Ok(await _fiscalYearService.GetByStatusAsync(status));
-
-    [HttpPost("fiscal-years")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalYearDto>> CreateFiscalYear([FromBody] CreateFiscalYearDto dto)
+    public async Task<ActionResult<HrFiscalYearAnswerDto>> GetFiscalYearForDate(
+        [FromServices] IHrFiscalCalendar calendar, [FromQuery] DateOnly date, CancellationToken ct)
     {
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var created = await _fiscalYearService.CreateAsync(dto);
-        return CreatedAtAction(nameof(GetFiscalYear), new { id = created.Id }, created);
+        if (date.Year is < 1900 or > 2200) return BadRequest(new { message = "Say which date (between 1900 and 2200)." });
+        return Ok(await calendar.YearForDateAsync(date, ct));
     }
 
-    [HttpPut("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalYearDto>> UpdateFiscalYear(Guid id, [FromBody] UpdateFiscalYearDto dto)
-    {
-        if (id != dto.Id) return BadRequest("ID mismatch");
-        if (!ModelState.IsValid) return BadRequest(ModelState);
-        var updated = await _fiscalYearService.UpdateAsync(dto);
-        return Ok(updated);
-    }
-
-    [HttpPost("fiscal-years/{id:guid}/set-current")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> SetCurrentFiscalYear(Guid id)
-    {
-        await _fiscalYearService.SetAsCurrentAsync(id);
-        return Ok(new { message = "Fiscal year set as current" });
-    }
-
-    [HttpDelete("fiscal-years/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteFiscalYear(Guid id)
-    {
-        await _fiscalYearService.DeleteAsync(id);
-        return NoContent();
-    }
-
-    #region Fiscal Periods
-
-    [HttpPost("fiscal-years/{fiscalYearId:guid}/periods")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalPeriodDto>> AddFiscalPeriod(Guid fiscalYearId, [FromBody] CreateFiscalPeriodDto dto)
-    {
-        dto.FiscalYearId = fiscalYearId;
-        var created = await _fiscalYearService.AddPeriodAsync(dto);
-        return CreatedAtAction(nameof(GetFiscalPeriods), new { fiscalYearId }, created);
-    }
-
-    [HttpGet("fiscal-years/{fiscalYearId:guid}/periods")]
+    /// <summary>
+    /// The dates of a fiscal year — Finance's year of that number, else Finance's sequence continued, else the policy's
+    /// start month.
+    /// </summary>
+    [HttpGet("fiscal-calendar/period")]
     [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
-    public async Task<ActionResult<IEnumerable<FiscalPeriodDto>>> GetFiscalPeriods(Guid fiscalYearId)
-        => Ok(await _fiscalYearService.GetPeriodsAsync(fiscalYearId));
-
-    [HttpPut("periods/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<ActionResult<FiscalPeriodDto>> UpdateFiscalPeriod(Guid id, [FromBody] UpdateFiscalPeriodDto dto)
+    public async Task<ActionResult<HrFiscalYearAnswerDto>> GetFiscalPeriodForYear(
+        [FromServices] IHrFiscalCalendar calendar, [FromQuery] int year, CancellationToken ct)
     {
-        if (id != dto.Id) return BadRequest("ID mismatch");
-        var updated = await _fiscalYearService.UpdatePeriodAsync(dto);
-        return Ok(updated);
+        if (year is < 1900 or > 2200) return BadRequest(new { message = "Say which fiscal year (e.g. 2026)." });
+        return Ok(await calendar.PeriodForYearAsync(year, ct));
     }
-
-    [HttpPost("periods/{id:guid}/close")]
-    [Authorize(Policy = HrPermissions.CompanyWritePolicy)]
-    public async Task<IActionResult> CloseFiscalPeriod(Guid id, [FromBody] CloseFiscalPeriodDto dto)
-    {
-        dto.PeriodId = id;
-        await _fiscalYearService.ClosePeriodAsync(dto);
-        return Ok(new { message = "Fiscal period closed" });
-    }
-
-    [HttpDelete("periods/{id:guid}")]
-    [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
-    public async Task<IActionResult> DeleteFiscalPeriod(Guid id)
-    {
-        await _fiscalYearService.DeletePeriodAsync(id);
-        return NoContent();
-    }
-
-    #endregion
 
     #endregion
 }

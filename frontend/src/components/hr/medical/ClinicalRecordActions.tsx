@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import {
   Dialog,
   DialogContent,
@@ -82,6 +90,12 @@ const toLocalInput = (v?: string | null) => {
 
 const toDateInput = (v?: string | null) => (v ? toLocalInput(v).slice(0, 10) : '');
 
+/** A step in the record's own lifecycle — approve, complete, check in — listed above Edit. */
+export interface ClinicalRecordStep {
+  label: string;
+  onSelect: () => void;
+}
+
 interface Props {
   kind: Kind;
   id: string;
@@ -89,9 +103,22 @@ interface Props {
   recordLabel: string;
   canWrite: boolean;
   canDelete: boolean;
+  /** The steps this record's status admits; the caller leaves out any the user may not take. */
+  steps?: ClinicalRecordStep[];
 }
 
-export function ClinicalRecordActions({ kind, id, recordLabel, canWrite, canDelete }: Props) {
+/**
+ * The row's ⋯ menu — the same shape as every other HR register (`ResourceCollectionTab`), rather
+ * than the strip of text buttons these rows used to carry. A row with nothing to offer gets no menu.
+ */
+export function ClinicalRecordActions({
+  kind,
+  id,
+  recordLabel,
+  canWrite,
+  canDelete,
+  steps = [],
+}: Props) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
@@ -230,20 +257,40 @@ export function ClinicalRecordActions({ kind, id, recordLabel, canWrite, canDele
     onError,
   });
 
-  if (!canWrite && !canDelete) return null;
+  if (!canWrite && !canDelete && steps.length === 0) return null;
 
   return (
     <>
-      {canWrite && (
-        <Button variant="ghost" size="sm" onClick={() => setEditing(true)}>
-          Edit
-        </Button>
-      )}
-      {canDelete && (
-        <Button variant="ghost" size="sm" onClick={() => setConfirmingDelete(true)}>
-          Delete
-        </Button>
-      )}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <MoreHorizontal className="h-4 w-4" />
+            <span className="sr-only">Actions for {recordLabel}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {steps.map((s) => (
+            <DropdownMenuItem key={s.label} onClick={s.onSelect}>
+              {s.label}
+            </DropdownMenuItem>
+          ))}
+          {canWrite && (
+            <DropdownMenuItem onClick={() => setEditing(true)}>
+              <Pencil className="mr-2 h-4 w-4" />
+              Edit
+            </DropdownMenuItem>
+          )}
+          {canDelete && (
+            <>
+              {(steps.length > 0 || canWrite) && <DropdownMenuSeparator />}
+              <DropdownMenuItem className="text-red-600" onClick={() => setConfirmingDelete(true)}>
+                <Trash2 className="mr-2 h-4 w-4" />
+                Delete
+              </DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <Dialog open={editing} onOpenChange={(o) => !o && setEditing(false)}>
         <DialogContent className="max-h-[85vh] overflow-y-auto">

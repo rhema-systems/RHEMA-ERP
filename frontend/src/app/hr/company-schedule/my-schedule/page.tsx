@@ -13,6 +13,7 @@
  */
 
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   Building2,
@@ -31,6 +32,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { IncompleteDiaryBanner } from '@/components/hr/company-schedule/IncompleteDiaryBanner';
+import { byDay as spreadByDay, spansDays } from '@/components/hr/company-schedule/diaryDays';
 import { formatDate, formatTime } from '@/lib/hr/attendance-format';
 import { personalScheduleService } from '@/services/hr/company-schedule.service';
 import type { PersonalScheduleEntry, ScheduleEntryKind } from '@/types/hr/company-schedule';
@@ -46,13 +49,13 @@ const KIND_ICON: Record<ScheduleEntryKind, typeof CalendarCheck> = {
   Holiday: Building2,
 };
 
-const dayKey = (iso: string) => iso.slice(0, 10);
-
-const addDays = (days: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
+const addDays = (days: number, from?: string) => {
+  const d = from ? new Date(`${from}T00:00:00Z`) : new Date();
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 };
+
+const isDay = (s: string | null): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
 
 /**
  * ⚠ A day-granular entry is never printed with times. Leave, travel, closures and all-day events
@@ -74,6 +77,12 @@ function EntryRow({ entry }: { entry: PersonalScheduleEntry }) {
               {formatTime(entry.start.slice(11, 19))} – {formatTime(entry.end.slice(11, 19))}
             </span>
           )}
+          {/* Lane 5b (F-23): an entry over several days sits under each of them; say which run it belongs to. */}
+          {spansDays(entry) && (
+            <span className="ml-2">
+              · {formatDate(entry.start.slice(0, 10))} to {formatDate(entry.end.slice(0, 10))}
+            </span>
+          )}
           {entry.reference && <span className="ml-2">· {entry.reference}</span>}
         </div>
       </div>
@@ -85,8 +94,12 @@ function EntryRow({ entry }: { entry: PersonalScheduleEntry }) {
 }
 
 export default function MySchedulePage() {
-  const [from, setFrom] = useState(addDays(0));
-  const [to, setTo] = useState(addDays(13));
+  // Lane 2e-1: an event's notice links here at the event's first day (`?from=`), so a notice about an event
+  // months away opens on it rather than on this fortnight.
+  const params = useSearchParams();
+  const linkedFrom = params.get('from');
+  const [from, setFrom] = useState(isDay(linkedFrom) ? linkedFrom : addDays(0));
+  const [to, setTo] = useState(isDay(linkedFrom) ? addDays(13, linkedFrom) : addDays(13));
 
   const schedule = useQuery({
     queryKey: ['hr', 'my-schedule', from, to],
@@ -97,14 +110,16 @@ export default function MySchedulePage() {
     retry: false,
   });
 
-  /** Grouped by day so a fortnight reads as a diary rather than a list. */
+  /**
+   * Grouped by day so a fortnight reads as a diary rather than a list — lane 5b (F-23, R4-10A.1): under EVERY day of the
+   * range an entry covers, not only its first (a week's leave read as Monday's), and one that began before the range
+   * from the range's first day.
+   */
   const byDay = useMemo(() => {
-    const groups = new Map<string, PersonalScheduleEntry[]>();
-    for (const e of schedule.data?.entries ?? []) {
-      const key = dayKey(e.start);
-      groups.set(key, [...(groups.get(key) ?? []), e]);
-    }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+    const data = schedule.data;
+    if (!data) return [];
+    const range = { from: data.from.slice(0, 10), to: data.to.slice(0, 10) };
+    return [...spreadByDay(data.entries, range.from, range.to).entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [schedule.data]);
 
   return (
@@ -133,6 +148,8 @@ export default function MySchedulePage() {
           </Button>
         </CardContent>
       </Card>
+
+      <IncompleteDiaryBanner sources={schedule.data?.incompleteSources} />
 
       {schedule.isLoading ? (
         <div className="flex items-center justify-center py-16">

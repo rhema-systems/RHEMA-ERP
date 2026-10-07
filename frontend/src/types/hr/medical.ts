@@ -188,6 +188,7 @@ export interface PhysicianCreateRequest {
   notes?: string | null;
 }
 
+/** No `isVerified`: an edit never changes verification — `verifyPhysician` does (2026-10-07). */
 export interface PhysicianUpdateRequest extends PhysicianCreateRequest {
   id: string;
 }
@@ -733,7 +734,12 @@ export type ClaimStatus =
   | 'AdditionalInfoRequired'
   | 'Rejected'
   | 'Paid'
-  | 'Cancelled';
+  | 'Cancelled'
+  /**
+   * A self-service claim not yet submitted (2026-10-07) — the claimant's own working copy. Only
+   * their own reads return it; the desk's lists and by-id reads never do.
+   */
+  | 'Draft';
 
 export type MedicalExpenseType =
   | 'Consultation'

@@ -91,10 +91,8 @@ export default function MedicalBenefitSchemeDetailPage({
     queryFn: () => staffLevelService.getActive(),
   });
 
-  const staffLevelOptions = [
-    { value: '', label: 'All staff — not tied to a level' },
-    ...staffLevels.map((l) => ({ value: l.id, label: l.name })),
-  ];
+  // The "all staff" choice is SelectField's allowEmpty item: Radix throws on an item whose value is ''.
+  const staffLevelOptions = staffLevels.map((l) => ({ value: l.id, label: l.name }));
 
   return (
     <div className="space-y-6 p-6">
@@ -219,6 +217,8 @@ export default function MedicalBenefitSchemeDetailPage({
                 name="staffLevelId"
                 label="Staff level"
                 options={staffLevelOptions}
+                allowEmpty
+                emptyLabel="All staff — not tied to a level"
               />
             </FieldRow>
             <TextareaField form={form} name="tierDescription" label="Description" rows={2} />

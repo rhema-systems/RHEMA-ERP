@@ -120,14 +120,17 @@ public class HolidayCalendarsController : AttendanceControllerBase
         }
     }
 
+    /// <summary>
+    /// Deletes a calendar. 200 with the leave recount rather than 204 (company-schedule lane 1c): an
+    /// active calendar may be the one in use, and deleting it recounts granted leave.
+    /// </summary>
     [HttpDelete("{id:guid}")]
     [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
-    public async Task<IActionResult> Delete(Guid id, CancellationToken ct = default)
+    public async Task<ActionResult<LeaveRechargeResultDto>> Delete(Guid id, CancellationToken ct = default)
     {
         try
         {
-            await _calendarService.DeleteAsync(id, ct);
-            return NoContent();
+            return Ok(await _calendarService.DeleteAsync(id, ct));
         }
         catch (ArgumentException ex)
         {
@@ -233,9 +236,13 @@ public class HolidayCalendarsController : AttendanceControllerBase
         }
     }
 
+    /// <summary>
+    /// Deletes a holiday. 200 with the leave recount rather than 204 (company-schedule lane 1c, D-15b):
+    /// the person deleting should see whose leave now counts the day again.
+    /// </summary>
     [HttpDelete("{id:guid}/holidays/{holidayId:guid}")]
     [Authorize(Policy = HrPermissions.AttendanceAdminPolicy)]
-    public async Task<IActionResult> DeleteHoliday(
+    public async Task<ActionResult<LeaveRechargeResultDto>> DeleteHoliday(
         Guid id,
         Guid holidayId,
         CancellationToken ct = default)
@@ -246,8 +253,7 @@ public class HolidayCalendarsController : AttendanceControllerBase
             if (existing.HolidayCalendarId != id)
                 return NotFound(new { message = $"Public holiday '{holidayId}' does not belong to calendar '{id}'." });
 
-            await _calendarService.DeleteHolidayAsync(holidayId, ct);
-            return NoContent();
+            return Ok(await _calendarService.DeleteHolidayAsync(holidayId, ct));
         }
         catch (ArgumentException ex)
         {

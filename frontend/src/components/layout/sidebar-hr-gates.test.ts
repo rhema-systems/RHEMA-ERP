@@ -33,6 +33,13 @@ const KEEP_OPEN = new Set<string>([
   '/hr/probation/reviews', // "reviews to conduct" — the reviewer's own queue
   '/hr/discipline/approvals', // "awaiting my confirmation" — headship is data, not a role
   '/hr/travel/approvals', // the traveller's line manager approves stage 1 and holds no travel permission (travel closure lane 2)
+  // Added 2026-10-06 with the user's ruling (company-schedule final closure lane 5a, F-57):
+  '/hr/company-schedule/my-schedule', // the caller's own diary — the server takes the employee from the token (round 4, D5)
+  '/hr/leave/calendar', // "mine" and "my team" are open to all staff; "Everyone" needs HR.Leave.Read on the server
+  // Lane 5b (R4-10B.3, the user's ruling):
+  '/hr/company-schedule/team', // the HR desk, or a unit's head for their own subtree — headship is data, decided per unit on the server
+  // Lane 7 (D-7):
+  '/hr/company-schedule/calendar', // the company calendar — the server decides per caller what is shown (the desk all, anyone else theirs)
 ]);
 
 const MODULE_GATES = new Set(['hr.access', 'she.access']);

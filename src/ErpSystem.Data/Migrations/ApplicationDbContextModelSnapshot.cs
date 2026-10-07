@@ -6761,6 +6761,10 @@ namespace ErpSystem.Data.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<decimal?>("ExternalPremiumChargeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<bool?>("ExternalPremiumChargeRequired")
                         .HasColumnType("bit");
 
@@ -6959,6 +6963,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("ExternalMonthlyRent")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal?>("ExternalPremiumChargeAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<bool?>("ExternalPremiumChargeRequired")
                         .HasColumnType("bit");
@@ -39135,9 +39143,15 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LocationId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("Reason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("RecursAnnually")
+                        .HasColumnType("bit");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
@@ -39168,6 +39182,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("EndDate");
 
                     b.HasIndex("LocationId");
+
+                    b.HasIndex("OrganizationUnitId");
 
                     b.HasIndex("StartDate");
 
@@ -39212,6 +39228,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("BudgetCode")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("CalendarSequence")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("CancellationDate")
                         .HasColumnType("datetime2");
@@ -39299,9 +39318,15 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<int?>("OccurrenceNumber")
+                        .HasColumnType("int");
+
                     b.Property<string>("OnlineMeetingLink")
                         .HasMaxLength(700)
                         .HasColumnType("nvarchar(700)");
+
+                    b.Property<Guid?>("OrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("OrganizerId")
                         .HasColumnType("uniqueidentifier");
@@ -39337,6 +39362,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int?>("RecurrencePattern")
                         .HasColumnType("int");
+
+                    b.Property<Guid?>("RecurrenceSeriesId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int?>("ReminderDaysBefore")
                         .HasColumnType("int");
@@ -39378,6 +39406,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("ShowOnIntranet")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("SourceEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceEntityType")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<DateTime>("StartDate")
                         .HasColumnType("datetime2");
@@ -39429,11 +39464,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("LocationId");
 
+                    b.HasIndex("OrganizationUnitId");
+
                     b.HasIndex("OrganizerId");
+
+                    b.HasIndex("RecurrenceSeriesId");
 
                     b.HasIndex("StartDate");
 
                     b.HasIndex("Status");
+
+                    b.HasIndex("SourceEntityType", "SourceEntityId");
 
                     b.HasIndex("TenantId", "EventNumber")
                         .IsUnique()
@@ -39520,6 +39561,88 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("CompanyMilestones");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.CompanyMilestoneDocument", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("FilePath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("MilestoneId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("UploadDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MilestoneId");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("UploadedById");
+
+                    b.ToTable("CompanyMilestoneDocuments");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.EventAttachment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -39545,6 +39668,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("DocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("DocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("EventId")
                         .HasColumnType("uniqueidentifier");
 
@@ -39557,6 +39686,12 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
+
+                    b.Property<long?>("FileSizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid?>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -39579,11 +39714,16 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime>("UploadDate")
                         .HasColumnType("datetime2");
 
+                    b.Property<Guid?>("UploadedById")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("EventId");
 
                     b.HasIndex("TenantId");
+
+                    b.HasIndex("UploadedById");
 
                     b.ToTable("EventAttachments");
                 });
@@ -39658,7 +39798,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("MarkedById");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "EventId", "EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EventAttendance_Tenant_Event_Employee")
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("EventAttendances");
                 });
@@ -39748,7 +39891,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("InvitationStatus");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "EventId", "EmployeeId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_EventParticipant_Tenant_Event_Employee")
+                        .HasFilter("[EmployeeId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.ToTable("EventParticipants");
                 });
@@ -39798,6 +39944,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("OverdueChasedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<int>("Priority")
                         .HasColumnType("int");
@@ -199545,6 +199694,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -199554,6 +199708,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("AnnouncedBy");
 
                     b.Navigation("Department");
+
+                    b.Navigation("OrganizationUnit");
 
                     b.Navigation("SiteLocation");
 
@@ -199577,6 +199733,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict);
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "OrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("OrganizationUnitId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "Organizer")
                         .WithMany()
                         .HasForeignKey("OrganizerId")
@@ -199592,6 +199753,8 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("ApprovedBy");
 
                     b.Navigation("Department");
+
+                    b.Navigation("OrganizationUnit");
 
                     b.Navigation("Organizer");
 
@@ -199611,6 +199774,33 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.CompanyMilestoneDocument", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.HR.CompanySchedule.CompanyMilestone", "Milestone")
+                        .WithMany("Documents")
+                        .HasForeignKey("MilestoneId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Milestone");
+
+                    b.Navigation("Tenant");
+
+                    b.Navigation("UploadedBy");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.EventAttachment", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.HR.CompanySchedule.CompanyEvent", "Event")
@@ -199625,9 +199815,16 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.Employee", "UploadedBy")
+                        .WithMany()
+                        .HasForeignKey("UploadedById")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Event");
 
                     b.Navigation("Tenant");
+
+                    b.Navigation("UploadedBy");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.EventAttendance", b =>
@@ -243593,6 +243790,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Participants");
 
                     b.Navigation("Tasks");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.CompanyMilestone", b =>
+                {
+                    b.Navigation("Documents");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.HR.CompanySchedule.FiscalYear", b =>

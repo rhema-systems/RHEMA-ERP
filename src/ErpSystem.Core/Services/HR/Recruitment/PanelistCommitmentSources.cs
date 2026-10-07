@@ -194,19 +194,24 @@ public sealed class TravelCommitmentSource : IPanelistCommitmentSource
 /// Meetings and company events the panelist is a PARTICIPANT of — not merely ones they organise.
 /// </summary>
 /// <remarks>
-/// <para>⚠ The company-schedule module's own <c>HasConflictingEventAsync</c> checks the ORGANIZER
-/// only, which is the smallest useful part of the answer: the people whose diaries an interview
-/// actually collides with are the ones invited to the meeting, and a board meeting has one
-/// organiser and twelve attendees.</para>
+/// <para>The guests AND the organiser (lane 2a, D-11). The module's old organiser-only overlap check
+/// had no caller and is gone; the people an interview collides with are everyone the meeting holds —
+/// a board meeting has one organiser and twelve attendees.</para>
 ///
-/// <para>Hardness turns on the participant's own answer. Somebody who ACCEPTED a Confirmed meeting
-/// has said they will be there, so that is hard. An unanswered invitation, a Declined one, or a
-/// merely Scheduled event is soft — the check should say "they may be busy", not refuse.</para>
+/// <para>Hardness turns on the person's own answer. Somebody who ACCEPTED a firm meeting has said
+/// they will be there, so that is hard; an unanswered invitation, or an event still awaiting approval,
+/// is soft — the check should say "they may be busy", not refuse.</para>
 /// </remarks>
 public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
 {
     private readonly IUnitOfWork _unitOfWork;
-    public CompanyEventCommitmentSource(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly IHrAudienceResolver _audience;
+
+    public CompanyEventCommitmentSource(IUnitOfWork unitOfWork, IHrAudienceResolver audience)
+    {
+        _unitOfWork = unitOfWork;
+        _audience = audience;
+    }
 
     public string SourceName => "meetings and events";
 
@@ -232,40 +237,94 @@ public sealed class CompanyEventCommitmentSource : IPanelistCommitmentSource
                      && p.Event.StartDate <= dayEnd && p.Event.EndDate >= dayStart)
             .ToListAsync(ct);
 
+        // ⚠ The organiser is committed to the event whether or not they invited themselves (D-11, lane
+        // 2a). Before this the diaries and the clash check read the guest list only, so the person
+        // running the meeting looked free during it.
+        var organised = await _unitOfWork.Repository<CompanyEvent>().GetQueryable()
+            .Where(e => q.EmployeeIds.Contains(e.OrganizerId)
+                     && e.TenantId == q.TenantId && !e.IsDeleted
+                     && !e.IsCancelled && e.Status != EventStatus.Cancelled
+                     && e.StartDate <= dayEnd && e.EndDate >= dayStart)
+            .ToListAsync(ct);
+
         var commitments = new List<PanelistCommitment>();
+        var counted = new HashSet<(Guid Employee, Guid Event)>();
         foreach (var p in rows)
         {
-            var ev = p.Event!;
-            // ⚠ The event's own day, not the query's first — over a range they differ.
-            var (start, end) = WindowOf(ev, DateOnly.FromDateTime(ev.StartDate));
+            counted.Add((p.EmployeeId!.Value, p.Event!.Id));
+            AddDays(commitments, q, p.EmployeeId!.Value, p.Event!,
+                accepted: p.InvitationStatus == InvitationStatus.Accepted,
+                $"{p.Event!.EventName} ({p.Event.Status}, invitation {p.InvitationStatus})");
+        }
+        foreach (var ev in organised.Where(e => !counted.Contains((e.OrganizerId, e.Id))))
+        {
+            counted.Add((ev.OrganizerId, ev.Id));
+            AddDays(commitments, q, ev.OrganizerId, ev, accepted: true, $"{ev.EventName} ({ev.Status}, organiser)");
+        }
 
-            // An event with times must actually overlap the asked-about window; an all-day one covers it.
-            if (!ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue && !q.Overlaps(start, end))
-                continue;
-
-            var accepted = p.InvitationStatus == InvitationStatus.Accepted;
-            var confirmed = ev.Status is EventStatus.Confirmed or EventStatus.InProgress;
-            var hard = accepted && confirmed && !ev.IsAllDayEvent && ev.StartTime.HasValue;
-
-            commitments.Add(new PanelistCommitment(
-                p.EmployeeId!.Value, false, CommitmentKind.Event,
-                hard ? CommitmentHardness.Hard : CommitmentHardness.Soft,
-                $"{ev.EventName} ({ev.Status}, invitation {p.InvitationStatus})",
-                start, end,
-                IsDayGranular: ev.IsAllDayEvent || !ev.StartTime.HasValue,
-                Reference: ev.EventNumber));
+        // ⚠ The event's audience (lane 2c, D-16): an event on the company calendar is for its audience —
+        // everyone, a unit, management — not only its guests. Each of them not already counted is
+        // committed too, softly: nobody asked them to answer. Private and Confidential events, and
+        // "selected guests" ones, reach nobody here.
+        var forAudiences = await _unitOfWork.Repository<CompanyEvent>().GetQueryable()
+            .Where(e => e.TenantId == q.TenantId && !e.IsDeleted
+                     && !e.IsCancelled && e.Status != EventStatus.Cancelled
+                     && e.ShowOnCompanyCalendar
+                     && e.Visibility != EventVisibility.Private && e.Visibility != EventVisibility.Confidential
+                     && e.StartDate <= dayEnd && e.EndDate >= dayStart)
+            .ToListAsync(ct);
+        foreach (var ev in forAudiences)
+        {
+            if (CompanyEventRules.CalendarAudienceOf(ev) is not { } rule) continue;
+            var asked = q.EmployeeIds.Where(id => !counted.Contains((id, ev.Id))).ToList();
+            if (asked.Count == 0) continue;
+            var reached = await _audience.IncludedAmongForTenantAsync(q.TenantId, [rule], asked, ct);
+            foreach (var employeeId in reached)
+                AddDays(commitments, q, employeeId, ev, accepted: false, $"{ev.EventName} ({ev.Status}, for {AudienceLabel(rule)})");
         }
 
         return commitments;
     }
 
-    private static (DateTime Start, DateTime End) WindowOf(CompanyEvent ev, DateOnly date)
+    private static string AudienceLabel(HrAudienceRule rule) => rule.TargetType switch
     {
-        if (ev.IsAllDayEvent || !ev.StartTime.HasValue || !ev.EndTime.HasValue)
-            return (date.ToDateTime(TimeOnly.MinValue), date.ToDateTime(TimeOnly.MaxValue));
+        HrAudienceTargetType.AllEmployees => "all staff",
+        HrAudienceTargetType.OrganizationUnit => "their unit",
+        HrAudienceTargetType.Management => "management",
+        _ => "its audience",
+    };
 
-        return (date.ToDateTime(TimeOnly.MinValue) + ev.StartTime.Value,
-                date.ToDateTime(TimeOnly.MinValue) + ev.EndTime.Value);
+    /// <summary>
+    /// One commitment per day of the event inside the query (R4-10A.2): a timed event over several days
+    /// keeps its hours each day.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ It used to build one window, from the first day, so days two onward never reached the
+    /// clash check or the diaries.</para>
+    ///
+    /// <para>Hard when the person has said yes — the organiser always has — to a timed event that is
+    /// firm (<see cref="CompanyEventRules.IsFirm"/>, F-41): an event needing no approval counts once
+    /// scheduled, where before only Confirmed did and nothing but Approve set it.</para>
+    /// </remarks>
+    private static void AddDays(
+        List<PanelistCommitment> commitments, PanelistCommitmentQuery q, Guid employeeId, CompanyEvent ev,
+        bool accepted, string label)
+    {
+        var timed = !ev.IsAllDayEvent && ev.StartTime.HasValue && ev.EndTime.HasValue;
+        var hard = accepted && timed && CompanyEventRules.IsFirm(ev);
+
+        foreach (var (_, start, end) in CompanyEventRules.DailyWindows(ev, q.FromDate, q.ToDate))
+        {
+            // A timed day must actually overlap the asked-about window; an all-day one covers it.
+            if (timed && !q.Overlaps(start, end)) continue;
+
+            commitments.Add(new PanelistCommitment(
+                employeeId, false, CommitmentKind.Event,
+                hard ? CommitmentHardness.Hard : CommitmentHardness.Soft,
+                label, start, end,
+                IsDayGranular: !timed,
+                Reference: ev.EventNumber));
+        }
     }
 }
 
@@ -361,34 +420,41 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
         var commitments = new List<PanelistCommitment>();
         foreach (var n in rows)
         {
-            // ⚠ Over a range there may be several sessions; the first one in the window is the one
-            // to report, and its own date is what the times hang off.
-            var session = sessions.FirstOrDefault(x => x.ScheduleId == n.ScheduleId);
-            var sessionDay = session?.Date.Date ?? dayStart;
             var name = n.Schedule!.Program?.ProgramName ?? "Training";
-
-            DateTime start, end;
-            bool dayGranular;
-            if (session?.StartTime is { } ss && session.EndTime is { } se)
+            void Add(DateTime start, DateTime end, bool dayGranular)
             {
-                (start, end, dayGranular) = (sessionDay + ss, sessionDay + se, false);
+                if (!dayGranular && !q.Overlaps(start, end)) return;
+                commitments.Add(new PanelistCommitment(
+                    n.EmployeeId, false, CommitmentKind.Training, CommitmentHardness.Soft,
+                    $"{name} ({n.Status})", start, end, dayGranular, n.NominationNumber));
             }
-            else if (n.Schedule.StartTime is { } cs && n.Schedule.EndTime is { } ce)
+
+            // ⚠ Company-schedule lane 5b (F-23): EVERY session in the window, in date order. This reported one session
+            // (`FirstOrDefault` over an unordered read, so not even reliably the first) — enough for the clash check's
+            // hour on one day, but a diary over a fortnight showed one afternoon of a five-session course.
+            var own = sessions.Where(x => x.ScheduleId == n.ScheduleId).OrderBy(x => x.Date).ThenBy(x => x.StartTime).ToList();
+            var timed = own.Where(x => x.StartTime is not null && x.EndTime is not null).ToList();
+            if (timed.Count > 0)
             {
-                // The course's daily hours, on the first day of the asked-about window that it covers.
-                var courseDay = n.Schedule.StartDate.Date > dayStart ? n.Schedule.StartDate.Date : dayStart;
-                (start, end, dayGranular) = (courseDay + cs, courseDay + ce, false);
+                foreach (var s in timed)
+                    Add(s.Date.Date + s.StartTime!.Value, s.Date.Date + s.EndTime!.Value, false);
+                continue;
+            }
+
+            // No timed session in the window: the course's own days, clipped to the window — never the whole window
+            // (a two-day course used to fill a sixty-day diary).
+            var first = n.Schedule.StartDate.Date > dayStart.Date ? n.Schedule.StartDate.Date : dayStart.Date;
+            var last = n.Schedule.EndDate.Date < dayEnd.Date ? n.Schedule.EndDate.Date : dayEnd.Date;
+            if (n.Schedule.StartTime is { } cs && n.Schedule.EndTime is { } ce)
+            {
+                // The course's daily hours, on each of its days in the window.
+                for (var day = first; day <= last; day = day.AddDays(1))
+                    Add(day + cs, day + ce, false);
             }
             else
             {
-                (start, end, dayGranular) = (dayStart, dayEnd, true);
+                Add(first, last.Add(TimeOnly.MaxValue.ToTimeSpan()), true);
             }
-
-            if (!dayGranular && !q.Overlaps(start, end)) continue;
-
-            commitments.Add(new PanelistCommitment(
-                n.EmployeeId, false, CommitmentKind.Training, CommitmentHardness.Soft,
-                $"{name} ({n.Status})", start, end, dayGranular, n.NominationNumber));
         }
 
         return commitments;
@@ -404,14 +470,28 @@ public sealed class TrainingCommitmentSource : IPanelistCommitmentSource
 /// a virtual panel is unaffected by the building being locked. What matters is that the recruiter
 /// is told, which is what C-5 (*"closures reach nothing"*) was about.</para>
 ///
-/// <para>The commitment is attributed to every panelist in the query, because the closure applies to
-/// the organisation rather than to a person: attributing it to nobody would mean it never appeared
-/// on a row and the recruiter would never see it.</para>
+/// <para><b>A closure is attributed to the people it covers</b> (company-schedule final closure,
+/// lane 1: R4-13.1). A company-wide one reaches every panelist, external ones included, since the
+/// office is shut; a site closure reaches staff assigned to that site; a unit closure the staff of
+/// that unit and everything beneath it. It used to reach everybody, so the Accra diary showed the
+/// Tema site's closure. A partial closure is labelled as a working day. A yearly closure appears
+/// on its repeat in the asked-about years (C-38).</para>
+///
+/// <para><b>Holidays come from the one definition</b> leave and the statutory clocks use (R4-10A.4):
+/// the default calendar's active Mandatory and SubstituteDay holidays, with the day in lieu. This
+/// used to read every holiday of every calendar, retired and optional ones included. A holiday is
+/// the whole tenant's, so it reaches every panelist.</para>
 /// </remarks>
 public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
 {
-    private readonly IUnitOfWork _unitOfWork;
-    public ClosureCommitmentSource(IUnitOfWork unitOfWork) => _unitOfWork = unitOfWork;
+    private readonly IHrClosureCalendar _closures;
+    private readonly IHrWorkingDayCalculator _workingDays;
+
+    public ClosureCommitmentSource(IHrClosureCalendar closures, IHrWorkingDayCalculator workingDays)
+    {
+        _closures = closures;
+        _workingDays = workingDays;
+    }
 
     public string SourceName => "closures and public holidays";
 
@@ -423,40 +503,63 @@ public sealed class ClosureCommitmentSource : IPanelistCommitmentSource
             .ToList();
         if (everyone.Count == 0) return Array.Empty<PanelistCommitment>();
 
+        var from = q.FromDate;
+        var to = q.ToDate;
         var dayStart = q.DayStart;
         var dayEnd = q.DayEnd;
         var commitments = new List<PanelistCommitment>();
 
-        var closures = await _unitOfWork.Repository<BusinessClosure>().GetQueryable()
-            .Where(c => c.TenantId == q.TenantId && !c.IsDeleted
-                     && c.StartDate <= dayEnd && c.EndDate >= dayStart)
-            .ToListAsync(ct);
+        var closures = await _closures.GetClosuresAsync(q.TenantId, from, to, ct);
+        if (closures.Count > 0)
+        {
+            var coverage = await _closures.CoverageAsync(q.TenantId, closures, q.EmployeeIds, ct);
+            foreach (var c in closures)
+            {
+                var companyWide = BusinessClosureRules.ScopeOf(c).Kind == ClosureScopeKind.Company;
+                var covered = coverage[c.Id];
+                var label = BusinessClosureRules.IsNonWorking(c)
+                    ? $"Business closure: {c.Title}"
+                    : $"Partial closure (a working day): {c.Title}";
 
-        // ⚠ Clipped to the asked-about window. A two-week shutdown reported as spanning the whole
-        // fortnight is right; reported as spanning the query is wrong the moment the query is one day.
-        foreach (var c in closures)
+                foreach (var occurrence in BusinessClosureRules.OccurrencesIn(c, from, to))
+                {
+                    // ⚠ Clipped to the asked-about window. A two-week shutdown reported as spanning the
+                    // whole fortnight is right; reported as spanning the query is wrong the moment the
+                    // query is one day.
+                    var start = occurrence.Start.ToDateTime(TimeOnly.MinValue);
+                    var end = occurrence.End.ToDateTime(TimeOnly.MinValue);
+                    foreach (var (id, external) in everyone)
+                    {
+                        if (external ? !companyWide : !covered.Contains(id)) continue;
+                        commitments.Add(new PanelistCommitment(
+                            id, external, CommitmentKind.Closure, CommitmentHardness.Soft, label,
+                            start > dayStart ? start : dayStart,
+                            end < dayEnd ? end : dayEnd,
+                            IsDayGranular: true));
+                    }
+                }
+            }
+        }
+
+        // One commitment per run of consecutive days of the same holiday, as there was one per
+        // holiday row before.
+        var holidays = await _workingDays.GetHolidaysAsync(q.TenantId, from, to, ct);
+        var runs = new List<(DateOnly First, DateOnly Last, string Label)>();
+        foreach (var day in holidays)
+        {
+            var label = day.InLieu ? $"Day off in lieu of {day.Name}" : $"Public holiday: {day.Name}";
+            if (runs.Count > 0 && runs[^1].Label == label && runs[^1].Last.AddDays(1) == day.Date)
+                runs[^1] = (runs[^1].First, day.Date, label);
+            else
+                runs.Add((day.Date, day.Date, label));
+        }
+
+        foreach (var (first, last, label) in runs)
             foreach (var (id, external) in everyone)
                 commitments.Add(new PanelistCommitment(
-                    id, external, CommitmentKind.Closure, CommitmentHardness.Soft,
-                    $"Business closure: {c.Title}",
-                    c.StartDate > dayStart ? c.StartDate : dayStart,
-                    c.EndDate < dayEnd ? c.EndDate : dayEnd,
-                    IsDayGranular: true));
-
-        var from = q.FromDate;
-        var to = q.ToDate;
-        var holidays = await _unitOfWork.Repository<PublicHoliday>().GetQueryable()
-            .Where(h => h.TenantId == q.TenantId && !h.IsDeleted
-                     && h.DateFrom <= to && h.DateTo >= from)
-            .ToListAsync(ct);
-
-        foreach (var h in holidays)
-            foreach (var (id, external) in everyone)
-                commitments.Add(new PanelistCommitment(
-                    id, external, CommitmentKind.Holiday, CommitmentHardness.Soft,
-                    $"Public holiday: {h.HolidayName}",
-                    h.DateFrom.ToDateTime(TimeOnly.MinValue),
-                    h.DateTo.ToDateTime(TimeOnly.MaxValue),
+                    id, external, CommitmentKind.Holiday, CommitmentHardness.Soft, label,
+                    first.ToDateTime(TimeOnly.MinValue),
+                    last.ToDateTime(TimeOnly.MaxValue),
                     IsDayGranular: true));
 
         return commitments;

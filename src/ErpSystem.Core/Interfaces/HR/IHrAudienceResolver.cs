@@ -71,9 +71,29 @@ public interface IHrAudienceResolver
         Guid tenantId, IEnumerable<HrAudienceRule> rules, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Which of <paramref name="employeeIds"/> the rules reach, in a named tenant (company-schedule
+    /// final closure, lane 2c) — the diaries' question, "is this event for these people?", answered in
+    /// the database rather than by expanding a whole-company rule.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> IncludedAmongForTenantAsync(
+        Guid tenantId, IEnumerable<HrAudienceRule> rules, IEnumerable<Guid> employeeIds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// A unit followed by every unit above it, nearest first — the order a "most specific match
     /// wins" rule needs (round 4, lane I4: onboarding template precedence).
     /// </summary>
     Task<IReadOnlyList<Guid>> UnitAncestryAsync(
         Guid tenantId, Guid unitId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// <see cref="UnitAncestryAsync"/> for many units at once, loading the unit tree once: each
+    /// unit mapped to itself and every unit above it (company-schedule final closure, lane 1).
+    /// </summary>
+    /// <remarks>
+    /// For "which of these people does a unit-wide closure cover": a team diary can span dozens of
+    /// units, and the one-unit method reads the whole tree on every call.
+    /// </remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlySet<Guid>>> UnitAncestriesAsync(
+        Guid tenantId, IEnumerable<Guid> unitIds, CancellationToken cancellationToken = default);
 }

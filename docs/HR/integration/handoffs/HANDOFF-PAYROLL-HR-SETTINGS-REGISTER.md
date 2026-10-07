@@ -71,6 +71,23 @@ whichever direction you prefer to own. **The two pay fields (`AttractsHolidayPay
 `HolidayPayMultiplier`) are already stored on HR's holiday and labelled on the form as payroll's to
 apply** — HR stores them and reads neither.
 
+**Business closures are days off too (added 2026-10-05, company-schedule final closure, lane 1d —
+decision D-15c).** HR records the days the company, a site or an organisation unit is shut
+(`BusinessClosure`), each with **"Staff are paid" (`IsPaidClosure`)**. Payroll has no counterpart and
+reads none of them. Since lane 1 they are days off for leave and the statutory clocks, like a
+holiday — a company-wide one for everybody, a site or unit one for the people it covers. A *partial*
+closure is a working day.
+
+- **What payroll needs to decide:** what an **unpaid** closure day is worth on a payslip. HR applies
+  no pay rule, as with unpaid leave (§ 3, item 1).
+- **Where to read it** — one place, for the employees and dates you ask about, with the closure, the
+  pay flag and whether the day is worked:
+  - in process: `IHrClosureCalendar.GetClosureDaysAsync(tenantId, employeeIds, from, to)`;
+  - over HTTP: `GET /api/CompanySchedule/closures/employee-days?employeeIds=…&from=…&to=…`
+    (`HR.Company.Read`; up to 500 employees and a year at a time).
+
+  It is a pull: HR pushes nothing into payroll.
+
 ### 2.2 Non-working days — a configurable week, on one side only
 
 | | HR | Payroll |
@@ -122,14 +139,16 @@ payroll as the only module with a private rate table. Worth one decision, not ur
 
 ## 3. What leave specifically needs from payroll
 
-All three are already written up in [`HANDOFF-PAYROLL-LEAVE.md`](HANDOFF-PAYROLL-LEAVE.md); they are
-repeated here in one line each so this register is complete on its own.
+Items 1–3 are already written up in [`HANDOFF-PAYROLL-LEAVE.md`](HANDOFF-PAYROLL-LEAVE.md); they are
+repeated here in one line each so this register is complete on its own. Item 4 is the same question
+for the company schedule's closures, which leave now treats as days off (§ 2.1).
 
 | # | What | Status |
 |---|---|---|
 | 1 | **Unpaid leave produces no deduction.** `LeaveType.IsPaid` is display-only. HR records who was away and for how many chargeable days; what a day of unpaid leave is worth is payroll's | open |
 | 2 | **Holiday pay.** `AttractsHolidayPay` and `HolidayPayMultiplier` are stored by HR and read by nothing | open |
 | 3 | ⚠ **The daily-rate basis.** Leave encashment uses *(basic + linked allowances) ÷ 22*; the separation settlement uses *monthly × 12 ÷ 365*. On GHS 6,000/month those differ by about **38%** | **blocked on TDC** — logged as **L-D7** |
+| 4 | **Unpaid closure days produce no deduction.** `BusinessClosure.IsPaidClosure` is stored by HR and read by nothing on payroll's side; the read to use is in § 2.1 (added 2026-10-05, D-15c) | open |
 
 ---
 

@@ -41,6 +41,21 @@ public class CompanyEvent : TenantEntity
     public DateTime? RecurrenceEndDate { get; set; }
     public int? RecurrenceCount { get; set; }
 
+    /// <summary>
+    /// The series this event is one occurrence of (final closure D-2, D-12): shared by every
+    /// occurrence generated from one recurring create. Null on a one-off event.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ There is no series table, and that is the decision rather than an omission. Each occurrence
+    /// is a full event with its own number, guests, answers and attendance — people miss one week and
+    /// not the next — so a series action ("this and following", "the whole series") is a query on
+    /// this id, and an ordinary event needs no special case anywhere.
+    /// </remarks>
+    public Guid? RecurrenceSeriesId { get; set; }
+
+    /// <summary>1-based position within the series ("Occurrence 3 of 10"); null on a one-off event.</summary>
+    public int? OccurrenceNumber { get; set; }
+
     // Location
     public EventLocation LocationType { get; set; } // OnSite, OffSite, Virtual, Hybrid
 
@@ -74,10 +89,23 @@ public class CompanyEvent : TenantEntity
     [ForeignKey(nameof(OrganizerId))]
     public virtual Employee Organizer { get; set; } = null!;
 
+    /// <summary>
+    /// ⚠ Retiring. Replaced outright by <see cref="OrganizationUnitId"/> (final closure D-5); no row on UAT
+    /// or the dev databases carried one (2026-10-04). Kept while existing code reads it; a later migration drops it.
+    /// </summary>
     public Guid? DepartmentId { get; set; }
     
     [ForeignKey(nameof(DepartmentId))]
     public virtual Department? Department { get; set; }
+
+    /// <summary>
+    /// The organisation unit a <c>Scope = Department</c> event is for (final closure D-5). The audience
+    /// is the unit and everything beneath it, through the HR audience resolver.
+    /// </summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
 
     // Participants
     public ParticipantScope Scope { get; set; } // AllStaff, Department, Selected, External
@@ -129,6 +157,13 @@ public class CompanyEvent : TenantEntity
     public DateTime? ReminderSentDate { get; set; }
     public DateTime? RsvpReminderSentDate { get; set; }
 
+    /// <summary>
+    /// The calendar file's SEQUENCE (company-schedule final closure, lane 2e-3, D-14): raised each time the event's
+    /// calendar entry changes for its guests — moved, a new venue or link, postponed, cancelled, a guest taken off —
+    /// so a mail client replaces the entry it holds rather than keeping the old one. The UID is the event's id.
+    /// </summary>
+    public int CalendarSequence { get; set; }
+
     // Completion
     public DateTime? ActualStartTime { get; set; }
     public DateTime? ActualEndTime { get; set; }
@@ -178,6 +213,17 @@ public class CompanyEvent : TenantEntity
 
     [MaxLength(2000)]
     public string? AdditionalNotes { get; set; }
+
+    /// <summary>
+    /// The record that created this event, when another module did (final closure D-9, C-51): today
+    /// only the SHE emergency drill, which schedules its next drill as a company event. Null when
+    /// somebody created the event by hand.
+    /// </summary>
+    [MaxLength(50)]
+    public string? SourceEntityType { get; set; }
+
+    /// <summary>The id of the <see cref="SourceEntityType"/> record. No FK: the source may live in any module.</summary>
+    public Guid? SourceEntityId { get; set; }
 
     public virtual ICollection<EventParticipant> Participants { get; set; } = new List<EventParticipant>();
     public virtual ICollection<EventAttendance> AttendanceRecords { get; set; } = new List<EventAttendance>();
@@ -268,6 +314,30 @@ public class EventAttachment : TenantEntity
     public string? Description { get; set; }
     
     public DateTime UploadDate { get; set; }
+
+    // ── the controlled upload gate — final closure D-3; the StaffRequisitionAttachment pattern. ──
+
+    /// <summary>Who uploaded it, as an Employee id from the token. Null on rows from before the gate.</summary>
+    public Guid? UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee? UploadedBy { get; set; }
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Scanned controlled upload backing this attachment.</summary>
+    /// <remarks>
+    /// ⚠ Null on rows written before event attachments moved onto the gate, where
+    /// <see cref="FilePath"/> arrived from the caller's payload and no file was ever stored (F-54).
+    /// Those read "reference only — no file stored" and offer no download.
+    /// </remarks>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 public class EventTask : TenantEntity
@@ -295,6 +365,13 @@ public class EventTask : TenantEntity
 
     [MaxLength(1000)]
     public string? CompletionNotes { get; set; }
+
+    /// <summary>
+    /// When the hourly sweep chased the assignee about this task being overdue (lane 2e-3, F-34) — once, so the sweep
+    /// never repeats it. Stamped only when the chase reached them (lane 2e-2's rule); cleared when the due date moves
+    /// or the task passes to someone new, since that is a new overdue.
+    /// </summary>
+    public DateTime? OverdueChasedAt { get; set; }
 }
 
 /// <summary>
@@ -431,8 +508,59 @@ public class CompanyMilestone : TenantEntity
     [MaxLength(1000)]
     public string? Significance { get; set; }
 
+    /// <summary>
+    /// Free-text references ("ISO certificate no. …, filed with Admin"). Not the documents themselves:
+    /// those are <see cref="Documents"/>, real files on the upload gate (final closure D-3).
+    /// </summary>
     [MaxLength(1000)]
     public string? RelatedDocuments { get; set; }
+
+    public virtual ICollection<CompanyMilestoneDocument> Documents { get; set; } = new List<CompanyMilestoneDocument>();
+}
+
+/// <summary>
+/// A file evidencing a company milestone — the certificate, the licence, the opening photograph
+/// (final closure D-3). Stored through the controlled upload gate: scanned, registered in the
+/// central DMS, served only through the download door.
+/// </summary>
+/// <remarks>
+/// The milestone's evidence lives here rather than in a link to one employee's award or
+/// certification (D-17): a company milestone is a company fact.
+/// </remarks>
+public class CompanyMilestoneDocument : TenantEntity
+{
+    public Guid MilestoneId { get; set; }
+
+    [ForeignKey(nameof(MilestoneId))]
+    public virtual CompanyMilestone Milestone { get; set; } = null!;
+
+    [MaxLength(200)]
+    public string FileName { get; set; } = string.Empty;
+
+    [MaxLength(500)]
+    public string FilePath { get; set; } = string.Empty;
+
+    [MaxLength(1000)]
+    public string? Description { get; set; }
+
+    public DateTime UploadDate { get; set; }
+
+    /// <summary>Who uploaded it, as an Employee id from the token — the upload helper refuses a caller without one.</summary>
+    public Guid UploadedById { get; set; }
+
+    [ForeignKey(nameof(UploadedById))]
+    public virtual Employee UploadedBy { get; set; } = null!;
+
+    public long? FileSizeBytes { get; set; }
+
+    /// <summary>Scanned controlled upload backing this document.</summary>
+    public Guid? FileUploadRecordId { get; set; }
+
+    /// <summary>Central-DMS record, once registered.</summary>
+    public Guid? DocumentRecordId { get; set; }
+
+    /// <summary>Central-DMS version, once registered.</summary>
+    public Guid? DocumentVersionId { get; set; }
 }
 
 /// <summary>
@@ -463,10 +591,29 @@ public class BusinessClosure : TenantEntity
     [ForeignKey(nameof(LocationId))]
     public virtual Location? SiteLocation { get; set; }
 
+    /// <summary>
+    /// ⚠ Retiring. Replaced outright by <see cref="OrganizationUnitId"/> (final closure D-5); no row on UAT
+    /// or the dev databases carried one (2026-10-04). Kept while existing code reads it; a later migration drops it.
+    /// </summary>
     public Guid? DepartmentId { get; set; }
 
     [ForeignKey(nameof(DepartmentId))]
     public virtual Department? Department { get; set; }
+
+    /// <summary>
+    /// The organisation unit an organisation-unit closure covers, with everything beneath it (final
+    /// closure D-1, D-5). The closure's type decides which of site, unit or whole company applies.
+    /// </summary>
+    public Guid? OrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(OrganizationUnitId))]
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
+
+    /// <summary>
+    /// The closure falls on the same month and day every later year — the year-end stocktake typed
+    /// once (final closure D-9, C-38).
+    /// </summary>
+    public bool RecursAnnually { get; set; }
 
     public bool IsPaidClosure { get; set; }
     public bool CountsAsWorkingDay { get; set; }

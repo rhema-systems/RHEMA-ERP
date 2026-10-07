@@ -132,7 +132,11 @@ public class CompanyProfile : TenantEntity
     [MaxLength(500)]
     public string? CompanySealImageUrl { get; set; }
 
-    /// <summary>Logo used on document letterheads. Falls back to <c>Tenant.LogoUrl</c> when unset.</summary>
+    /// <summary>
+    /// ⚠ Retired (company-schedule final closure lane 4c, F-55): neither written nor read. The letterhead logo is an
+    /// uploaded, versioned image (<c>CompanySealAssetKind.Logo</c>), else <c>Tenant.LogoUrl</c> —
+    /// <c>ICompanyProfileProvider.GetLogoAsync</c>. The column stays until a later migration drops it.
+    /// </summary>
     [MaxLength(500)]
     public string? LogoUrl { get; set; }
 
