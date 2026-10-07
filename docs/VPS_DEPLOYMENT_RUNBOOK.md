@@ -50,7 +50,11 @@ refuses deployment from any branch other than `master`.
 The workflow deliberately does not build Docker images. It uses the same
 `Build-RhemaRelease.ps1` and `Deploy-RhemaVps.ps1 -DeployOnly` path documented
 below, keeps nested release ZIPs uncompressed during GitHub artifact transport,
-and retains sanitized deployment evidence for 30 days.
+and retains sanitized deployment evidence for 30 days when GitHub artifact
+capacity is available. The authoritative evidence is also persisted under
+`C:\RhemaERP\logs` on the VPS. Failure to upload that optional GitHub copy is a
+workflow warning after deployment and does not change a successful activation
+into a deployment failure.
 
 Configure these repository variables once:
 
